@@ -1,0 +1,157 @@
+{
+  "cases": [
+    {
+      "id": "POS-authorization",
+      "kind": "positive",
+      "request": "Let workspace members edit every project.",
+      "repository_evidence": ["authorizeProjectEdit currently permits owner and admin roles", "workspace invitations default to member", "project edits emit an actor-role audit event"],
+      "must_detect": ["owner/admin distinction", "invitation scope", "audit behavior"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "POS-deletion",
+      "kind": "positive",
+      "request": "Delete an account immediately.",
+      "repository_evidence": ["invoice.account_id uses RESTRICT", "privacy.md requires a 30-day finance retention period", "account cleanup is consumed by a background worker"],
+      "must_detect": ["foreign records", "retention policy", "asynchronous jobs"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "POS-api-contract",
+      "kind": "positive",
+      "request": "Rename displayName to name.",
+      "repository_evidence": ["ios/UserDTO.swift decodes displayName", "cached profile JSON persists displayName", "the public API changelog promises one-version deprecation"],
+      "must_detect": ["mobile consumer", "stored payload", "backward compatibility"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "POS-cache",
+      "kind": "positive",
+      "request": "Cache the dashboard response for one hour.",
+      "repository_evidence": ["dashboard results depend on tenant_id", "role changes invalidate permission_cache only", "dashboard writes publish dashboard.updated"],
+      "must_detect": ["tenant key", "invalidation path", "stale authorization"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "POS-payments",
+      "kind": "positive",
+      "request": "Retry every failed charge automatically.",
+      "repository_evidence": ["charge requests accept an idempotency_key", "payment status is rendered before webhook settlement", "the provider may time out after capture"],
+      "must_detect": ["idempotency key", "user-visible status", "duplicate capture"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "POS-sharing",
+      "kind": "positive",
+      "request": "Make shared links permanent.",
+      "repository_evidence": ["share tokens currently expire after seven days", "permission changes revoke active tokens", "token signing keys rotate every 90 days"],
+      "must_detect": ["revocation", "permission changes", "secret rotation"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "POS-offline-sync",
+      "kind": "positive",
+      "request": "Sync offline edits when the app reconnects.",
+      "repository_evidence": ["records carry an updated_at timestamp", "server deletions create tombstones for 24 hours", "the client queue preserves local creation order only"],
+      "must_detect": ["conflict resolution", "deleted records", "ordering"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "POS-background-retry",
+      "kind": "positive",
+      "request": "Retry failed export jobs forever.",
+      "repository_evidence": ["exports write to a deterministic object key", "worker retries currently stop after five attempts", "alerts consume dead_letter events"],
+      "must_detect": ["duplicate output", "retry ceiling", "dead-letter observability"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "NEG-brainstorming",
+      "kind": "negative",
+      "request": "Help me brainstorm ideas for a new fitness app.",
+      "repository_evidence": [],
+      "must_detect": [],
+      "must_not_do": ["activate impact refinement", "invent repository evidence"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "NEG-planning",
+      "kind": "negative",
+      "request": "Turn this approved specification into coding tasks.",
+      "repository_evidence": ["the impact report is already approved"],
+      "must_detect": [],
+      "must_not_do": ["repeat impact refinement", "replace the planning workflow"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "NEG-debugging",
+      "kind": "negative",
+      "request": "Find why this test intermittently fails.",
+      "repository_evidence": ["the failure occurs only in CI"],
+      "must_detect": [],
+      "must_not_do": ["activate impact refinement", "rewrite the requirement"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "NEG-code-review",
+      "kind": "negative",
+      "request": "Review this pull request for correctness.",
+      "repository_evidence": ["a complete diff is supplied"],
+      "must_detect": [],
+      "must_not_do": ["activate impact refinement", "replace code review"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "NEG-generic-prd",
+      "kind": "negative",
+      "request": "Write a complete PRD from this product idea.",
+      "repository_evidence": [],
+      "must_detect": [],
+      "must_not_do": ["activate impact refinement", "claim repository-backed findings"],
+      "modes": ["generic", "codex", "claude-code"]
+    },
+    {
+      "id": "INT-generic",
+      "kind": "integration",
+      "request": "Refine this approved requirement before I plan it with my own workflow.",
+      "repository_evidence": ["the requirement is approved", "no named orchestration framework is active"],
+      "must_detect": ["generic entry after clarification", "handoff to user-selected planning method"],
+      "must_not_do": ["invoke an external framework", "write implementation tasks"],
+      "modes": ["generic"]
+    },
+    {
+      "id": "INT-superpowers",
+      "kind": "integration",
+      "request": "Brainstorming approved the design; refine repository impacts next.",
+      "repository_evidence": ["Superpowers brainstorming is complete", "writing-plans has not started"],
+      "must_detect": ["entry after brainstorming", "exit before writing-plans"],
+      "must_not_do": ["repeat brainstorming", "invoke writing-plans automatically"],
+      "modes": ["superpowers"]
+    },
+    {
+      "id": "INT-claude-feature-dev",
+      "kind": "integration",
+      "request": "Feature-dev clarification is complete; analyze change impact.",
+      "repository_evidence": ["feature-dev Phase 3 is complete", "Phase 4 architecture has not started"],
+      "must_detect": ["entry after Phase 3", "exit before Phase 4"],
+      "must_not_do": ["repeat general clarification", "invoke architecture design automatically"],
+      "modes": ["claude-feature-dev"]
+    },
+    {
+      "id": "INT-spec-kit",
+      "kind": "integration",
+      "request": "Speckit clarify is complete; refine impacts before planning.",
+      "repository_evidence": ["speckit.clarify is complete", "speckit.plan has not started"],
+      "must_detect": ["entry after speckit.clarify", "exit before speckit.plan"],
+      "must_not_do": ["repeat specification", "invoke speckit.plan automatically"],
+      "modes": ["spec-kit"]
+    }
+  ]
+}
