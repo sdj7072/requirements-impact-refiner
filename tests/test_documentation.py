@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.ko.md", "README.ja.md"]
 LANGUAGE_TARGETS = {"README.md", "README.ko.md", "README.ja.md"}
+SKILL_ROOT = ROOT / "skills" / "requirements-impact-refiner"
 
 
 def headings(path):
@@ -39,6 +40,25 @@ def compatibility_identity_rows(path):
 
 
 class DocumentationTest(unittest.TestCase):
+    def test_future_acceptance_criterion_examples_are_not_verified_findings(self):
+        for path in (SKILL_ROOT / "references").glob("*.md"):
+            header = None
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.startswith("|"):
+                    header = None
+                    continue
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                if "ID" in cells and "Level" in cells:
+                    header = cells
+                    continue
+                if header and re.fullmatch(r"`?AC-\d{3}`?", cells[0]):
+                    level = cells[header.index("Level")].strip("`").lower()
+                    self.assertNotEqual(
+                        level,
+                        "verified",
+                        f"future target is labelled as current proof in {path}",
+                    )
+
     def test_all_languages_exist_and_link_to_each_other(self):
         for name in READMES:
             path = ROOT / name

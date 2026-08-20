@@ -1,4 +1,7 @@
-# Preserve controller-supplied evaluation transcripts byte-for-byte.
-evals/results/baseline-raw/** -whitespace
+# Preserve controller-supplied evaluation transcripts byte-for-byte. Core raw
+# corpora also opt out of whitespace diagnostics; their original bytes are the
+# audited artifact, while non-raw repository paths remain whitespace-checked.
+evals/results/baseline-raw/** -text -whitespace
+evals/results/with-skill-raw/** -text -whitespace
 evals/results/integration-raw/** -text
 evals/results/compatibility-raw/** -text

@@ -39,11 +39,11 @@ For verified and inferred claims, cite a repository-relative path plus a symbol,
 
 | ID | Finding | Level | Evidence | State | Links |
 | --- | --- | --- | --- | --- | --- |
-| `INV-001` | iOS decoding of `displayName` remains readable during the promised compatibility window. | `verified` | `ios/UserDTO.swift — UserDTO.init(from:)` | `detected` | `must-preserve` `REQ-001` |
+| `INV-001` | The current iOS decoder reads `displayName`. | `verified` | `ios/UserDTO.swift — UserDTO.init(from:)` | `detected` | `must-preserve` `REQ-001` |
 | `IMP-001` | The iOS consumer breaks if the field is removed immediately. | `verified` | `ios/UserDTO.swift — UserDTO.init(from:)` | `refining` | `affects` `REQ-001`, `INV-001`; `produces` `AC-001` |
 | `IMP-002` | An external consumer may decode the field. | `inferred` | `api/openapi.yaml — User.displayName`; published API contract | `detected` | `affects` `REQ-001` |
 | `IMP-003` | The unavailable partner SDK’s handling of the field cannot be assessed. | `unknown` | Partner SDK unavailable; local `api/openapi.yaml — User` inspected | `blocked` | `affects` `REQ-001` |
-| `AC-001` | Existing iOS payload decoding continues through the compatibility window. | `verified` | `ios/UserDTO.swift — UserDTO.init(from:)` | — | verifies `INV-001`, produced by `IMP-001` |
+| `AC-001` | Existing iOS payload decoding continues through the compatibility window. | — | Future observable target; the current decoder is rationale, but no compatibility-window test has been executed (coverage gap). | — | verifies `INV-001`, produced by `IMP-001` |
 
 ## Failure and uncertainty handling
 

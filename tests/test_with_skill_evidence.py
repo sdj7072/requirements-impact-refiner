@@ -1,4 +1,5 @@
 import hashlib
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "evals" / "results" / "with-skill.md"
 EVIDENCE_ROOT = ROOT / "evals" / "results" / "with-skill-raw"
+BASELINE_ROOT = ROOT / "evals" / "results" / "baseline-raw"
 EXPECTED_COUNTS = {
     "initial": 25,
     "rerun-1": 15,
@@ -29,6 +31,29 @@ def evidence_manifest() -> str:
 
 
 class WithSkillEvidenceTest(unittest.TestCase):
+    def test_core_raw_evidence_disables_git_text_and_whitespace_conversion(self):
+        paths = sorted(
+            path.relative_to(ROOT).as_posix()
+            for evidence_root in (BASELINE_ROOT, EVIDENCE_ROOT)
+            for path in evidence_root.rglob("*.md")
+        )
+        result = subprocess.run(
+            ["git", "check-attr", "text", "whitespace", "--stdin"],
+            cwd=ROOT,
+            input="\n".join(paths) + "\n",
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        attributes = {}
+        for line in result.stdout.splitlines():
+            path, attribute, value = line.rsplit(": ", 2)
+            attributes.setdefault(path, {})[attribute] = value
+        self.assertEqual(set(attributes), set(paths))
+        for path in paths:
+            self.assertEqual(attributes[path]["text"], "unset", path)
+            self.assertEqual(attributes[path]["whitespace"], "unset", path)
+
     def test_canonical_evidence_inventory_and_checksums(self):
         for directory, expected_count in EXPECTED_COUNTS.items():
             self.assertEqual(
