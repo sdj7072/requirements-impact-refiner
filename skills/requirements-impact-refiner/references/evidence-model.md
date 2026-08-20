@@ -10,7 +10,7 @@
 | `DEC-###` | Recorded user choice | refines `REQ-###`; mitigates or accepts `IMP-###` |
 | `AC-###` | Testable acceptance or regression criterion | produced by `IMP-###`; verifies a requirement or invariant |
 
-Use only existing IDs in links. Create `AC-###` for every critical impact. Create `DEC-###` only after an explicit user/stakeholder selection or a decision explicitly supplied by the request. Before selection, use **Decision needed** and “the pending decision”; never allocate, mention, link, or forward-reference a `DEC-###`. A constraint, invariant, recommendation, or policy implied by evidence is not a selection of an exact transition, wire, cache, or retry policy. An `accepted` impact requires that linked recorded decision; a `resolved` impact requires evidence explaining why it no longer applies.
+Use only existing IDs in links. Each `IMP-###` has exactly one evidence level; split a compound finding when its assertions need different levels. Create `AC-###` for every critical impact. Create `DEC-###` only after an explicit user/stakeholder selection or a decision explicitly supplied by the request. Before selection, never allocate, link, or forward-reference a concrete `DEC-###` (for example, `DEC-001`); generic “no decision ID is recorded” language is allowed, but operational links and handoffs use only “the pending decision.” A constraint, invariant, recommendation, or policy implied by evidence is not a selection of an exact transition, wire, cache, or retry policy. An `accepted` impact requires that linked recorded decision; a `resolved` impact requires evidence explaining why it no longer applies.
 
 ## Impact states
 
