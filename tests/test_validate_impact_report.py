@@ -116,6 +116,112 @@ class ValidateImpactReportTest(unittest.TestCase):
         )
         self.assertEqual(VALIDATOR.validate_report(code_formatted_report), [])
 
+    def test_rejects_missing_or_wrong_canonical_title(self):
+        mutations = {
+            "missing": VALID_REPORT.replace("# Requirements Impact Report\n\n", "", 1),
+            "wrong": VALID_REPORT.replace(
+                "# Requirements Impact Report", "# Requirement Review", 1
+            ),
+        }
+
+        for name, report in mutations.items():
+            with self.subTest(name=name):
+                self.assertIn(
+                    "missing canonical title: # Requirements Impact Report",
+                    VALIDATOR.validate_report(report),
+                )
+
+    def test_rejects_headings_only_report(self):
+        report = "# Requirements Impact Report\n\n" + "\n".join(
+            f"## {name}\n" for name in sorted(VALIDATOR.REQUIRED_SECTIONS)
+        )
+
+        errors = VALIDATOR.validate_report(report)
+
+        self.assertIn("invalid table schema in Impact Ledger", errors)
+        self.assertIn("missing required requirement row", errors)
+        self.assertIn("missing required impact row", errors)
+
+    def test_rejects_missing_canonical_table_or_wrong_header(self):
+        original_table = (
+            "| Requirement ID | Original request | Source |\n"
+            "| --- | --- | --- |\n"
+            "| REQ-001 | Preserve existing exports while adding sharing. | Product request |"
+        )
+        mutations = {
+            "missing": VALID_REPORT.replace(original_table, "No structured requirement.", 1),
+            "wrong_header": VALID_REPORT.replace(
+                "| Requirement ID | Original request | Source |",
+                "| Requirement | Original request | Source |",
+                1,
+            ),
+        }
+
+        for name, report in mutations.items():
+            with self.subTest(name=name):
+                self.assertIn(
+                    "invalid table schema in Original Requirement",
+                    VALIDATOR.validate_report(report),
+                )
+
+    def test_rejects_missing_required_definition_or_impact_rows(self):
+        rows = {
+            "requirement": "| REQ-001 | Preserve existing exports while adding sharing. | Product request |",
+            "invariant": "| INV-001 | Existing exports remain private. | verified | tests/test_exports.py |",
+            "impact": (
+                "| IMP-001 | REQ-001 | contract | critical | accepted | verified | "
+                "tests/test_exports.py | INV-001 | DEC-001 | AC-001 |"
+            ),
+            "criterion": (
+                "| AC-001 | REQ-001 | IMP-001 | INV-001 | Existing exports stay private. "
+                "| tests/test_exports.py |"
+            ),
+        }
+
+        for entity, row in rows.items():
+            with self.subTest(entity=entity):
+                self.assertIn(
+                    f"missing required {entity} row",
+                    VALIDATOR.validate_report(VALID_REPORT.replace(row, "", 1)),
+                )
+
+    def test_rejects_malformed_identifier_like_tokens_in_relationship_cells(self):
+        mutations = {
+            "preserved_invariant": VALID_REPORT.replace(
+                "| INV-001 | REQ-001 | IMP-001 | tests/test_exports.py |",
+                "| INV-001 | REQ-001 | IMP-1 | tests/test_exports.py |",
+                1,
+            ),
+            "revision_history": VALID_REPORT.replace(
+                "| REQ-001 | Add sharing with private defaults. | DEC-001 | — | Narrowed scope. |",
+                "| REQ-001 | Add sharing with private defaults. | DEC-1 | — | Narrowed scope. |",
+                1,
+            ),
+            "planning_handoff": VALID_REPORT.replace(
+                "| REQ-001 | INV-001, IMP-001, DEC-001 | Accepted IMP-001 | AC-001 | Existing planning workflow |",
+                "| REQ-001 | INV-1, IMP-001, DEC-001 | Accepted IMP-001 | AC-001 | Existing planning workflow |",
+                1,
+            ),
+        }
+
+        for name, report in mutations.items():
+            with self.subTest(name=name):
+                self.assertTrue(
+                    any(error.startswith("invalid identifier ") for error in VALIDATOR.validate_report(report))
+                )
+
+    def test_rejects_malformed_table_row_instead_of_silently_skipping_it(self):
+        malformed = VALID_REPORT.replace(
+            "| REQ-001 | Preserve existing exports while adding sharing. | Product request |",
+            "| REQ-001 | Preserve existing exports while adding sharing. | Product request | extra |",
+            1,
+        )
+
+        self.assertIn(
+            "malformed table row in Original Requirement: expected 3 cells, got 4",
+            VALIDATOR.validate_report(malformed),
+        )
+
     def test_rejects_each_invalid_report_contract(self):
         impact_row = (
             "| IMP-001 | REQ-001 | contract | critical | accepted | verified | "
@@ -178,25 +284,89 @@ class ValidateImpactReportTest(unittest.TestCase):
 
         self.assertIn(EXPECTED_ERRORS["state"], VALIDATOR.validate_report(report))
 
-    def test_accepts_code_formatted_enums_and_allowed_unresolved_states(self):
+    def test_accepts_code_formatted_enums_and_matching_unresolved_state(self):
         report = VALID_REPORT.replace(
             "| INV-001 | Existing exports remain private. | verified | tests/test_exports.py |",
             "| INV-001 | Existing exports remain private. | `verified` | tests/test_exports.py |",
             1,
         ).replace(
             "| critical | accepted | verified |",
-            "| critical | `accepted` | `verified` |",
+            "| critical | `blocked` | `verified` |",
             1,
         ).replace(
             "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
             "| --- | --- | --- | --- | --- |\n"
-            "| IMP-001 | `blocked` | Waiting for product input. | DEC-001 | Product |\n"
-            "| IMP-001 | `deferred` | Scheduled for a later release. | DEC-001 | Product |\n\n"
+            "| IMP-001 | `blocked` | Waiting for product input. | DEC-001 | Product |\n\n"
             "## Analysis Scope and Limitations",
             1,
         )
 
         self.assertEqual(VALIDATOR.validate_report(report), [])
+
+    def test_rejects_duplicate_unresolved_impact_rows(self):
+        report = VALID_REPORT.replace(
+            "| critical | accepted | verified |",
+            "| critical | blocked | verified |",
+            1,
+        ).replace(
+            "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+            "| --- | --- | --- | --- | --- |\n"
+            "| IMP-001 | blocked | Waiting for product input. | DEC-001 | Product |\n"
+            "| IMP-001 | blocked | Duplicate entry. | DEC-001 | Product |\n\n"
+            "## Analysis Scope and Limitations",
+            1,
+        )
+
+        self.assertIn("duplicate unresolved impact IMP-001", VALIDATOR.validate_report(report))
+
+    def test_rejects_unresolved_state_that_disagrees_with_ledger(self):
+        report = VALID_REPORT.replace(
+            "| critical | accepted | verified |",
+            "| critical | deferred | verified |",
+            1,
+        ).replace(
+            "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+            "| --- | --- | --- | --- | --- |\n"
+            "| IMP-001 | blocked | Waiting for product input. | DEC-001 | Product |\n\n"
+            "## Analysis Scope and Limitations",
+            1,
+        )
+
+        self.assertIn(
+            "unresolved impact IMP-001 state blocked disagrees with ledger state deferred",
+            VALIDATOR.validate_report(report),
+        )
+
+    def test_rejects_non_unresolved_ledger_impact_listed_as_unresolved(self):
+        report = VALID_REPORT.replace(
+            "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+            "| --- | --- | --- | --- | --- |\n"
+            "| IMP-001 | blocked | Already accepted. | DEC-001 | Product |\n\n"
+            "## Analysis Scope and Limitations",
+            1,
+        )
+
+        self.assertIn(
+            "unresolved impact IMP-001 state blocked disagrees with ledger state accepted",
+            VALIDATOR.validate_report(report),
+        )
+
+    def test_rejects_blocked_or_deferred_ledger_impact_missing_from_unresolved_items(self):
+        report = VALID_REPORT.replace(
+            "| critical | accepted | verified |",
+            "| critical | blocked | verified |",
+            1,
+        )
+
+        self.assertIn(
+            "ledger impact IMP-001 in state blocked is missing from unresolved items",
+            VALIDATOR.validate_report(report),
+        )
+
+    def test_requires_at_least_one_impact_with_requirement_relationship(self):
+        report = VALID_REPORT.replace("| IMP-001 | REQ-001 |", "| IMP-001 | — |", 1)
+
+        self.assertIn("report requires at least one impact with REQ relationship", VALIDATOR.validate_report(report))
 
     def test_rejects_accepted_state_in_unresolved_items(self):
         report = VALID_REPORT.replace(
