@@ -61,6 +61,19 @@ class IntegrationEvidenceTest(unittest.TestCase):
         ):
             self.assertIn(required, text)
 
+    def test_final_report_discloses_raw_whitespace_exception(self):
+        text = REPORT.read_text(encoding="utf-8")
+        for required in (
+            "Full `git diff --check 3e4476d..366508e` reports exactly four intentional EOF blank-line findings",
+            "integration-raw/initial/INT-generic-3.md:67",
+            "integration-raw/initial/INT-generic-4.md:66",
+            "integration-raw/initial/INT-spec-kit-2.md:75",
+            "integration-raw/rerun-1/NEG-brainstorming-2.md:67",
+            "excluded solely to preserve the raw evidence bytes",
+            "The non-raw portion of that diff check passes.",
+        ):
+            self.assertIn(required, text)
+
 
 if __name__ == "__main__":
     unittest.main()

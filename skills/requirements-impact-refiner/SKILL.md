@@ -9,7 +9,7 @@ metadata:
 
 # Requirements Impact Refiner
 
-Use for concrete pre-planning changes; not ideation, debugging, review, or generic PRDs. If an approved review/spec requests coding tasks or a plan, exit: emit no `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, or `AC-###` artifacts and route to active planning. Ordinary planning remains allowed.
+Use for concrete pre-planning changes; not ideation, debugging, code review, or generic PRDs. If an approved review/spec requests coding tasks or a plan, exit: emit no `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, or `AC-###` artifacts and route to active planning. Ordinary planning remains allowed.
 
 1. Record the change as `REQ-###`; inspect supplied and repository evidence. Preserve current behavior as `INV-###` before refining.
 2. Create stable `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, and `AC-###` identifiers. Give each impact one of `verified`, `inferred`, or `unknown`; split compound findings with different levels. Cite evidence.

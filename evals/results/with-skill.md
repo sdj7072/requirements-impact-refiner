@@ -98,6 +98,15 @@ The 80 core transcripts are byte-preserved from the controller corpus: `initial`
 
 The integration corpus is independently byte-preserved under [`integration-raw/`](integration-raw/): `baseline` (4 transcripts), `initial` (30), `rerun-1` (15), and `scoring` (3 reports). Its sorted `relative-path SHA-256` manifest covers 52 Markdown files and has SHA-256 `9740064ebd3eb60cae7d95917db99195e765dd84c28d600303c1c6cc0ebbf1fc`. [`tests/test_integration_evidence.py`](../../tests/test_integration_evidence.py) protects its counts, byte checksums, report metadata, and final composition.
 
+Full `git diff --check 3e4476d..366508e` reports exactly four intentional EOF blank-line findings in the byte-preserved controller corpus:
+
+- `evals/results/integration-raw/initial/INT-generic-3.md:67`
+- `evals/results/integration-raw/initial/INT-generic-4.md:66`
+- `evals/results/integration-raw/initial/INT-spec-kit-2.md:75`
+- `evals/results/integration-raw/rerun-1/NEG-brainstorming-2.md:67`
+
+The `integration-raw` subtree is excluded solely to preserve the raw evidence bytes and their audited checksums, not to conceal an implementation whitespace defect. The non-raw portion of that diff check passes.
+
 ## Conclusion
 
 The skill materially improves evidence discipline, traceability, focused decisions, whole-set deltas, acceptance-vs-resolution separation, payment grounding, and workflow boundaries. Workflow integration passes its adjudicated final composition at 30/30. The separate core evaluation retains one documented stochastic limitation and must not be represented as a clean 25/25 GREEN result.

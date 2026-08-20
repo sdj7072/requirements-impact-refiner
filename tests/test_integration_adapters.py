@@ -94,6 +94,17 @@ class IntegrationAdapterContractTest(unittest.TestCase):
             self.assertEqual(routing.count(f"| `{name}` |"), 1)
             self.assertEqual(routing.count(f"(references/{adapter['file']})"), 1)
 
+    def test_skill_activation_excludes_code_review_without_excluding_all_review(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "not ideation, debugging, code review, or generic PRDs",
+            text,
+        )
+        self.assertNotIn(
+            "not ideation, debugging, review, or generic PRDs",
+            text,
+        )
+
     def test_skill_entrypoint_stays_below_five_hundred_words(self):
         words = SKILL_PATH.read_text(encoding="utf-8").split()
         self.assertLess(len(words), 500)
