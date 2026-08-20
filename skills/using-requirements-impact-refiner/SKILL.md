@@ -4,7 +4,7 @@ description: Use when starting any software-development conversation - determine
 license: MIT
 compatibility: Works with Agent Skills clients that support automatic skill discovery.
 metadata:
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # Using Requirements Impact Refiner

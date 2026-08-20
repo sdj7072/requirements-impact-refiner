@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "requirements-impact-refiner",
   "displayName": "Requirements Impact Refiner",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Refines software requirements by exposing repository-backed change impacts and regression risks before planning.",
   "author": {
     "name": "Requirements Impact Refiner Contributors",
