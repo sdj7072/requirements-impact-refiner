@@ -24,7 +24,7 @@ Read [evidence](references/evidence-model.md), [taxonomy](references/impact-taxo
 
 ## Workflow integration
 
-Read exactly one adapter after the orchestrator is known. If more than one orchestrator is active, ask the user to choose one before continuing. Never load multiple adapters or invoke their external workflow.
+Read exactly one adapter after the orchestrator is known; apply its Entry before step 1. If more than one orchestrator is active, ask the user to choose one before continuing. Never load multiple adapters or invoke their external workflow.
 
 | Selected mode | Read only |
 | --- | --- |

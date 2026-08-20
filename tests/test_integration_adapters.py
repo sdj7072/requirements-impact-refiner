@@ -64,6 +64,18 @@ class IntegrationAdapterContractTest(unittest.TestCase):
             self.assertIn(adapter["entry"], entry, name)
             self.assertIn(adapter["exit"], exit_section, name)
 
+    def test_generic_entry_rejects_approval_without_inspectable_inputs(self):
+        text = (REFERENCES / ADAPTERS["generic"]["file"]).read_text(encoding="utf-8")
+        entry = text.split("## Entry\n", 1)[1].split("\n## Ownership", 1)[0]
+        self.assertIn("Approval alone is not sufficient.", entry)
+        self.assertIn("substantive change request", entry)
+        self.assertIn("affected repository scope or evidence target", entry)
+        self.assertIn("Before emitting any `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, `AC-###`, or canonical report", entry)
+        self.assertIn("do not start impact refinement", entry)
+        self.assertIn("state that the entry gate is not met", entry)
+        self.assertIn("ask only for the missing requirement text or scope", entry)
+        self.assertIn("not broad product ideation", entry)
+
     def test_each_adapter_returns_the_canonical_report_without_planning(self):
         for adapter in ADAPTERS.values():
             text = (REFERENCES / adapter["file"]).read_text(encoding="utf-8")
@@ -76,6 +88,7 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         text = SKILL_PATH.read_text(encoding="utf-8")
         routing = text.split("## Workflow integration\n", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Read exactly one", routing)
+        self.assertIn("apply its Entry before step 1", routing)
         self.assertIn("If more than one orchestrator is active, ask the user to choose one", routing)
         for name, adapter in ADAPTERS.items():
             self.assertEqual(routing.count(f"| `{name}` |"), 1)

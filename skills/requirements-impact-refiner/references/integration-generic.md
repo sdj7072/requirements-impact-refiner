@@ -2,7 +2,7 @@
 
 ## Entry
 
-Enter after the request is concrete enough for repository inspection and the user has not selected a named orchestrator. Consume the clarified requirement and its current `Planning Handoff` state.
+Enter after the request is concrete enough for repository inspection and the user has not selected a named orchestrator. Approval alone is not sufficient. Before emitting any `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, `AC-###`, or canonical report, confirm that both the substantive change request and affected repository scope or evidence target are concrete enough for inspection. If either is missing, do not start impact refinement or the canonical report; state that the entry gate is not met and ask only for the missing requirement text or scope. This entry-gate request is not broad product ideation. Once the gate is met, consume the clarified requirement and its current `Planning Handoff` state.
 
 ## Ownership
 
