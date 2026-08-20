@@ -11,7 +11,7 @@
 | Candidate skill | `skills/requirements-impact-refiner/SKILL.md`, version `0.1.0` |
 | Contract | `evals/cases.json` |
 | Repetitions | Five per evaluated case/run |
-| Raw corpus | 80 tracked transcripts under [`with-skill-raw/`](with-skill-raw/) plus six tracked scoring reports |
+| Raw corpus | Core: 80 transcripts plus six scoring reports under [`with-skill-raw/`](with-skill-raw/). Integration: 49 transcripts plus three scoring reports under [`integration-raw/`](integration-raw/) |
 
 ## Strict Scoring Method
 
@@ -37,6 +37,46 @@ Use the baseline rule: a required detection is strict only when tied to supplied
 | `rerun-4` | API, payments; 10 | 8/10 pass; pre-decision mechanics leaked into requirement revisions. | Checked revision/acceptance-target discipline. |
 | `rerun-5` | API, payments; 10 | 9/10 pass. API passed 5/5; payments passed 4/5. | Final allowed evaluation round. |
 
+## Workflow Integration Evaluation
+
+This evaluation is separate from the 25-case core composition below. It tests mutually exclusive workflow ownership and does not replace or conceal the core corpus's known payment limitation.
+
+### Integration Environment
+
+| Field | Value |
+| --- | --- |
+| Evaluator model | `gpt-5.6-luna` |
+| Client/runtime | Codex subagent fresh context |
+| Local CLI version | `codex-cli 0.148.0-alpha.15` |
+| Hosted model/runtime version | Unavailable in supplied evidence; not inferred from the local CLI version |
+| Contract | `INT-generic`, `INT-superpowers`, `INT-claude-feature-dev`, `INT-spec-kit`, `NEG-brainstorming`, and `NEG-planning` in `evals/cases.json` |
+| Initial adapter commit | `b6b95dd` |
+| Generic entry-gate fix | `543e288` |
+
+Strict scoring required exact entry/exit boundaries and counted a prohibition only when the response performed it. Generic mode also had to reject approval-only input before emitting a canonical report or any `REQ/INV/IMP/DEC/AC` artifact. An unselected option or a named next workflow explicitly left unstarted was not scored as automatic invocation.
+
+### Integration Progression
+
+| Corpus | Cases/repetitions | Result | Observed behavior |
+| --- | --- | --- | --- |
+| `baseline` | Four integration cases; one run each without adapter references | **2/4 exact** | Generic missed its concrete inspection entry; Superpowers had an ambiguous planning exit. Exact exits/entries passed for Claude feature-dev and Spec Kit. There were zero hard-prohibition violations. |
+| `initial` | Four integration cases plus two negative controls; five runs each | **25/30** | Superpowers, Claude feature-dev, Spec Kit, brainstorming, and planning passed 25/25. Generic entered from approval alone and emitted reports in 5/5 runs. |
+| `rerun-1` | Generic plus both negative controls; five runs each after `543e288` | **15/15** | Generic rejected approval-only input in 5/5 without identifiers/reports; both unchanged negative workflows passed 10/10. |
+
+### Final Integration Composition
+
+| Case | Evidence source | Strict result |
+| --- | --- | --- |
+| `INT-generic` | `rerun-1` | 5/5 |
+| `INT-superpowers` | `initial` | 5/5 |
+| `INT-claude-feature-dev` | `initial` | 5/5 |
+| `INT-spec-kit` | `initial` | 5/5 |
+| `NEG-brainstorming` | `rerun-1` | 5/5 |
+| `NEG-planning` | `rerun-1` | 5/5 |
+| **Total** | Adjudicated final composition | **30/30** |
+
+The final composition has no repeated broad ideation/clarification, implementation tasks in integration reports, multiple-orchestrator activation, automatic next-workflow invocation, or negative-control workflow replacement. The three unchanged formal adapters use their five-run initial evidence because the fix modified only generic entry gating.
+
 ## Final Composition
 
 | Case | Evidence source | Strict result |
@@ -54,8 +94,10 @@ Use the baseline rule: a required detection is strict only when tied to supplied
 
 ## Evidence Inventory
 
-The 80 transcripts are byte-preserved from the controller corpus: `initial` (25), `rerun-1` (15), and `rerun-2` through `rerun-5` (10 each). Six scoring reports are under [`with-skill-raw/scoring/`](with-skill-raw/scoring/). The canonical inventory is the sorted `relative-path SHA-256` manifest of all 86 Markdown evidence files; its SHA-256 is `6fe00ab7e7ea3c9158c987094c77690efe673a692ab73a3945807b6ae7dde842`. [`tests/test_with_skill_evidence.py`](../../tests/test_with_skill_evidence.py) protects the directory counts, manifest checksum, and final-report limitation statement.
+The 80 core transcripts are byte-preserved from the controller corpus: `initial` (25), `rerun-1` (15), and `rerun-2` through `rerun-5` (10 each). Six scoring reports are under [`with-skill-raw/scoring/`](with-skill-raw/scoring/). The canonical core inventory is the sorted `relative-path SHA-256` manifest of all 86 Markdown evidence files; its SHA-256 is `6fe00ab7e7ea3c9158c987094c77690efe673a692ab73a3945807b6ae7dde842`. [`tests/test_with_skill_evidence.py`](../../tests/test_with_skill_evidence.py) protects the core directory counts, checksum, and limitation statement.
+
+The integration corpus is independently byte-preserved under [`integration-raw/`](integration-raw/): `baseline` (4 transcripts), `initial` (30), `rerun-1` (15), and `scoring` (3 reports). Its sorted `relative-path SHA-256` manifest covers 52 Markdown files and has SHA-256 `9740064ebd3eb60cae7d95917db99195e765dd84c28d600303c1c6cc0ebbf1fc`. [`tests/test_integration_evidence.py`](../../tests/test_integration_evidence.py) protects its counts, byte checksums, report metadata, and final composition.
 
 ## Conclusion
 
-The skill materially improves evidence discipline, traceability, focused decisions, whole-set deltas, acceptance-vs-resolution separation, payment grounding, and workflow boundaries. It has one documented stochastic limitation and must not be represented as a clean 25/25 GREEN result.
+The skill materially improves evidence discipline, traceability, focused decisions, whole-set deltas, acceptance-vs-resolution separation, payment grounding, and workflow boundaries. Workflow integration passes its adjudicated final composition at 30/30. The separate core evaluation retains one documented stochastic limitation and must not be represented as a clean 25/25 GREEN result.
