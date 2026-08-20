@@ -277,6 +277,16 @@ def validate_report(text: str) -> list[str]:
     elif phase == "post-decision":
         if not tables["Decisions and Accepted Risks"]:
             errors.append("post-decision report requires a recorded decision row")
+        for row in tables["Decisions and Accepted Risks"]:
+            decision_id = row.get("Decision ID", "unknown decision").strip("`")
+            if not row.get("Choice", "").strip():
+                errors.append(
+                    f"recorded decision {decision_id} requires a nonempty choice"
+                )
+            if not row.get("Rationale", "").strip():
+                errors.append(
+                    f"recorded decision {decision_id} requires a nonempty rationale"
+                )
         current_rows = tables["Current Refined Requirement"]
         if not any(
             any(ref.startswith("DEC-") for ref in references(row.get("Refined by decision", "")))
@@ -310,6 +320,17 @@ def validate_report(text: str) -> list[str]:
                 for reference in references(value):
                     if reference not in known:
                         errors.append(f"unknown reference {reference}")
+
+    for row in tables["Current Refined Requirement"]:
+        requirement_id = row.get("Requirement ID", "").strip("`")
+        if (
+            not ID_PATTERN.fullmatch(requirement_id)
+            or not requirement_id.startswith("REQ-")
+            or requirement_id not in known
+        ):
+            errors.append(
+                "current refined requirement requires one known REQ identifier"
+            )
 
     for name, column in EVIDENCE_LEVEL_COLUMNS.items():
         for row in tables[name]:
@@ -366,13 +387,19 @@ def validate_report(text: str) -> list[str]:
             continue
         if category in delta_by_category:
             errors.append(f"duplicate impact delta category {category}")
-        ids = {
+        id_occurrences = [
             ref
             for ref in references(row.get("Impact IDs", ""))
             if ref.startswith("IMP-")
-        }
+        ]
+        raw_occurrences = [
+            ref
+            for ref in ID_PATTERN.findall(row.get("Impact IDs", ""))
+            if ref.startswith("IMP-")
+        ]
+        ids = set(id_occurrences)
         delta_by_category.setdefault(category, set()).update(ids)
-        for impact_id in ids:
+        for impact_id in raw_occurrences:
             delta_counts[impact_id] = delta_counts.get(impact_id, 0) + 1
             if impact_id not in impact_states:
                 errors.append(f"impact delta references unknown impact {impact_id}")
@@ -399,7 +426,13 @@ def validate_report(text: str) -> list[str]:
     for row in tables["Unresolved, Deferred, and Blocked Items"]:
         impact_id = row.get("Impact ID", "").strip("`")
         state = enum_value(row.get("State", ""))
-        if not ID_PATTERN.fullmatch(impact_id):
+        if not ID_PATTERN.fullmatch(impact_id) or not impact_id.startswith("IMP-"):
+            errors.append(
+                "unresolved row requires exactly one canonical IMP identifier"
+            )
+            continue
+        if impact_id not in impact_states:
+            errors.append(f"unresolved impact {impact_id} is not in ledger")
             continue
         unresolved_counts[impact_id] = unresolved_counts.get(impact_id, 0) + 1
         ledger_state = impact_states.get(impact_id)

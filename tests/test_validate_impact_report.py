@@ -360,6 +360,39 @@ class ValidateImpactReportTest(unittest.TestCase):
             VALIDATOR.validate_report(report),
         )
 
+    def test_post_decision_requires_selected_choice_and_rationale(self):
+        choice_missing = POST_DECISION_REPORT.replace(
+            "| DEC-001 | Use revocable opaque links. | REQ-001 | IMP-001 | Explicit revocation is required. |",
+            "| DEC-001 |  | REQ-001 | IMP-001 | Explicit revocation is required. |",
+            1,
+        )
+        rationale_missing = POST_DECISION_REPORT.replace(
+            "| DEC-001 | Use revocable opaque links. | REQ-001 | IMP-001 | Explicit revocation is required. |",
+            "| DEC-001 | Use revocable opaque links. | REQ-001 | IMP-001 |  |",
+            1,
+        )
+
+        self.assertIn(
+            "recorded decision DEC-001 requires a nonempty choice",
+            VALIDATOR.validate_report(choice_missing),
+        )
+        self.assertIn(
+            "recorded decision DEC-001 requires a nonempty rationale",
+            VALIDATOR.validate_report(rationale_missing),
+        )
+
+    def test_current_requirement_row_requires_one_known_requirement(self):
+        report = POST_DECISION_REPORT.replace(
+            "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — |",
+            "| none | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — |",
+            1,
+        )
+
+        self.assertIn(
+            "current refined requirement requires one known REQ identifier",
+            VALIDATOR.validate_report(report),
+        )
+
     def test_delta_requires_each_category_and_each_known_impact_exactly_once(self):
         missing_category = POST_DECISION_REPORT.replace("| superseded | none |\n", "", 1)
         missing_impact = POST_DECISION_REPORT.replace("| accepted | IMP-001 |", "| accepted | none |", 1)
@@ -378,6 +411,18 @@ class ValidateImpactReportTest(unittest.TestCase):
         self.assertIn(
             "impact delta lists IMP-001 more than once",
             VALIDATOR.validate_report(duplicate_impact),
+        )
+
+    def test_delta_rejects_repeated_identifier_within_one_cell(self):
+        report = POST_DECISION_REPORT.replace(
+            "| accepted | IMP-001 |",
+            "| accepted | IMP-001, IMP-001 |",
+            1,
+        )
+
+        self.assertIn(
+            "impact delta lists IMP-001 more than once",
+            VALIDATOR.validate_report(report),
         )
 
     def test_delta_rejects_unknown_impacts_and_state_category_disagreement(self):
@@ -660,6 +705,35 @@ class ValidateImpactReportTest(unittest.TestCase):
         )
 
         self.assertIn("duplicate unresolved impact IMP-001", VALIDATOR.validate_report(report))
+
+    def test_rejects_noncanonical_or_multiple_unresolved_impact_ids(self):
+        base = VALID_REPORT.replace(
+            "| critical | accepted | verified |",
+            "| critical | blocked | verified |",
+            1,
+        ).replace(
+            "| accepted | IMP-001 |",
+            "| blocked | IMP-001 |",
+            1,
+        ).replace("| blocked | none |", "| accepted | none |", 1)
+        mutations = {
+            "none": "none",
+            "multiple": "IMP-001, IMP-001",
+        }
+
+        for name, impact_cell in mutations.items():
+            with self.subTest(name=name):
+                report = base.replace(
+                    "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+                    "| --- | --- | --- | --- | --- |\n"
+                    f"| {impact_cell} | blocked | Waiting for input. | DEC-001 | Product |\n\n"
+                    "## Analysis Scope and Limitations",
+                    1,
+                )
+                self.assertIn(
+                    "unresolved row requires exactly one canonical IMP identifier",
+                    VALIDATOR.validate_report(report),
+                )
 
     def test_rejects_unresolved_state_that_disagrees_with_ledger(self):
         report = VALID_REPORT.replace(

@@ -1,7 +1,9 @@
 # State-Machine Behavioral Evaluation
 
-Date: 2026-08-20  
-Scope: report-phase selection, decision boundaries, structured delta, and unresolved-item reconciliation.  
+Date: 2026-08-20
+
+Scope: report-phase selection, decision boundaries, structured delta, and unresolved-item reconciliation.
+
 Method: fresh-context agents received the named scenario plus only the routed skill files. These are behavioral observations, not client-loader support claims.
 
 ## RED — version 0.1.2
