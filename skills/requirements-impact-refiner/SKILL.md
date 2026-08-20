@@ -9,13 +9,14 @@ metadata:
 
 # Requirements Impact Refiner
 
-Use after a change is concrete and before implementation planning. Do not activate for ideation, debugging, code review, generic PRD writing, or an already-approved request to produce coding tasks.
+Use after a change is concrete and before implementation planning. Do not activate for ideation, debugging, code review, or generic PRD writing. If the impact review or specification is already approved and coding tasks or an implementation plan are requested, exit this skill immediately: emit no `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, or `AC-###` artifacts and continue or route to the active planning workflow. Ordinary planning output after this exit is allowed.
 
 1. Record the proposed change as `REQ-###`; inspect supplied and repository evidence. Preserve current behavior as `INV-###` entries before refining the change.
 2. Create stable `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, and `AC-###` identifiers. Classify every impact as `verified`, `inferred`, or `unknown`; cite evidence instead of implying confidence.
 3. Show the impact ledger before asking one focused question. Offer two or three concrete refinement options only when a decision is needed.
-4. After a decision, update the requirement and recalculate the complete impact set. Show the delta, including new impacts.
-5. Keep `accepted` separate from `resolved`: accepted needs its decision link; resolved needs evidence. Stop at a planning handoff; do not write the implementation plan.
+4. Create `DEC-###` only after an explicit user/stakeholder selection or a decision explicitly supplied by the request. Before then, use plain **Decision needed** with no `DEC` ID; a compatibility invariant is not a selected wire or cache policy. Never mark an impact `accepted` without that recorded choice.
+5. After a decision, update the requirement and recalculate the complete impact set. Even without a decision, show an explicit complete delta with every category and `new: none` when applicable.
+6. Keep `accepted` separate from `resolved`: accepted needs its decision link; resolved needs evidence. Stop at a report-only planning handoff (refined requirement, linked evidence, open risks, and `AC-###`), not an imperative work breakdown or implementation plan.
 
 | State | Use |
 | --- | --- |

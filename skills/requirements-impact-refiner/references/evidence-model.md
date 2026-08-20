@@ -10,7 +10,7 @@
 | `DEC-###` | Recorded user choice | refines `REQ-###`; mitigates or accepts `IMP-###` |
 | `AC-###` | Testable acceptance or regression criterion | produced by `IMP-###`; verifies a requirement or invariant |
 
-Use only existing IDs in links. Create `AC-###` for every critical impact. An `accepted` impact requires a linked `DEC-###`; a `resolved` impact requires evidence explaining why it no longer applies.
+Use only existing IDs in links. Create `AC-###` for every critical impact. Create `DEC-###` only after an explicit user/stakeholder selection or a decision explicitly supplied by the request. Before selection, label the issue **Decision needed** without a `DEC` ID; do not turn a compatibility invariant or recommendation into a policy choice. An `accepted` impact requires that linked recorded decision; a `resolved` impact requires evidence explaining why it no longer applies.
 
 ## Impact states
 
