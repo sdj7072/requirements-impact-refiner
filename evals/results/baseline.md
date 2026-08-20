@@ -5,17 +5,18 @@
 | Field | Value |
 | --- | --- |
 | Evaluator model | `gpt-5.6-luna` |
-| Client | Codex subagent, fresh context |
-| Client version | Not recorded in the supplied fresh-context evidence |
+| Client/runtime | Codex subagent fresh context |
+| Local CLI version | `codex-cli 0.148.0-alpha.15` |
+| Hosted model/runtime version | Not available in the supplied evidence; distinct from the local CLI version |
 | Candidate skill guidance | None |
 | Enabled orchestrator | None recorded; the control used no skill guidance |
-| Repository/tool access | Not recorded in the supplied fresh-context evidence |
+| Tool access | Full Codex agent toolset available; the prompt prohibited workspace reads and subagent dispatch, and the designated output-file write was exercised |
 | Contract | `evals/cases.json` |
-| Raw corpus | 25 responses in controller-supplied `baseline-raw/` |
+| Raw corpus | 25 tracked responses in [`evals/results/baseline-raw/`](baseline-raw/) |
 | Repetitions | Five per selected case |
 | Cases | `POS-authorization`, `POS-api-contract`, `POS-payments`, `NEG-brainstorming`, `NEG-planning` |
 
-Unavailable client-version and tool-access metadata are disclosed rather than treated as passing evidence.
+The local CLI version is recorded separately from the unavailable hosted model/runtime version. The latter is disclosed rather than inferred or treated as passing evidence.
 
 ## Scoring Method
 
@@ -35,7 +36,7 @@ Each `must_detect` item counts as a detection only when its output connects the 
 
 ### Correct substantive detection
 
-`POS-authorization-1.md` explicitly grounded all three substantive impacts:
+[`evals/results/baseline-raw/POS-authorization-1.md`](baseline-raw/POS-authorization-1.md) explicitly grounded all three substantive impacts:
 
 > “`authorizeProjectEdit` currently permits only `owner` and `admin` roles”
 
@@ -43,7 +44,7 @@ Each `must_detect` item counts as a detection only when its output connects the 
 
 > “Project edits emit an audit event containing the actor's role.”
 
-`POS-api-contract-1.md` likewise grounded its contract analysis:
+[`evals/results/baseline-raw/POS-api-contract-1.md`](baseline-raw/POS-api-contract-1.md) likewise grounded its contract analysis:
 
 > “`ios/UserDTO.swift` currently decodes `displayName`”
 
@@ -55,27 +56,27 @@ Each `must_detect` item counts as a detection only when its output connects the 
 
 The following are possible rather than strict detections because they prescribe the right behavior without connecting it to the supplied evidence that charge requests already accept `idempotency_key`:
 
-> “Generate a stable, unique idempotency key per logical charge attempt and send it on every provider request.” — `POS-payments-1.md`
+> “Generate a stable, unique idempotency key per logical charge attempt and send it on every provider request.” — [`evals/results/baseline-raw/POS-payments-1.md`](baseline-raw/POS-payments-1.md)
 
-> “Every retry must reuse a stable idempotency key for the logical charge (or a provider-supported equivalent).” — `POS-payments-2.md`
+> “Every retry must reuse a stable idempotency key for the logical charge (or a provider-supported equivalent).” — [`evals/results/baseline-raw/POS-payments-2.md`](baseline-raw/POS-payments-2.md)
 
 By contrast, duplicate-capture risk was explicitly grounded:
 
-> “Because a provider may time out after capture, do not immediately issue a new charge.” — `POS-payments-3.md`
+> “Because a provider may time out after capture, do not immediately issue a new charge.” — [`evals/results/baseline-raw/POS-payments-3.md`](baseline-raw/POS-payments-3.md)
 
 The user-visible-status evidence was explicit in some repetitions:
 
-> “the payment status is rendered before webhook settlement.” — `POS-payments-2.md`
+> “the payment status is rendered before webhook settlement.” — [`evals/results/baseline-raw/POS-payments-2.md`](baseline-raw/POS-payments-2.md)
 
 ### Planning-boundary violations
 
 The following outputs performed the forbidden replacement planning workflow:
 
-> “# Requirements Impact Refiner Implementation Plan” — `NEG-planning-1.md`
+> “# Requirements Impact Refiner Implementation Plan” — [`evals/results/baseline-raw/NEG-planning-1.md`](baseline-raw/NEG-planning-1.md)
 
-> “The implementation plan should then be decomposed into independently testable tasks in this order:” — `NEG-planning-3.md`
+> “The implementation plan should then be decomposed into independently testable tasks in this order:” — [`evals/results/baseline-raw/NEG-planning-3.md`](baseline-raw/NEG-planning-3.md)
 
-> “### Task 2: Decompose the requirements into independently testable coding tasks” — `NEG-planning-4.md`
+> “### Task 2: Decompose the requirements into independently testable coding tasks” — [`evals/results/baseline-raw/NEG-planning-4.md`](baseline-raw/NEG-planning-4.md)
 
 ## Demonstrated Failures the Skill Must Correct
 

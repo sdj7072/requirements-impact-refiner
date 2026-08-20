@@ -1,0 +1,2 @@
+# Preserve controller-supplied evaluation transcripts byte-for-byte.
+evals/results/baseline-raw/** -whitespace

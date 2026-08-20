@@ -1,3 +1,4 @@
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -25,6 +26,9 @@ REQUIRED_POSITIVE_TOPICS = {
     "offline-sync",
     "background-retry",
 }
+# Canonical SHA-256 of the approved Task 1 case set. Update deliberately only
+# when the evaluation contract changes through its review process.
+CASES_SHA256 = "03dbedb66900e89efec45fae7d73312fe2ccb6508a67e9143af3e3c88c1c53bc"
 
 
 def load_cases():
@@ -32,6 +36,10 @@ def load_cases():
 
 
 class EvalCaseContractTest(unittest.TestCase):
+    def test_cases_match_the_approved_golden_contract(self):
+        digest = hashlib.sha256(CASES_PATH.read_bytes()).hexdigest()
+        self.assertEqual(digest, CASES_SHA256)
+
     def test_cases_have_unique_ids_and_required_fields(self):
         cases = load_cases()
         self.assertEqual(len(cases), len({case["id"] for case in cases}))
