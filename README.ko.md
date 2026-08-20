@@ -26,22 +26,37 @@ Requirements Impact Refiner `0.1.0`은 구체적인 소프트웨어 변경을 �
 
 ## 3. 빠른 시작
 
-저장소를 복제한 다음 기준 스킬을 사용하는 클라이언트에 노출합니다. 일부 크로스 클라이언트 구성은 `.agents/skills/`를 사용합니다. 이는 실용적인 관례일 뿐 Agent Skills 명세가 강제하는 설치 경로가 아닙니다.
+클라이언트가 지원한다면 GitHub 저장소를 네이티브 마켓플레이스 방식으로 설치합니다. 마켓플레이스와 플러그인 이름은 모두 `requirements-impact-refiner`입니다.
+
+Codex CLI에서는 다음을 실행합니다.
 
 ```sh
-mkdir -p .agents/skills
-ln -s ../../skills/requirements-impact-refiner .agents/skills/requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-Codex에서는 사용하는 Codex 클라이언트의 플러그인 로딩 기능으로 이 저장소를 로컬 플러그인으로 불러옵니다. [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)의 `skills`는 `./skills/`를 가리키며 MCP 서버, hook, app, agent, dependency를 추가하지 않습니다. 이 저장소의 호환성 실행에서 검증된 Codex CLI 로딩 명령은 없으므로 특정 명령을 성공했다고 주장하지 않습니다.
+저장소의 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)은 루트 [Codex 플러그인 매니페스트](.codex-plugin/plugin.json)를 가리키며, 그 `skills` 필드는 하나뿐인 기준 `./skills/` 트리를 사용합니다. MCP 서버, hook, app, agent, dependency는 추가하지 않습니다.
 
-Claude Code 개발 로딩은 저장소 루트에서 다음을 실행합니다.
+Claude Code에서는 Claude Code 내부에서 다음 명령을 실행합니다.
+
+```text
+/plugin marketplace add sdj7072/requirements-impact-refiner
+/plugin install requirements-impact-refiner@requirements-impact-refiner
+```
+
+설치 요약에서 요청하면 `/reload-plugins`를 실행합니다. [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)은 루트 [Claude 플러그인 매니페스트](.claude-plugin/plugin.json)를 배포합니다. 로컬 개발 로딩은 저장소를 복제한 뒤 루트에서 다음을 실행합니다.
 
 ```sh
 claude --plugin-dir .
 ```
 
-루트의 [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json)은 Claude Code의 일반적인 루트 `skills/` 탐색 방식을 사용합니다. 이 명령은 Claude Code가 설치된 환경을 위한 안내이며, 현재 환경에는 `claude`가 없어 실행이 `blocked`되었습니다.
+그 밖의 [Agent Skills 호환 클라이언트](https://agentskills.io/clients)는 저장소를 복제한 뒤 기준 스킬 전체를 해당 클라이언트가 안내하는 디렉터리로 복사합니다. `.agents/skills/`는 유용한 크로스 클라이언트 기본값이지만 Agent Skills 명세가 설치 위치를 강제하지는 않습니다.
+
+```sh
+python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
+```
+
+설치기는 기존 설치를 덮어쓰지 않습니다. 클라이언트 고유 경로로 `~/.codex/skills`와 `~/.claude/skills`도 사용할 수 있지만, Codex와 Claude Code에서는 위 마켓플레이스 방식이 업데이트 관리에 더 적합합니다.
 
 로딩 후에는 변경과 저장소 범위를 함께 제시합니다. 예: “계획 전에 `displayName` API 이름 변경이 API, iOS DTO, 캐시된 프로필 경로에 미치는 영향을 정제해 줘.” 오케스트레이터가 여러 개라면 정확히 하나를 선택합니다.
 

@@ -1,0 +1,20 @@
+{
+  "name": "requirements-impact-refiner",
+  "interface": {
+    "displayName": "Requirements Impact Refiner"
+  },
+  "plugins": [
+    {
+      "name": "requirements-impact-refiner",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

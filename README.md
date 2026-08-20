@@ -26,22 +26,37 @@ Evidence levels are exactly `verified`, `inferred`, and `unknown`. Impact states
 
 ## 3. Quick Start
 
-Clone the repository, then expose the canonical skill to your client. Some cross-client setups use `.agents/skills/`; this is a practical convention, not an installation path mandated by the Agent Skills specification.
+Install from the GitHub repository with the native marketplace flow when your client supports it. The marketplace and plugin use the same name: `requirements-impact-refiner`.
+
+For Codex CLI:
 
 ```sh
-mkdir -p .agents/skills
-ln -s ../../skills/requirements-impact-refiner .agents/skills/requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-For Codex, load this repository as a local plugin using the plugin-loading facility in your Codex client. [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json) points `skills` to `./skills/`; it does not add MCP servers, hooks, apps, agents, or dependencies. No Codex CLI loading command is claimed because none was exercised in this repository's compatibility run.
+The repository marketplace at [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) resolves the root [Codex plugin manifest](.codex-plugin/plugin.json), whose `skills` field points to the single canonical `./skills/` tree. It does not add MCP servers, hooks, apps, agents, or dependencies.
 
-For Claude Code development loading, run from the repository root:
+For Claude Code, run these commands inside Claude Code:
+
+```text
+/plugin marketplace add sdj7072/requirements-impact-refiner
+/plugin install requirements-impact-refiner@requirements-impact-refiner
+```
+
+Run `/reload-plugins` if the install summary asks for it. [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) publishes the root [Claude plugin manifest](.claude-plugin/plugin.json). For local development loading, clone the repository and run from its root:
 
 ```sh
 claude --plugin-dir .
 ```
 
-The root [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) uses Claude Code's conventional root-level `skills/` discovery. The command is documented for an environment with Claude Code installed; it was `blocked` here because `claude` was unavailable.
+For another [Agent Skills-compatible client](https://agentskills.io/clients), clone the repository and copy the complete canonical skill into the directory that client documents. The cross-client `.agents/skills/` convention is a useful default, although the Agent Skills specification does not mandate an installation location:
+
+```sh
+python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
+```
+
+The installer refuses to overwrite an existing installation. Client-native alternatives include `~/.codex/skills` and `~/.claude/skills`, but the marketplace flows above provide cleaner updates for Codex and Claude Code.
 
 After loading, ask for impact refinement with a concrete change and repository scope, for example: “Before planning, refine the `displayName` API rename against the API, iOS DTO, and cached-profile paths.” If multiple orchestrators are present, select exactly one.
 

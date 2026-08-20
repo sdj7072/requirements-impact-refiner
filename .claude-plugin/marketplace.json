@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "requirements-impact-refiner",
+  "owner": {
+    "name": "sdj7072",
+    "url": "https://github.com/sdj7072"
+  },
+  "description": "Repository-aware requirement impact analysis before implementation planning.",
+  "plugins": [
+    {
+      "name": "requirements-impact-refiner",
+      "source": "./",
+      "description": "Refines software requirements by exposing repository-backed change impacts and regression risks before planning.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Requirements Impact Refiner Contributors"
+      },
+      "homepage": "https://github.com/sdj7072/requirements-impact-refiner",
+      "repository": "https://github.com/sdj7072/requirements-impact-refiner",
+      "license": "MIT",
+      "category": "Development",
+      "tags": [
+        "requirements",
+        "impact-analysis",
+        "regression-risk",
+        "agent-skills"
+      ]
+    }
+  ]
+}

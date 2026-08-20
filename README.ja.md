@@ -26,22 +26,37 @@ Requirements Impact Refiner `0.1.0` は、具体的なソフトウェア変更�
 
 ## 3. クイックスタート
 
-リポジトリをクローンし、正本スキルをクライアントに公開します。一部のクロスクライアント構成では `.agents/skills/` を使います。これは実用上の慣例であり、Agent Skills 仕様が必須とするインストール先ではありません。
+クライアントが対応している場合は、GitHub リポジトリをネイティブのマーケットプレイス機能でインストールします。マーケットプレイス名とプラグイン名はどちらも `requirements-impact-refiner` です。
+
+Codex CLI では次を実行します。
 
 ```sh
-mkdir -p .agents/skills
-ln -s ../../skills/requirements-impact-refiner .agents/skills/requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-Codex では、利用する Codex クライアントのプラグイン読み込み機能を使い、このリポジトリをローカルプラグインとして読み込みます。[`.codex-plugin/plugin.json`](.codex-plugin/plugin.json) の `skills` は `./skills/` を指し、MCP server、hook、app、agent、dependency を追加しません。このリポジトリの互換性実行では Codex CLI の読み込みコマンドを検証していないため、特定のコマンドの成功は主張しません。
+リポジトリの [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) はルートの [Codex plugin manifest](.codex-plugin/plugin.json) を参照し、その `skills` は単一の正本 `./skills/` ツリーを指します。MCP server、hook、app、agent、dependency は追加しません。
 
-Claude Code の開発用読み込みは、リポジトリルートで次を実行します。
+Claude Code では、Claude Code 内で次を実行します。
+
+```text
+/plugin marketplace add sdj7072/requirements-impact-refiner
+/plugin install requirements-impact-refiner@requirements-impact-refiner
+```
+
+インストール結果で求められた場合は `/reload-plugins` を実行します。[`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) はルートの [Claude plugin manifest](.claude-plugin/plugin.json) を配布します。ローカル開発用にはリポジトリをクローンし、ルートで次を実行します。
 
 ```sh
 claude --plugin-dir .
 ```
 
-ルートの [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) は Claude Code の慣例的なルート `skills/` 検出を使います。このコマンドは Claude Code が導入済みの環境向けです。現在の環境には `claude` がなく、実行は `blocked` でした。
+その他の [Agent Skills 互換クライアント](https://agentskills.io/clients) では、リポジトリをクローンし、正本スキル全体をクライアントが指定するディレクトリへコピーします。`.agents/skills/` は便利なクロスクライアント既定値ですが、Agent Skills 仕様がインストール先を必須化しているわけではありません。
+
+```sh
+python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
+```
+
+インストーラーは既存のインストールを上書きしません。クライアント固有の選択肢として `~/.codex/skills` と `~/.claude/skills` も利用できますが、Codex と Claude Code では上記のマーケットプレイス方式の方が更新を管理しやすくなります。
 
 読み込み後、変更とリポジトリ範囲を併記して依頼します。例: 「計画前に `displayName` API 名変更を API、iOS DTO、キャッシュ済みプロフィール経路に対して精緻化して」。複数のオーケストレーターがある場合は、正確に一つだけ選びます。
 
