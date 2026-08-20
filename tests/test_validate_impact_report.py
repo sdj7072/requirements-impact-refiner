@@ -31,6 +31,7 @@ EXPECTED_ERRORS = {
     "accepted_without_decision": "accepted impact IMP-001 requires DEC reference",
     "critical_without_ac": "critical impact IMP-001 requires AC reference",
     "missing_limitations": "missing section: Analysis Scope and Limitations",
+    "unresolved_accepted": "invalid impact state accepted",
 }
 
 
@@ -176,6 +177,40 @@ class ValidateImpactReportTest(unittest.TestCase):
         )
 
         self.assertIn(EXPECTED_ERRORS["state"], VALIDATOR.validate_report(report))
+
+    def test_accepts_code_formatted_enums_and_allowed_unresolved_states(self):
+        report = VALID_REPORT.replace(
+            "| INV-001 | Existing exports remain private. | verified | tests/test_exports.py |",
+            "| INV-001 | Existing exports remain private. | `verified` | tests/test_exports.py |",
+            1,
+        ).replace(
+            "| critical | accepted | verified |",
+            "| critical | `accepted` | `verified` |",
+            1,
+        ).replace(
+            "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+            "| --- | --- | --- | --- | --- |\n"
+            "| IMP-001 | `blocked` | Waiting for product input. | DEC-001 | Product |\n"
+            "| IMP-001 | `deferred` | Scheduled for a later release. | DEC-001 | Product |\n\n"
+            "## Analysis Scope and Limitations",
+            1,
+        )
+
+        self.assertEqual(VALIDATOR.validate_report(report), [])
+
+    def test_rejects_accepted_state_in_unresolved_items(self):
+        report = VALID_REPORT.replace(
+            "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+            "| --- | --- | --- | --- | --- |\n"
+            "| IMP-001 | accepted | Already decided. | DEC-001 | Product |\n\n"
+            "## Analysis Scope and Limitations",
+            1,
+        )
+
+        self.assertIn(
+            EXPECTED_ERRORS["unresolved_accepted"],
+            VALIDATOR.validate_report(report),
+        )
 
     def test_validate_path_and_cli_report_success_and_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:

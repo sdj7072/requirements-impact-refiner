@@ -18,6 +18,7 @@ IMPACT_STATES = {
     "superseded",
 }
 EVIDENCE_LEVELS = {"verified", "inferred", "unknown"}
+UNRESOLVED_STATES = {"deferred", "blocked"}
 REQUIRED_SECTIONS = {
     "Original Requirement",
     "Current Refined Requirement",
@@ -42,9 +43,9 @@ EVIDENCE_LEVEL_COLUMNS = {
     "Current Behavior": "Evidence level",
     "Impact Ledger": "Evidence Level",
 }
-STATE_COLUMNS = {
-    "Impact Ledger": "State",
-    "Unresolved, Deferred, and Blocked Items": "State",
+STATE_RULES = {
+    "Impact Ledger": ("State", IMPACT_STATES),
+    "Unresolved, Deferred, and Blocked Items": ("State", UNRESOLVED_STATES),
 }
 
 
@@ -77,6 +78,13 @@ def references(value: str) -> set[str]:
     return set(ID_PATTERN.findall(value))
 
 
+def enum_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value.startswith("`") and value.endswith("`"):
+        return value[1:-1]
+    return value
+
+
 def validate_report(text: str) -> list[str]:
     errors: list[str] = []
     sections = markdown_sections(text)
@@ -105,19 +113,19 @@ def validate_report(text: str) -> list[str]:
 
     for name, column in EVIDENCE_LEVEL_COLUMNS.items():
         for row in table_rows(sections.get(name, "")):
-            level = row.get(column, "")
+            level = enum_value(row.get(column, ""))
             if level not in EVIDENCE_LEVELS:
                 errors.append(f"invalid evidence level {level}")
 
-    for name, column in STATE_COLUMNS.items():
+    for name, (column, allowed_states) in STATE_RULES.items():
         for row in table_rows(sections.get(name, "")):
-            state = row.get(column, "")
-            if state not in IMPACT_STATES:
+            state = enum_value(row.get(column, ""))
+            if state not in allowed_states:
                 errors.append(f"invalid impact state {state}")
 
     for row in table_rows(sections.get("Impact Ledger", "")):
         impact_id = row.get("ID", "unknown impact")
-        state = row.get("State", "")
+        state = enum_value(row.get("State", ""))
         evidence = row.get("Evidence", "").strip()
         requirement_refs = {
             ref for ref in references(row.get("Requirement", "")) if ref.startswith("REQ-")
