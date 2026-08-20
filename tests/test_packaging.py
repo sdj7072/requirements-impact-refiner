@@ -11,6 +11,39 @@ class PackagingTest(unittest.TestCase):
     def load(self, relative_path):
         return json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
 
+    def load_skill_identity(self):
+        path = ROOT / "skills/requirements-impact-refiner/SKILL.md"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertGreaterEqual(len(lines), 3)
+        self.assertEqual(lines[0], "---")
+        try:
+            end = lines.index("---", 1)
+        except ValueError:
+            self.fail("canonical SKILL.md frontmatter is not closed")
+
+        name = None
+        version = None
+        in_metadata = False
+        for line in lines[1:end]:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            key, separator, raw_value = line.strip().partition(":")
+            if not separator:
+                continue
+            if indent == 0:
+                in_metadata = key == "metadata"
+                if key == "name":
+                    name = raw_value.strip().strip("\"'")
+            elif in_metadata and key == "version":
+                version = raw_value.strip().strip("\"'")
+
+        self.assertTrue(name, "canonical SKILL.md frontmatter is missing name")
+        self.assertTrue(
+            version, "canonical SKILL.md frontmatter is missing metadata.version"
+        )
+        return name, version
+
     def test_canonical_skill_exists(self):
         self.assertTrue(
             (ROOT / "skills/requirements-impact-refiner/SKILL.md").is_file()
@@ -34,6 +67,16 @@ class PackagingTest(unittest.TestCase):
         claude = self.load(".claude-plugin/plugin.json")
         for key in ("name", "version", "description", "license"):
             self.assertEqual(codex[key], claude[key])
+
+    def test_manifests_match_canonical_skill_identity(self):
+        skill_name, skill_version = self.load_skill_identity()
+        for relative_path in (
+            ".codex-plugin/plugin.json",
+            ".claude-plugin/plugin.json",
+        ):
+            manifest = self.load(relative_path)
+            self.assertEqual(manifest["name"], skill_name)
+            self.assertEqual(manifest["version"], skill_version)
 
 
 if __name__ == "__main__":
