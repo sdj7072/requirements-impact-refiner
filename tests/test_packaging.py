@@ -70,6 +70,19 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("name: using-requirements-impact-refiner", text)
         self.assertIn("Use when starting any software-development conversation", text)
 
+    def test_automatic_entrypoint_owns_activation_boundaries(self):
+        bootstrap = (
+            ROOT / "skills/using-requirements-impact-refiner/SKILL.md"
+        ).read_text(encoding="utf-8")
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("already impact-refined requirement or plan", bootstrap)
+        self.assertNotIn("or approved plan", bootstrap)
+        self.assertIn("bootstrap has selected", core)
+        self.assertIn("after approved brainstorming", core)
+        self.assertIn("already impact-refined requirement or plan", core)
+
     def test_codex_manifest_references_a_readable_square_logo(self):
         manifest = self.load(".codex-plugin/plugin.json")
         interface = manifest["interface"]

@@ -1,6 +1,6 @@
 ---
 name: requirements-impact-refiner
-description: Use when a proposed software change may affect existing behavior, contracts, data, permissions, compatibility, or regression risk and repository evidence can refine the requirement before implementation planning.
+description: Use when the automatic bootstrap has selected a concrete software behavior change for impact refinement, or the user explicitly requests it, after approved brainstorming and before planning; excludes ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan
 license: MIT
 compatibility: Works with Agent Skills clients that can inspect supplied files; repository access, search, and tests improve evidence quality but are not required.
 metadata:
@@ -9,7 +9,7 @@ metadata:
 
 # Requirements Impact Refiner
 
-Use for concrete pre-planning changes; not ideation, debugging, code review, or generic PRDs. If an approved review/spec requests coding tasks or a plan, exit: emit no `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, or `AC-###` artifacts and route to active planning. Ordinary planning remains allowed.
+Use for concrete pre-planning changes; not ideation, debugging, code review, or generic PRDs. For explanation, status, or executing an already impact-refined requirement or plan, exit without IDs to the active workflow.
 
 1. Record the change as `REQ-###`; inspect supplied and repository evidence. Preserve current behavior as `INV-###` before refining.
 2. Create stable `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, and `AC-###` identifiers. Give each impact one of `verified`, `inferred`, or `unknown`; split compound findings with different levels. Cite evidence.
