@@ -38,6 +38,14 @@ DEFINITION_COLUMNS = {
     "Decisions and Accepted Risks": "Decision ID",
     "Acceptance and Regression Criteria": "Criterion ID",
 }
+EVIDENCE_LEVEL_COLUMNS = {
+    "Current Behavior": "Evidence level",
+    "Impact Ledger": "Evidence Level",
+}
+STATE_COLUMNS = {
+    "Impact Ledger": "State",
+    "Unresolved, Deferred, and Blocked Items": "State",
+}
 
 
 def markdown_sections(text: str) -> dict[str, str]:
@@ -95,10 +103,21 @@ def validate_report(text: str) -> list[str]:
                     if reference not in known:
                         errors.append(f"unknown reference {reference}")
 
+    for name, column in EVIDENCE_LEVEL_COLUMNS.items():
+        for row in table_rows(sections.get(name, "")):
+            level = row.get(column, "")
+            if level not in EVIDENCE_LEVELS:
+                errors.append(f"invalid evidence level {level}")
+
+    for name, column in STATE_COLUMNS.items():
+        for row in table_rows(sections.get(name, "")):
+            state = row.get(column, "")
+            if state not in IMPACT_STATES:
+                errors.append(f"invalid impact state {state}")
+
     for row in table_rows(sections.get("Impact Ledger", "")):
         impact_id = row.get("ID", "unknown impact")
         state = row.get("State", "")
-        level = row.get("Evidence Level", "")
         evidence = row.get("Evidence", "").strip()
         requirement_refs = {
             ref for ref in references(row.get("Requirement", "")) if ref.startswith("REQ-")
@@ -111,10 +130,6 @@ def validate_report(text: str) -> list[str]:
             for ref in references(row.get("Acceptance Criteria", ""))
             if ref.startswith("AC-")
         }
-        if state not in IMPACT_STATES:
-            errors.append(f"invalid impact state {state}")
-        if level not in EVIDENCE_LEVELS:
-            errors.append(f"invalid evidence level {level}")
         if not requirement_refs:
             errors.append(f"impact {impact_id} requires REQ reference")
         if state == "resolved" and not evidence:

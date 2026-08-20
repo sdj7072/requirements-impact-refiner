@@ -157,6 +157,26 @@ class ValidateImpactReportTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(EXPECTED_ERRORS[name], VALIDATOR.validate_report(report))
 
+    def test_rejects_invalid_current_behavior_evidence_level(self):
+        report = VALID_REPORT.replace(
+            "| INV-001 | Existing exports remain private. | verified | tests/test_exports.py |",
+            "| INV-001 | Existing exports remain private. | certain | tests/test_exports.py |",
+            1,
+        )
+
+        self.assertIn(EXPECTED_ERRORS["evidence_level"], VALIDATOR.validate_report(report))
+
+    def test_rejects_invalid_unresolved_item_state(self):
+        report = VALID_REPORT.replace(
+            "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+            "| --- | --- | --- | --- | --- |\n"
+            "| IMP-001 | ignored | Still under review. | DEC-001 | Product |\n\n"
+            "## Analysis Scope and Limitations",
+            1,
+        )
+
+        self.assertIn(EXPECTED_ERRORS["state"], VALIDATOR.validate_report(report))
+
     def test_validate_path_and_cli_report_success_and_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             valid_path = Path(temp_dir) / "valid.md"
