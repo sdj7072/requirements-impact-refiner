@@ -1,0 +1,38 @@
+---
+name: requirements-impact-refiner
+description: Use when a proposed software change may affect existing behavior, contracts, data, permissions, compatibility, or regression risk and repository evidence can refine the requirement before implementation planning.
+license: MIT
+compatibility: Works with Agent Skills clients that can inspect supplied files; repository access, search, and tests improve evidence quality but are not required.
+metadata:
+  version: "0.1.0"
+---
+
+# Requirements Impact Refiner
+
+Use after a change is concrete and before implementation planning. Do not activate for ideation, debugging, code review, generic PRD writing, or an already-approved request to produce coding tasks.
+
+1. Record the proposed change as `REQ-###`; inspect supplied and repository evidence. Preserve current behavior as `INV-###` entries before refining the change.
+2. Create stable `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, and `AC-###` identifiers. Classify every impact as `verified`, `inferred`, or `unknown`; cite evidence instead of implying confidence.
+3. Show the impact ledger before asking one focused question. Offer two or three concrete refinement options only when a decision is needed.
+4. After a decision, update the requirement and recalculate the complete impact set. Show the delta, including new impacts.
+5. Keep `accepted` separate from `resolved`: accepted needs its decision link; resolved needs evidence. Stop at a planning handoff; do not write the implementation plan.
+
+| State | Use |
+| --- | --- |
+| `detected`, `refining`, `mitigated` | Found, under refinement, or reduced |
+| `resolved`, `accepted`, `deferred`, `blocked`, `superseded` | Eliminated with evidence; retained by decision; postponed; information-limited; or replaced |
+
+| Evidence level | Meaning |
+| --- | --- |
+| `verified` | Direct inspected support |
+| `inferred` | Indirect repository support |
+| `unknown` | Insufficient or conflicting support |
+
+Read [the evidence model](references/evidence-model.md) for IDs, evidence, states, and uncertainty; [the taxonomy](references/impact-taxonomy.md) for inspection targets; and [the refinement loop](references/refinement-loop.md) for decisions and stopping. Load only the integration reference selected for the current workflow when one is available; never load every integration reference by default.
+
+## Common mistakes
+
+- Presenting payment idempotency advice without tying it to the supplied request evidence.
+- Listing impacts without evidence levels, stable IDs, a decision, or whole-set delta.
+- Treating a user’s silence as resolution or acceptance.
+- Replacing an approved planning workflow with an implementation plan.
