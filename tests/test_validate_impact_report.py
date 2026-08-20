@@ -210,6 +210,41 @@ class ValidateImpactReportTest(unittest.TestCase):
                     any(error.startswith("invalid identifier ") for error in VALIDATOR.validate_report(report))
                 )
 
+    def test_rejects_canonical_placeholder_tokens_left_in_relationship_cells(self):
+        mutations = {
+            "preserved_invariant": (
+                "| INV-001 | REQ-001 | IMP-001 | tests/test_exports.py |",
+                "| INV-001 | REQ-001 | IMP-### | tests/test_exports.py |",
+                "invalid identifier IMP-###",
+            ),
+            "revision_history": (
+                "| REQ-001 | Add sharing with private defaults. | DEC-001 | — | Narrowed scope. |",
+                "| REQ-001 | Add sharing with private defaults. | DEC-### | — | Narrowed scope. |",
+                "invalid identifier DEC-###",
+            ),
+            "planning_handoff": (
+                "| REQ-001 | INV-001, IMP-001, DEC-001 | Accepted IMP-001 | AC-001 | Existing planning workflow |",
+                "| REQ-001 | INV-###, IMP-001, DEC-001 | Accepted IMP-001 | AC-001 | Existing planning workflow |",
+                "invalid identifier INV-###",
+            ),
+        }
+
+        for name, (old, new, expected_error) in mutations.items():
+            with self.subTest(name=name):
+                self.assertIn(
+                    expected_error,
+                    VALIDATOR.validate_report(VALID_REPORT.replace(old, new, 1)),
+                )
+
+    def test_identifier_candidate_scan_ignores_embedded_normal_prose_and_code(self):
+        report = VALID_REPORT.replace(
+            "Other paths remain unknown.",
+            "FREQ-### prose, someIMP-###Helper, AC-001_test, and requirements-impact-refiner.",
+            1,
+        )
+
+        self.assertEqual(VALIDATOR.validate_report(report), [])
+
     def test_rejects_malformed_table_row_instead_of_silently_skipping_it(self):
         malformed = VALID_REPORT.replace(
             "| REQ-001 | Preserve existing exports while adding sharing. | Product request |",

@@ -7,7 +7,9 @@ from pathlib import Path
 
 ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
 ID_LIKE_PATTERN = re.compile(r"^(?:REQ|INV|IMP|DEC|AC)-")
-ID_TOKEN_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-[A-Za-z0-9]+\b")
+ID_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])(?:REQ|INV|IMP|DEC|AC)-[A-Za-z0-9#]+(?![A-Za-z0-9_])"
+)
 IMPACT_STATES = {
     "detected",
     "refining",
