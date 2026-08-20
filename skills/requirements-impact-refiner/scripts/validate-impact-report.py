@@ -22,19 +22,50 @@ IMPACT_STATES = {
 }
 EVIDENCE_LEVELS = {"verified", "inferred", "unknown"}
 UNRESOLVED_STATES = {"deferred", "blocked"}
-REQUIRED_SECTIONS = {
+REPORT_PHASES = {"pre-decision", "post-decision"}
+DELTA_CATEGORIES = {
+    "resolved",
+    "mitigated",
+    "unchanged",
+    "accepted",
+    "deferred",
+    "blocked",
+    "superseded",
+    "new",
+}
+STATE_TO_DELTA = {
+    "detected": "unchanged",
+    "refining": "unchanged",
+    "mitigated": "mitigated",
+    "resolved": "resolved",
+    "accepted": "accepted",
+    "deferred": "deferred",
+    "blocked": "blocked",
+    "superseded": "superseded",
+}
+COMMON_REQUIRED_SECTIONS = {
+    "Report State",
     "Original Requirement",
     "Current Refined Requirement",
     "Current Behavior",
     "Preserved Invariants",
     "Impact Ledger",
-    "Decisions and Accepted Risks",
+    "Impact Delta",
     "Requirement Revision History",
     "Acceptance and Regression Criteria",
     "Unresolved, Deferred, and Blocked Items",
     "Analysis Scope and Limitations",
     "Planning Handoff",
 }
+PHASE_REQUIRED_SECTION = {
+    "pre-decision": "Decision Needed",
+    "post-decision": "Decisions and Accepted Risks",
+}
+PHASE_FORBIDDEN_SECTION = {
+    "pre-decision": "Decisions and Accepted Risks",
+    "post-decision": "Decision Needed",
+}
+REQUIRED_SECTIONS = COMMON_REQUIRED_SECTIONS | set(PHASE_REQUIRED_SECTION.values())
 DEFINITION_COLUMNS = {
     "Original Requirement": "Requirement ID",
     "Current Behavior": "Invariant ID",
@@ -51,6 +82,7 @@ STATE_RULES = {
     "Unresolved, Deferred, and Blocked Items": ("State", UNRESOLVED_STATES),
 }
 TABLE_HEADERS = {
+    "Report State": ["Phase"],
     "Original Requirement": ["Requirement ID", "Original request", "Source"],
     "Current Refined Requirement": [
         "Requirement ID",
@@ -89,12 +121,14 @@ TABLE_HEADERS = {
         "Accepted impacts",
         "Rationale",
     ],
+    "Decision Needed": ["Question", "Option", "Impact IDs", "Trade-off"],
+    "Impact Delta": ["Category", "Impact IDs"],
     "Requirement Revision History": [
         "Requirement ID",
         "Revision",
         "Decision",
         "Superseded impacts",
-        "Delta",
+        "Change summary",
     ],
     "Acceptance and Regression Criteria": [
         "Criterion ID",
@@ -193,14 +227,62 @@ def validate_report(text: str) -> list[str]:
     if first_line != "# Requirements Impact Report":
         errors.append("missing canonical title: # Requirements Impact Report")
     sections = markdown_sections(text)
-    for name in sorted(REQUIRED_SECTIONS - sections.keys()):
+    for name in sorted(COMMON_REQUIRED_SECTIONS - sections.keys()):
         errors.append(f"missing section: {name}")
+
+    phase_rows, phase_table_errors = parse_table(
+        "Report State", sections.get("Report State", ""), TABLE_HEADERS["Report State"]
+    )
+    errors.extend(phase_table_errors)
+    phase = enum_value(phase_rows[0].get("Phase", "")) if len(phase_rows) == 1 else ""
+    if len(phase_rows) != 1:
+        errors.append("report state requires exactly one phase row")
+    if phase and phase not in REPORT_PHASES:
+        errors.append(f"invalid report phase {phase}")
+    if phase in REPORT_PHASES:
+        required = PHASE_REQUIRED_SECTION[phase]
+        forbidden = PHASE_FORBIDDEN_SECTION[phase]
+        if required not in sections:
+            errors.append(f"missing section: {required}")
+        if forbidden in sections:
+            errors.append(f"{phase} report forbids section: {forbidden}")
 
     tables: dict[str, list[dict[str, str]]] = {}
     for name, headers in TABLE_HEADERS.items():
+        if name in {"Decision Needed", "Decisions and Accepted Risks"} and name not in sections:
+            tables[name] = []
+            continue
         rows, table_errors = parse_table(name, sections.get(name, ""), headers)
         tables[name] = rows
         errors.extend(table_errors)
+
+    if phase == "pre-decision":
+        option_rows = tables["Decision Needed"]
+        if not 2 <= len(option_rows) <= 3:
+            errors.append("pre-decision report requires two or three options")
+        questions = {row.get("Question", "").strip() for row in option_rows}
+        if len(questions) != 1 or not next(iter(questions), ""):
+            errors.append("pre-decision report requires one focused question")
+        options = [row.get("Option", "").strip() for row in option_rows]
+        if any(not option for option in options) or len(set(options)) != len(options):
+            errors.append("pre-decision report requires distinct options")
+        for row in option_rows:
+            if not any(
+                ref.startswith("IMP-")
+                for ref in references(row.get("Impact IDs", ""))
+            ):
+                errors.append("pre-decision option requires IMP reference")
+        if any(token.startswith("DEC-") for token in ID_PATTERN.findall(text)):
+            errors.append("pre-decision report forbids concrete DEC identifiers")
+    elif phase == "post-decision":
+        if not tables["Decisions and Accepted Risks"]:
+            errors.append("post-decision report requires a recorded decision row")
+        current_rows = tables["Current Refined Requirement"]
+        if not any(
+            any(ref.startswith("DEC-") for ref in references(row.get("Refined by decision", "")))
+            for row in current_rows
+        ):
+            errors.append("post-decision current requirement requires DEC reference")
 
     for section_name, entity in REQUIRED_DEFINITION_ROWS.items():
         if not tables[section_name]:
@@ -273,6 +355,45 @@ def validate_report(text: str) -> list[str]:
             errors.append(f"critical impact {impact_id} requires AC reference")
     if not has_requirement_relationship:
         errors.append("report requires at least one impact with REQ relationship")
+
+    delta_rows = tables["Impact Delta"]
+    delta_by_category: dict[str, set[str]] = {}
+    delta_counts: dict[str, int] = {}
+    for row in delta_rows:
+        category = enum_value(row.get("Category", ""))
+        if category not in DELTA_CATEGORIES:
+            errors.append(f"invalid impact delta category {category}")
+            continue
+        if category in delta_by_category:
+            errors.append(f"duplicate impact delta category {category}")
+        ids = {
+            ref
+            for ref in references(row.get("Impact IDs", ""))
+            if ref.startswith("IMP-")
+        }
+        delta_by_category.setdefault(category, set()).update(ids)
+        for impact_id in ids:
+            delta_counts[impact_id] = delta_counts.get(impact_id, 0) + 1
+            if impact_id not in impact_states:
+                errors.append(f"impact delta references unknown impact {impact_id}")
+    for category in sorted(DELTA_CATEGORIES - delta_by_category.keys()):
+        errors.append(f"impact delta missing category {category}")
+    for impact_id in sorted(impact_states):
+        count = delta_counts.get(impact_id, 0)
+        if count == 0:
+            errors.append(f"impact delta missing known impact {impact_id}")
+        elif count > 1:
+            errors.append(f"impact delta lists {impact_id} more than once")
+    for category, impact_ids in delta_by_category.items():
+        if category == "new":
+            continue
+        for impact_id in impact_ids:
+            state = impact_states.get(impact_id)
+            if state is not None and STATE_TO_DELTA.get(state) != category:
+                errors.append(
+                    f"impact {impact_id} state {state} "
+                    f"disagrees with delta category {category}"
+                )
 
     unresolved_counts: dict[str, int] = {}
     for row in tables["Unresolved, Deferred, and Blocked Items"]:

@@ -37,6 +37,12 @@ EXPECTED_ERRORS = {
 
 VALID_REPORT = """# Requirements Impact Report
 
+## Report State
+
+| Phase |
+| --- |
+| post-decision |
+
 ## Original Requirement
 
 | Requirement ID | Original request | Source |
@@ -73,9 +79,22 @@ VALID_REPORT = """# Requirements Impact Report
 | --- | --- | --- | --- | --- |
 | DEC-001 | Preserve private export default. | REQ-001 | IMP-001 | Avoid regression. |
 
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | IMP-001 |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| new | none |
+
 ## Requirement Revision History
 
-| Requirement ID | Revision | Decision | Superseded impacts | Delta |
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
 | --- | --- | --- | --- | --- |
 | REQ-001 | Add sharing with private defaults. | DEC-001 | — | Narrowed scope. |
 
@@ -104,7 +123,287 @@ VALID_REPORT = """# Requirements Impact Report
 """
 
 
+PRE_DECISION_REPORT = """# Requirements Impact Report
+
+## Report State
+
+| Phase |
+| --- |
+| pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| REQ-001 | Add public sharing without changing authenticated exports. | Product request |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | Existing export URLs require authentication. | verified | tests/test_exports.py |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | REQ-001 | IMP-001 | tests/test_exports.py |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | REQ-001 | contract | critical | refining | verified | tests/test_exports.py | INV-001 | — | AC-001 |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which sharing mechanism should be used? | Expiring signed URLs | IMP-001 | Simple expiry, limited revocation. |
+| Which sharing mechanism should be used? | Revocable opaque links | IMP-001 | Explicit revocation, more stored state. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | IMP-001 |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| new | none |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — | Initial refinement. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| AC-001 | REQ-001 | IMP-001 | INV-001 | Existing authenticated exports remain unchanged. | Future regression test required. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Export paths only. | tests/test_exports.py | Sharing implementation remains unknown. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending decision is selected. | REQ-001, INV-001, IMP-001 | Pending sharing mechanism. | AC-001 | Not ready |
+"""
+
+
+POST_DECISION_REPORT = PRE_DECISION_REPORT.replace(
+    "| pre-decision |", "| post-decision |", 1
+).replace(
+    "## Decision Needed\n\n"
+    "| Question | Option | Impact IDs | Trade-off |\n"
+    "| --- | --- | --- | --- |\n"
+    "| Which sharing mechanism should be used? | Expiring signed URLs | IMP-001 | Simple expiry, limited revocation. |\n"
+    "| Which sharing mechanism should be used? | Revocable opaque links | IMP-001 | Explicit revocation, more stored state. |",
+    "## Decisions and Accepted Risks\n\n"
+    "| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |\n"
+    "| --- | --- | --- | --- | --- |\n"
+    "| DEC-001 | Use revocable opaque links. | REQ-001 | IMP-001 | Explicit revocation is required. |",
+    1,
+).replace(
+    "| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — |",
+    "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — |",
+    1,
+).replace(
+    "| critical | refining | verified | tests/test_exports.py | INV-001 | — | AC-001 |",
+    "| critical | accepted | verified | tests/test_exports.py | INV-001 | DEC-001 | AC-001 |",
+    1,
+).replace("| unchanged | IMP-001 |", "| unchanged | none |", 1).replace(
+    "| accepted | none |", "| accepted | IMP-001 |", 1
+).replace(
+    "| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — | Initial refinement. |",
+    "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — | Applied selected mechanism. |",
+    1,
+).replace(
+    "| Not ready until the pending decision is selected. | REQ-001, INV-001, IMP-001 | Pending sharing mechanism. | AC-001 | Not ready |",
+    "| REQ-001 | INV-001, IMP-001, DEC-001 | Accepted IMP-001 | AC-001 | Existing planning workflow |",
+    1,
+)
+
+
 class ValidateImpactReportTest(unittest.TestCase):
+    def test_accepts_both_explicit_report_phases(self):
+        self.assertEqual(VALIDATOR.validate_report(PRE_DECISION_REPORT), [])
+        self.assertEqual(VALIDATOR.validate_report(POST_DECISION_REPORT), [])
+
+    def test_rejects_missing_or_invalid_report_phase(self):
+        missing = POST_DECISION_REPORT.replace("## Report State", "## Removed State", 1)
+        invalid = POST_DECISION_REPORT.replace("| post-decision |", "| drafting |", 1)
+
+        self.assertIn("missing section: Report State", VALIDATOR.validate_report(missing))
+        self.assertIn("invalid report phase drafting", VALIDATOR.validate_report(invalid))
+
+    def test_pre_decision_forbids_recorded_decisions_and_concrete_decision_ids(self):
+        with_section = PRE_DECISION_REPORT.replace(
+            "## Impact Delta",
+            "## Decisions and Accepted Risks\n\n"
+            "| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |\n"
+            "| --- | --- | --- | --- | --- |\n\n"
+            "## Impact Delta",
+            1,
+        )
+        with_identifier = PRE_DECISION_REPORT.replace(
+            "the pending decision", "DEC-001", 1
+        )
+
+        self.assertIn(
+            "pre-decision report forbids section: Decisions and Accepted Risks",
+            VALIDATOR.validate_report(with_section),
+        )
+        self.assertIn(
+            "pre-decision report forbids concrete DEC identifiers",
+            VALIDATOR.validate_report(with_identifier),
+        )
+
+    def test_pre_decision_requires_one_question_with_two_or_three_options(self):
+        one_option = PRE_DECISION_REPORT.replace(
+            "| Which sharing mechanism should be used? | Revocable opaque links | IMP-001 | Explicit revocation, more stored state. |\n",
+            "",
+            1,
+        )
+        two_questions = PRE_DECISION_REPORT.replace(
+            "| Which sharing mechanism should be used? | Revocable opaque links |",
+            "| Should links be revocable? | Revocable opaque links |",
+            1,
+        )
+
+        self.assertIn(
+            "pre-decision report requires two or three options",
+            VALIDATOR.validate_report(one_option),
+        )
+        self.assertIn(
+            "pre-decision report requires one focused question",
+            VALIDATOR.validate_report(two_questions),
+        )
+
+    def test_pre_decision_requires_distinct_options_linked_to_impacts(self):
+        duplicate = PRE_DECISION_REPORT.replace(
+            "| Revocable opaque links | IMP-001 | Explicit revocation, more stored state. |",
+            "| Expiring signed URLs | IMP-001 | Simple expiry, limited revocation. |",
+            1,
+        )
+        unlinked = PRE_DECISION_REPORT.replace(
+            "| Revocable opaque links | IMP-001 |",
+            "| Revocable opaque links | none |",
+            1,
+        )
+
+        self.assertIn(
+            "pre-decision report requires distinct options",
+            VALIDATOR.validate_report(duplicate),
+        )
+        self.assertIn(
+            "pre-decision option requires IMP reference",
+            VALIDATOR.validate_report(unlinked),
+        )
+
+    def test_post_decision_requires_a_recorded_decision_and_forbids_decision_needed(self):
+        missing_row = POST_DECISION_REPORT.replace(
+            "| DEC-001 | Use revocable opaque links. | REQ-001 | IMP-001 | Explicit revocation is required. |",
+            "",
+            1,
+        )
+        pending_section = POST_DECISION_REPORT.replace(
+            "## Impact Delta",
+            "## Decision Needed\n\n"
+            "| Question | Option | Impact IDs | Trade-off |\n"
+            "| --- | --- | --- | --- |\n"
+            "| Which sharing mechanism should be used? | Signed URLs | IMP-001 | Expiry only. |\n"
+            "| Which sharing mechanism should be used? | Opaque links | IMP-001 | Revocable. |\n\n"
+            "## Impact Delta",
+            1,
+        )
+
+        self.assertIn(
+            "post-decision report requires a recorded decision row",
+            VALIDATOR.validate_report(missing_row),
+        )
+        self.assertIn(
+            "post-decision report forbids section: Decision Needed",
+            VALIDATOR.validate_report(pending_section),
+        )
+
+    def test_post_decision_requires_current_requirement_decision_link(self):
+        report = POST_DECISION_REPORT.replace(
+            "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — |",
+            "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | — | — |",
+            1,
+        )
+
+        self.assertIn(
+            "post-decision current requirement requires DEC reference",
+            VALIDATOR.validate_report(report),
+        )
+
+    def test_delta_requires_each_category_and_each_known_impact_exactly_once(self):
+        missing_category = POST_DECISION_REPORT.replace("| superseded | none |\n", "", 1)
+        missing_impact = POST_DECISION_REPORT.replace("| accepted | IMP-001 |", "| accepted | none |", 1)
+        duplicate_impact = POST_DECISION_REPORT.replace(
+            "| unchanged | none |", "| unchanged | IMP-001 |", 1
+        )
+
+        self.assertIn(
+            "impact delta missing category superseded",
+            VALIDATOR.validate_report(missing_category),
+        )
+        self.assertIn(
+            "impact delta missing known impact IMP-001",
+            VALIDATOR.validate_report(missing_impact),
+        )
+        self.assertIn(
+            "impact delta lists IMP-001 more than once",
+            VALIDATOR.validate_report(duplicate_impact),
+        )
+
+    def test_delta_rejects_unknown_impacts_and_state_category_disagreement(self):
+        unknown = POST_DECISION_REPORT.replace(
+            "| new | none |", "| new | IMP-999 |", 1
+        )
+        wrong_category = POST_DECISION_REPORT.replace(
+            "| accepted | IMP-001 |", "| resolved | IMP-001 |", 1
+        ).replace("| resolved | none |", "| accepted | none |", 1)
+
+        self.assertIn(
+            "impact delta references unknown impact IMP-999",
+            VALIDATOR.validate_report(unknown),
+        )
+        self.assertIn(
+            "impact IMP-001 state accepted disagrees with delta category resolved",
+            VALIDATOR.validate_report(wrong_category),
+        )
+
+    def test_delta_new_category_accepts_a_new_impact_regardless_of_lifecycle_state(self):
+        report = PRE_DECISION_REPORT.replace(
+            "| unchanged | IMP-001 |", "| unchanged | none |", 1
+        ).replace("| new | none |", "| new | IMP-001 |", 1)
+
+        self.assertEqual(VALIDATOR.validate_report(report), [])
+
     def test_complete_template_report_is_valid(self):
         self.assertEqual(VALIDATOR.validate_report(VALID_REPORT), [])
 
@@ -327,6 +626,14 @@ class ValidateImpactReportTest(unittest.TestCase):
         ).replace(
             "| critical | accepted | verified |",
             "| critical | `blocked` | `verified` |",
+            1,
+        ).replace(
+            "| accepted | IMP-001 |",
+            "| accepted | none |",
+            1,
+        ).replace(
+            "| blocked | none |",
+            "| blocked | IMP-001 |",
             1,
         ).replace(
             "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",

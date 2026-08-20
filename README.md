@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.1.2` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.2.0` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
@@ -130,7 +130,7 @@ The skill can miss impacts outside the inspected scope. Users should keep unreso
 
 ## 9. Report Schema and Validation
 
-Start from [`impact-report-template.md`](skills/requirements-impact-refiner/assets/impact-report-template.md). It contains the original/current requirement, current behavior, preserved invariants, impact ledger, decisions, revision history, acceptance criteria, unresolved items, scope limitations, and `Planning Handoff`.
+Start from the [`template chooser`](skills/requirements-impact-refiner/assets/impact-report-template.md). Version 0.2 separates `pre-decision` and `post-decision` reports, forbids recorded decisions before selection, and validates a complete, disjoint Impact Delta.
 
 Validate a completed report with the standard-library validator:
 

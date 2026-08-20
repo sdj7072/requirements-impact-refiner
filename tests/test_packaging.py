@@ -53,14 +53,14 @@ class PackagingTest(unittest.TestCase):
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.1.2")
+        self.assertEqual(manifest["version"], "0.2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.1.2")
+        self.assertEqual(manifest["version"], "0.2.0")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_automatic_bootstrap_skill_is_discoverable(self):
@@ -69,7 +69,7 @@ class PackagingTest(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("name: using-requirements-impact-refiner", text)
         self.assertIn("Use when starting any software-development conversation", text)
-        self.assertIn('version: "0.1.2"', text)
+        self.assertIn('version: "0.2.0"', text)
 
     def test_automatic_entrypoint_owns_activation_boundaries(self):
         bootstrap = (
@@ -83,6 +83,40 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("bootstrap has selected", core)
         self.assertIn("with Superpowers, after approved brainstorming", core)
         self.assertIn("already impact-refined requirement or plan", core)
+
+    def test_stage_templates_are_disjoint_and_complete(self):
+        assets = ROOT / "skills/requirements-impact-refiner/assets"
+        chooser = (assets / "impact-report-template.md").read_text(encoding="utf-8")
+        pre = (assets / "impact-report-pre-decision-template.md").read_text(
+            encoding="utf-8"
+        )
+        post = (assets / "impact-report-post-decision-template.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("impact-report-pre-decision-template.md", chooser)
+        self.assertIn("impact-report-post-decision-template.md", chooser)
+        self.assertIn("| pre-decision |", pre)
+        self.assertIn("## Decision Needed", pre)
+        self.assertNotIn("DEC-###", pre)
+        self.assertNotIn("## Decisions and Accepted Risks", pre)
+        self.assertIn("| post-decision |", post)
+        self.assertIn("## Decisions and Accepted Risks", post)
+        self.assertNotIn("## Decision Needed", post)
+        for text in (pre, post):
+            self.assertIn("## Impact Delta", text)
+            self.assertIn("List only ledger impacts whose state is `deferred` or `blocked`", text)
+            for category in (
+                "resolved",
+                "mitigated",
+                "unchanged",
+                "accepted",
+                "deferred",
+                "blocked",
+                "superseded",
+                "new",
+            ):
+                self.assertIn(f"| {category} |", text)
 
     def test_codex_manifest_references_a_readable_square_logo(self):
         manifest = self.load(".codex-plugin/plugin.json")

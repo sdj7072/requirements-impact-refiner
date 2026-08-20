@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.1.2` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
+Requirements Impact Refiner `0.2.0` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
 
 ## 1. 課題
 
@@ -130,7 +130,7 @@ Superpowers はブレインストーミング、計画、実行、デバッグ�
 
 ## 9. 報告書スキーマと検証
 
-[`impact-report-template.md`](skills/requirements-impact-refiner/assets/impact-report-template.md) から始めます。元/現行要求、現行動作、保持する不変条件、影響台帳、決定、改訂履歴、受入基準、未解決項目、範囲制限、`Planning Handoff` を含みます。
+[`テンプレート選択`](skills/requirements-impact-refiner/assets/impact-report-template.md) から始めます。バージョン 0.2 は `pre-decision` と `post-decision` の報告を分離し、選択前の決定記録を禁止し、完全で重複のない Impact Delta を検証します。
 
 完成した報告書は標準ライブラリだけの検証器で確認します。
 

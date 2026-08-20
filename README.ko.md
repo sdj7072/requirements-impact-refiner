@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.1.2`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.2.0`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -130,7 +130,7 @@ Superpowers는 아이디어 구상, 계획, 실행, 디버깅, 리뷰의 오케�
 
 ## 9. 보고서 스키마와 검증
 
-[`impact-report-template.md`](skills/requirements-impact-refiner/assets/impact-report-template.md)에서 시작합니다. 최초/현재 요구사항, 현재 동작, 보존 불변 조건, 영향도 목록, 결정, 수정 이력, 인수 기준, 미해결 항목, 범위 한계, `Planning Handoff`를 포함합니다.
+[`템플릿 선택기`](skills/requirements-impact-refiner/assets/impact-report-template.md)에서 시작합니다. 버전 0.2는 `pre-decision`과 `post-decision` 보고서를 분리하고, 선택 전 결정 기록을 금지하며, 완전하고 서로 겹치지 않는 Impact Delta를 검증합니다.
 
 완성된 보고서는 표준 라이브러리 기반 검증기로 확인합니다.
 

@@ -1,20 +1,18 @@
 # Refinement Loop
 
-Present outputs in this order:
+Choose one branch and present only its sections:
 
 ```text
-Requirement revision
-Current behavior and preserved invariants
-Impact ledger ordered by severity and evidence confidence
-One focused decision with 2–3 options
-Recorded decision
-Whole-set recalculation
-Delta: resolved / mitigated / unchanged / accepted / deferred / blocked / new
-Stop check and planning handoff
+pre-decision: Report State → requirement → current behavior/invariants → ledger
+              → Decision Needed (one question, 2–3 options) → Impact Delta → handoff
+post-decision: Report State → requirement → current behavior/invariants → ledger
+               → Decisions and Accepted Risks → Impact Delta → handoff
 ```
 
 Create or revise `REQ-###`, then establish current behavior and `INV-###` before proposing a change. Show the ledger first. Ask one question only if a decision is needed, provide two or three concrete options, and record the answer as `DEC-###`.
 
-After every decision, re-evaluate every known `IMP-###`, not just the item discussed. Mark obsolete findings `superseded`, identify new impacts, and show the complete delta. If no decision is made, still show every delta category (`resolved`, `mitigated`, `unchanged`, `accepted`, `deferred`, `blocked`, `new`) and write `new: none` when applicable. Delta categories are mutually exclusive: list every known `IMP-###` once only, never under a second category; initial `detected` or `refining` impacts are `unchanged`, and a ledger `blocked` impact belongs only under `blocked`. Keep accepted risks linked to their decision; only evidence can resolve an impact.
+Before selection, use the pre-decision template. It forbids concrete decision IDs and the recorded-decisions section; option-specific mechanics stay in **Decision Needed**. After selection, switch to the post-decision template, record the choice, and re-evaluate every known `IMP-###`.
+
+Both phases show all delta categories: `resolved`, `mitigated`, `unchanged`, `accepted`, `deferred`, `blocked`, `superseded`, and `new`. Write `none` for empty categories. Categories are mutually exclusive and cover every known impact exactly once. Initial `detected`/`refining` impacts are `unchanged`; a newly discovered impact appears only under `new` that turn; other states use their matching category. Only evidence resolves an impact, and acceptance requires its decision.
 
 Stop only when every material impact is `resolved`, `accepted`, `deferred` with rationale, or `blocked` with a named information gap. Silence is never acceptance. At stop, provide the refined requirement, report links, remaining risks, and `AC-###` criteria to the selected planning workflow; do not create an imperative work breakdown or its implementation plan.
