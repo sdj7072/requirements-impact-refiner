@@ -1,7 +1,7 @@
 # Requirements Impact Refiner — Design Specification
 
 **Date:** 2026-08-20  
-**Status:** Draft for repository review  
+**Status:** Approved
 **Distribution:** Public GitHub repository  
 **Primary artifact:** Portable Agent Skill with optional platform adapters
 
@@ -350,4 +350,3 @@ The first public release is ready when:
 - Whether BMAD, GSD, or another framework merits a formal adapter.
 - Whether to split the single Markdown report into machine-readable and human-readable artifacts.
 - Whether additional documentation languages have sufficient demand and maintainership.
-
