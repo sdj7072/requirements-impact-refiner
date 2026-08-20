@@ -79,16 +79,21 @@ claude --plugin-dir .
 
 ## 6. 互換性
 
-以下の主張は保存済み評価根拠に限定します。「動作評価」はスキルと参照ファイルを渡した fresh-context モデル実行であり、外部プラグインローダーやオーケストレーターが実行された証明ではありません。
+以下の主張は保存済み評価根拠に限定します。「動作評価」はスキルと参照ファイルを渡した fresh-context モデル実行であり、外部プラグインローダーやオーケストレーターが実行された証明ではありません。製品、バージョン、状態の列は全翻訳で同一とし、根拠メモだけを翻訳しています。
 
-| クライアントまたは経路 | バージョン/環境 | 状態 |
-| --- | --- | --- |
-| Codex fresh-context 動作ハーネス | `codex-cli 0.148.0-alpha.15`、評価モデル `gpt-5.6-luna`; hosted runtime version は不明 | tested: 中核最終構成 24/25、統合最終構成 30/30 |
-| Codex ローカルプラグイン manifest 検証 | ローカル Python 環境 | `blocked`: `ModuleNotFoundError: yaml` |
-| Claude Code プラグイン読み込み/検証 | Claude Code バージョン不明 | `not tested`; `claude` 未導入のため検証/読み込みコマンドは `blocked` |
-| 汎用 `.agents/skills/` 検出 | クライアントとバージョン未指定 | `not tested`; 検出を保証せず慣例のみ記載 |
-| Superpowers、Claude Code `feature-dev`、Spec Kit のランタイム実行 | 外部ワークフローは未起動 | `not tested`; Codex ハーネスでアダプター指示の動作のみ評価 |
-| BMAD と GSD | v1 アダプターなし | `not tested`; 手動ガイダンスのみ |
+| Environment | Version | Status | Evidence note |
+| --- | --- | --- | --- |
+| Codex standalone behavioral harness | `codex-cli 0.148.0-alpha.15`; `gpt-5.6-luna`; hosted runtime unavailable | `not verified` | 1ケース1回の厳格評価は **7/17** で失敗しました。陽性 0/8、陰性 3/5、統合 4/4 です。 |
+| Codex with Superpowers | executed client/model/version not recorded in selected transcripts | `not verified` | 1ケース1回の厳格評価は **10/17** で失敗しました。陽性は1件合格、7件部分合格で、陰性 5/5 と統合 4/4 は合格しました。 |
+| Codex skill quick validator | local system snapshot | `blocked` | PyYAML がありません。静的監査では、この検証器の許可キー一覧に Agent Skills の `compatibility` キーがないことも確認しました。実行合格とは主張しません。 |
+| Codex plugin validator | local system snapshot | `blocked` | `ModuleNotFoundError: yaml` で実行が停止しました。manifest テストをこの検証器の合格として代用しません。 |
+| Claude Code standalone | version unavailable | `blocked` | `claude` 実行ファイルがありません。 |
+| Claude Code with Superpowers | version unavailable | `blocked` | `claude` 実行ファイルと Claude 側 Superpowers ランタイムがありません。 |
+| Claude Code with `feature-dev` | version unavailable | `blocked` | `claude` 実行ファイルと `feature-dev` ランタイムがありません。 |
+| Claude Code with Spec Kit | version unavailable | `blocked` | `claude` 実行ファイルと Spec Kit ランタイムがありません。 |
+| Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | 名前付きまたは設定済みの汎用ハーネス実行ファイルがありません。 |
+
+両方の Codex 評価で陽性の表層項目 **24/24** を検出し、統合所有境界 **4/4** を維持しました。これは観察された動作であり、互換性やサポートではありません。全17ケースを5回ずつ再実行していません。Task 7 ではスキルまたはアダプター文言を変更しておらず、1回実行のコーパスがすでに厳格なサポート基準に失敗したためです。全 transcript、再実行、scorecard、checksum は [`evals/results/with-skill.md`](evals/results/with-skill.md) にあります。
 
 ## 7. 比較と非目標
 
@@ -101,6 +106,8 @@ Superpowers はブレインストーミング、計画、実行、デバッグ�
 リポジトリへのアクセス、検索、テストは信頼度を高めますが、提供ファイルだけで動作する場合もあり、自動アクセスは保証されません。`verified` は直接調べた裏付けを表し、ランタイム根拠を実際に調べていない限りランタイム証明ではありません。`inferred` と `unknown` は表示し続けます。`AC-###` は将来の目標であり、現行動作が合格した証拠ではありません。
 
 中核評価は 25/25 ではなく **24/25** です。既知の単一確率的失敗 `POS-payments-5` は、ユーザーがリトライ方針を選ぶ前に reconcile-before-retry の仕組みを要求へ埋め込みました。最終チェックリストはこのパターンに対処しますが、許可された修正ラウンドを使い切ったため制限を開示しています。別のワークフロー統合最終構成は **30/30** です。これらは記録済み Codex ハーネスの結果であり、未試験クライアントへ一般化してはいけません。
+
+より広い Task 7 リリース監査は、クライアント対応を推論できない結果です。Codex standalone は厳格評価 **7/17**、Codex with Superpowers は **10/17** で失敗しました。各ケースの採用結果は1件だけで、runbook の5回サポート基準にも届きません。したがって、このリリース根拠では両環境とも検証済みまたはサポート済みではありません。
 
 スキルは調査範囲外の影響を見逃す可能性があります。未解決、`deferred`、`blocked`、`accepted` のリスクを計画中も可視化し、重要な動作は適切な人手レビューとテストで検証してください。
 

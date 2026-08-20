@@ -1,0 +1,67 @@
+# Requirements Impact Refinement — Permanent shared links
+
+## Status
+
+`NEEDS_DECISION` — the request is under-specified. No option has been selected; no implementation plan or repository edit is proposed.
+
+## Requirement revision
+
+`REQ-001`: Make shared links permanent, while defining whether “permanent” means a stable link address, non-expiring bearer access, or both. The existing seven-day token expiry, permission-change revocation, and 90-day signing-key rotation remain compatibility constraints until a policy is selected.
+
+## Current behavior and preserved invariants
+
+| ID | Current behavior / invariant | Evidence | Level | Relationship |
+| --- | --- | --- | --- | --- |
+| `INV-001` | Share tokens expire after seven days. | Supplied fact: share tokens currently expire after seven days. | `verified` | Must preserve or explicitly supersede through the decision for `REQ-001`. |
+| `INV-002` | Permission changes revoke active share tokens. | Supplied fact: permission changes revoke active tokens. | `verified` | Must preserve unless the selected policy explicitly changes revocation semantics. |
+| `INV-003` | Token signing keys rotate every 90 days. | Supplied fact: token signing keys rotate every 90 days. | `verified` | Must preserve for `REQ-001`. |
+
+## Impact ledger
+
+| ID | Impact | Category | Severity | Level | State | Evidence | Invariants | Acceptance criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | “Permanent” conflicts with the current seven-day expiry unless it means a stable URL whose access credential can be renewed, or explicitly authorizes non-expiring access. | Compatibility | high | `verified` | `refining` | Requested permanent links plus the supplied seven-day expiry. | `INV-001` | `AC-001` |
+| `IMP-002` | A non-expiring bearer token must still honor permission-change revocation; otherwise a previously shared link can continue granting access after authorization is withdrawn. | Authorization/Privacy | high | `verified` | `detected` | Supplied active-token revocation behavior. | `INV-002` | `AC-002` |
+| `IMP-003` | Tokens that outlive a 90-day signing-key rotation require key-version/history or re-issuance semantics; otherwise permanent links break at rotation or force unsafe indefinite key retention. | Compatibility | high | `verified` | `blocked` | Supplied 90-day signing-key rotation; rollover and retention behavior are not supplied. | `INV-003` | `AC-003` |
+| `IMP-004` | The request does not establish whether a permanent link should survive owner deletion, resource deletion, permission changes, or manual revocation, nor whether access remains authorization-checked. | Authorization/Privacy | high | `unknown` | `blocked` | No sharing lifecycle, audience, or deletion contract supplied. | — | `AC-004` |
+
+## One focused decision
+
+What should “make shared links permanent” mean for the link address, access credential, revocation, and signing-key rotation?
+
+1. **Permanent URL with renewable, revocable access (recommended)** — keep a stable share record/URL indefinitely, but issue or refresh access credentials under existing authorization checks. Permission changes and explicit revocation continue to invalidate access, and signing-key rotation remains supported without changing the URL.
+2. **Long-lived token with retained verification history** — make the bearer token non-expiring, retain enough signing-key versions or key metadata to verify it across 90-day rotations, and maintain explicit permission-change and manual revocation state. This increases bearer-token exposure and key/revocation state.
+3. **Non-expiring public bearer link** — remove the seven-day expiry and allow the token to remain valid across key rotations, with explicit revocation as the end of access. This maximizes permanence but changes the exposure and authorization model; deletion behavior must be specified.
+
+Please select one option, or specify another policy covering stable URL versus token lifetime, permission-change revocation, key rotation, and resource/account deletion. No decision has been recorded; the pending decision is required before a concrete `DEC-###` can be created.
+
+## Recorded decision
+
+Decision needed — no `DEC-###` is recorded because no user/stakeholder option has been selected.
+
+## Whole-set recalculation (before decision)
+
+All supplied impacts were checked against the permanence request. No impact is resolved, mitigated, accepted, deferred, or new before the focused policy decision.
+
+## Delta
+
+- `resolved`: none
+- `mitigated`: none
+- `unchanged`: `IMP-001`, `IMP-002`
+- `accepted`: none
+- `deferred`: none
+- `blocked`: `IMP-003`, `IMP-004`
+- `new`: none
+
+## Acceptance criteria targets
+
+| ID | Future criterion | Evidence / gap |
+| --- | --- | --- |
+| `AC-001` | The selected meaning of “permanent” makes URL lifetime and access-credential lifetime independently explicit and testable. | Derived from `IMP-001`; permanence semantics are not supplied. |
+| `AC-002` | Permission changes and explicit revocation follow the selected policy and cannot leave unauthorized active access. | Derived from `IMP-002`; behavior for any new credential model is not supplied. |
+| `AC-003` | A link remains verifiable or safely renewable across each 90-day signing-key rotation without unsafe indefinite key retention. | Derived from blocked `IMP-003`; rollover contract is unavailable. |
+| `AC-004` | Lifecycle behavior for deleted resources/accounts, changed permissions, and manual revocation is explicit and testable. | Derived from blocked `IMP-004`; sharing lifecycle and audience policy are unavailable. |
+
+## Stop check and planning handoff
+
+Stopped at the single required permanence-policy decision. The refined requirement, preserved invariants, evidence-backed impacts, open risks, and acceptance-criteria targets are ready for continuation after selection. No implementation plan, task breakdown, or repository edit is included.

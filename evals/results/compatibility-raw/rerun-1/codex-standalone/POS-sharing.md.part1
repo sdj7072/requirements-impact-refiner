@@ -1,0 +1,59 @@
+# Requirements impact report: permanent shared links
+
+## Requirement revision
+
+`REQ-001`: Make shared links permanent.
+
+The request establishes the desired change; the meaning of “permanent” across permission changes and signing-key rotation remains the pending decision.
+
+## Current behavior and preserved invariants
+
+| ID | Current behavior / invariant | Level | Evidence | Links |
+| --- | --- | --- | --- | --- |
+| `INV-001` | Share tokens expire after seven days. | `verified` | User-supplied repository fact: “share tokens currently expire after seven days.” | `must-preserve` `REQ-001` as the baseline to be explicitly revised |
+| `INV-002` | Permission changes revoke active share tokens. | `verified` | User-supplied repository fact: “permission changes revoke active tokens.” | `must-preserve` `REQ-001` unless the pending decision changes this policy |
+| `INV-003` | Token-signing keys rotate every 90 days. | `verified` | User-supplied repository fact: “token signing keys rotate every 90 days.” | `must-preserve` `REQ-001` |
+
+## Impact ledger
+
+| ID | Impact | Level | Evidence | State | Links |
+| --- | --- | --- | --- | --- | --- |
+| `IMP-001` | Removing the seven-day expiry changes the token validity contract and requires a precise definition of permanence. | `verified` | `INV-001`; supplied seven-day expiry fact | `refining` | `affects` `REQ-001`, `INV-001`; `produces` `AC-001` |
+| `IMP-002` | If permission changes continue to revoke tokens, a link can stop working despite having no time-based expiry; if they do not, access can persist after authorization changes. | `verified` | `INV-002`; supplied permission-revocation fact | `refining` | `affects` `REQ-001`, `INV-002`; `produces` `AC-002` |
+| `IMP-003` | A 90-day signing-key rotation may invalidate existing tokens unless the permanence policy defines how already-issued tokens are handled across rotation. | `verified` | `INV-003`; supplied key-rotation fact | `refining` | `affects` `REQ-001`, `INV-003`; `produces` `AC-003` |
+| `IMP-004` | Indefinite link validity increases the exposure window for a leaked or mis-shared link, so revocation and access-control expectations must be explicit. | `inferred` | Consequence of `REQ-001` combined with `INV-001`–`INV-003`; no repository security policy was supplied | `detected` | `affects` `REQ-001`; `produces` `AC-004` |
+
+## One focused decision
+
+What should “permanent” mean when permissions change or signing keys rotate?
+
+1. **Permanent but revocable (recommended):** remove time-based expiry; preserve revocation when permissions change; keep existing links valid across signing-key rotation; provide/retain an explicit revocation path.
+2. **Permanent within current security boundaries:** remove time-based expiry; preserve permission-change revocation; allow signing-key rotation to invalidate older tokens.
+3. **Persistent until explicit revocation:** remove time-based expiry and automatic permission-change revocation; keep links valid across key rotation; access ends only through explicit link revocation.
+
+Decision status: the pending decision; no decision ID is recorded.
+
+## Whole-set recalculation (before the decision)
+
+No policy has been selected, so the complete known impact set remains open. Existing `detected` and `refining` impacts are unchanged pending the decision.
+
+### Delta
+
+- `resolved`: none
+- `mitigated`: none
+- `unchanged`: `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`
+- `accepted`: none
+- `deferred`: none
+- `blocked`: none
+- `new`: none
+
+## Stop check and planning handoff
+
+Impact refinement cannot close yet: `IMP-001`–`IMP-004` require the pending policy choice. After selection, recalculate the full set and produce acceptance criteria:
+
+- `AC-001`: Shared links follow the selected permanence definition rather than expiring after seven days.
+- `AC-002`: Permission-change behavior matches the selected revocation policy.
+- `AC-003`: Existing links follow the selected behavior across 90-day signing-key rotation.
+- `AC-004`: The resulting indefinite-access and explicit-revocation behavior is testable and documented.
+
+Planning handoff is pending the single decision above; no implementation plan or repository modification is proposed in this report.

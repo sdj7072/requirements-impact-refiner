@@ -11,7 +11,7 @@
 | Candidate skill | `skills/requirements-impact-refiner/SKILL.md`, version `0.1.0` |
 | Contract | `evals/cases.json` |
 | Repetitions | Five per evaluated case/run |
-| Raw corpus | Core: 80 transcripts plus six scoring reports under [`with-skill-raw/`](with-skill-raw/). Integration: 49 transcripts plus three scoring reports under [`integration-raw/`](integration-raw/) |
+| Raw corpus | Core: 80 transcripts plus six scoring reports under [`with-skill-raw/`](with-skill-raw/). Integration: 49 transcripts plus three scoring reports under [`integration-raw/`](integration-raw/). Task 7 release verification: 61 transcripts/turn artifacts plus four scorecards under [`compatibility-raw/`](compatibility-raw/) |
 
 ## Strict Scoring Method
 
@@ -77,6 +77,23 @@ Strict scoring required exact entry/exit boundaries and counted a prohibition on
 
 The final composition has no repeated broad ideation/clarification, implementation tasks in integration reports, multiple-orchestrator activation, automatic next-workflow invocation, or negative-control workflow replacement. The three unchanged formal adapters use their five-run initial evidence because the fix modified only generic entry gating.
 
+## Task 7 Cross-Client Release Verification
+
+Task 7 evaluated all 17 contract cases in the two locally available Codex environments. Each final composition uses one repetition per case. These were one-repetition release audits, not the five-repetition behavioral runs required for a support claim. The controller manually verified every final flagged quotation against the preserved raw transcript.
+
+| Environment | Strict result | Positive | Negative | Integration | Release status |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Codex standalone | **7/17** | **0/8** | **3/5** | **4/4** | **not verified** — strict evaluation failed |
+| Codex with Superpowers | **10/17** | **1/8 pass**, 7/8 partial | **5/5** | **4/4** | **not verified** — strict evaluation failed |
+
+Both environments detected all **24/24** case-specific positive surface topics and preserved all **4/4** integration ownership/boundary checks. Those are observed behaviors, not compatibility or support claims. The strict failures include transcript-protocol defects, evidence-level mixing or promotion, lifecycle/delta defects, unsupported decision interpretation, and—in the standalone corpus—two invalid neighboring-workflow controls. The authoritative details and exact quotations are preserved in [`scoring/rerun-final/`](compatibility-raw/scoring/rerun-final/).
+
+The final standalone composition uses rerun 2 for `POS-sharing` and rerun 1 for `NEG-brainstorming`; its other nominated files are identified in the standalone final scorecard. The final Superpowers composition uses rerun 3 for `POS-authorization` and `POS-api-contract`; its other nominated files are identified in the Superpowers final scorecard. Earlier and discarded attempts remain preserved rather than rewritten.
+
+No all-17-times-five rerun was performed. No skill or adapter wording changed in Task 7, so the task-specific five-repetition trigger did not fire. More importantly, the one-repetition corpora already failed strict release verification; additional unchanged repetitions could measure variance but could not turn these observed failures into a supported claim. This also means the stricter five-repetition policy in `evals/runbook.md` remains unsatisfied for these environment rows.
+
+Claude Code standalone, Claude Code with Superpowers, Claude Code with `feature-dev`, and Claude Code with Spec Kit were `blocked` because the `claude` executable and corresponding runtimes were unavailable. A generic Agent Skills-compatible harness was `blocked` because no named or configured harness executable was available. These environments have no inferred pass.
+
 ## Final Composition
 
 | Case | Evidence source | Strict result |
@@ -98,6 +115,10 @@ The 80 core transcripts are byte-preserved from the controller corpus: `initial`
 
 The integration corpus is independently byte-preserved under [`integration-raw/`](integration-raw/): `baseline` (4 transcripts), `initial` (30), `rerun-1` (15), and `scoring` (3 reports). Its sorted `relative-path SHA-256` manifest covers 52 Markdown files and has SHA-256 `9740064ebd3eb60cae7d95917db99195e765dd84c28d600303c1c6cc0ebbf1fc`. [`tests/test_integration_evidence.py`](../../tests/test_integration_evidence.py) protects its counts, byte checksums, report metadata, and final composition.
 
+The Task 7 release corpus is byte-preserved under [`compatibility-raw/`](compatibility-raw/): `initial` (44 files), `rerun-1` (7), `rerun-2` (6), `rerun-3` (4), initial scoring (2), and final rerun scoring (2). The 65-file sorted `relative-path SHA-256` manifest has SHA-256 `2f7922729059b3dcb9c1d527706dfcde22559e962f489be8f062e50a695c0ffa`. [`tests/test_release_compatibility_evidence.py`](../../tests/test_release_compatibility_evidence.py) protects the counts, checksum, byte-preservation attribute, and strict non-support conclusion.
+
+`git diff --cached --check` reports 15 intentional raw whitespace findings in that byte-preserved Task 7 corpus: six trailing-space lines in the two initial `NEG-generic-prd.md` files; one EOF blank-line finding each in standalone `POS-cache.md`, Superpowers `NEG-planning.md`, Superpowers `POS-deletion.md.part1`, rerun-2 standalone `POS-sharing.md`, rerun-2 standalone `POS-sharing.md.part1`, and rerun-2 Superpowers `POS-api-contract.md.part1`; one whitespace-only line in rerun-2 standalone `POS-sharing.md`; and one trailing-space line in each rerun-3 Superpowers `POS-authorization.md` and `.part1`. The compatibility-raw subtree is excluded only from the whitespace gate so the controller bytes and audited checksum remain intact. `git diff --cached --check -- . ':!evals/results/compatibility-raw'` passes.
+
 Full `git diff --check 3e4476d..366508e` reports exactly four intentional EOF blank-line findings in the byte-preserved controller corpus:
 
 - `evals/results/integration-raw/initial/INT-generic-3.md:67`
@@ -109,4 +130,4 @@ The `integration-raw` subtree is excluded solely to preserve the raw evidence by
 
 ## Conclusion
 
-The skill materially improves evidence discipline, traceability, focused decisions, whole-set deltas, acceptance-vs-resolution separation, payment grounding, and workflow boundaries. Workflow integration passes its adjudicated final composition at 30/30. The separate core evaluation retains one documented stochastic limitation and must not be represented as a clean 25/25 GREEN result.
+The earlier targeted evaluations show improved evidence discipline, traceability, focused decisions, whole-set deltas, acceptance-vs-resolution separation, payment grounding, and workflow boundaries. Their 24/25 core and 30/30 adapter compositions remain useful behavioral evidence, but they do not establish cross-client release support. Task 7's broader one-repetition audits strictly failed at 7/17 for Codex standalone and 10/17 for Codex with Superpowers. Both available Codex environments are therefore **not verified**, and every unavailable environment remains explicitly blocked rather than inferred supported.

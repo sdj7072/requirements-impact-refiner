@@ -1,0 +1,59 @@
+# POS-payments — Requirements Impact Refinement (decision needed)
+
+## Requirement revision
+
+| Requirement ID | Revision | Decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Retry every failed charge automatically, while preserving the existing idempotency contract, keeping the pre-webhook payment state accurate, and preventing a timeout after capture from becoming a duplicate capture. The exact retry and reconciliation policy remains the pending decision. | `NEEDS_DECISION` | — |
+
+## Current behavior and preserved invariants
+
+| Invariant ID | Current behavior that must be preserved | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Charge requests accept an `idempotency_key`, which is the existing correlation mechanism for repeated requests. | `verified` | Supplied repository evidence: “charge requests accept an idempotency_key.” |
+| `INV-002` | Payment status is rendered before webhook settlement, so an initial response can precede the provider’s final settlement event. | `verified` | Supplied repository evidence: “payment status is rendered before webhook settlement.” |
+| `INV-003` | The provider may time out after capture, making a transport timeout insufficient to prove that no charge occurred. | `verified` | Supplied repository evidence: “the provider may time out after capture.” |
+
+## Impact ledger
+
+| ID | Requirement | Category | Severity | State | Evidence level | Evidence | Invariants | Decision | Acceptance criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | State / idempotency / retries | high | `refining` | `inferred` | Retrying after a timeout-after-capture can create a duplicate capture unless the retry remains correlated with the original logical charge. | `INV-001`, `INV-003` | `NEEDS_DECISION` | `AC-001` |
+| `IMP-002` | `REQ-001` | Payments / state / user flow | high | `refining` | `inferred` | Treating every timeout as a definitive failure can trigger another charge even though the original request may already have captured. | `INV-003` | `NEEDS_DECISION` | `AC-002` |
+| `IMP-003` | `REQ-001` | User-visible state / regression | high | `detected` | `inferred` | A status shown before webhook settlement can contradict the eventual settlement if retrying, pending, success, and terminal failure are not distinct states. | `INV-002` | `NEEDS_DECISION` | `AC-003` |
+| `IMP-004` | `REQ-001` | Operations / retries | medium | `blocked` | `unknown` | “Every failed charge” does not define retryable failure classes, attempt limits, backoff, or terminal handling; the resulting provider-call volume and user outcome are unspecified. | — | `NEEDS_DECISION` | `AC-004` |
+| `IMP-005` | `REQ-001` | External interface / compatibility | high | `blocked` | `unknown` | The provider’s idempotency-key scope and retention, plus its status/reconciliation behavior after capture timeout, are not supplied. Safe duplicate prevention therefore cannot be verified. | `INV-001`, `INV-003` | `NEEDS_DECISION` | `AC-005` |
+
+## Focused decision needed — `NEEDS_DECISION`
+
+When a charge request times out after the provider may already have captured it, which policy should refine `REQ-001`?
+
+1. **Conservative reconciliation (recommended):** retry only confirmed retryable failures; treat timeout outcomes as unknown, reconcile provider status/webhook first, and keep the payment pending until settlement is known.
+2. **Same-key retry:** retry transport/timeout outcomes with the original `idempotency_key`, relying on the provider to return the original result. This requires explicit confirmation of key scope and retention.
+3. **New-key retry:** retry with a new key, accepting duplicate-capture risk and requiring compensating reconciliation/refund handling.
+
+The decision must also specify retry bounds, backoff, and terminal handling. No `DEC-###` is recorded until a stakeholder selects an option or supplies an equivalent explicit policy. The supplied facts establish the risk but do not select how ambiguous outcomes should be handled.
+
+## Acceptance and regression criteria (proposed)
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001`, `INV-003` | One logical payment cannot produce two provider captures when the original request times out after capture under the selected retry policy. | Supplied idempotency/timeout facts; provider behavior and implementation test remain unverified. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-003` | An ambiguous timeout is not treated as a definitive failed charge until provider settlement is reconciled. | Supplied timeout fact; reconciliation behavior requires decision and provider evidence. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | The pre-webhook UI distinguishes pending or retrying from terminal success/failure and converges with the eventual webhook settlement. | Supplied pre-webhook rendering fact; state-transition tests remain required. |
+| `AC-004` | `REQ-001` | `IMP-004` | — | Retryable classes, maximum attempts, backoff, and terminal behavior are explicit and bounded. | Missing from request; blocked pending stakeholder policy. |
+| `AC-005` | `REQ-001` | `IMP-005` | `INV-001`, `INV-003` | Provider evidence establishes idempotency-key scope/retention and the supported reconciliation path after timeout. | Provider contract or SDK behavior not supplied. |
+
+## Delta before decision
+
+- `resolved`: none
+- `mitigated`: none
+- `unchanged`: `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`
+- `accepted`: none
+- `deferred`: none
+- `blocked`: `IMP-004`, `IMP-005`
+- `new`: none
+
+## Stop check / planning handoff
+
+Stop at this decision gate. The requirement cannot be handed to implementation planning until the user selects a retry/reconciliation policy and the complete impact set is recalculated with a concrete `DEC-###`. No implementation plan, work breakdown, or repository edit is produced in this artifact.

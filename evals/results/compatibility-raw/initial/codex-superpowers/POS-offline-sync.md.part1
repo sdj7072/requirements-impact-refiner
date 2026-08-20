@@ -1,0 +1,63 @@
+# Offline edits — reconnect synchronization
+
+## Requirement revision
+
+`REQ-001`: Synchronize edits made while the app is offline when it reconnects, preserving record integrity across concurrent client/server changes, server deletions, and queued local operations. The conflict, tombstone-expiry, and replay-order policy remains the pending decision; no implementation behavior is selected here.
+
+## Current behavior and preserved invariants
+
+| ID | Current behavior / invariant | Evidence | Level | Relationship |
+| --- | --- | --- | --- | --- |
+| `INV-001` | Records carry `updated_at`, which is the available version/freshness signal for synchronization. | Supplied fact: records carry `updated_at`. | `verified` | `must-preserve` `REQ-001` |
+| `INV-002` | Server deletions are represented by tombstones retained for 24 hours. | Supplied fact: server deletions create tombstones 24h. | `verified` | `must-preserve` `REQ-001` |
+| `INV-003` | The client queue preserves local creation order, but no stronger cross-device or server ordering guarantee is supplied. | Supplied fact: client queue preserves local creation order only. | `verified` | `must-preserve` `REQ-001` |
+
+## Impact ledger
+
+| ID | Impact | Level | State | Evidence | Links |
+| --- | --- | --- | --- | --- | --- |
+| `IMP-001` | Concurrent offline and server edits can overwrite one another if synchronization treats `updated_at` as an unconditional last-writer-wins rule without defining clock skew, equal timestamps, or the authoritative timestamp source. | `verified` | `refining` | `INV-001`; the supplied facts do not define timestamp authority or tie-breaking. | `affects` `REQ-001`, `INV-001`; `produces` `AC-001` |
+| `IMP-002` | An offline client that reconnects after the 24-hour tombstone window may not observe a server deletion and can replay a stale update that resurrects the deleted record unless the sync contract has a durable deletion/version check. | `verified` | `refining` | `INV-002`; offline duration and tombstone retention are not bounded to 24 hours. | `affects` `REQ-001`, `INV-002`; `produces` `AC-002` |
+| `IMP-003` | Local creation order alone cannot establish a safe global order against server operations or edits from another client; replay can therefore produce divergent state when operations conflict. | `verified` | `refining` | `INV-003`; no global sequence, causal token, or per-record operation version is supplied. | `affects` `REQ-001`, `INV-003`; `produces` `AC-003` |
+| `IMP-004` | The required user-visible handling of an irreconcilable edit (automatic overwrite, merge, retry, or manual conflict) is unspecified, so data-loss and UX expectations cannot yet be assessed. | `unknown` | `blocked` | No conflict-resolution or notification policy supplied. | `affects` `REQ-001`; `produces` `AC-004` |
+
+## One focused decision
+
+Which synchronization policy should govern conflicts, deletions, and replay when the app reconnects?
+
+1. **Server-versioned sync with durable deletion knowledge (recommended)** — use a server-issued per-record version or sync cursor as the authority (with `updated_at` retained as metadata), reject or surface stale writes, and retain/query deletion knowledge beyond 24 hours or provide a durable “deleted at/version” check so an old client cannot resurrect a record. Replay local operations in queue order, but reconcile each operation against the server version and define a deterministic tie-breaker for equal versions.
+2. **`updated_at` last-writer-wins with bounded offline support** — compare `updated_at` on reconnect, define a deterministic equal-timestamp tie-breaker, and document that clients offline beyond the 24-hour tombstone window may lose edits or require a full resnapshot/re-authentication before replay. This is simpler, but it explicitly limits deletion safety and depends on reliable timestamp semantics.
+3. **Conflict-preserving merge/manual review** — use `updated_at` only to detect concurrent changes, retain both sides (field-level merge where safe), and put unresolved edits into a conflict state for user review; require a resnapshot or durable deletion lookup before replaying a client that missed the tombstone. This minimizes silent loss but adds storage, UI, and operational complexity.
+
+Please select one option or specify another policy, including the authoritative version signal, behavior after the 24-hour tombstone window, and treatment of conflicting queued operations. No decision has been recorded.
+
+## Recorded decision
+
+**NEEDS_DECISION** — no `DEC-###` is recorded because no user/stakeholder option has been selected.
+
+## Whole-set recalculation (before decision)
+
+All supplied impacts have been checked against the offline-reconnect requirement. No impact is resolved, mitigated, accepted, deferred, or new before the conflict/deletion/replay decision.
+
+## Delta
+
+- `resolved`: none
+- `mitigated`: none
+- `unchanged`: `IMP-001`, `IMP-002`, `IMP-003`
+- `accepted`: none
+- `deferred`: none
+- `blocked`: `IMP-004`
+- `new`: none
+
+## Stop check and planning handoff
+
+Stopped at the single focused synchronization-policy decision. The refined requirement, preserved invariants, evidence-backed impacts, open information gap, and provisional acceptance criteria are ready for continuation after selection. No implementation tasks, work breakdown, or plan is included.
+
+### Acceptance criteria targets
+
+| ID | Future criterion | Evidence / gap |
+| --- | --- | --- |
+| `AC-001` | Concurrent edits follow the selected version/conflict policy without silent loss caused by clock skew or equal timestamps. | Produced by `IMP-001`; timestamp authority and conflict policy are not supplied. |
+| `AC-002` | A client reconnecting after 24 hours cannot resurrect a server-deleted record without the selected explicit recovery/conflict behavior. | Produced by `IMP-002`; durable deletion lookup/retention policy is not supplied. |
+| `AC-003` | Queued operations replay in local creation order while each operation is reconciled against the selected global/version ordering rules. | Produced by `IMP-003`; no global ordering contract is supplied. |
+| `AC-004` | An irreconcilable edit follows a documented automatic-merge, rejection/retry, or manual-review path and is visible to the user as required. | Produced by blocked `IMP-004`; product conflict UX is unspecified. |

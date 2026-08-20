@@ -17,6 +17,27 @@ def headings(path):
     ]
 
 
+def compatibility_identity_rows(path):
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = next(
+        index
+        for index, line in enumerate(lines)
+        if re.match(r"^## 6\.", line)
+    )
+    header = next(
+        index
+        for index in range(start + 1, len(lines))
+        if lines[index].startswith("| Environment | Version | Status |")
+    )
+    rows = []
+    for line in lines[header + 2 :]:
+        if not line.startswith("|"):
+            break
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        rows.append(tuple(cells[:3]))
+    return rows
+
+
 class DocumentationTest(unittest.TestCase):
     def test_all_languages_exist_and_link_to_each_other(self):
         for name in READMES:
@@ -36,6 +57,16 @@ class DocumentationTest(unittest.TestCase):
             text = (ROOT / name).read_text(encoding="utf-8")
             for term in ("Codex", "Claude Code", "Superpowers", "Spec Kit"):
                 self.assertIn(term, text, f"{term} missing from {name}")
+
+    def test_compatibility_identity_and_status_rows_match_in_every_language(self):
+        canonical = compatibility_identity_rows(ROOT / "README.md")
+        self.assertEqual(len(canonical), 9)
+        for name in READMES[1:]:
+            self.assertEqual(
+                compatibility_identity_rows(ROOT / name),
+                canonical,
+                name,
+            )
 
     def test_license_and_contributing_exist(self):
         self.assertIn("MIT License", (ROOT / "LICENSE").read_text(encoding="utf-8"))

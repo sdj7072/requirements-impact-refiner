@@ -79,16 +79,21 @@ Adapters do not invoke the upstream or downstream workflow. If more than one orc
 
 ## 6. Compatibility
 
-Compatibility claims below are limited to preserved evaluation evidence. “Behavioral evaluation” means fresh-context model runs with supplied skill/reference files; it is not proof that an external plugin loader or orchestrator executed.
+Compatibility claims below are limited to preserved evaluation evidence. “Behavioral evaluation” means fresh-context model runs with supplied skill/reference files; it is not proof that an external plugin loader or orchestrator executed. Product, version, and status columns are identical across all translations; only the evidence note is translated.
 
-| Client or path | Version/environment | Status |
-| --- | --- | --- |
-| Codex fresh-context behavioral harness | `codex-cli 0.148.0-alpha.15`, evaluator `gpt-5.6-luna`; hosted runtime version unavailable | tested: core final composition 24/25; integration final composition 30/30 |
-| Codex local plugin manifest validation | Local Python environment | `blocked`: `ModuleNotFoundError: yaml` |
-| Claude Code plugin loading/validation | Claude Code version unavailable | `not tested`; validator/loading command `blocked` because `claude` was not installed |
-| Generic `.agents/skills/` discovery | Client and version unspecified | `not tested`; convention documented without a discovery guarantee |
-| Superpowers, Claude Code `feature-dev`, Spec Kit runtime execution | External workflows were not invoked | `not tested`; adapter instruction behavior only was evaluated in the Codex harness |
-| BMAD and GSD | No v1 adapter | `not tested`; manual guidance only |
+| Environment | Version | Status | Evidence note |
+| --- | --- | --- | --- |
+| Codex standalone behavioral harness | `codex-cli 0.148.0-alpha.15`; `gpt-5.6-luna`; hosted runtime unavailable | `not verified` | Strict evaluation failed at **7/17** from one repetition per case: positives 0/8, negatives 3/5, integrations 4/4. |
+| Codex with Superpowers | executed client/model/version not recorded in selected transcripts | `not verified` | Strict evaluation failed at **10/17** from one repetition per case: one positive passed and seven were partial; negatives 5/5 and integrations 4/4 passed. |
+| Codex skill quick validator | local system snapshot | `blocked` | PyYAML is absent. Static audit also found that this validator's allowed-key list omits the Agent Skills `compatibility` key; no executed pass is claimed. |
+| Codex plugin validator | local system snapshot | `blocked` | Execution stopped at `ModuleNotFoundError: yaml`; manifest tests are not substituted for this validator. |
+| Claude Code standalone | version unavailable | `blocked` | The `claude` executable was absent. |
+| Claude Code with Superpowers | version unavailable | `blocked` | The `claude` executable and Claude-side Superpowers runtime were unavailable. |
+| Claude Code with `feature-dev` | version unavailable | `blocked` | The `claude` executable and `feature-dev` runtime were unavailable. |
+| Claude Code with Spec Kit | version unavailable | `blocked` | The `claude` executable and Spec Kit runtime were unavailable. |
+| Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | No named or configured generic harness executable was available. |
+
+Both Codex audits detected all **24/24** positive surface topics and preserved all **4/4** integration ownership boundaries. These are observed behaviors, not compatibility or support. No all-17-times-five rerun was performed: no skill or adapter wording changed in Task 7, and the one-run corpora already failed strict support criteria. Full transcripts, reruns, scorecards, and checksums are in [`evals/results/with-skill.md`](evals/results/with-skill.md).
 
 ## 7. Comparison and Non-Goals
 
@@ -101,6 +106,8 @@ This project does not provide broad ideation, generic PRD generation, architectu
 Repository access, search, and tests improve confidence, but supplied files may be sufficient and automatic access is not guaranteed. `verified` means direct inspected support, not runtime proof unless runtime evidence was actually inspected. `inferred` and `unknown` must remain visible. An `AC-###` is a future target, never evidence that behavior already passes.
 
 The core evaluation is **24/25**, not 25/25. The single known stochastic failure in `POS-payments-5` embedded reconcile-before-retry mechanics before the user selected a retry policy. The final checklist addresses the pattern, but the allowed correction rounds were exhausted, so the limitation remains disclosed. The separate workflow-integration final composition is **30/30**. These scores come from the recorded Codex harness and must not be generalized to untested clients.
+
+The broader Task 7 release audits supersede any inference of client support: Codex standalone strictly failed at **7/17**, and Codex with Superpowers strictly failed at **10/17**. Each used only one nominated result per case, below the runbook's five-repetition support threshold. Therefore neither environment is verified or supported by this release evidence.
 
 The skill can miss impacts outside the inspected scope. Users should keep unresolved, deferred, blocked, and accepted risks visible through planning and validate critical behavior with appropriate human review and tests.
 

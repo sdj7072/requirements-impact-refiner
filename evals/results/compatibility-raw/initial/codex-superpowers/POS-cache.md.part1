@@ -1,0 +1,87 @@
+# Requirements Impact Report — POS-cache (needs decision)
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Cache the dashboard response for one hour. | Supplied request: “Cache the dashboard response for one hour.” |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Cache dashboard responses for up to one hour while preserving tenant-scoped results, current authorization behavior, and dashboard-write freshness. The exact invalidation and authorization-cache interaction remains a pending decision. | the pending decision | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Dashboard results depend on `tenant_id`; results must not cross tenant boundaries. | `verified` | Supplied repository evidence: “dashboard results depend on tenant_id”. |
+| `INV-002` | Role changes invalidate `permission_cache` only. | `verified` | Supplied repository evidence: “role changes invalidate permission_cache only”. |
+| `INV-003` | Dashboard writes publish `dashboard.updated`. | `verified` | Supplied repository evidence: “dashboard writes publish dashboard.updated”. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Supplied repository evidence on `tenant_id`. |
+| `INV-002` | `REQ-001` | `IMP-003` | Supplied repository evidence on `permission_cache`. |
+| `INV-003` | `REQ-001` | `IMP-002` | Supplied repository evidence on `dashboard.updated`. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | Data / Authorization | Critical | `refining` | `verified` | Dashboard results depend on `tenant_id`; a cache key that omits tenant scope could serve one tenant another tenant’s response. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | State / Interfaces | High | `refining` | `verified` | Dashboard writes publish `dashboard.updated`; a one-hour response cache needs a defined relationship to that event or may remain stale after writes. | `INV-003` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | Authorization / Privacy | Critical | `refining` | `verified` | Role changes invalidate `permission_cache` only; a dashboard response cache may outlive the authorization change and expose stale permitted data unless its behavior is explicitly defined. | `INV-002` | the pending decision | `AC-003` |
+
+## Decision Needed
+
+Choose the cache-safety policy for the one-hour dashboard response cache:
+
+1. **Event-aware invalidation (recommended):** scope entries by every authorization/data dimension, invalidate affected dashboard entries on `dashboard.updated` and role/permission changes, and retain one hour only as the maximum TTL.
+2. **Authorization-safe bypass:** use the one-hour cache for stable dashboard data, but bypass or revalidate it whenever authorization context may have changed; define the revalidation signal separately.
+3. **Accept bounded staleness:** cache for one hour using tenant-scoped keys and document that dashboard data and authorization effects can remain stale for up to one hour, including after writes or role changes.
+
+No choice has been recorded. Silence or the existing invalidation behavior does not select an option; a concrete `DEC-###` must wait for explicit selection.
+
+## Delta Before Decision
+
+- `resolved: none`
+- `mitigated: none`
+- `unchanged: IMP-001, IMP-002, IMP-003`
+- `accepted: none`
+- `deferred: none`
+- `blocked: none`
+- `new: none`
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | A cached response is never returned across tenant boundaries; cache identity includes the complete tenant scope required by the dashboard query. | Current tenant dependency is supplied evidence; cross-tenant cache test remains to be defined after policy selection. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-003` | After a dashboard write publishes `dashboard.updated`, affected cached responses follow the selected freshness policy. | Supplied event behavior; event/cache assertion remains to be defined after policy selection. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | A role or permission change cannot cause a response to be served under stale authorization beyond the selected policy. | Supplied `permission_cache` behavior; authorization-staleness test remains to be defined after policy selection. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-001` | `refining` | Exact tenant/cache-key dimensions are not selected. | the pending decision | Request owner |
+| `IMP-002` | `refining` | Whether `dashboard.updated` invalidates or bypasses cached responses is not selected. | the pending decision | Request owner |
+| `IMP-003` | `refining` | Whether role changes evict dashboard entries, force revalidation, or permit bounded staleness is not selected. | the pending decision | Request owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Analysis is limited to the supplied repository facts; no implementation plan or code changes were requested. | `tenant_id`, `permission_cache`, and `dashboard.updated` facts supplied with POS-cache. | The three impacts are verified against supplied evidence, but exact cache dimensions and event wiring remain unknown until the policy decision and implementation inspection. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| `REQ-001` pending the cache-safety policy decision | `INV-001`–`INV-003`, `IMP-001`–`IMP-003`; no concrete `DEC-###` yet | Tenant isolation, write freshness, and stale authorization remain unresolved. | `AC-001`–`AC-003` | Superpowers planning is blocked until the request owner selects one option; do not enter `writing-plans` yet. |
+
+**Status: NEEDS_DECISION.**

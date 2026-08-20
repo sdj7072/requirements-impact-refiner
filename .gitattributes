@@ -1,3 +1,4 @@
 # Preserve controller-supplied evaluation transcripts byte-for-byte.
 evals/results/baseline-raw/** -whitespace
 evals/results/integration-raw/** -text
+evals/results/compatibility-raw/** -text
