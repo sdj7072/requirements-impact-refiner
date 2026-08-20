@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.1.0` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.1.1` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
@@ -57,6 +57,8 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 ```
 
 The installer refuses to overwrite an existing installation. Client-native alternatives include `~/.codex/skills` and `~/.claude/skills`, but the marketplace flows above provide cleaner updates for Codex and Claude Code.
+
+When the plugin is enabled, [`using-requirements-impact-refiner`](skills/using-requirements-impact-refiner/SKILL.md) automatically checks software-development conversations and invokes the core skill for concrete behavior changes at the correct pre-planning boundary. No invocation phrase is required. Disable the plugin in the client's plugin settings to turn this automatic check off.
 
 After loading, ask for impact refinement with a concrete change and repository scope, for example: “Before planning, refine the `displayName` API rename against the API, iOS DTO, and cached-profile paths.” If multiple orchestrators are present, select exactly one.
 

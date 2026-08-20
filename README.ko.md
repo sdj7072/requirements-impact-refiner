@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.1.0`은 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.1.1`은 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -57,6 +57,8 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 ```
 
 설치기는 기존 설치를 덮어쓰지 않습니다. 클라이언트 고유 경로로 `~/.codex/skills`와 `~/.claude/skills`도 사용할 수 있지만, Codex와 Claude Code에서는 위 마켓플레이스 방식이 업데이트 관리에 더 적합합니다.
+
+플러그인이 활성화되어 있으면 [`using-requirements-impact-refiner`](skills/using-requirements-impact-refiner/SKILL.md)가 소프트웨어 개발 대화를 자동으로 확인하고, 구체적인 동작 변경에는 계획 전의 올바른 지점에서 핵심 스킬을 호출합니다. 별도 호출 문구는 필요하지 않습니다. 자동 확인을 끄려면 클라이언트의 플러그인 설정에서 이 플러그인을 비활성화합니다.
 
 로딩 후에는 변경과 저장소 범위를 함께 제시합니다. 예: “계획 전에 `displayName` API 이름 변경이 API, iOS DTO, 캐시된 프로필 경로에 미치는 영향을 정제해 줘.” 오케스트레이터가 여러 개라면 정확히 하나를 선택합니다.
 

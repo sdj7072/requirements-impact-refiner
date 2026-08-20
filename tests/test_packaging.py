@@ -1,4 +1,5 @@
 import json
+import struct
 import unittest
 from pathlib import Path
 
@@ -52,15 +53,33 @@ class PackagingTest(unittest.TestCase):
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.1.0")
+        self.assertEqual(manifest["version"], "0.1.1")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.1.0")
+        self.assertEqual(manifest["version"], "0.1.1")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
+
+    def test_automatic_bootstrap_skill_is_discoverable(self):
+        path = ROOT / "skills/using-requirements-impact-refiner/SKILL.md"
+        self.assertTrue(path.is_file())
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("name: using-requirements-impact-refiner", text)
+        self.assertIn("Use when starting any software-development conversation", text)
+
+    def test_codex_manifest_references_a_readable_square_logo(self):
+        manifest = self.load(".codex-plugin/plugin.json")
+        interface = manifest["interface"]
+        self.assertEqual(interface["composerIcon"], interface["logo"])
+        logo_path = ROOT / interface["logo"]
+        payload = logo_path.read_bytes()
+        self.assertEqual(payload[:8], b"\x89PNG\r\n\x1a\n")
+        width, height = struct.unpack(">II", payload[16:24])
+        self.assertEqual(width, height)
+        self.assertGreaterEqual(width, 512)
 
     def test_manifest_identity_is_consistent(self):
         codex = self.load(".codex-plugin/plugin.json")

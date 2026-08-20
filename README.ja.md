@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.1.0` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
+Requirements Impact Refiner `0.1.1` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
 
 ## 1. 課題
 
@@ -57,6 +57,8 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 ```
 
 インストーラーは既存のインストールを上書きしません。クライアント固有の選択肢として `~/.codex/skills` と `~/.claude/skills` も利用できますが、Codex と Claude Code では上記のマーケットプレイス方式の方が更新を管理しやすくなります。
+
+プラグインが有効な場合、[`using-requirements-impact-refiner`](skills/using-requirements-impact-refiner/SKILL.md) がソフトウェア開発の会話を自動確認し、具体的な動作変更では計画前の適切な境界で中核スキルを呼び出します。専用の呼び出し文句は不要です。自動確認を止めるには、クライアントのプラグイン設定でこのプラグインを無効にします。
 
 読み込み後、変更とリポジトリ範囲を併記して依頼します。例: 「計画前に `displayName` API 名変更を API、iOS DTO、キャッシュ済みプロフィール経路に対して精緻化して」。複数のオーケストレーターがある場合は、正確に一つだけ選びます。
 

@@ -2,11 +2,14 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "requirements-impact-refiner",
   "displayName": "Requirements Impact Refiner",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Refines software requirements by exposing repository-backed change impacts and regression risks before planning.",
   "author": {
-    "name": "Requirements Impact Refiner Contributors"
+    "name": "Requirements Impact Refiner Contributors",
+    "url": "https://github.com/sdj7072"
   },
+  "homepage": "https://github.com/sdj7072/requirements-impact-refiner",
+  "repository": "https://github.com/sdj7072/requirements-impact-refiner",
   "license": "MIT",
   "keywords": [
     "requirements",

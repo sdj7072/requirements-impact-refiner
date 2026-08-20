@@ -4,7 +4,7 @@ description: Use when a proposed software change may affect existing behavior, c
 license: MIT
 compatibility: Works with Agent Skills clients that can inspect supplied files; repository access, search, and tests improve evidence quality but are not required.
 metadata:
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # Requirements Impact Refiner
