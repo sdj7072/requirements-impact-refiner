@@ -14,8 +14,8 @@ Use for a concrete change before implementation planning; not ideation, debuggin
 1. Record the proposed change as `REQ-###`; inspect supplied and repository evidence. Preserve current behavior as `INV-###` entries before refining the change.
 2. Create stable `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, and `AC-###` identifiers. Give every impact exactly one of `verified`, `inferred`, or `unknown`; split compound findings with different evidence levels. Cite evidence instead of implying confidence.
 3. Show the impact ledger before asking one focused question. Offer two or three concrete refinement options only when a decision is needed.
-4. Create `DEC-###` only after an explicit user/stakeholder selection or a decision explicitly supplied by the request. Never allocate, link, or forward-reference a concrete `DEC-###` (for example, `DEC-001`) before it is recorded; generic “no decision ID is recorded” language is allowed, but operational links and handoffs use only “the pending decision.” A constraint, invariant, recommendation, or policy implied by evidence is never a selected wire, cache, transition, or retry policy. Never mark an impact `accepted` without that recorded choice.
-5. After a decision, update the requirement and recalculate the complete impact set. Even without a decision, show every delta category and `new: none` when applicable; categories are mutually exclusive, so list every known `IMP-###` once only, placing initial `detected` or `refining` impacts under `unchanged`.
+4. Create concrete `DEC-###` only after explicit selection; otherwise use **Decision needed** and “the pending decision.” Generic “no decision ID is recorded” is allowed. Constraints, invariants, and recommendations never select policy; never accept without a recorded choice.
+5. After a decision, recalculate the complete set. Always show every delta category and `new: none`; categorise every known `IMP-###` once only, placing initial `detected` or `refining` impacts under `unchanged`.
 6. Keep `accepted` separate from `resolved`: accepted needs its decision link; resolved needs evidence. Stop at a report-only planning handoff (refined requirement, linked evidence, open risks, and `AC-###`), not an imperative work breakdown or implementation plan.
 
 | State | Use |
@@ -37,3 +37,8 @@ Read [the evidence model](references/evidence-model.md), [taxonomy](references/i
 - Omitting evidence levels, IDs, a decision, or the whole-set delta.
 - Treating silence as resolution or acceptance.
 - Replacing approved planning with an implementation plan.
+
+## Before output
+
+- For concrete `DEC-###`, quote or point to an explicit user/stakeholder selection. Without one: no concrete ID or Recorded decision section; a constraint or deprecation window does not select mechanics.
+- Validate delta: category-ID union equals all known `IMP-###`; intersections are empty. A ledger `blocked` impact goes only under `blocked`.
