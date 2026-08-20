@@ -1,6 +1,6 @@
 ---
 name: requirements-impact-refiner
-description: Use when the automatic bootstrap has selected a concrete software behavior change for impact refinement, or the user explicitly requests it, after approved brainstorming and before planning; excludes ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan
+description: Use when the automatic bootstrap has selected a concrete software behavior change for impact refinement, or the user explicitly requests it, before planning; with Superpowers, after approved brainstorming; excludes ideation, explanation, debugging, code review, status, and execution of an already impact-refined requirement or plan
 license: MIT
 compatibility: Works with Agent Skills clients that can inspect supplied files; repository access, search, and tests improve evidence quality but are not required.
 metadata:

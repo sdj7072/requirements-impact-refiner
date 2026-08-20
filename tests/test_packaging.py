@@ -80,7 +80,7 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("already impact-refined requirement or plan", bootstrap)
         self.assertNotIn("or approved plan", bootstrap)
         self.assertIn("bootstrap has selected", core)
-        self.assertIn("after approved brainstorming", core)
+        self.assertIn("with Superpowers, after approved brainstorming", core)
         self.assertIn("already impact-refined requirement or plan", core)
 
     def test_codex_manifest_references_a_readable_square_logo(self):
