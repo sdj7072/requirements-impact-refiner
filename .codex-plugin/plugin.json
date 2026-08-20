@@ -1,0 +1,32 @@
+{
+  "name": "requirements-impact-refiner",
+  "version": "0.1.0",
+  "description": "Refines software requirements by exposing repository-backed change impacts and regression risks before planning.",
+  "author": {
+    "name": "Requirements Impact Refiner Contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "requirements",
+    "impact-analysis",
+    "regression-risk",
+    "agent-skills"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Requirements Impact Refiner",
+    "shortDescription": "Refine changes against repository impact",
+    "longDescription": "Discover affected behavior, preserve invariants, and reduce or explicitly accept regression risks before implementation planning.",
+    "developerName": "Requirements Impact Refiner Contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Analyze this change's impact before planning it.",
+      "Refine this requirement without breaking existing behavior."
+    ],
+    "brandColor": "#6D5EF5"
+  }
+}
