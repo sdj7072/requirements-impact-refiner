@@ -70,6 +70,8 @@ class ClaudeAdapter(ClientAdapter):
         probe, commands = self._probe_with_commands()
         artifacts = self._probe_artifacts(commands)
         artifacts["metadata.json"] = self._metadata_json(probe, commands, request)
+        status = RunStatus.BLOCKED
+        reason = "paid authentication unavailable"
         try:
             record_run(
                 request.output_root,
@@ -79,14 +81,17 @@ class ClaudeAdapter(ClientAdapter):
                 artifacts,
                 self.quarantine_root,
             )
-        except (PotentialSecretError, OSError, ValueError):
-            pass
+        except PotentialSecretError:
+            reason = "potential secret exposure"
+        except (OSError, ValueError) as error:
+            status = RunStatus.INVALID_EVIDENCE
+            reason = "evidence recording failed: %s" % error
         return RunResult(
             case_id=request.case.id,
             repetition=request.repetition,
             client=request.client,
-            status=RunStatus.BLOCKED,
-            reason="paid authentication unavailable",
+            status=status,
+            reason=reason,
             command=None,
             final_output=None,
             session_id=None,

@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from evals.harness.adapters.claude import ClaudeAdapter
 from evals.harness.models import CaseSpec, CaseTurn, RunRequest, RunStatus
@@ -29,7 +30,7 @@ def make_request(root):
     )
 
 
-def write_fake_claude(directory, doctor_mode="success"):
+def write_fake_claude(directory, doctor_mode="success", version_text="claude 1.2.3-test"):
     script = Path(directory) / "fake-claude.py"
     script.write_text(
         "#!/usr/bin/env python3\n"
@@ -40,7 +41,7 @@ def write_fake_claude(directory, doctor_mode="success"):
         "    with open(log, 'a', encoding='utf-8') as handle:\n"
         "        handle.write(json.dumps(args) + '\\n')\n"
         "if args == ['--version']:\n"
-        "    print('claude 1.2.3-test')\n"
+        f"    print({version_text!r})\n"
         "elif args == ['doctor']:\n"
         f"    mode = {doctor_mode!r}\n"
         "    if mode == 'hang':\n"
@@ -57,6 +58,18 @@ def write_fake_claude(directory, doctor_mode="success"):
         "else:\n"
         "    print('unexpected arguments', file=sys.stderr)\n"
         "    sys.exit(2)\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def write_hostile_claude(directory):
+    script = Path(directory) / "claude"
+    script.write_text(
+        "#!/bin/sh\n"
+        "printf escaped > \"$HOSTILE_CLAUDE_SENTINEL\"\n"
+        "exit 99\n",
         encoding="utf-8",
     )
     script.chmod(0o755)
@@ -80,11 +93,33 @@ class ClaudeAdapterTest(unittest.TestCase):
     def test_behavior_is_blocked(self):
         """Replacing the explicit boundary with a model call would spend paid credentials."""
         with tempfile.TemporaryDirectory() as temporary:
-            result = ClaudeAdapter(cwd=Path(temporary)).execute(make_request(temporary))
+            executable = write_fake_claude(temporary)
+            hostile_directory = Path(temporary) / "hostile"
+            hostile_directory.mkdir()
+            write_hostile_claude(hostile_directory)
+            sentinel = Path(temporary) / "escaped.txt"
+            previous_path = os.environ.get("PATH")
+            previous_sentinel = os.environ.get("HOSTILE_CLAUDE_SENTINEL")
+            os.environ["PATH"] = str(hostile_directory) + os.pathsep + (previous_path or "")
+            os.environ["HOSTILE_CLAUDE_SENTINEL"] = str(sentinel)
+            try:
+                result = ClaudeAdapter(
+                    executable=str(executable), cwd=Path(temporary)
+                ).execute(make_request(temporary))
+            finally:
+                if previous_path is None:
+                    del os.environ["PATH"]
+                else:
+                    os.environ["PATH"] = previous_path
+                if previous_sentinel is None:
+                    del os.environ["HOSTILE_CLAUDE_SENTINEL"]
+                else:
+                    os.environ["HOSTILE_CLAUDE_SENTINEL"] = previous_sentinel
 
         self.assertEqual(result.status, RunStatus.BLOCKED)
         self.assertEqual(result.reason, "paid authentication unavailable")
         self.assertIsNone(result.command)
+        self.assertFalse(sentinel.exists())
 
     def test_probe_runs_each_structural_command_and_records_plugin_inventory(self):
         """Dropping a structural probe would hide an independently observable check."""
@@ -162,6 +197,50 @@ class ClaudeAdapterTest(unittest.TestCase):
                 "metadata.json",
             },
         )
+
+    def test_secret_structural_evidence_is_quarantined_and_blocks_the_result(self):
+        """Ignoring a secret detector would publish credential-shaped probe output."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(
+                temporary, version_text="claude sk-ant-abcdefghijklmnopqrstuvwxyz"
+            )
+            request = make_request(temporary)
+            quarantine_root = Path(temporary) / "quarantine"
+            adapter = ClaudeAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=quarantine_root,
+            )
+
+            result = adapter.execute(request)
+
+            self.assertEqual(result.status, RunStatus.BLOCKED)
+            self.assertEqual(result.reason, "potential secret exposure")
+            self.assertFalse(request.output_root.exists())
+            self.assertEqual(len(adapter.structural_results), 5)
+            quarantined = list(quarantine_root.rglob("version.stdout.txt"))
+
+        self.assertEqual(len(quarantined), 1)
+
+    def test_recording_failure_is_invalid_evidence_without_losing_probe_results(self):
+        """Discarding recorder errors would falsely present incomplete evidence as usable."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(temporary)
+            request = make_request(temporary)
+            adapter = ClaudeAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            )
+
+            with patch(
+                "evals.harness.adapters.claude.record_run", side_effect=OSError("disk full")
+            ):
+                result = adapter.execute(request)
+
+            self.assertEqual(result.status, RunStatus.INVALID_EVIDENCE)
+            self.assertEqual(result.reason, "evidence recording failed: disk full")
+            self.assertEqual(len(adapter.structural_results), 5)
 
 
 if __name__ == "__main__":
