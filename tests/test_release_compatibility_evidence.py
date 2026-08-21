@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "evals" / "results" / "with-skill.md"
+STATE_MACHINE_V03 = ROOT / "evals" / "results" / "state-machine-v0.3.md"
 EVIDENCE_ROOT = ROOT / "evals" / "results" / "compatibility-raw"
 EXPECTED_COUNTS = {
     "initial": 44,
@@ -28,6 +29,32 @@ def evidence_manifest() -> str:
 
 
 class ReleaseCompatibilityEvidenceTest(unittest.TestCase):
+    def test_v03_state_machine_ledger_is_bounded_and_auditable(self):
+        text = STATE_MACHINE_V03.read_text(encoding="utf-8")
+        self.assertIn(
+            "| Case | Client/model | Repetitions | Report ID preserved | Revision/hash valid | Expected Delta | Unsupported claim rejected | Result |",
+            text,
+        )
+        for case_id in (
+            "LINEAGE-stable-blocked",
+            "LINEAGE-reopened",
+            "LINEAGE-no-false-resolution",
+        ):
+            self.assertIn(case_id, text)
+        for required in (
+            "one repetition",
+            "not verified",
+            "104/104",
+            "111/111",
+            "PyYAML",
+            "no raw transcripts committed",
+            "Exact post-change prompts and decisive output excerpts",
+            "initial stable-blocked dispatcher prompt was not preserved",
+            "Delta treatment is `reopened`",
+            "Unsupported resolution is rejected",
+        ):
+            self.assertIn(required, text)
+
     def test_controller_corpus_is_complete_and_byte_preserved(self):
         for directory, expected_count in EXPECTED_COUNTS.items():
             self.assertEqual(
