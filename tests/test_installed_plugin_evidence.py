@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import unittest
@@ -24,13 +25,105 @@ LINEAGE_CASE_IDS = {
     "LINEAGE-reopened",
     "LINEAGE-no-false-resolution",
 }
+EXPECTED_MANIFEST_SHA256 = (
+    "a88f024d2631428555ae9368d1eee883794993913c93ff8ec11fe105caa53d1d"
+)
+EXPECTED_LINEAGE_CASE_IDS = (
+    "LINEAGE-stable-blocked",
+    "LINEAGE-reopened",
+    "LINEAGE-no-false-resolution",
+)
+# Controller provenance is canonicalized in ascending plugin-ID order. The
+# observed probe may preserve client order, so it is sorted before exact match.
+EXPECTED_CODEX_ENABLED_PLUGINS = (
+    "browser@openai-bundled",
+    "chrome@openai-bundled",
+    "codex-app-tools@openai-bundled",
+    "computer-use@openai-bundled",
+    "documents@openai-primary-runtime",
+    "google-calendar@openai-curated",
+    "pdf@openai-primary-runtime",
+    "presentations@openai-primary-runtime",
+    "requirements-impact-refiner@requirements-impact-refiner",
+    "sites@openai-bundled",
+    "slack@openai-curated",
+    "spreadsheets@openai-primary-runtime",
+    "superpowers@openai-curated",
+    "template-creator@openai-primary-runtime",
+    "visualize@openai-bundled",
+)
 
 
 def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def thread_started_ids(path):
+    events = (
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
+    return tuple(
+        event["thread_id"]
+        for event in events
+        if event.get("type") == "thread.started"
+    )
+
+
 class InstalledPluginEvidenceTest(unittest.TestCase):
+    def test_manifest_digest_pins_the_sealed_inventory_after_regeneration(self):
+        """Catch a regenerated manifest even when it matches altered raw files."""
+        manifest_bytes = (RESULT_ROOT / "manifest.sha256").read_bytes()
+        digest = hashlib.sha256(manifest_bytes).hexdigest()
+        self.assertEqual(digest, EXPECTED_MANIFEST_SHA256)
+        self.assertNotEqual(
+            hashlib.sha256(manifest_bytes + b"regenerated-row\n").hexdigest(),
+            EXPECTED_MANIFEST_SHA256,
+        )
+
+    def test_lineage_sessions_are_distinct_and_match_both_raw_turns(self):
+        """Catch a reused or mismatched persisted UUID across lineage runs."""
+        selected = load_json(RESULT_ROOT / "controller.json")["runs"]
+        lineage = [row for row in selected if row["case_id"] in LINEAGE_CASE_IDS]
+        self.assertEqual(
+            tuple(row["case_id"] for row in lineage), EXPECTED_LINEAGE_CASE_IDS
+        )
+        selected_sessions = [row["result"]["session_id"] for row in lineage]
+        self.assertEqual(len(selected_sessions), len(set(selected_sessions)))
+        for row in lineage:
+            selected_session = row["result"]["session_id"]
+            for turn in ("first", "second"):
+                raw_path = (
+                    RAW_ROOT
+                    / "codex"
+                    / row["case_id"]
+                    / "01"
+                    / (turn + ".jsonl")
+                )
+                self.assertEqual(thread_started_ids(raw_path), (selected_session,))
+
+    def test_codex_composition_is_exact_and_matches_the_observed_probe(self):
+        """Catch a changed enabled-plugin set or an identity/probe provenance mismatch."""
+        controller = load_json(RESULT_ROOT / "controller.json")
+        identity = controller["identity"]
+        probes = load_json(RESULT_ROOT / "probes.json")["probes"]
+        codex_probe = next(row["probe"] for row in probes if row["client"] == "codex")
+        self.assertEqual(
+            tuple(identity["enabled_plugins"]), EXPECTED_CODEX_ENABLED_PLUGINS
+        )
+        self.assertEqual(
+            tuple(sorted(codex_probe["enabled_plugins"])),
+            EXPECTED_CODEX_ENABLED_PLUGINS,
+        )
+        self.assertIn("requirements-impact-refiner@requirements-impact-refiner", identity["enabled_plugins"])
+        self.assertIn("superpowers@openai-curated", identity["enabled_plugins"])
+        self.assertEqual(
+            identity["enabled_composition"],
+            "codex %s plugins=%s"
+            % (identity["version"], ",".join(EXPECTED_CODEX_ENABLED_PLUGINS)),
+        )
+
     def test_smoke_evidence_is_sealed_safe_and_byte_preserved(self):
         """Catch a modified transcript, manifest, or Git conversion of sealed raw smoke evidence."""
         manifest = (RESULT_ROOT / "manifest.sha256").read_text(encoding="utf-8")
