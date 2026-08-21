@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "id": "LINEAGE-stable-blocked",
+      "first_state": "blocked",
+      "second_state": "blocked",
+      "expected_transition": "unchanged",
+      "must_reject": "none"
+    },
+    {
+      "id": "LINEAGE-reopened",
+      "first_state": "resolved",
+      "second_state": "refining",
+      "expected_transition": "reopened",
+      "must_reject": "none"
+    },
+    {
+      "id": "LINEAGE-no-false-resolution",
+      "first_state": "refining",
+      "second_state": "resolved-without-evidence",
+      "expected_transition": "none",
+      "must_reject": "unsupported resolution"
+    }
+  ]
+}

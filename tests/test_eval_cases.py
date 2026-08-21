@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "evals" / "cases.json"
+V03_CASES_PATH = ROOT / "evals" / "v0.3-cases.json"
 REQUIRED_KEYS = {
     "id",
     "kind",
@@ -36,6 +37,29 @@ def load_cases():
 
 
 class EvalCaseContractTest(unittest.TestCase):
+    def test_v03_lineage_cases_cover_required_transitions(self):
+        cases = json.loads(V03_CASES_PATH.read_text(encoding="utf-8"))["cases"]
+
+        self.assertEqual(
+            {case["id"] for case in cases},
+            {
+                "LINEAGE-stable-blocked",
+                "LINEAGE-reopened",
+                "LINEAGE-no-false-resolution",
+            },
+        )
+        for case in cases:
+            self.assertEqual(
+                set(case),
+                {
+                    "id",
+                    "first_state",
+                    "second_state",
+                    "expected_transition",
+                    "must_reject",
+                },
+            )
+
     def test_cases_match_the_approved_golden_contract(self):
         digest = hashlib.sha256(CASES_PATH.read_bytes()).hexdigest()
         self.assertEqual(digest, CASES_SHA256)
