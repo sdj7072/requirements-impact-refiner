@@ -129,6 +129,25 @@ Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다
 
 두 Codex 평가 모두 양성 표면 항목 **24/24**를 감지했고 연동 소유권 경계 **4/4**를 지켰습니다. 이는 관찰된 동작일 뿐 호환성이나 지원을 뜻하지 않습니다. 전체 17개를 5회씩 다시 실행하지 않았습니다. Task 7에서 스킬이나 어댑터 문구가 바뀌지 않았고, 1회 실행 코퍼스가 이미 엄격 지원 기준에 실패했기 때문입니다. 전체 transcript, 재실행, scorecard, checksum은 [`evals/results/with-skill.md`](evals/results/with-skill.md)에 있습니다.
 
+### 라이브 전 평가 계약
+
+아래 내용은 승인된 평가 계획이며, 봉인된 동작 근거가 아닙니다. 위 호환성 상태는 바꾸지 않습니다.
+
+| Contract key | Requirement |
+| --- | --- |
+| planned-live-composition | Codex with Superpowers |
+| planned-live-finals | 85 |
+| run-local-model | gpt-5.6-sol |
+| model-selection-owner | user |
+| skill-model-selection | none |
+| claude-evaluation | structural-only |
+| claude-paid-auth | blocked: paid authentication unavailable |
+| raw-evidence | all outcomes and attempts |
+| approval-gates | plugin replacement; Claude installation; full batch |
+| rerun-policy | no selective rerun of a valid model result |
+
+사용자가 고른 평가 모델은 예정된 85회 최종 Codex-with-Superpowers 배치에만 적용되는 `gpt-5.6-sol`과 `high` reasoning입니다. 모델과 reasoning은 실행별 입력이며 스킬이 모델을 선택하지 않습니다. Claude 작업은 구조 검증 전용이며 인증하지 않습니다. 유료 인증이나 모델 동작 경계는 동작 호환성으로 주장하지 않고 계속 `blocked`로 기록합니다. 모든 원시 결과와 시도를 보존하고, 나열한 각 게이트에서 새 승인을 받고, Superpowers를 유지하며, 유효한 모델 결과를 선택적으로 재실행하지 않습니다.
+
 ## 7. 비교와 비목표
 
 Superpowers는 아이디어 구상, 계획, 실행, 디버깅, 리뷰의 오케스트레이터로 남습니다. Claude Code `feature-dev`는 단계형 기능 개발 흐름으로, GitHub Spec Kit은 명세와 계획 흐름으로 남습니다. Requirements Impact Refiner는 이들을 대체하거나 내장하지 않습니다. 각 흐름의 명확화와 계획 사이에서 저장소 근거 기반 영향도 목록과 반복적인 영향 축소를 제공합니다.

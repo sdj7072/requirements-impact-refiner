@@ -129,6 +129,25 @@ Compatibility claims below are limited to preserved evaluation evidence. “Beha
 
 Both Codex audits detected all **24/24** positive surface topics and preserved all **4/4** integration ownership boundaries. These are observed behaviors, not compatibility or support. No all-17-times-five rerun was performed: no skill or adapter wording changed in Task 7, and the one-run corpora already failed strict support criteria. Full transcripts, reruns, scorecards, and checksums are in [`evals/results/with-skill.md`](evals/results/with-skill.md).
 
+### Pre-live evaluation contract
+
+This is the approved evaluation plan, not sealed behavioral evidence. It does not change any compatibility status above.
+
+| Contract key | Requirement |
+| --- | --- |
+| planned-live-composition | Codex with Superpowers |
+| planned-live-finals | 85 |
+| run-local-model | gpt-5.6-sol |
+| model-selection-owner | user |
+| skill-model-selection | none |
+| claude-evaluation | structural-only |
+| claude-paid-auth | blocked: paid authentication unavailable |
+| raw-evidence | all outcomes and attempts |
+| approval-gates | plugin replacement; Claude installation; full batch |
+| rerun-policy | no selective rerun of a valid model result |
+
+The user-selected evaluation model is `gpt-5.6-sol` with `high` reasoning for the planned 85-final Codex-with-Superpowers batch. Model and reasoning are run-local inputs: the skill does not select a model. Claude work is structural-only and unauthenticated; any paid-authentication or model-behavior boundary remains `blocked`, never behavioral compatibility. Preserve all raw outcomes and attempts, request fresh approval at each listed gate, retain Superpowers, and never selectively rerun a valid model result.
+
 ## 7. Comparison and Non-Goals
 
 Superpowers remains the orchestrator for brainstorming, planning, execution, debugging, and review. Claude Code `feature-dev` remains its phased feature workflow. GitHub Spec Kit remains the specification and planning workflow. Requirements Impact Refiner neither replaces nor vendors them: it contributes the repository-backed impact ledger and iterative impact reduction between their clarification and planning stages.

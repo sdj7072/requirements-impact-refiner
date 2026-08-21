@@ -158,6 +158,14 @@ class PackagingTest(unittest.TestCase):
             self.assertEqual(manifest["name"], skill_name)
             self.assertEqual(manifest["version"], skill_version)
 
+    def test_ci_exercises_and_compiles_the_harness_without_live_clients(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("python3 -m unittest discover -s tests -v", workflow)
+        self.assertIn("python3 -m compileall -q evals/harness", workflow)
+        self.assertNotRegex(workflow, r"(?m)^.*\bcodex\s+exec\b")
+        self.assertNotRegex(workflow, r"(?m)^.*(?:claude\.ai/install\.sh|claude.*install)")
+
 
 if __name__ == "__main__":
     unittest.main()

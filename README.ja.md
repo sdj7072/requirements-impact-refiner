@@ -129,6 +129,25 @@ Revision 1 の基準報告では両方の影響を `new` とします。次の�
 
 両方の Codex 評価で陽性の表層項目 **24/24** を検出し、統合所有境界 **4/4** を維持しました。これは観察された動作であり、互換性やサポートではありません。全17ケースを5回ずつ再実行していません。Task 7 ではスキルまたはアダプター文言を変更しておらず、1回実行のコーパスがすでに厳格なサポート基準に失敗したためです。全 transcript、再実行、scorecard、checksum は [`evals/results/with-skill.md`](evals/results/with-skill.md) にあります。
 
+### ライブ前評価契約
+
+以下は承認済みの評価計画であり、封印済みの動作証拠ではありません。上記の互換性ステータスは変更しません。
+
+| Contract key | Requirement |
+| --- | --- |
+| planned-live-composition | Codex with Superpowers |
+| planned-live-finals | 85 |
+| run-local-model | gpt-5.6-sol |
+| model-selection-owner | user |
+| skill-model-selection | none |
+| claude-evaluation | structural-only |
+| claude-paid-auth | blocked: paid authentication unavailable |
+| raw-evidence | all outcomes and attempts |
+| approval-gates | plugin replacement; Claude installation; full batch |
+| rerun-policy | no selective rerun of a valid model result |
+
+ユーザーが選択した評価モデルは、予定された 85 件の Codex-with-Superpowers 最終バッチに限る `gpt-5.6-sol` と `high` reasoning です。モデルと reasoning は実行ローカルの入力であり、スキルがモデルを選択することはありません。Claude の作業は構造検証のみで認証しません。有料認証またはモデル動作の境界は動作互換性として主張せず、引き続き `blocked` と記録します。すべての raw outcome と attempt を保存し、列挙した各ゲートで新しい承認を得て、Superpowers を維持し、有効なモデル結果を選択的に再実行しません。
+
 ## 7. 比較と非目標
 
 Superpowers はブレインストーミング、計画、実行、デバッグ、レビューのオーケストレーターであり続けます。Claude Code `feature-dev` は段階的な機能開発フロー、GitHub Spec Kit は仕様・計画フローであり続けます。Requirements Impact Refiner はそれらを置き換えたり内包したりしません。それぞれの明確化と計画の間に、リポジトリ根拠付き影響台帳と反復的な影響低減を提供します。

@@ -1,12 +1,39 @@
 import re
+import shlex
 import unittest
 from pathlib import Path
+
+from evals.harness.catalog import load_all, select_suite
+from evals.harness.run import build_parser
 
 
 ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.ko.md", "README.ja.md"]
 LANGUAGE_TARGETS = {"README.md", "README.ko.md", "README.ja.md"}
 SKILL_ROOT = ROOT / "skills" / "requirements-impact-refiner"
+PRE_LIVE_CONTRACT = {
+    "planned-live-composition": "Codex with Superpowers",
+    "planned-live-finals": "85",
+    "run-local-model": "gpt-5.6-sol",
+    "model-selection-owner": "user",
+    "skill-model-selection": "none",
+    "claude-evaluation": "structural-only",
+    "claude-paid-auth": "blocked: paid authentication unavailable",
+    "raw-evidence": "all outcomes and attempts",
+    "approval-gates": "plugin replacement; Claude installation; full batch",
+    "rerun-policy": "no selective rerun of a valid model result",
+}
+PRE_LIVE_COMPATIBILITY = {
+    "Codex standalone behavioral harness": "not verified",
+    "Codex with Superpowers": "not verified",
+    "Codex skill quick validator": "blocked",
+    "Codex plugin validator": "blocked",
+    "Claude Code standalone": "blocked",
+    "Claude Code with Superpowers": "blocked",
+    "Claude Code with `feature-dev`": "blocked",
+    "Claude Code with Spec Kit": "blocked",
+    "Generic Agent Skills-compatible harness": "blocked",
+}
 
 
 def headings(path):
@@ -37,6 +64,32 @@ def compatibility_identity_rows(path):
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         rows.append(tuple(cells[:3]))
     return rows
+
+
+def markdown_table(path, header):
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = lines.index(header)
+    rows = {}
+    for line in lines[start + 2 :]:
+        if not line.startswith("|"):
+            break
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        rows[cells[0].strip("`")] = cells[1].strip("`")
+    return rows
+
+
+def shell_blocks(path):
+    return re.findall(r"```sh\n(.*?)\n```", path.read_text(encoding="utf-8"), re.DOTALL)
+
+
+def harness_commands(path):
+    commands = []
+    for block in shell_blocks(path):
+        for line in block.splitlines():
+            parts = shlex.split(line)
+            if parts[:3] == ["python3", "-m", "evals.harness.run"]:
+                commands.append(parts[3:])
+    return commands
 
 
 class DocumentationTest(unittest.TestCase):
@@ -101,12 +154,42 @@ class DocumentationTest(unittest.TestCase):
     def test_compatibility_identity_and_status_rows_match_in_every_language(self):
         canonical = compatibility_identity_rows(ROOT / "README.md")
         self.assertEqual(len(canonical), 9)
+        self.assertEqual(
+            {environment: status.strip("`") for environment, _, status in canonical},
+            PRE_LIVE_COMPATIBILITY,
+        )
         for name in READMES[1:]:
             self.assertEqual(
                 compatibility_identity_rows(ROOT / name),
                 canonical,
                 name,
             )
+
+    def test_pre_live_contract_is_structured_and_synchronized(self):
+        canonical = markdown_table(ROOT / "README.md", "| Contract key | Requirement |")
+        self.assertEqual(canonical, PRE_LIVE_CONTRACT)
+        for name in READMES[1:]:
+            self.assertEqual(
+                markdown_table(ROOT / name, "| Contract key | Requirement |"),
+                canonical,
+                name,
+            )
+
+    def test_runbook_commands_are_parseable_and_cover_the_approved_batch(self):
+        commands = harness_commands(ROOT / "evals/runbook.md")
+        parsed = [build_parser().parse_args(command) for command in commands]
+        self.assertEqual(len(parsed), 3)
+        self.assertTrue(parsed[0].probe_only)
+        self.assertEqual(parsed[1].suite, "smoke")
+        self.assertEqual(parsed[1].repetitions, 1)
+        self.assertEqual(parsed[2].suite, "installed-superpowers")
+        self.assertEqual(parsed[2].repetitions, 5)
+        self.assertEqual(parsed[2].model, "gpt-5.6-sol")
+        self.assertEqual(parsed[2].reasoning, "high")
+        self.assertEqual(
+            len(select_suite(load_all(), parsed[2].suite)) * parsed[2].repetitions,
+            int(PRE_LIVE_CONTRACT["planned-live-finals"]),
+        )
 
     def test_license_and_contributing_exist(self):
         self.assertIn("MIT License", (ROOT / "LICENSE").read_text(encoding="utf-8"))
