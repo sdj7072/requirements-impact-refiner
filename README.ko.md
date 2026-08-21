@@ -36,6 +36,14 @@ codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
+기존 Codex 설치를 업그레이드하려면 마켓플레이스 스냅샷을 갱신하고 플러그인을 다시 설치해 캐시된 복사본을 교체합니다.
+
+```sh
+codex plugin marketplace upgrade requirements-impact-refiner
+codex plugin remove requirements-impact-refiner@requirements-impact-refiner
+codex plugin add requirements-impact-refiner@requirements-impact-refiner
+```
+
 저장소의 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)은 루트 [Codex 플러그인 매니페스트](.codex-plugin/plugin.json)를 가리키며, 그 `skills` 필드는 하나뿐인 기준 `./skills/` 트리를 사용합니다. MCP 서버, hook, app, agent, dependency는 추가하지 않습니다.
 
 Claude Code에서는 Claude Code 내부에서 다음 명령을 실행합니다.
@@ -43,6 +51,14 @@ Claude Code에서는 Claude Code 내부에서 다음 명령을 실행합니다.
 ```text
 /plugin marketplace add sdj7072/requirements-impact-refiner
 /plugin install requirements-impact-refiner@requirements-impact-refiner
+```
+
+기존 Claude Code 설치를 업그레이드하려면 마켓플레이스를 갱신하고 설치된 플러그인을 업데이트한 뒤 다시 로드합니다.
+
+```text
+/plugin marketplace update requirements-impact-refiner
+/plugin update requirements-impact-refiner@requirements-impact-refiner
+/reload-plugins
 ```
 
 설치 요약에서 요청하면 `/reload-plugins`를 실행합니다. [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)은 루트 [Claude 플러그인 매니페스트](.claude-plugin/plugin.json)를 배포합니다. 로컬 개발 로딩은 저장소를 복제한 뒤 루트에서 다음을 실행합니다.

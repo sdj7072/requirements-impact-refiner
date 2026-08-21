@@ -168,6 +168,43 @@ class ReportLineageCliTest(unittest.TestCase):
         self.assertIn("cannot read report", missing_file.stderr)
         self.assertEqual(invalid_option.returncode, 2)
 
+    def test_invalid_lifecycle_state_returns_errors_without_traceback(self):
+        previous_text = VALID_REPORT
+        invalid_current = next_report(
+            previous_text,
+            report_with_state("invalid-state", "unchanged"),
+        )
+
+        errors = VALIDATOR.validate_report(
+            invalid_current,
+            previous_text=previous_text,
+            previous_bytes=previous_text.encode("utf-8"),
+        )
+        self.assertIn("invalid impact state invalid-state", errors)
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = Path(directory) / "previous.md"
+            current = Path(directory) / "current.md"
+            previous.write_text(previous_text, encoding="utf-8")
+            current.write_text(invalid_current, encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--previous",
+                    str(previous),
+                    "--print-expected-delta",
+                    str(current),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("invalid impact state invalid-state", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_terminal_impact_returning_active_is_reopened(self):
         previous = report_with_state("resolved")
         current = next_report(

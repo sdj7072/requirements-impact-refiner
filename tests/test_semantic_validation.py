@@ -1,6 +1,6 @@
 import unittest
 
-from tests.test_validate_impact_report import VALIDATOR, VALID_REPORT
+from tests.test_validate_impact_report import PRE_DECISION_REPORT, VALIDATOR, VALID_REPORT
 
 
 class SemanticValidationTest(unittest.TestCase):
@@ -47,6 +47,24 @@ class SemanticValidationTest(unittest.TestCase):
             empty_verified_evidence,
             "invariant INV-001 evidence level verified requires an evidence basis",
         )
+
+    def test_resolution_requires_evidence_beyond_future_acceptance_target(self):
+        report = VALID_REPORT.replace(
+            "| critical | accepted | verified | tests/test_exports.py |",
+            "| critical | resolved | verified | AC-001 |",
+            1,
+        )
+
+        self.assert_rejected(
+            report,
+            "resolved impact IMP-001 requires resolution evidence beyond future acceptance criteria",
+        )
+
+    def test_localized_evidence_bases_are_substantive(self):
+        for evidence in ("저장소경로와기호", "呼び出し関係からの推論"):
+            with self.subTest(evidence=evidence):
+                report = VALID_REPORT.replace("tests/test_exports.py", evidence)
+                self.assertEqual(VALIDATOR.validate_report(report), [])
 
     def test_rejects_empty_preserved_invariant_content(self):
         report = VALID_REPORT.replace(
@@ -148,6 +166,34 @@ class SemanticValidationTest(unittest.TestCase):
         self.assert_rejected(
             report, "Planning Handoff requires Selected planning workflow"
         )
+
+    def test_required_option_decision_and_revision_fields_are_nonempty(self):
+        mutations = {
+            "pre-decision option requires a nonempty trade-off": PRE_DECISION_REPORT.replace(
+                "| Which sharing mechanism should be used? | Expiring signed URLs | IMP-001 | Simple expiry, limited revocation. |",
+                "| Which sharing mechanism should be used? | Expiring signed URLs | IMP-001 |  |",
+                1,
+            ),
+            "recorded decision DEC-001 requires a requirement revision": VALID_REPORT.replace(
+                "| DEC-001 | Preserve private export default. | REQ-001 | IMP-001 | Avoid regression. |",
+                "| DEC-001 | Preserve private export default. |  | IMP-001 | Avoid regression. |",
+                1,
+            ),
+            "recorded decision DEC-001 requires accepted impacts or none": VALID_REPORT.replace(
+                "| DEC-001 | Preserve private export default. | REQ-001 | IMP-001 | Avoid regression. |",
+                "| DEC-001 | Preserve private export default. | REQ-001 |  | Avoid regression. |",
+                1,
+            ),
+            "requirement history REQ-001 requires a change summary": VALID_REPORT.replace(
+                "| REQ-001 | Add sharing with private defaults. | DEC-001 | — | Narrowed scope. |",
+                "| REQ-001 | Add sharing with private defaults. | DEC-001 | — |  |",
+                1,
+            ),
+        }
+
+        for expected, report in mutations.items():
+            with self.subTest(expected=expected):
+                self.assert_rejected(report, expected)
 
 
 if __name__ == "__main__":

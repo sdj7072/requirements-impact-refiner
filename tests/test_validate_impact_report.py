@@ -453,6 +453,14 @@ class ValidateImpactReportTest(unittest.TestCase):
             VALIDATOR.validate_report(report),
         )
 
+    def test_delta_empty_cell_requires_literal_none(self):
+        report = VALID_REPORT.replace("| resolved | none |", "| resolved |  |", 1)
+
+        self.assertIn(
+            "impact delta category resolved requires literal none or canonical IMP identifiers",
+            VALIDATOR.validate_report(report),
+        )
+
     def test_delta_rejects_unknown_impacts_and_state_category_disagreement(self):
         unknown = POST_DECISION_REPORT.replace(
             "| blocked | none |", "| blocked | IMP-999 |", 1

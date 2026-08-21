@@ -36,6 +36,14 @@ codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
+既存の Codex インストールをアップグレードするには、マーケットプレイスのスナップショットを更新し、プラグインを再インストールしてキャッシュ済みコピーを置き換えます。
+
+```sh
+codex plugin marketplace upgrade requirements-impact-refiner
+codex plugin remove requirements-impact-refiner@requirements-impact-refiner
+codex plugin add requirements-impact-refiner@requirements-impact-refiner
+```
+
 リポジトリの [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) はルートの [Codex plugin manifest](.codex-plugin/plugin.json) を参照し、その `skills` は単一の正本 `./skills/` ツリーを指します。MCP server、hook、app、agent、dependency は追加しません。
 
 Claude Code では、Claude Code 内で次を実行します。
@@ -43,6 +51,14 @@ Claude Code では、Claude Code 内で次を実行します。
 ```text
 /plugin marketplace add sdj7072/requirements-impact-refiner
 /plugin install requirements-impact-refiner@requirements-impact-refiner
+```
+
+既存の Claude Code インストールをアップグレードするには、マーケットプレイスを更新し、インストール済みプラグインを更新して再読み込みします。
+
+```text
+/plugin marketplace update requirements-impact-refiner
+/plugin update requirements-impact-refiner@requirements-impact-refiner
+/reload-plugins
 ```
 
 インストール結果で求められた場合は `/reload-plugins` を実行します。[`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) はルートの [Claude plugin manifest](.claude-plugin/plugin.json) を配布します。ローカル開発用にはリポジトリをクローンし、ルートで次を実行します。

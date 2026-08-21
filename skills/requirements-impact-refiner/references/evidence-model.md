@@ -28,7 +28,7 @@ Across report revisions, preserve the `RPT-###` and every still-known `IMP-###`;
 | `blocked` | Cannot be assessed without named information or access |
 | `superseded` | Replaced by a later revision or finding |
 
-`reopened` is a Delta transition, not a ledger state: use it when a previously terminal impact (`resolved`, `accepted`, `deferred`, or `superseded`) returns to `detected`, `refining`, or `blocked`. Stable states are `unchanged`; in particular, `blocked`→`blocked` remains `unchanged`. State changes require a named evidence basis. Resolution needs evidence that the impact no longer applies, and acceptance needs an explicit linked decision.
+`reopened` is a Delta transition, not a ledger state: use it when a previously terminal impact (`resolved`, `accepted`, or `superseded`) returns to `detected`, `refining`, `mitigated`, `deferred`, or `blocked`. Stable states are `unchanged`; in particular, `blocked`→`blocked` remains `unchanged`. State changes require a named evidence basis. Resolution needs evidence that the impact no longer applies, and acceptance needs an explicit linked decision.
 
 ## Evidence levels and citations
 

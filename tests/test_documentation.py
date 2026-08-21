@@ -51,6 +51,9 @@ class DocumentationTest(unittest.TestCase):
                 "--previous",
                 "--print-expected-delta",
                 "Revision 1",
+                "codex plugin marketplace upgrade requirements-impact-refiner",
+                "/plugin marketplace update requirements-impact-refiner",
+                "/plugin update requirements-impact-refiner@requirements-impact-refiner",
             ):
                 self.assertIn(token, text, f"{token} missing from {name}")
             self.assertRegex(text, r"v?0\.2(?:\.0)?.{0,80}(historical|과거|履歴)")

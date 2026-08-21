@@ -292,6 +292,8 @@ def _validate_single_report(text: str) -> list[str]:
                 for ref in references(row.get("Impact IDs", ""))
             ):
                 errors.append("pre-decision option requires IMP reference")
+            if not row.get("Trade-off", "").strip():
+                errors.append("pre-decision option requires a nonempty trade-off")
         if any(token.startswith("DEC-") for token in ID_PATTERN.findall(text)):
             errors.append("pre-decision report forbids concrete DEC identifiers")
     elif phase == "post-decision":
@@ -306,6 +308,23 @@ def _validate_single_report(text: str) -> list[str]:
             if not row.get("Rationale", "").strip():
                 errors.append(
                     f"recorded decision {decision_id} requires a nonempty rationale"
+                )
+            if not any(
+                ref.startswith("REQ-")
+                for ref in references(row.get("Requirement revision", ""))
+            ):
+                errors.append(
+                    f"recorded decision {decision_id} requires a requirement revision"
+                )
+            accepted = enum_value(row.get("Accepted impacts", ""))
+            accepted_refs = {
+                ref
+                for ref in references(row.get("Accepted impacts", ""))
+                if ref.startswith("IMP-")
+            }
+            if accepted != "none" and not accepted_refs:
+                errors.append(
+                    f"recorded decision {decision_id} requires accepted impacts or none"
                 )
         current_rows = tables["Current Refined Requirement"]
         if not any(
@@ -407,6 +426,16 @@ def _validate_single_report(text: str) -> list[str]:
             continue
         if category in delta_by_category:
             errors.append(f"duplicate impact delta category {category}")
+        impact_cell = row.get("Impact IDs", "").strip()
+        normalized_cell = impact_cell.replace("`", "").strip().lower()
+        canonical_ids = [part.strip() for part in impact_cell.replace("`", "").split(",")]
+        if normalized_cell != "none" and (
+            not canonical_ids
+            or any(not re.fullmatch(r"IMP-\d{3}", part) for part in canonical_ids)
+        ):
+            errors.append(
+                f"impact delta category {category} requires literal none or canonical IMP identifiers"
+            )
         id_occurrences = [
             ref
             for ref in references(row.get("Impact IDs", ""))
@@ -500,7 +529,16 @@ def validate_report(
         errors.append("lineage validation requires exact previous bytes")
         return sorted(set(errors))
     errors.extend(validate_lineage(previous, current, previous_bytes))
-    errors.extend(validate_authored_delta(previous, current))
+    current_states = {
+        enum_value(row.get("State", ""))
+        for row in current.tables.get("Impact Ledger", ())
+    }
+    previous_states = {
+        enum_value(row.get("State", ""))
+        for row in previous.tables.get("Impact Ledger", ())
+    }
+    if current_states <= IMPACT_STATES and previous_states <= IMPACT_STATES:
+        errors.extend(validate_authored_delta(previous, current))
     return sorted(set(errors))
 
 
@@ -535,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
         previous_text=previous_text,
         previous_bytes=previous_bytes,
     )
-    if args.print_expected_delta:
+    if args.print_expected_delta and not errors:
         current_report, current_errors = parse_report(current_text)
         previous_report = None
         previous_errors: list[str] = []

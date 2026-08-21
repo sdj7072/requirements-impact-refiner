@@ -12,6 +12,7 @@ RPT_PATTERN = re.compile(r"RPT-\d{3}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 IMPACT_PATTERN = re.compile(r"\bIMP-\d{3}\b")
 ENTITY_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
+ACCEPTANCE_PATTERN = re.compile(r"\bAC-\d{3}\b")
 IMPACT_CATEGORIES = {
     "functionality",
     "data",
@@ -106,6 +107,11 @@ def present(value: str) -> bool:
     return unquote(value).strip().lower() not in {"", "—", "none"}
 
 
+def evidence_beyond_acceptance_targets(value: str) -> bool:
+    remainder = ACCEPTANCE_PATTERN.sub("", value).replace("`", "")
+    return any(character.isalnum() for character in remainder)
+
+
 def references(value: str, prefix: str) -> set[str]:
     return {
         token
@@ -195,6 +201,17 @@ def validate_evidence_bases(report: ParsedReport) -> list[str]:
                 errors.append(
                     f"{label} {identifier} evidence level {level} requires an evidence basis"
                 )
+            elif level in EVIDENCE_LEVELS and not evidence_beyond_acceptance_targets(
+                evidence
+            ):
+                basis = {
+                    "verified": "a direct evidence citation",
+                    "inferred": "an inference basis",
+                    "unknown": "a named information gap",
+                }[level]
+                errors.append(
+                    f"{label} {identifier} evidence level {level} requires {basis}"
+                )
     for row in report.tables.get("Current Behavior", ()):
         identifier = entity_id(row, "Invariant ID", "unknown invariant")
         if not present(row.get("Current behavior", "")):
@@ -209,6 +226,7 @@ def validate_impact_semantics(report: ParsedReport) -> list[str]:
         category = unquote(row.get("Category", "")).lower()
         severity = unquote(row.get("Severity", "")).lower()
         state = unquote(row.get("State", "")).lower()
+        evidence = row.get("Evidence", "")
         if not category:
             errors.append(f"impact {impact_id} requires a category")
         elif category not in IMPACT_CATEGORIES:
@@ -222,10 +240,14 @@ def validate_impact_semantics(report: ParsedReport) -> list[str]:
         ):
             errors.append(f"impact {impact_id} requires acceptance criteria")
         if state == "superseded" and not (
-            present(row.get("Evidence", ""))
+            present(evidence)
             or references(row.get("Decision", ""), "DEC-")
         ):
             errors.append(f"superseded impact {impact_id} requires successor or rationale")
+        if state == "resolved" and not evidence_beyond_acceptance_targets(evidence):
+            errors.append(
+                f"resolved impact {impact_id} requires resolution evidence beyond future acceptance criteria"
+            )
     return errors
 
 
@@ -265,6 +287,16 @@ def validate_relationship_semantics(report: ParsedReport) -> list[str]:
             )
         if not present(row.get("Evidence/test", "")):
             errors.append(f"criterion {criterion_id} requires evidence or test")
+    for row in report.tables.get("Requirement Revision History", ()):
+        requirement_id = entity_id(row, "Requirement ID", "unknown requirement")
+        if not present(row.get("Revision", "")):
+            errors.append(
+                f"requirement history {requirement_id} requires a revision description"
+            )
+        if not present(row.get("Change summary", "")):
+            errors.append(
+                f"requirement history {requirement_id} requires a change summary"
+            )
     for row in report.tables.get("Unresolved, Deferred, and Blocked Items", ()):
         impact_id = entity_id(row, "Impact ID", "unknown impact")
         if not present(row.get("Information gap or rationale", "")):

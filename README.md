@@ -36,6 +36,14 @@ codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
+To upgrade an existing Codex installation, refresh the marketplace snapshot and reinstall the plugin so the cached copy is replaced:
+
+```sh
+codex plugin marketplace upgrade requirements-impact-refiner
+codex plugin remove requirements-impact-refiner@requirements-impact-refiner
+codex plugin add requirements-impact-refiner@requirements-impact-refiner
+```
+
 The repository marketplace at [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) resolves the root [Codex plugin manifest](.codex-plugin/plugin.json), whose `skills` field points to the single canonical `./skills/` tree. It does not add MCP servers, hooks, apps, agents, or dependencies.
 
 For Claude Code, run these commands inside Claude Code:
@@ -43,6 +51,14 @@ For Claude Code, run these commands inside Claude Code:
 ```text
 /plugin marketplace add sdj7072/requirements-impact-refiner
 /plugin install requirements-impact-refiner@requirements-impact-refiner
+```
+
+To upgrade an existing Claude Code installation, refresh the marketplace, update the installed plugin, and reload it:
+
+```text
+/plugin marketplace update requirements-impact-refiner
+/plugin update requirements-impact-refiner@requirements-impact-refiner
+/reload-plugins
 ```
 
 Run `/reload-plugins` if the install summary asks for it. [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) publishes the root [Claude plugin manifest](.claude-plugin/plugin.json). For local development loading, clone the repository and run from its root:
