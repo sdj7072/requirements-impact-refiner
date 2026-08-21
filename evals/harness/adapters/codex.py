@@ -27,10 +27,12 @@ class CodexAdapter(ClientAdapter):
         cwd: Optional[Path] = None,
         timeout_seconds: float = 300.0,
         quarantine_root: Optional[Path] = None,
+        expected_plugin_version: str = "0.3.0",
     ) -> None:
         self.executable = executable
         self.cwd = Path.cwd() if cwd is None else Path(cwd)
         self.timeout_seconds = timeout_seconds
+        self.expected_plugin_version = expected_plugin_version
         self.quarantine_root = (
             Path(tempfile.gettempdir()) / "codex-eval-quarantine"
             if quarantine_root is None
@@ -251,9 +253,19 @@ class CodexAdapter(ClientAdapter):
         enabled = tuple(self._plugin_id(entry) for entry in entries if entry.get("enabled") is True)
         rir = next((entry for entry in entries if self._is_rir(entry)), None)
         superpowers = next((entry for entry in entries if self._is_superpowers(entry)), None)
-        if rir is None or rir.get("enabled") is not True or self._plugin_version(rir) != "0.3.0":
+        observed_plugin_version = self._plugin_version(rir) if rir is not None else None
+        if (
+            rir is None
+            or rir.get("enabled") is not True
+            or observed_plugin_version != self.expected_plugin_version
+        ):
             return self._unavailable_probe(
-                "enabled Requirements Impact Refiner 0.3.0 is required", version.stdout, enabled
+                "enabled Requirements Impact Refiner %s is required (observed: %s)" % (
+                    self.expected_plugin_version, observed_plugin_version or "none",
+                ),
+                version.stdout,
+                enabled,
+                observed_plugin_version,
             ), commands
         if superpowers is None or superpowers.get("enabled") is not True:
             return self._unavailable_probe("enabled Superpowers is required", version.stdout, enabled), commands
@@ -263,7 +275,7 @@ class CodexAdapter(ClientAdapter):
                 available=True,
                 version=version.stdout.strip() or None,
                 authenticated=None,
-                plugin_version="0.3.0",
+                plugin_version=observed_plugin_version,
                 enabled_plugins=enabled,
                 capabilities=(
                     _COMPOSITION_LABEL,
@@ -462,14 +474,17 @@ class CodexAdapter(ClientAdapter):
 
     @staticmethod
     def _unavailable_probe(
-        reason: str, version: Optional[str] = None, enabled: Tuple[str, ...] = ()
+        reason: str,
+        version: Optional[str] = None,
+        enabled: Tuple[str, ...] = (),
+        plugin_version: Optional[str] = None,
     ) -> ClientProbe:
         return ClientProbe(
             client="codex",
             available=False,
             version=version.strip() if version else None,
             authenticated=None,
-            plugin_version=None,
+            plugin_version=plugin_version,
             enabled_plugins=enabled,
             capabilities=(),
             reason=reason,

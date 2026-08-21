@@ -7,7 +7,7 @@ from unittest.mock import patch
 from evals.harness.catalog import load_all
 from evals.harness.evidence import record_run, verify_manifest
 from evals.harness.models import ClientProbe, CommandResult, RunResult, RunStatus
-from evals.harness.run import build_parser, build_schedule, run_batch, run_probe
+from evals.harness.run import build_parser, build_schedule, create_adapter, run_batch, run_probe
 
 
 class FakeAdapter:
@@ -87,6 +87,30 @@ class EvalHarnessCliTest(unittest.TestCase):
 
         self.assertIsNone(args.model)
         self.assertIsNone(args.reasoning)
+
+    def test_expected_plugin_version_defaults_to_the_sealed_v030_contract(self):
+        """Changing the default would prevent replaying the sealed 0.3.0 composition."""
+        args = build_parser().parse_args(
+            ["--client", "codex", "--suite", "smoke", "--output", "out"]
+        )
+
+        self.assertEqual(args.expected_plugin_version, "0.3.0")
+
+    def test_codex_adapter_receives_the_explicit_expected_plugin_version(self):
+        """Dropping the requested version at the CLI boundary would probe the wrong release."""
+        args = build_parser().parse_args(
+            [
+                "--client", "codex", "--probe-only", "--output", "out",
+                "--expected-plugin-version", "0.3.1",
+            ]
+        )
+
+        with patch("evals.harness.run.CodexAdapter") as adapter_class:
+            create_adapter(args)
+
+        adapter_class.assert_called_once_with(
+            timeout_seconds=300.0, expected_plugin_version="0.3.1"
+        )
 
     def test_probe_only_allows_omitting_suite_but_batches_do_not(self):
         """Making suite optional for a behavior batch would make its coverage ambiguous."""

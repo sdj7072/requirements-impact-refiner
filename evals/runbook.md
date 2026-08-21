@@ -64,3 +64,11 @@ python3 -m evals.harness.run --client codex --suite installed-superpowers --repe
 Never selectively rerun a valid model result or discard an unfavorable valid
 transcript. Retry only a classified infrastructure failure, retain its original
 attempt and retry link, and start a new named batch if skill wording changes.
+
+For a separately approved evaluation of a newer installed plugin, use a new,
+empty named output directory and state the observed release explicitly. For
+example, a future 0.3.1 smoke would add
+`--expected-plugin-version 0.3.1`; it must not append to or reinterpret the
+sealed `installed-v0.3` evidence. This option controls only the Codex
+composition gate. Claude remains structural-only and does not accept model or
+reasoning options.

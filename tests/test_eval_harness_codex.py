@@ -241,6 +241,31 @@ class CodexAdapterTest(unittest.TestCase):
             ("requirements-impact-refiner", "superpowers", "other-enabled"),
         )
 
+    def test_probe_accepts_an_explicit_expected_v031_plugin_version(self):
+        """A 0.3.1 smoke must not be rejected by the historical 0.3.0 gate."""
+        plugins = [dict(entry) for entry in INSTALLED_PLUGIN_LIST["installed"]]
+        plugins[0]["version"] = "0.3.1"
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, {"installed": plugins, "available": []})
+            probe = CodexAdapter(
+                executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.3.1"
+            ).probe()
+
+        self.assertTrue(probe.available)
+        self.assertEqual(probe.plugin_version, "0.3.1")
+
+    def test_probe_fails_closed_when_observed_version_differs_from_expected_version(self):
+        """Treating a different installed release as eligible would invalidate smoke provenance."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary)
+            probe = CodexAdapter(
+                executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.3.1"
+            ).probe()
+
+        self.assertFalse(probe.available)
+        self.assertEqual(probe.plugin_version, "0.3.0")
+        self.assertIn("0.3.1", probe.reason)
+
     def test_prepare_rejects_disabled_required_plugin(self):
         plugins = [
             {"id": "requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},

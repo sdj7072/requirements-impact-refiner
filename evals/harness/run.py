@@ -54,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--model")
     parser.add_argument("--reasoning")
+    parser.add_argument("--expected-plugin-version", default="0.3.0")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--probe-only", action="store_true")
@@ -74,7 +75,10 @@ def build_schedule(cases: Iterable[CaseSpec], suite: str, repetitions: int) -> T
 def create_adapter(args: argparse.Namespace):
     """Instantiate a real client adapter only for the command-line entry point."""
     if args.client == "codex":
-        return CodexAdapter(timeout_seconds=args.timeout)
+        return CodexAdapter(
+            timeout_seconds=args.timeout,
+            expected_plugin_version=args.expected_plugin_version,
+        )
     return ClaudeAdapter(executable="claude", timeout_seconds=args.timeout)
 
 
