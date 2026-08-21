@@ -160,14 +160,14 @@ class PackagingTest(unittest.TestCase):
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertEqual(manifest["version"], "0.3.1")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertEqual(manifest["version"], "0.3.1")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_automatic_bootstrap_skill_is_discoverable(self):
@@ -176,7 +176,7 @@ class PackagingTest(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("name: using-requirements-impact-refiner", text)
         self.assertIn("Use when starting any software-development conversation", text)
-        self.assertIn('version: "0.3.0"', text)
+        self.assertIn('version: "0.3.1"', text)
 
     def test_automatic_entrypoint_owns_activation_boundaries(self):
         bootstrap = (
@@ -236,9 +236,11 @@ class PackagingTest(unittest.TestCase):
 
         self.assertTrue((scripts / "impact_report.py").is_file())
 
-    def test_codex_manifest_references_a_readable_square_logo(self):
+    def test_codex_manifest_references_a_standard_root_logo(self):
         manifest = self.load(".codex-plugin/plugin.json")
         interface = manifest["interface"]
+        self.assertEqual(interface["composerIcon"], "./assets/logo.png")
+        self.assertEqual(interface["logo"], "./assets/logo.png")
         self.assertEqual(interface["composerIcon"], interface["logo"])
         logo_path = ROOT / interface["logo"]
         payload = logo_path.read_bytes()
@@ -248,6 +250,35 @@ class PackagingTest(unittest.TestCase):
         self.assertGreaterEqual(width, 512)
         self.assertLess(len(payload), 1_300_000)
         self.assertIn(payload[25], (4, 6), "logo PNG must include an alpha channel")
+        self.assertEqual(
+            payload,
+            (ROOT / ".codex-plugin/assets/logo.png").read_bytes(),
+            "the root-standard logo must preserve the established artwork",
+        )
+
+    def test_core_skill_resolves_resources_from_its_own_directory(self):
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "Resolve every `references/`, `assets/`, and `scripts/` path from the directory that contains this `SKILL.md`.",
+            core,
+        )
+        self.assertIn(
+            "read `SKILL_DIR/references/evidence-model.md`", core,
+        )
+        self.assertIn("not the plugin root or workspace root", core)
+
+    def test_core_skill_requires_an_inline_canonical_report(self):
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "first non-empty line exactly `# Requirements Impact Report`", core
+        )
+        self.assertIn("complete canonical current report inline", core)
+        self.assertIn("saved file is supplementary only", core)
+        self.assertIn("lineage turn returns the complete revised report inline", core)
 
     def test_manifest_identity_is_consistent(self):
         codex = self.load(".codex-plugin/plugin.json")

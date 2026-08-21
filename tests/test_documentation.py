@@ -93,6 +93,12 @@ def harness_commands(path):
 
 
 class DocumentationTest(unittest.TestCase):
+    def test_top_release_descriptions_identify_the_current_patch_release(self):
+        for name in READMES:
+            description = (ROOT / name).read_text(encoding="utf-8").splitlines()[4]
+            self.assertIn("`0.3.1`", description, name)
+            self.assertNotIn("`0.3.0`", description, name)
+
     def test_v03_lineage_and_migration_contract_is_synchronized(self):
         for name in READMES:
             text = (ROOT / name).read_text(encoding="utf-8")

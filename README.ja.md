@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.3.0` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
+Requirements Impact Refiner `0.3.1` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
 
 ## 1. 課題
 
