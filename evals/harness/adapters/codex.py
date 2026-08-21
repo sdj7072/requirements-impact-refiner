@@ -60,7 +60,6 @@ class CodexAdapter(ClientAdapter):
                 "--json",
                 "-s",
                 "read-only",
-                "--approve-for-me",
                 "-o",
                 str(final_path),
             )

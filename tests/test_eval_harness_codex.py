@@ -110,6 +110,9 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         f"    print({json.dumps(json.dumps(plugins))})\n"
         "elif args and args[0] == 'exec':\n"
         f"    mode = {exec_mode!r}\n"
+        "    if mode == 'reject-readonly-approval' and '-s' in args and 'read-only' in args and '--approve-for-me' in args:\n"
+        "        print('error: --sandbox and --approve-for-me cannot be used together', file=sys.stderr)\n"
+        "        sys.exit(2)\n"
         "    if mode == 'nonzero':\n"
         "        print('{\\\"type\\\":\\\"thread.started\\\",\\\"thread_id\\\":\\\"" + UUID + "\\\"}')\n"
         "        print('client error', file=sys.stderr)\n"
@@ -143,8 +146,11 @@ class CodexAdapterTest(unittest.TestCase):
 
         self.assertEqual(
             argv[:10],
-            ("codex", "exec", "--ephemeral", "--json", "-s", "read-only", "--approve-for-me", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
+            ("codex", "exec", "--ephemeral", "--json", "-s", "read-only", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
         )
+        self.assertIn("-s", argv)
+        self.assertIn("read-only", argv)
+        self.assertNotIn("--approve-for-me", argv)
         self.assertNotIn("-m", argv)
         self.assertNotIn("model_reasoning_effort", " ".join(argv))
 
@@ -285,9 +291,40 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertEqual(result.session_id, UUID)
         self.assertNotIn("--ephemeral", execution_commands[0])
+        self.assertIn("-s", execution_commands[0])
+        self.assertIn("read-only", execution_commands[0])
+        self.assertNotIn("--approve-for-me", execution_commands[0])
         self.assertEqual(execution_commands[1][0:2], ["exec", "resume"])
         self.assertIn(UUID, execution_commands[1])
         self.assertNotIn("--last", execution_commands[1])
+
+    def test_execute_succeeds_when_cli_rejects_read_only_with_auto_approve(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, exec_mode="reject-readonly-approval")
+            log = Path(temporary) / "argv.jsonl"
+            request = make_request(temporary, ("first turn",))
+            adapter = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            )
+            original_log = os.environ.get("FAKE_CODEX_LOG")
+            os.environ["FAKE_CODEX_LOG"] = str(log)
+            try:
+                result = adapter.execute(request)
+            finally:
+                if original_log is None:
+                    del os.environ["FAKE_CODEX_LOG"]
+                else:
+                    os.environ["FAKE_CODEX_LOG"] = original_log
+
+            commands = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+        execution_command = next(command for command in commands if command[0] == "exec")
+        self.assertEqual(result.status, RunStatus.PASS)
+        self.assertIn("-s", execution_command)
+        self.assertIn("read-only", execution_command)
+        self.assertNotIn("--approve-for-me", execution_command)
 
     def test_resume_renders_the_actual_second_turn_when_prompts_are_identical(self):
         with tempfile.TemporaryDirectory() as temporary:
