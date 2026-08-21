@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -507,11 +508,41 @@ def validate_path(path: Path) -> list[str]:
     return validate_report(path.read_text(encoding="utf-8"))
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: validate-impact-report.py REPORT.md", file=sys.stderr)
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Validate a requirements impact report"
+    )
+    parser.add_argument("report", type=Path)
+    parser.add_argument("--previous", type=Path)
+    parser.add_argument("--print-expected-delta", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        current_bytes = args.report.read_bytes()
+        current_text = current_bytes.decode("utf-8")
+        previous_bytes = args.previous.read_bytes() if args.previous else None
+        previous_text = (
+            previous_bytes.decode("utf-8") if previous_bytes is not None else None
+        )
+    except (OSError, UnicodeDecodeError) as error:
+        print(f"cannot read report: {error}", file=sys.stderr)
         return 2
-    errors = validate_path(Path(argv[1]))
+    errors = validate_report(
+        current_text,
+        previous_text=previous_text,
+        previous_bytes=previous_bytes,
+    )
+    if args.print_expected_delta:
+        current_report, current_errors = parse_report(current_text)
+        previous_report = None
+        previous_errors: list[str] = []
+        if previous_text is not None:
+            previous_report, previous_errors = parse_report(previous_text)
+        if not current_errors and not previous_errors:
+            print(render_delta(calculate_delta(previous_report, current_report)))
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
@@ -521,4 +552,4 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(main())

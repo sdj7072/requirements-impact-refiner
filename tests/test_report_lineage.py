@@ -1,7 +1,21 @@
 import hashlib
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 from tests.test_validate_impact_report import VALIDATOR, VALID_REPORT
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = (
+    ROOT
+    / "skills"
+    / "requirements-impact-refiner"
+    / "scripts"
+    / "validate-impact-report.py"
+)
 
 
 IMPACT_ROW = (
@@ -67,6 +81,92 @@ class ReportLineageTest(unittest.TestCase):
             ),
             [],
         )
+
+
+class ReportLineageCliTest(unittest.TestCase):
+    def parsed(self, text):
+        report, errors = VALIDATOR.parse_report(text)
+        self.assertEqual(errors, [])
+        return report
+
+    def test_comparison_prints_expected_delta_without_modifying_reports(self):
+        previous_text = VALID_REPORT
+        current_text = next_report(
+            previous_text, report_with_state("accepted", "unchanged")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            previous = Path(directory) / "previous.md"
+            current = Path(directory) / "current.md"
+            previous.write_text(previous_text, encoding="utf-8")
+            current.write_text(current_text, encoding="utf-8")
+            previous_before = previous.read_bytes()
+            current_before = current.read_bytes()
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--previous",
+                    str(previous),
+                    "--print-expected-delta",
+                    str(current),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(previous.read_bytes(), previous_before)
+            self.assertEqual(current.read_bytes(), current_before)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("| unchanged | IMP-001 |", result.stdout)
+        self.assertIn("valid impact report", result.stdout)
+
+    def test_report_errors_return_one_and_invocation_errors_return_two(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            previous = root / "previous.md"
+            wrong_sha = root / "wrong-sha.md"
+            previous.write_text(VALID_REPORT, encoding="utf-8")
+            wrong_sha.write_text(
+                next_report(
+                    VALID_REPORT, report_with_state("accepted", "unchanged")
+                ).replace(hashlib.sha256(VALID_REPORT.encode()).hexdigest(), "0" * 64),
+                encoding="utf-8",
+            )
+            report_error = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--previous",
+                    str(previous),
+                    str(wrong_sha),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            missing_file = subprocess.run(
+                [sys.executable, str(SCRIPT), str(root / "missing.md")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            invalid_option = subprocess.run(
+                [sys.executable, str(SCRIPT), "--not-a-real-option"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(report_error.returncode, 1)
+        self.assertIn(
+            "Previous SHA-256 does not match predecessor bytes",
+            report_error.stderr,
+        )
+        self.assertEqual(missing_file.returncode, 2)
+        self.assertIn("cannot read report", missing_file.stderr)
+        self.assertEqual(invalid_option.returncode, 2)
 
     def test_terminal_impact_returning_active_is_reopened(self):
         previous = report_with_state("resolved")

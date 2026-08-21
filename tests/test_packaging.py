@@ -96,6 +96,8 @@ class PackagingTest(unittest.TestCase):
 
         self.assertIn("impact-report-pre-decision-template.md", chooser)
         self.assertIn("impact-report-post-decision-template.md", chooser)
+        self.assertIn("--previous", chooser)
+        self.assertIn("--print-expected-delta", chooser)
         self.assertIn("| pre-decision |", pre)
         self.assertIn("## Decision Needed", pre)
         self.assertNotIn("DEC-###", pre)
@@ -104,6 +106,9 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("## Decisions and Accepted Risks", post)
         self.assertNotIn("## Decision Needed", post)
         for text in (pre, post):
+            self.assertIn(
+                "| Report ID | Revision | Previous SHA-256 | Phase |", text
+            )
             self.assertIn("## Impact Delta", text)
             self.assertIn("List only ledger impacts whose state is `deferred` or `blocked`", text)
             for category in (
@@ -114,9 +119,15 @@ class PackagingTest(unittest.TestCase):
                 "deferred",
                 "blocked",
                 "superseded",
+                "reopened",
                 "new",
             ):
                 self.assertIn(f"| {category} |", text)
+
+    def test_distribution_contains_reusable_report_domain_module(self):
+        scripts = ROOT / "skills/requirements-impact-refiner/scripts"
+
+        self.assertTrue((scripts / "impact_report.py").is_file())
 
     def test_codex_manifest_references_a_readable_square_logo(self):
         manifest = self.load(".codex-plugin/plugin.json")
