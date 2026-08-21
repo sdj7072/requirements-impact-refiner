@@ -74,10 +74,16 @@ def _environment_values(run: RunResult) -> tuple[str, ...]:
     return tuple(value for key, value in run.metadata if key == "environment")
 
 
+def _derived_repetitions(results: Sequence[RunResult]) -> int:
+    """Count repetitions from sealed final keys, never report metadata."""
+    return len({run.repetition for run in results})
+
+
 def _verification_errors(
     results: Sequence[RunResult],
     scores: Optional[Sequence[MechanicalScore]],
     adjudications: Sequence[Adjudication],
+    declared_repetitions: int,
 ) -> list[str]:
     """Require the sealed canonical matrix, never a caller-supplied summary."""
     cases = select_suite(load_all(), "installed-superpowers")
@@ -86,8 +92,14 @@ def _verification_errors(
     }
     errors = []
     actual_runs = [(run.case_id, run.repetition) for run in results]
+    actual_repetitions = {run.repetition for run in results}
+    derived_repetitions = _derived_repetitions(results)
     if len(results) != len(expected_runs) or set(actual_runs) != expected_runs:
         errors.append("runs are not the canonical 17-case by 5-repetition matrix")
+    if actual_repetitions != {1, 2, 3, 4, 5}:
+        errors.append("sealed runs do not contain exactly repetitions 1 through 5")
+    if declared_repetitions != derived_repetitions:
+        errors.append("metadata repetitions disagree with sealed runs")
     if len(set(actual_runs)) != len(actual_runs):
         errors.append("runs contain duplicate case/repetition finals")
     if any(run.status is not RunStatus.PASS for run in results):
@@ -129,7 +141,10 @@ def render_report(
     """
     required = _require_metadata(metadata)
     summary = summarize(results, scores)
-    verification_errors = _verification_errors(results, scores, adjudications)
+    derived_repetitions = _derived_repetitions(results)
+    verification_errors = _verification_errors(
+        results, scores, adjudications, required["repetitions"]
+    )
     status = "verified" if not verification_errors else "not verified"
     actual_clients = sorted({run.client for run in results})
     actual_compositions = sorted(
@@ -148,7 +163,7 @@ def render_report(
         "- enabled composition: %s" % rendered_composition,
         "- model: %s" % required["model"],
         "- reasoning: %s" % required["reasoning"],
-        "- repetitions: %s" % required["repetitions"],
+        "- repetitions: %s" % derived_repetitions,
         "- strict score: %d/%d" % (summary["strict_passes"], summary["total"]),
         "- pass: %d" % summary[RunStatus.PASS.value],
         "- partial: %d" % summary[RunStatus.PARTIAL.value],

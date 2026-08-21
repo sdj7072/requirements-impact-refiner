@@ -236,6 +236,15 @@ class EvalHarnessScoringTest(unittest.TestCase):
         verified = render_report(runs, REPORT_METADATA, scores, adjudications)
         self.assertIn("status: verified", verified)
 
+        contradictory_repetitions = render_report(
+            runs,
+            dict(REPORT_METADATA, repetitions=1),
+            scores,
+            adjudications,
+        )
+        self.assertIn("status: not verified", contradictory_repetitions)
+        self.assertIn("repetitions: 5", contradictory_repetitions)
+
         mutations = {
             "empty scores": (runs, (), adjudications),
             "empty adjudications": (runs, scores, ()),
