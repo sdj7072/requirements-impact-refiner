@@ -151,6 +151,14 @@ def select_suite(cases: Iterable[CaseSpec], suite: str) -> Tuple[CaseSpec, ...]:
         )
         if len(selected) != 17:
             raise CatalogError("installed-superpowers suite must contain exactly 17 cases")
+        if sum(case.kind == "positive" for case in selected) != 8:
+            raise CatalogError("installed-superpowers suite must contain eight positive cases")
+        if sum(case.kind == "negative" for case in selected) != 5:
+            raise CatalogError("installed-superpowers suite must contain five negative cases")
+        if [case.id for case in selected if case.kind == "integration"] != ["INT-superpowers"]:
+            raise CatalogError("installed-superpowers suite must contain exactly INT-superpowers")
+        if sum(case.kind == "lineage" for case in selected) != 3:
+            raise CatalogError("installed-superpowers suite must contain three lineage cases")
         return selected
     if suite == "smoke":
         missing = [case_id for case_id in _SMOKE_CASE_IDS if case_id not in by_id]

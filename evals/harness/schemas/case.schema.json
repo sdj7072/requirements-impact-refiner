@@ -8,14 +8,14 @@
   "$defs": {
     "rubric": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": { "type": "string", "minLength": 1, "pattern": "\\S" }
     },
     "turn": {
       "type": "object",
       "required": ["prompt", "repository_evidence"],
       "additionalProperties": false,
       "properties": {
-        "prompt": { "type": "string", "minLength": 1 },
+        "prompt": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "repository_evidence": { "$ref": "#/$defs/rubric" }
       }
     },
@@ -23,7 +23,7 @@
       "type": "object",
       "required": ["id", "kind", "must_detect", "must_not_do", "modes"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "must_detect": { "$ref": "#/$defs/rubric" },
         "must_not_do": { "$ref": "#/$defs/rubric" },
         "modes": {
@@ -42,9 +42,9 @@
           "required": ["request", "repository_evidence"],
           "additionalProperties": false,
           "properties": {
-            "id": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1, "pattern": "\\S" },
             "kind": { "enum": ["positive", "negative", "integration"] },
-            "request": { "type": "string", "minLength": 1 },
+            "request": { "type": "string", "minLength": 1, "pattern": "\\S" },
             "repository_evidence": { "$ref": "#/$defs/rubric" },
             "must_detect": { "$ref": "#/$defs/rubric" },
             "must_not_do": { "$ref": "#/$defs/rubric" },
@@ -61,7 +61,7 @@
           "required": ["turns", "expected_transition"],
           "additionalProperties": false,
           "properties": {
-            "id": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1, "pattern": "\\S" },
             "kind": { "const": "lineage" },
             "turns": {
               "type": "array",

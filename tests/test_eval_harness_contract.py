@@ -2,7 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 from evals.harness.catalog import CatalogError, load_all, load_catalog, select_suite
@@ -11,6 +11,7 @@ from evals.harness.models import CaseSpec, CaseTurn
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "evals" / "cases.json"
+CASE_SCHEMA_PATH = ROOT / "evals" / "harness" / "schemas" / "case.schema.json"
 RESULT_SCHEMA_PATH = ROOT / "evals" / "harness" / "schemas" / "result.schema.json"
 CASES_SHA256 = "03dbedb66900e89efec45fae7d73312fe2ccb6508a67e9143af3e3c88c1c53bc"
 
@@ -40,6 +41,47 @@ class EvalHarnessContractTest(unittest.TestCase):
                 "LINEAGE-no-false-resolution",
             ],
         )
+
+    def test_installed_superpowers_rejects_mutated_required_composition(self):
+        cases = load_all()
+        integration = next(case for case in cases if case.id == "INT-superpowers")
+        mutations = {
+            "positive changed to negative": (
+                cases[0],
+                replace(cases[0], kind="negative"),
+                "eight positive cases",
+            ),
+            "negative changed to lineage": (
+                next(case for case in cases if case.kind == "negative"),
+                replace(next(case for case in cases if case.kind == "negative"), kind="lineage"),
+                "five negative cases",
+            ),
+            "integration identity replaced": (
+                integration,
+                replace(integration, id="INT-other", kind="positive"),
+                "eight positive cases",
+            ),
+            "integration changed to lineage": (
+                integration,
+                replace(integration, kind="lineage"),
+                "exactly INT-superpowers",
+            ),
+            "lineage changed to positive": (
+                next(case for case in cases if case.kind == "lineage"),
+                replace(next(case for case in cases if case.kind == "lineage"), kind="positive"),
+                "eight positive cases",
+            ),
+        }
+
+        for name, (original_case, mutated_case, message) in mutations.items():
+            with self.subTest(name=name):
+                mutated_cases = tuple(
+                    mutated_case if case is original_case else case
+                    for case in cases
+                )
+
+                with self.assertRaisesRegex(CatalogError, message):
+                    select_suite(mutated_cases, "installed-superpowers")
 
     def test_catalog_cases_are_immutable(self):
         case = CaseSpec(
@@ -113,6 +155,20 @@ class EvalHarnessContractTest(unittest.TestCase):
                 "runResult",
             },
         )
+
+    def test_case_schema_rejects_whitespace_for_every_loader_nonblank_string(self):
+        schema = json.loads(CASE_SCHEMA_PATH.read_text(encoding="utf-8"))
+        definitions = schema["$defs"]
+        nonblank_schemas = (
+            definitions["rubric"]["items"],
+            definitions["turn"]["properties"]["prompt"],
+            definitions["common"]["properties"]["id"],
+            definitions["singleTurnCase"]["allOf"][1]["properties"]["id"],
+            definitions["singleTurnCase"]["allOf"][1]["properties"]["request"],
+            definitions["lineageCase"]["allOf"][1]["properties"]["id"],
+        )
+
+        self.assertTrue(all(item.get("pattern") == r"\S" for item in nonblank_schemas))
 
 
 if __name__ == "__main__":
