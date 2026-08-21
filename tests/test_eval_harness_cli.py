@@ -12,22 +12,36 @@ from evals.harness.run import build_parser, build_schedule, run_batch, run_probe
 class FakeAdapter:
     """Records safe synthetic evidence without invoking an installed client."""
 
-    def __init__(self, statuses=(), record_evidence=True):
+    def __init__(
+        self,
+        statuses=(),
+        record_evidence=True,
+        client="codex",
+        version="fake 1.0",
+        plugin_version="0.3.0",
+        enabled_plugins=("requirements-impact-refiner", "superpowers"),
+        result_metadata=(),
+    ):
         self.statuses = list(statuses)
         self.requests = []
         self.record_evidence = record_evidence
+        self.client = client
+        self.version = version
+        self.plugin_version = plugin_version
+        self.enabled_plugins = enabled_plugins
+        self.result_metadata = result_metadata
         self.probe_results = (
             CommandResult(("fake", "--version"), 0, "fake 1.0", "", 0.0, False),
         )
 
     def prepare(self):
         return ClientProbe(
-            client="codex",
+            client=self.client,
             available=True,
-            version="fake 1.0",
+            version=self.version,
             authenticated=None,
-            plugin_version="0.3.0",
-            enabled_plugins=("requirements-impact-refiner", "superpowers"),
+            plugin_version=self.plugin_version,
+            enabled_plugins=self.enabled_plugins,
             capabilities=("fake",),
         )
 
@@ -57,6 +71,7 @@ class FakeAdapter:
             session_id="123e4567-e89b-12d3-a456-426614174000" if len(request.case.turns) > 1 else None,
             attempt=request.attempt,
             retry_of=request.retry_of,
+            metadata=self.result_metadata,
         )
 
 
@@ -251,9 +266,90 @@ class EvalHarnessCliTest(unittest.TestCase):
             self.assertEqual(run_probe(args, FakeAdapter()), 0)
             manifest = (output / "manifest.sha256").read_text(encoding="utf-8")
 
-            self.assertTrue((output / "raw" / "codex" / "probe" / "01" / "metadata.json").is_file())
-            self.assertTrue((output / "controller.json").is_file())
+            self.assertTrue((output / "raw" / "codex" / "probe-01" / "metadata.json").is_file())
+            self.assertTrue((output / "probes.json").is_file())
+            self.assertFalse((output / "controller.json").exists())
             self.assertEqual(verify_manifest(output, manifest), [])
+
+    def test_probes_coexist_before_a_batch_without_claiming_batch_metadata(self):
+        """Letting a probe own controller.json prevents later batch evidence from sealing."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            codex_probe = build_parser().parse_args(
+                ["--client", "codex", "--probe-only", "--output", str(output)]
+            )
+            claude_probe = build_parser().parse_args(
+                ["--client", "claude", "--probe-only", "--output", str(output)]
+            )
+            smoke = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+            first = FakeAdapter(client="codex")
+            second = FakeAdapter(client="claude")
+            third = FakeAdapter(client="codex")
+            batch = FakeAdapter(client="codex")
+
+            self.assertEqual(run_probe(codex_probe, first), 0)
+            self.assertEqual(run_probe(claude_probe, second), 0)
+            self.assertEqual(run_probe(codex_probe, third), 0)
+            self.assertEqual(run_batch(smoke, batch), 0)
+            probes = json.loads((output / "probes.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(len(probes["probes"]), 3)
+            self.assertTrue((output / "raw" / "codex" / "probe-01").is_dir())
+            self.assertTrue((output / "raw" / "claude" / "probe-01").is_dir())
+            self.assertTrue((output / "raw" / "codex" / "probe-02").is_dir())
+            self.assertEqual(len(batch.requests), 6)
+
+    def test_full_expansion_requires_the_exact_observed_probe_environment(self):
+        """A caller label cannot prove that version or plugin inventory stayed the same."""
+        mutations = {
+            "client version": {"version": "fake 2.0"},
+            "plugin version": {"plugin_version": "0.4.0"},
+            "enabled plugin": {
+                "enabled_plugins": (
+                    "requirements-impact-refiner", "superpowers", "extra-plugin",
+                )
+            },
+        }
+        for name, changed in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "output"
+                smoke = build_parser().parse_args(
+                    ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+                )
+                full = build_parser().parse_args(
+                    [
+                        "--client", "codex", "--suite", "installed-superpowers",
+                        "--repetitions", "5", "--output", str(output),
+                    ]
+                )
+                self.assertEqual(run_batch(smoke, FakeAdapter()), 0)
+                changed_adapter = FakeAdapter(**changed)
+
+                self.assertEqual(run_batch(full, changed_adapter), 1)
+                self.assertEqual(changed_adapter.requests, [])
+
+    def test_reported_composition_comes_from_the_observed_probe_inventory(self):
+        """An adapter label can omit enabled plugins and must not define report provenance."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+            adapter = FakeAdapter(
+                version="fake 9.0",
+                enabled_plugins=("superpowers", "requirements-impact-refiner", "extra"),
+                result_metadata=(("environment", "adapter supplied label"),),
+            )
+
+            self.assertEqual(run_batch(args, adapter), 0)
+            report = (output / "report.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "- enabled composition: codex fake 9.0 plugins=extra,requirements-impact-refiner,superpowers",
+            report,
+        )
 
     def test_missing_safe_evidence_makes_the_batch_invalid(self):
         """A result without a recorded artifact cannot support an exit-zero batch."""

@@ -11,7 +11,7 @@ from typing import Any, Iterable, Optional, Sequence, Tuple
 from .adapters.claude import ClaudeAdapter
 from .adapters.codex import CodexAdapter
 from .catalog import load_all, select_suite
-from .evidence import PotentialSecretError, build_manifest, record_run, verify_manifest
+from .evidence import PotentialSecretError, build_manifest, record_probe, record_run, verify_manifest
 from .models import CaseSpec, ClientProbe, CommandResult, MechanicalScore, RunRequest, RunResult, RunStatus
 from .reporting import render_report
 from .scoring import score_mechanical
@@ -102,13 +102,17 @@ def _files_hash(paths: Sequence[Path]) -> str:
 
 
 def _composition(probe: ClientProbe) -> str:
-    return probe.capabilities[0] if probe.capabilities else "unavailable"
+    plugins = ",".join(sorted(probe.enabled_plugins)) or "none"
+    return "%s %s plugins=%s" % (probe.client, probe.version or "unavailable", plugins)
 
 
 def _batch_identity(args: argparse.Namespace, probe: ClientProbe) -> dict[str, object]:
     """Return provenance that must agree before a batch may be extended."""
     return {
-        "client": args.client,
+        "client": probe.client,
+        "version": probe.version,
+        "plugin_version": probe.plugin_version,
+        "enabled_plugins": sorted(probe.enabled_plugins),
         "model": args.model,
         "reasoning": args.reasoning,
         "enabled_composition": _composition(probe),
@@ -234,6 +238,13 @@ def _finalize(output_root: Path, ledger: dict[str, object], report: str) -> bool
     try:
         _write_derived(output_root / "report.md", report)
         _write_derived(output_root / "controller.json", json.dumps(ledger, sort_keys=True, indent=2) + "\n")
+        return _refresh_manifest(output_root)
+    except (OSError, ValueError):
+        return False
+
+
+def _refresh_manifest(output_root: Path) -> bool:
+    try:
         manifest = build_manifest(output_root)
         _write_derived(output_root / "manifest.sha256", manifest)
         return not verify_manifest(output_root, manifest)
@@ -244,9 +255,14 @@ def _finalize(output_root: Path, ledger: dict[str, object], report: str) -> bool
 def _load_existing(output_root: Path, raw_root: Path, identity: dict[str, object], schedule: Sequence[ScheduledRun]):
     controller = output_root / "controller.json"
     manifest_path = output_root / "manifest.sha256"
-    if not controller.exists() and not manifest_path.exists():
-        return [], [], []
-    if not controller.is_file() or not manifest_path.is_file():
+    if not controller.exists():
+        if not manifest_path.exists():
+            return [], [], []
+        try:
+            return ([], [], []) if not verify_manifest(output_root, manifest_path.read_text(encoding="utf-8")) else None
+        except (OSError, ValueError):
+            return None
+    if not manifest_path.is_file():
         return None
     try:
         if verify_manifest(output_root, manifest_path.read_text(encoding="utf-8")):
@@ -311,10 +327,10 @@ def _load_existing(output_root: Path, raw_root: Path, identity: dict[str, object
 
 
 def _report_metadata(args: argparse.Namespace, probe: ClientProbe, results: Sequence[RunResult]) -> dict[str, object]:
-    environments = {value for result in results for key, value in result.metadata if key == "environment"}
     return {
-        "client": args.client, "version": probe.version or "unavailable",
-        "enabled_composition": sorted(environments)[0] if len(environments) == 1 else _composition(probe),
+        "client": probe.client, "version": probe.version or "unavailable",
+        "enabled_composition": _composition(probe),
+        "enabled_plugins": sorted(probe.enabled_plugins),
         "model": args.model or "omitted", "reasoning": args.reasoning or "omitted",
         "repetitions": args.repetitions,
     }
@@ -421,15 +437,31 @@ def run_probe(args: argparse.Namespace, adapter: Any) -> int:
     """Persist a probe as raw evidence and seal it with controller metadata."""
     output_root = Path(args.output)
     raw_root = output_root / _RAW_DIRECTORY
-    if (output_root / "controller.json").exists() or (output_root / "manifest.sha256").exists():
-        return 1
+    probes_path = output_root / "probes.json"
     try:
+        if (output_root / "manifest.sha256").exists() and verify_manifest(
+            output_root, (output_root / "manifest.sha256").read_text(encoding="utf-8")
+        ):
+            return 1
+        if probes_path.exists():
+            probes = json.loads(probes_path.read_text(encoding="utf-8"))
+            if not isinstance(probes, dict) or not isinstance(probes.get("probes"), list):
+                return 1
+            entries = probes["probes"]
+        else:
+            entries = []
         probe = adapter.probe()
-        record_run(raw_root, args.client, "probe", 1, _probe_artifacts(adapter, probe), Path(tempfile.gettempdir()) / "eval-harness-controller-quarantine")
-    except (OSError, ValueError, PotentialSecretError, AttributeError):
+        number = 1 + sum(1 for entry in entries if isinstance(entry, dict) and entry.get("client") == args.client)
+        probe_id = "probe-%02d" % number
+        record_probe(
+            raw_root, args.client, probe_id, _probe_artifacts(adapter, probe),
+            Path(tempfile.gettempdir()) / "eval-harness-controller-quarantine",
+        )
+    except (OSError, ValueError, PotentialSecretError, AttributeError, json.JSONDecodeError):
         return 1
-    ledger = {"probe": _probe_payload(probe), "identity": _batch_identity(args, probe)}
-    return 0 if _finalize(output_root, ledger, "# Installed Plugin Evaluation\n\n- status: probe-only\n") else 1
+    entries.append({"client": args.client, "probe_id": probe_id, "probe": _probe_payload(probe)})
+    _write_derived(probes_path, json.dumps({"probes": entries}, sort_keys=True, indent=2) + "\n")
+    return 0 if _refresh_manifest(output_root) else 1
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:

@@ -146,14 +146,8 @@ def render_report(
         results, scores, adjudications, required["repetitions"]
     )
     status = "verified" if not verification_errors else "not verified"
-    actual_clients = sorted({run.client for run in results})
-    actual_compositions = sorted(
-        {value for run in results for value in _environment_values(run)}
-    )
-    rendered_client = actual_clients[0] if len(actual_clients) == 1 else "mixed"
-    rendered_composition = (
-        actual_compositions[0] if len(actual_compositions) == 1 else "mixed"
-    )
+    rendered_client = required["client"]
+    rendered_composition = required["enabled_composition"]
     lines = (
         "# Installed Plugin Evaluation",
         "",

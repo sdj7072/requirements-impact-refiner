@@ -220,6 +220,46 @@ def record_run(
     )
 
 
+def record_probe(
+    raw_root: Path,
+    client: str,
+    probe_id: str,
+    artifacts: Mapping[str, Artifact],
+    quarantine_root: Path,
+) -> Path:
+    """Atomically record one named structural probe without a run/repetition path."""
+    prepared = _artifact_bytes(artifacts)
+    raw_root = Path(raw_root)
+    quarantine_root = Path(quarantine_root)
+    raw_resolved = raw_root.resolve()
+    quarantine_resolved = quarantine_root.resolve()
+    if quarantine_resolved == raw_resolved or raw_resolved in quarantine_resolved.parents:
+        raise ValueError("quarantine_root must be outside raw_root")
+    repository_root = _repository_root(raw_resolved)
+    if repository_root is not None and _is_within(quarantine_resolved, repository_root):
+        raise ValueError("quarantine_root must be outside repository")
+
+    target = raw_root / _component(client, "client") / _component(probe_id, "probe_id")
+    findings = tuple(
+        sorted(
+            {
+                finding
+                for _, payload in prepared
+                for finding in find_potential_secrets(
+                    payload.decode("utf-8", errors="replace")
+                )
+            }
+        )
+    )
+    if findings:
+        quarantine_path = _write_atomically(
+            quarantine_root / _component(client, "client") / _component(probe_id, "probe_id"),
+            prepared,
+        )
+        raise PotentialSecretError(findings, quarantine_path)
+    return _write_atomically(target, prepared)
+
+
 def _evidence_files(raw_root: Path):
     if not raw_root.exists():
         return ()
