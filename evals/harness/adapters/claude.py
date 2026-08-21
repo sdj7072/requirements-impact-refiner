@@ -120,7 +120,9 @@ class ClaudeAdapter(ClientAdapter):
         version = self._result_at(results, 0)
         plugin_list = self._result_at(results, 4)
         plugin_entries = (
-            self._plugin_entries(plugin_list.stdout) if plugin_list is not None else None
+            self._plugin_entries(plugin_list.stdout)
+            if plugin_list is not None and self._succeeded(plugin_list)
+            else None
         )
         enabled = self._enabled_plugins(plugin_entries)
         plugin_version = self._requirements_impact_refiner_version(plugin_entries)

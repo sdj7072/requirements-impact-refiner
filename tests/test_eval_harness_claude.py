@@ -47,6 +47,7 @@ def write_fake_claude(
     doctor_mode="success",
     version_text="claude 1.2.3-test",
     plugin_list_payload=None,
+    plugin_list_mode="success",
 ):
     if plugin_list_payload is None:
         plugin_list_payload = json.dumps(
@@ -75,7 +76,12 @@ def write_fake_claude(
         "elif args == ['plugin', 'marketplace', 'list']:\n"
         "    print('marketplace empty')\n"
         "elif args == ['plugin', 'list', '--json']:\n"
-        f"    print({plugin_list_payload!r})\n"
+        f"    mode = {plugin_list_mode!r}\n"
+        f"    print({plugin_list_payload!r}, flush=True)\n"
+        "    if mode == 'hang':\n"
+        "        time.sleep(2)\n"
+        "    if mode == 'nonzero':\n"
+        "        sys.exit(3)\n"
         "else:\n"
         "    print('unexpected arguments', file=sys.stderr)\n"
         "    sys.exit(2)\n",
@@ -194,6 +200,70 @@ class ClaudeAdapterTest(unittest.TestCase):
             probe.enabled_plugins,
             ("requirements-impact-refiner@requirements-impact-refiner",),
         )
+
+    def test_probe_does_not_fabricate_version_from_malformed_plugin_list(self):
+        """Treating invalid stdout as inventory would invent configuration evidence."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(temporary, plugin_list_payload="not JSON")
+            probe = ClaudeAdapter(executable=str(executable), cwd=Path(temporary)).probe()
+
+        self.assertIsNone(probe.plugin_version)
+        self.assertEqual(probe.enabled_plugins, ())
+
+    def test_probe_reports_no_version_when_requirements_impact_refiner_is_missing(self):
+        """A missing installed plugin cannot support a reported version."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(temporary, plugin_list_payload="[]")
+            probe = ClaudeAdapter(executable=str(executable), cwd=Path(temporary)).probe()
+
+        self.assertIsNone(probe.plugin_version)
+        self.assertEqual(probe.enabled_plugins, ())
+
+    def test_probe_records_disabled_plugin_version_without_enabling_it(self):
+        """An installed disabled plugin has a version but must not enter enabled inventory."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(
+                temporary,
+                plugin_list_payload=CLAUDE_PLUGIN_LIST_FIXTURE.replace(
+                    '"enabled": true', '"enabled": false'
+                ),
+            )
+            probe = ClaudeAdapter(executable=str(executable), cwd=Path(temporary)).probe()
+
+        self.assertEqual(probe.plugin_version, "0.3.0")
+        self.assertEqual(probe.enabled_plugins, ())
+
+    def test_probe_ignores_plausible_stdout_from_failed_plugin_list(self):
+        """Nonzero plugin-list output is failed evidence, not an inventory."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(
+                temporary,
+                plugin_list_payload=CLAUDE_PLUGIN_LIST_FIXTURE,
+                plugin_list_mode="nonzero",
+            )
+            probe = ClaudeAdapter(executable=str(executable), cwd=Path(temporary)).probe()
+
+        self.assertIsNone(probe.plugin_version)
+        self.assertEqual(probe.enabled_plugins, ())
+        self.assertIn("plugin-list-blocked", probe.capabilities)
+
+    def test_probe_ignores_plausible_stdout_from_timed_out_plugin_list(self):
+        """Timed-out plugin-list output is incomplete evidence, not an inventory."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(
+                temporary,
+                plugin_list_payload=CLAUDE_PLUGIN_LIST_FIXTURE,
+                plugin_list_mode="hang",
+            )
+            adapter = ClaudeAdapter(
+                executable=str(executable), cwd=Path(temporary), timeout_seconds=0.01
+            )
+            probe = adapter.probe()
+
+        self.assertIsNone(probe.plugin_version)
+        self.assertEqual(probe.enabled_plugins, ())
+        self.assertTrue(adapter.structural_results[4].timed_out)
+        self.assertIn("plugin-list-blocked", probe.capabilities)
 
     def test_doctor_timeout_blocks_only_doctor_probe(self):
         """Treating a timed-out doctor as a global failure would erase usable structure."""
