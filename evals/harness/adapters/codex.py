@@ -4,7 +4,7 @@ import json
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Tuple
 
 from .base import ClientAdapter
 from ..evidence import PotentialSecretError, record_run
@@ -68,19 +68,15 @@ class CodexAdapter(ClientAdapter):
         return tuple(command)
 
     def build_resume_command(
-        self, request: RunRequest, thread_id: str, turn: Union[CaseTurn, str], final_path: Path
+        self, request: RunRequest, thread_id: str, turn: CaseTurn, final_path: Path
     ) -> Tuple[str, ...]:
-        """Resume the exact session emitted by the first persisted turn."""
+        """Resume the exact session emitted by the supplied persisted turn."""
         if not isinstance(thread_id, str) or not _UUID.fullmatch(thread_id):
             raise ValueError("thread_id must be a parsed UUID")
-        if isinstance(turn, CaseTurn):
-            prompt = turn.prompt
-            evidence = turn.repository_evidence
-        elif isinstance(turn, str):
-            prompt = turn
-            evidence = self._evidence_for_prompt(request, prompt)
-        else:
-            raise TypeError("turn must be a CaseTurn or prompt string")
+        if not isinstance(turn, CaseTurn):
+            raise TypeError("turn must be a CaseTurn")
+        prompt = turn.prompt
+        evidence = turn.repository_evidence
         return (
             self.executable,
             "exec",
@@ -326,13 +322,6 @@ class CodexAdapter(ClientAdapter):
             prompt,
             "\n".join("- %s" % item for item in repository_evidence),
         )
-
-    @staticmethod
-    def _evidence_for_prompt(request: RunRequest, prompt: str) -> Sequence[str]:
-        for turn in request.case.turns:
-            if turn.prompt == prompt:
-                return turn.repository_evidence
-        raise ValueError("resume prompt must belong to the request")
 
     @staticmethod
     def _append_run_options(command: list[str], request: RunRequest) -> None:

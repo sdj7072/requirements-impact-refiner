@@ -168,7 +168,7 @@ class CodexAdapterTest(unittest.TestCase):
                 '{"type":"thread.started","thread_id":"' + UUID + '"}\n'
             )
             argv = adapter.build_resume_command(
-                request, thread_id, "second turn", Path(temporary) / "FINAL"
+                request, thread_id, request.case.turns[1], Path(temporary) / "FINAL"
             )
 
         self.assertEqual(thread_id, UUID)
@@ -179,6 +179,16 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertNotIn("--last", argv)
         self.assertNotIn("-m", argv)
         self.assertNotIn("model_reasoning_effort", " ".join(argv))
+
+    def test_resume_rejects_raw_prompt_text(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            request = make_request(temporary, ("first turn", "second turn"))
+            adapter = CodexAdapter(cwd=Path(temporary))
+
+            with self.assertRaisesRegex(TypeError, "CaseTurn"):
+                adapter.build_resume_command(
+                    request, UUID, "second turn", Path(temporary) / "FINAL"
+                )
 
     def test_parse_thread_id_rejects_non_thread_or_non_uuid_events(self):
         adapter = CodexAdapter()
@@ -286,14 +296,15 @@ class CodexAdapterTest(unittest.TestCase):
                 ("same prompt", "same prompt"),
                 evidence=(("first.py",), ("second.py",)),
             )
+            supplied_turn = CaseTurn("same prompt", ("supplied.py",))
             argv = CodexAdapter(cwd=Path(temporary)).build_resume_command(
                 request,
                 UUID,
-                request.case.turns[1],
+                supplied_turn,
                 Path(temporary) / "FINAL",
             )
 
-        self.assertEqual(argv[-1], "same prompt\n\nRepository evidence:\n- second.py")
+        self.assertEqual(argv[-1], "same prompt\n\nRepository evidence:\n- supplied.py")
 
     def test_execute_uses_the_second_turn_evidence_when_prompts_are_identical(self):
         with tempfile.TemporaryDirectory() as temporary:
