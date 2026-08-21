@@ -71,7 +71,7 @@ VALID_REPORT = """# Requirements Impact Report
 
 | ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| IMP-001 | REQ-001 | contract | critical | accepted | verified | tests/test_exports.py | INV-001 | DEC-001 | AC-001 |
+| IMP-001 | REQ-001 | interfaces | critical | accepted | verified | tests/test_exports.py | INV-001 | DEC-001 | AC-001 |
 
 ## Decisions and Accepted Risks
 
@@ -159,7 +159,7 @@ PRE_DECISION_REPORT = """# Requirements Impact Report
 
 | ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| IMP-001 | REQ-001 | contract | critical | refining | verified | tests/test_exports.py | INV-001 | — | AC-001 |
+| IMP-001 | REQ-001 | interfaces | critical | refining | verified | tests/test_exports.py | INV-001 | — | AC-001 |
 
 ## Decision Needed
 
@@ -535,7 +535,7 @@ class ValidateImpactReportTest(unittest.TestCase):
             "requirement": "| REQ-001 | Preserve existing exports while adding sharing. | Product request |",
             "invariant": "| INV-001 | Existing exports remain private. | verified | tests/test_exports.py |",
             "impact": (
-                "| IMP-001 | REQ-001 | contract | critical | accepted | verified | "
+                "| IMP-001 | REQ-001 | interfaces | critical | accepted | verified | "
                 "tests/test_exports.py | INV-001 | DEC-001 | AC-001 |"
             ),
             "criterion": (
@@ -625,7 +625,7 @@ class ValidateImpactReportTest(unittest.TestCase):
 
     def test_rejects_each_invalid_report_contract(self):
         impact_row = (
-            "| IMP-001 | REQ-001 | contract | critical | accepted | verified | "
+            "| IMP-001 | REQ-001 | interfaces | critical | accepted | verified | "
             "tests/test_exports.py | INV-001 | DEC-001 | AC-001 |"
         )
         mutations = {
@@ -699,6 +699,10 @@ class ValidateImpactReportTest(unittest.TestCase):
             "| --- | --- | --- | --- | --- |\n"
             "| IMP-001 | `blocked` | Waiting for product input. | DEC-001 | Product |\n\n"
             "## Analysis Scope and Limitations",
+            1,
+        ).replace(
+            "| Existing planning workflow |",
+            "| Not ready |",
             1,
         )
 

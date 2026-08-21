@@ -8,7 +8,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from impact_report import parse_report, validate_baseline
+from impact_report import parse_report, validate_baseline, validate_semantics
 
 
 ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
@@ -459,6 +459,7 @@ def validate_report(text: str) -> list[str]:
                 "is missing from unresolved items"
             )
     errors.extend(validate_baseline(parsed_report))
+    errors.extend(validate_semantics(parsed_report))
     return sorted(set(errors))
 
 
