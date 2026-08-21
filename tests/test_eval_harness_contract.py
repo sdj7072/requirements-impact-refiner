@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 from evals.harness.catalog import CatalogError, load_all, load_catalog, select_suite
-from evals.harness.models import CaseSpec, CaseTurn
+from evals.harness.models import CaseSpec, CaseTurn, RunRequest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,6 +155,17 @@ class EvalHarnessContractTest(unittest.TestCase):
                 "runResult",
             },
         )
+
+    def test_retry_identity_is_typed_and_mirrored_in_the_result_schema(self):
+        """Encoding attempts in repetition would make matrix keys non-integral."""
+        fields = RunRequest.__dataclass_fields__
+        schema = json.loads(RESULT_SCHEMA_PATH.read_text(encoding="utf-8"))
+        run_result = schema["$defs"]["runResult"]
+
+        self.assertEqual(fields["attempt"].default, 1)
+        self.assertIsNone(fields["retry_of"].default)
+        self.assertEqual(run_result["properties"]["attempt"], {"type": "integer", "minimum": 1})
+        self.assertEqual(run_result["properties"]["retry_of"], {"type": ["string", "null"]})
 
     def test_case_schema_rejects_whitespace_for_every_loader_nonblank_string(self):
         schema = json.loads(CASE_SCHEMA_PATH.read_text(encoding="utf-8"))

@@ -40,6 +40,8 @@ class RunRequest:
     model: Optional[str]
     reasoning: Optional[str]
     output_root: Path
+    attempt: int = 1
+    retry_of: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,8 @@ class RunResult:
     final_output: Optional[str] = None
     session_id: Optional[str] = None
     metadata: Tuple[Tuple[str, str], ...] = ()
+    attempt: int = 1
+    retry_of: Optional[str] = None
 
 
 @dataclass(frozen=True)

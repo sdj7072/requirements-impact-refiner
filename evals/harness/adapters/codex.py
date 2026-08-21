@@ -36,10 +36,12 @@ class CodexAdapter(ClientAdapter):
             if quarantine_root is None
             else Path(quarantine_root)
         )
+        self.probe_results: Tuple[CommandResult, ...] = ()
 
     def probe(self) -> ClientProbe:
         """Inspect the installed CLI and enabled plugin inventory without mutation."""
-        probe, _ = self._probe_with_commands()
+        probe, commands = self._probe_with_commands()
+        self.probe_results = commands
         return probe
 
     def prepare(self) -> ClientProbe:
@@ -104,6 +106,7 @@ class CodexAdapter(ClientAdapter):
     def execute(self, request: RunRequest) -> RunResult:
         """Execute one request and preserve successful and infrastructure attempts."""
         probe, probe_commands = self._probe_with_commands()
+        self.probe_results = probe_commands
         artifacts: dict[str, str] = {
             "metadata.json": self._metadata_json(probe, probe_commands, (), request),
         }
@@ -396,6 +399,7 @@ class CodexAdapter(ClientAdapter):
                 request.repetition,
                 artifacts,
                 self.quarantine_root,
+                attempt=request.attempt,
             )
         except PotentialSecretError:
             status = RunStatus.BLOCKED
@@ -419,6 +423,8 @@ class CodexAdapter(ClientAdapter):
                 ("plugin_version", probe.plugin_version or ""),
                 ("enabled_plugins", ",".join(probe.enabled_plugins)),
             ),
+            attempt=request.attempt,
+            retry_of=request.retry_of,
         )
 
     @staticmethod
@@ -445,6 +451,8 @@ class CodexAdapter(ClientAdapter):
                 "enabled_plugins": list(probe.enabled_plugins),
                 "model": request.model,
                 "reasoning": request.reasoning,
+                "attempt": request.attempt,
+                "retry_of": request.retry_of,
                 "probe_commands": [command_payload(command) for command in probe_commands],
                 "execution_commands": [command_payload(command) for command in commands],
             },

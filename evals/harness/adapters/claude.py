@@ -80,6 +80,7 @@ class ClaudeAdapter(ClientAdapter):
                 request.repetition,
                 artifacts,
                 self.quarantine_root,
+                attempt=request.attempt,
             )
         except PotentialSecretError:
             reason = "potential secret exposure"
@@ -99,6 +100,8 @@ class ClaudeAdapter(ClientAdapter):
                 ("environment", _ENVIRONMENT_LABEL),
                 ("enabled_plugins", ",".join(probe.enabled_plugins)),
             ),
+            attempt=request.attempt,
+            retry_of=request.retry_of,
         )
 
     def _probe_with_commands(self) -> tuple[ClientProbe, Tuple[CommandResult, ...]]:
@@ -203,6 +206,8 @@ class ClaudeAdapter(ClientAdapter):
                 "enabled_plugins": list(probe.enabled_plugins),
                 "model": request.model,
                 "reasoning": request.reasoning,
+                "attempt": request.attempt,
+                "retry_of": request.retry_of,
                 "probe_commands": command_rows,
                 "behavior": "blocked",
                 "reason": "paid authentication unavailable",

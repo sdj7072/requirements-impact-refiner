@@ -96,13 +96,22 @@ def _artifact_bytes(artifacts: Mapping[str, Artifact]) -> tuple[tuple[str, bytes
     return tuple(prepared)
 
 
-def _run_directory(root: Path, client: object, case_id: object, repetition: object) -> Path:
-    return (
+def _attempt_component(attempt: object) -> str:
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise ValueError("attempt must be a positive integer")
+    return "attempt-%02d" % attempt
+
+
+def _run_directory(
+    root: Path, client: object, case_id: object, repetition: object, attempt: object = 1
+) -> Path:
+    directory = (
         root
         / _component(client, "client")
         / _component(case_id, "case_id")
         / _repetition_component(repetition)
     )
+    return directory if attempt == 1 else directory / _attempt_component(attempt)
 
 
 def _repository_root(path: Path):
@@ -170,6 +179,7 @@ def record_run(
     repetition: object,
     artifacts: Mapping[str, Artifact],
     quarantine_root: Path,
+    attempt: int = 1,
 ) -> Path:
     """Atomically persist one run, or quarantine its original bytes on suspicion.
 
@@ -201,11 +211,13 @@ def record_run(
     )
     if findings:
         quarantine_path = _write_atomically(
-            _run_directory(quarantine_root, client, case_id, repetition), prepared
+            _run_directory(quarantine_root, client, case_id, repetition, attempt), prepared
         )
         raise PotentialSecretError(findings, quarantine_path)
 
-    return _write_atomically(_run_directory(raw_root, client, case_id, repetition), prepared)
+    return _write_atomically(
+        _run_directory(raw_root, client, case_id, repetition, attempt), prepared
+    )
 
 
 def _evidence_files(raw_root: Path):
