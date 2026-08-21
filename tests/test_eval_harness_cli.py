@@ -22,6 +22,8 @@ class FakeAdapter:
         plugin_version="0.3.0",
         enabled_plugins=("requirements-impact-refiner", "superpowers"),
         result_metadata=(),
+        available=True,
+        reason=None,
     ):
         self.statuses = list(statuses)
         self.requests = []
@@ -32,6 +34,8 @@ class FakeAdapter:
         self.plugin_version = plugin_version
         self.enabled_plugins = enabled_plugins
         self.result_metadata = result_metadata
+        self.available = available
+        self.reason = reason
         self.probe_results = (
             CommandResult(("fake", "--version"), 0, "fake 1.0", "", 0.0, False),
         )
@@ -39,12 +43,13 @@ class FakeAdapter:
     def prepare(self):
         return ClientProbe(
             client=self.client,
-            available=True,
+            available=self.available,
             version=self.version,
             authenticated=None,
             plugin_version=self.plugin_version,
             enabled_plugins=self.enabled_plugins,
             capabilities=("fake",),
+            reason=self.reason,
         )
 
     def probe(self):
@@ -153,6 +158,22 @@ class EvalHarnessCliTest(unittest.TestCase):
             )
 
         self.assertEqual(error.exception.code, 2)
+
+    def test_unavailable_prepare_stops_a_batch_before_creating_case_evidence(self):
+        """Executing after a rejected composition would make mismatched runs appear selectable."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+            adapter = FakeAdapter(available=False, reason="expected 0.3.1; observed 0.3.0")
+
+            exit_code = run_batch(args, adapter)
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(adapter.requests, [])
+            self.assertFalse((output / "controller.json").exists())
+            self.assertFalse((output / "raw" / "codex" / "POS-authorization").exists())
 
     def test_infrastructure_error_has_a_single_append_only_retry(self):
         """Reusing the completed run ID would overwrite evidence from the failed attempt."""

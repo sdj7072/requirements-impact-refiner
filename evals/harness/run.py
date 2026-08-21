@@ -367,6 +367,8 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
     try:
         schedule = build_schedule(load_all() if cases is None else cases, args.suite, args.repetitions)
         probe = adapter.prepare()
+        if not probe.available:
+            return 1
     except (OSError, ValueError, AttributeError):
         return 1
     raw_root = output_root / _RAW_DIRECTORY
