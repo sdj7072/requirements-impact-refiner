@@ -40,6 +40,23 @@ def compatibility_identity_rows(path):
 
 
 class DocumentationTest(unittest.TestCase):
+    def test_v03_lineage_and_migration_contract_is_synchronized(self):
+        for name in READMES:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for token in (
+                "0.3.0",
+                "RPT-###",
+                "Previous SHA-256",
+                "reopened",
+                "--previous",
+                "--print-expected-delta",
+                "Revision 1",
+            ):
+                self.assertIn(token, text, f"{token} missing from {name}")
+            self.assertRegex(text, r"v?0\.2(?:\.0)?.{0,80}(historical|과거|履歴)")
+            self.assertRegex(text, r"(manual|수동|手動).{0,80}(migration|마이그레이션|移行)")
+            self.assertRegex(text, r"Claude Code.{0,160}(`not verified`|`blocked`)")
+
     def test_future_acceptance_criterion_examples_are_not_verified_findings(self):
         for path in (SKILL_ROOT / "references").glob("*.md"):
             header = None

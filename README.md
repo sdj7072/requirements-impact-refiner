@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.2.0` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.3.0` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
@@ -16,13 +16,14 @@ The canonical skill is [`skills/requirements-impact-refiner/SKILL.md`](skills/re
 
 | ID | Meaning |
 | --- | --- |
+| `RPT-###` | Stable report identity across consecutive revisions |
 | `REQ-###` | Original or refined requirement |
 | `INV-###` | Current behavior that may need preservation |
 | `IMP-###` | Affected behavior, contract, data path, or risk |
 | `DEC-###` | A choice explicitly selected by a user or stakeholder |
 | `AC-###` | Observable acceptance or regression criterion |
 
-Evidence levels are exactly `verified`, `inferred`, and `unknown`. Impact states are exactly `detected`, `refining`, `mitigated`, `resolved`, `accepted`, `deferred`, `blocked`, and `superseded`. `accepted` requires a linked `DEC-###`; `resolved` requires supporting evidence. Every material requirement revision recalculates the whole known impact set and reports a disjoint delta, including `new: none` when appropriate.
+Evidence levels are exactly `verified`, `inferred`, and `unknown`. Impact states are exactly `detected`, `refining`, `mitigated`, `resolved`, `accepted`, `deferred`, `blocked`, and `superseded`. `reopened` is a Delta transition for a terminal impact returning to active work, not a ledger state. `accepted` requires a linked `DEC-###`; `resolved` requires supporting evidence. Each report records `RPT-###`, Revision, `Previous SHA-256`, and phase. A Revision 1 baseline uses predecessor `none` and classifies every impact as `new`; later revisions preserve IDs and compare against the exact predecessor bytes.
 
 ## 3. Quick Start
 
@@ -77,7 +78,7 @@ Request: rename public API field `displayName` to `name`. Repository evidence sa
 | `REQ-002` | Introduce `name`, preserve deprecated `displayName` for one version, then remove it only after compatibility criteria pass. |
 | `AC-001` | The current iOS decoder and cached payload fixtures continue to work during that version. |
 
-The recalculated delta places `IMP-001` under `mitigated`, keeps `IMP-002` under `unchanged` until external-consumer evidence is inspected, lists no impact twice, and states `new: none`. The changelog promise is an invariant, not a fabricated user choice; `DEC-001` exists only after the explicit selection.
+The Revision 1 baseline records both impacts as `new`. On the next report, the recalculated Delta places `IMP-001` under `mitigated`, keeps `IMP-002` under `unchanged` until external-consumer evidence is inspected, and lists no impact twice. If later evidence invalidates a resolved impact, that impact becomes `reopened`. The changelog promise is an invariant, not a fabricated user choice; `DEC-001` exists only after the explicit selection.
 
 ## 5. Integrations
 
@@ -128,9 +129,11 @@ The broader Task 7 release audits supersede any inference of client support: Cod
 
 The skill can miss impacts outside the inspected scope. Users should keep unresolved, deferred, blocked, and accepted risks visible through planning and validate critical behavior with appropriate human review and tests.
 
+v0.2 is historical. The manual migration to `0.3.0` treats the first converted artifact as Revision 1 with a new `RPT-###`, `Previous SHA-256` set to `none`, and every retained impact under `new`. Do not fabricate a v0.2 predecessor digest. Subsequent revisions must preserve IDs and use the exact previous file bytes.
+
 ## 9. Report Schema and Validation
 
-Start from the [`template chooser`](skills/requirements-impact-refiner/assets/impact-report-template.md). Version 0.2 separates `pre-decision` and `post-decision` reports, forbids recorded decisions before selection, and validates a complete, disjoint Impact Delta.
+Start from the [`template chooser`](skills/requirements-impact-refiner/assets/impact-report-template.md). Version `0.3.0` separates `pre-decision` and `post-decision` reports, forbids recorded decisions before selection, and validates a complete, disjoint Impact Delta plus report lineage.
 
 Validate a completed report with the standard-library validator:
 
@@ -138,7 +141,14 @@ Validate a completed report with the standard-library validator:
 python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py path/to/report.md
 ```
 
-The validator checks required sections, definitions and references, exact evidence/state enums, decision links for `accepted`, evidence for `resolved`, and `AC-###` links for critical impacts. It does not verify that cited repository facts are true. The optional local skill/plugin platform validators were `blocked` in this environment as described above; no pass is claimed for them.
+Validate a later revision against its exact predecessor, or print the computed Delta without modifying either file:
+
+```sh
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md current.md
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md --print-expected-delta current.md
+```
+
+The validator checks required sections, definitions and references, exact evidence/state enums, decision links for `accepted`, evidence for `resolved`, `AC-###` links for critical impacts, consecutive revision numbers, stable report/impact IDs, the exact predecessor digest, and deterministic Delta transitions including `reopened`. It does not verify that cited repository facts are true or locate the predecessor automatically. The optional local skill/plugin platform validators were `blocked` in this environment as described above; no pass is claimed for them.
 
 ## 10. Development and Contributing
 

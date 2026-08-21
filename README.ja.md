@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.2.0` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
+Requirements Impact Refiner `0.3.0` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
 
 ## 1. 課題
 
@@ -16,13 +16,14 @@ Requirements Impact Refiner `0.2.0` は、具体的なソフトウェア変更�
 
 | ID | 意味 |
 | --- | --- |
+| `RPT-###` | 連続するリビジョンで維持する報告書 ID |
 | `REQ-###` | 元の要求または精緻化された要求 |
 | `INV-###` | 保持が必要になり得る現行動作 |
 | `IMP-###` | 影響を受ける動作、契約、データ経路、リスク |
 | `DEC-###` | ユーザーまたは関係者が明示的に選んだ決定 |
 | `AC-###` | 観測可能な受入基準または回帰基準 |
 
-根拠レベルは正確に `verified`, `inferred`, `unknown` です。影響状態は正確に `detected`, `refining`, `mitigated`, `resolved`, `accepted`, `deferred`, `blocked`, `superseded` です。`accepted` にはリンクされた `DEC-###` が、`resolved` には裏付ける根拠が必要です。重要な要求改訂のたびに既知の影響集合全体を再計算し、必要に応じて `new: none` を含む重複のない差分を示します。
+根拠レベルは正確に `verified`, `inferred`, `unknown` です。影響状態は正確に `detected`, `refining`, `mitigated`, `resolved`, `accepted`, `deferred`, `blocked`, `superseded` です。`reopened` は終端状態の影響が再び活動状態へ戻る Delta 遷移であり、台帳状態ではありません。各報告書は `RPT-###`, Revision, `Previous SHA-256`, phase を記録します。Revision 1 の基準報告は predecessor を `none`、全影響を `new` とし、後続リビジョンは ID を維持して直前ファイルの正確なバイト列と比較します。
 
 ## 3. クイックスタート
 
@@ -77,7 +78,7 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 | `REQ-002` | `name` を導入し、非推奨の `displayName` を一バージョン保持し、互換性基準を満たした後にだけ削除する。 |
 | `AC-001` | そのバージョン中、現行 iOS デコーダーとキャッシュペイロード fixture が動作し続ける。 |
 
-再計算した差分では `IMP-001` を `mitigated` に置き、外部利用者の根拠を調べるまで `IMP-002` を `unchanged` に保ち、同じ影響を二度記載せず、`new: none` を明示します。changelog の約束は不変条件であり、捏造したユーザー決定ではありません。`DEC-001` は明示的な選択後にのみ存在します。
+Revision 1 の基準報告では両方の影響を `new` とします。次の報告書で再計算した Delta は `IMP-001` を `mitigated`、外部利用者の根拠を調べるまで `IMP-002` を `unchanged` とし、同じ影響を二度記載しません。後の根拠が解決済み影響を無効にした場合、その影響は `reopened` です。changelog の約束は不変条件であり、捏造したユーザー決定ではありません。`DEC-001` は明示的な選択後にのみ存在します。
 
 ## 5. 統合
 
@@ -128,9 +129,11 @@ Superpowers はブレインストーミング、計画、実行、デバッグ�
 
 スキルは調査範囲外の影響を見逃す可能性があります。未解決、`deferred`、`blocked`、`accepted` のリスクを計画中も可視化し、重要な動作は適切な人手レビューとテストで検証してください。
 
+v0.2 は履歴形式です。`0.3.0` への移行は manual migration です。最初に変換した成果物を新しい `RPT-###` の Revision 1 とし、`Previous SHA-256` は `none`、維持する全影響は `new` とします。v0.2 の predecessor digest を捏造してはいけません。以降のリビジョンでは ID を維持し、直前ファイルの正確なバイト列を使います。
+
 ## 9. 報告書スキーマと検証
 
-[`テンプレート選択`](skills/requirements-impact-refiner/assets/impact-report-template.md) から始めます。バージョン 0.2 は `pre-decision` と `post-decision` の報告を分離し、選択前の決定記録を禁止し、完全で重複のない Impact Delta を検証します。
+[`テンプレート選択`](skills/requirements-impact-refiner/assets/impact-report-template.md) から始めます。バージョン `0.3.0` は `pre-decision` と `post-decision` の報告を分離し、選択前の決定記録を禁止し、完全で重複のない Impact Delta と報告書 lineage を検証します。
 
 完成した報告書は標準ライブラリだけの検証器で確認します。
 
@@ -138,7 +141,14 @@ Superpowers はブレインストーミング、計画、実行、デバッグ�
 python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py path/to/report.md
 ```
 
-検証器は必須セクション、定義と参照、正確な根拠/状態 enum、`accepted` の決定リンク、`resolved` の根拠、critical 影響の `AC-###` リンクを確認します。引用したリポジトリ事実の真偽は検証しません。任意のローカル skill/plugin platform validator は前述の環境問題で `blocked` され、成功は主張しません。
+後続リビジョンは正確な predecessor とともに検証し、両ファイルを変更せず計算済み Delta を表示できます。
+
+```sh
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md current.md
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md --print-expected-delta current.md
+```
+
+検証器は必須セクション、定義と参照、正確な根拠/状態 enum、`accepted` の決定リンク、`resolved` の根拠、critical 影響の `AC-###` リンク、連続リビジョン番号、安定した報告書/影響 ID、正確な predecessor digest、`reopened` を含む決定的 Delta 遷移を確認します。引用したリポジトリ事実の真偽は検証せず、predecessor を自動検索もしません。任意のローカル skill/plugin platform validator は前述の環境問題で `blocked` され、成功は主張しません。
 
 ## 10. 開発とコントリビューション
 

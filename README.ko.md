@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.2.0`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.3.0`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -16,13 +16,14 @@ Requirements Impact Refiner `0.2.0`는 구체적인 소프트웨어 변경을 �
 
 | ID | 의미 |
 | --- | --- |
+| `RPT-###` | 연속된 리비전에서 유지되는 보고서 식별자 |
 | `REQ-###` | 최초 또는 정제된 요구사항 |
 | `INV-###` | 보존이 필요할 수 있는 현재 동작 |
 | `IMP-###` | 영향을 받는 동작, 계약, 데이터 경로 또는 위험 |
 | `DEC-###` | 사용자나 이해관계자가 명시적으로 선택한 결정 |
 | `AC-###` | 관찰 가능한 인수 또는 회귀 기준 |
 
-근거 수준은 정확히 `verified`, `inferred`, `unknown`입니다. 영향 상태는 정확히 `detected`, `refining`, `mitigated`, `resolved`, `accepted`, `deferred`, `blocked`, `superseded`입니다. `accepted`에는 연결된 `DEC-###`가, `resolved`에는 뒷받침하는 근거가 필요합니다. 중요한 요구사항이 수정될 때마다 알려진 전체 영향 집합을 다시 계산하고, 필요하면 `new: none`까지 포함하여 중복 없는 변화량을 표시합니다.
+근거 수준은 정확히 `verified`, `inferred`, `unknown`입니다. 영향 상태는 정확히 `detected`, `refining`, `mitigated`, `resolved`, `accepted`, `deferred`, `blocked`, `superseded`입니다. `reopened`는 종료된 영향이 다시 활성화될 때 쓰는 Delta 전이이며 원장 상태가 아닙니다. 각 보고서는 `RPT-###`, Revision, `Previous SHA-256`, 단계를 기록합니다. Revision 1 기준선은 이전 값 `none`과 모든 영향을 `new`로 사용하며, 이후 리비전은 ID를 유지하고 이전 파일의 정확한 바이트와 비교합니다.
 
 ## 3. 빠른 시작
 
@@ -77,7 +78,7 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 | `REQ-002` | `name`을 도입하고 한 버전 동안 폐기 예정인 `displayName`을 보존한 뒤 호환성 기준을 통과한 후에만 제거한다. |
 | `AC-001` | 해당 버전 동안 현재 iOS 디코더와 캐시 페이로드 fixture가 계속 동작한다. |
 
-재계산된 변화량은 `IMP-001`을 `mitigated`에 배치하고, 외부 소비자 근거를 확인하기 전까지 `IMP-002`를 `unchanged`에 유지하며, 어떤 영향도 두 번 기재하지 않고 `new: none`을 표시합니다. 변경 이력의 약속은 불변 조건이지 임의로 만든 사용자 결정이 아닙니다. `DEC-001`은 명시적 선택 이후에만 생깁니다.
+Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다음 보고서의 재계산 Delta는 `IMP-001`을 `mitigated`에 두고, 외부 소비자 근거를 검사할 때까지 `IMP-002`를 `unchanged`에 유지하며 어떤 영향도 두 번 나열하지 않습니다. 이후 근거가 해결된 영향을 무효화하면 해당 영향은 `reopened`가 됩니다. 변경 이력의 약속은 불변 조건이지 임의로 만든 사용자 결정이 아닙니다. `DEC-001`은 명시적 선택 이후에만 생깁니다.
 
 ## 5. 연동
 
@@ -128,9 +129,11 @@ Superpowers는 아이디어 구상, 계획, 실행, 디버깅, 리뷰의 오케�
 
 스킬은 검사 범위 밖의 영향을 놓칠 수 있습니다. 해결되지 않거나 `deferred`, `blocked`, `accepted`된 위험을 계획 과정에서도 유지하고, 중요한 동작은 적절한 사람의 검토와 테스트로 검증해야 합니다.
 
+v0.2는 과거 형식입니다. `0.3.0`으로의 마이그레이션은 수동 migration입니다. 처음 변환한 산출물을 새 `RPT-###`의 Revision 1로 취급하고 `Previous SHA-256`은 `none`, 유지한 모든 영향은 `new`로 둡니다. v0.2 이전 해시를 만들어내지 마십시오. 그 다음 리비전부터 ID를 유지하고 바로 이전 파일의 정확한 바이트를 사용합니다.
+
 ## 9. 보고서 스키마와 검증
 
-[`템플릿 선택기`](skills/requirements-impact-refiner/assets/impact-report-template.md)에서 시작합니다. 버전 0.2는 `pre-decision`과 `post-decision` 보고서를 분리하고, 선택 전 결정 기록을 금지하며, 완전하고 서로 겹치지 않는 Impact Delta를 검증합니다.
+[`템플릿 선택기`](skills/requirements-impact-refiner/assets/impact-report-template.md)에서 시작합니다. 버전 `0.3.0`은 `pre-decision`과 `post-decision` 보고서를 분리하고, 선택 전 결정 기록을 금지하며, 완전하고 서로 겹치지 않는 Impact Delta와 보고서 계보를 검증합니다.
 
 완성된 보고서는 표준 라이브러리 기반 검증기로 확인합니다.
 
@@ -138,7 +141,14 @@ Superpowers는 아이디어 구상, 계획, 실행, 디버깅, 리뷰의 오케�
 python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py path/to/report.md
 ```
 
-검증기는 필수 섹션, 정의와 참조, 정확한 근거/상태 enum, `accepted`의 결정 연결, `resolved`의 근거, critical 영향의 `AC-###` 연결을 검사합니다. 인용한 저장소 사실이 참인지는 검증하지 않습니다. 선택적인 로컬 스킬/플러그인 플랫폼 검증기는 위에 설명한 환경 문제로 `blocked`되었으며 성공했다고 주장하지 않습니다.
+이후 리비전은 정확한 이전 파일과 함께 검증하며, 두 파일을 수정하지 않고 계산된 Delta를 출력할 수도 있습니다.
+
+```sh
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md current.md
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md --print-expected-delta current.md
+```
+
+검증기는 필수 섹션, 정의와 참조, 정확한 근거/상태 enum, `accepted`의 결정 연결, `resolved`의 근거, critical 영향의 `AC-###` 연결, 연속 리비전 번호, 안정적인 보고서/영향 ID, 정확한 이전 해시, `reopened`를 포함한 결정적 Delta 전이를 검사합니다. 인용한 저장소 사실이 참인지는 검증하지 않으며 이전 파일을 자동으로 찾지도 않습니다. 선택적인 로컬 스킬/플러그인 플랫폼 검증기는 위에 설명한 환경 문제로 `blocked`되었으며 성공했다고 주장하지 않습니다.
 
 ## 10. 개발과 기여
 

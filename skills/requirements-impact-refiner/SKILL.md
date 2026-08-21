@@ -4,7 +4,7 @@ description: Use when the automatic bootstrap has selected a concrete software b
 license: MIT
 compatibility: Works with Agent Skills clients that can inspect supplied files; repository access, search, and tests improve evidence quality but are not required.
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # Requirements Impact Refiner
