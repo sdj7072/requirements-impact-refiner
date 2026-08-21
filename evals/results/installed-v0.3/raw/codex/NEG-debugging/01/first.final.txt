@@ -1,0 +1,10 @@
+I can’t identify the cause yet: the supplied workspace is empty and isn’t a Git repository.
+
+Please provide the repository (or relevant test/source files) and one failing CI log, including:
+
+- Test name and assertion/error
+- Stack trace
+- CI command, runner/OS, and parallelism settings
+- A successful run of the same test, if available
+
+“Only fails in CI” narrows the search toward timing, concurrency, environment, locale/timezone, resource limits, and test isolation, but doesn’t distinguish among them.

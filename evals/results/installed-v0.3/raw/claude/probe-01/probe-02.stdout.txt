@@ -1,0 +1,26 @@
+Claude Code doctor
+
+Running: package-manager (2.1.228)
+Commit: 4a2077e9c396
+Platform: darwin-arm64
+Package manager: homebrew
+Path: /opt/homebrew/Caskroom/claude-code/2.1.228/claude
+Config install method: unknown
+Search: OK (bundled)
+Auto-updates: Managed by package manager
+Auto-update channel: latest
+Last update attempt: none recorded
+
+Remote Control
+Remote Control requires a claude.ai subscription. Run claude auth login to sign in with your claude.ai account.
+- Not signed in to claude.ai
+- claude.ai subscription auth not active
+- Sign-in is missing the user:profile scope
+- Organization not resolved
+- Remote Control rollout could not be verified for this account (no server response this session)
+
+1 warning found
+- macOS Keychain is not writable (security: SecKeychainSearchCreateFromAttributes: One or more parameters passed to a function were not valid.; security: SecKeychainItemCreateFromContent (<default>): Unable to obtain authorization for this operation.; add-generic-password: returned -60008). Console login will fail to save your API key.
+  Fix: Run: security unlock-keychain ~/Library/Keychains/login.keychain-db — if that doesn't fix it, your login keychain password may be out of sync with your account password: open Keychain Access, select the 'login' keychain, then Edit → Change Password for Keychain 'login'.
+
+For a full setup checkup that can also fix issues, run /doctor in a Claude Code session.

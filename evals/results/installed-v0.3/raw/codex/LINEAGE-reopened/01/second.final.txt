@@ -1,0 +1,9 @@
+Revision 2 is recorded and validated: [impact-report-r2.md](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-zbt_ghv_/impact-report-r2.md).
+
+`IMP-001` moved from `resolved` to `refining`, producing a `reopened` delta. It was not assigned a new impact ID because the desktop serializer changes the evidence for the existing client-compatibility impact.
+
+A decision is now required:
+
+1. Migrate desktop within the existing one-release window and gate removal on tests.
+2. Extend preservation until the desktop migration ships.
+3. Keep the original removal date and explicitly accept the desktop risk.

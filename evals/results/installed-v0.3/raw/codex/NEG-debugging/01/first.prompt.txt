@@ -1,0 +1,4 @@
+Find why this test intermittently fails.
+
+Repository evidence:
+- the failure occurs only in CI

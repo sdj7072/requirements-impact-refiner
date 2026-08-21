@@ -1,0 +1,96 @@
+The impact report is prepared below. The workspace is read-only, so it could not be saved as `webhook-retry-impact-report.md`. No predecessor report or repository files were available; deterministic file validation could not run.
+
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Record the impacts of changing webhook delivery retries; supplied evidence identifies an unresolved duplicate-delivery risk. | User request and supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Change webhook delivery retry behavior while explicitly addressing duplicate delivery after provider timeouts and defining idempotency behavior. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | A provider timeout can be followed by repeated webhook delivery attempts. | `verified` | Supplied evidence: delivery retries can repeat after a provider timeout. |
+| `INV-002` | Available documentation does not define webhook idempotency behavior. | `verified` | Supplied evidence: no idempotency behavior is documented. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` must deliberately define the delivery guarantee for provider timeouts rather than change it implicitly. | `IMP-001` | Supplied timeout-retry evidence. |
+| `INV-002` | `REQ-001` must close the documentation gap by defining the selected idempotency and duplicate-handling contract. | `IMP-002` | Supplied documentation evidence. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `refining` | `verified` | Repeated attempts after a provider timeout create an unresolved duplicate-delivery risk until a delivery guarantee is selected. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | `interfaces` | `high` | `blocked` | `unknown` | No consumer contract, idempotency key, or deduplication behavior was available to determine whether duplicates are safely handled. | `INV-002` | the pending decision | `AC-002` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| What delivery guarantee should govern an attempt whose outcome is ambiguous because of a provider timeout? | At-least-once delivery with a stable idempotency key and documented deduplication contract. | `IMP-001`, `IMP-002` | Preserves timeout recovery but requires provider or consumer deduplication support. |
+| What delivery guarantee should govern an attempt whose outcome is ambiguous because of a provider timeout? | At-most-once delivery: do not automatically retry the timed-out attempt. | `IMP-001`, `IMP-002` | Avoids retry-caused duplicates but can lose webhooks the provider did not process. |
+| What delivery guarantee should govern an attempt whose outcome is ambiguous because of a provider timeout? | At-least-once delivery with duplicates explicitly documented as possible and accepted. | `IMP-001`, `IMP-002` | Minimizes implementation change, but downstream side effects may occur more than once. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement records the duplicate-delivery risk and missing idempotency contract without selecting retry mechanics. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | An integration test simulates an ambiguous provider timeout and proves the selected delivery guarantee, including the permitted number of downstream side effects. | Future timeout/retry integration test; no existing test was supplied. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | The webhook contract documents retry triggers, delivery guarantees, idempotency-key behavior if applicable, deduplication responsibility, and duplicate-handling expectations. | Future contract inspection; no current idempotency documentation was supplied. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-002` | `blocked` | The provider and consumer idempotency implementation is unavailable, so duplicate safety cannot be assessed. | the pending decision | Webhook/API owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| No repository files or predecessor v0.3 report were available. | The two evidence statements supplied with the request. | Timeout repetition and the documentation gap are established, but implementation details, consumers, telemetry, and tests remain unknown. |
+| The workspace is read-only. | Save attempt was rejected by workspace permissions. | The report is recorded inline only and could not undergo file-based deterministic validation. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending delivery-guarantee decision is selected. | `REQ-001`, `INV-001`, `INV-002`, `IMP-001`, `IMP-002` | Duplicate delivery after an ambiguous timeout (`IMP-001`) and unknown idempotency support (`IMP-002`). | `AC-001`, `AC-002` | Not ready |

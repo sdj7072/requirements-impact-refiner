@@ -1,0 +1,8 @@
+Revision 2 is recorded and validated: [impact-report-r2.md](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-jrvf2eh_/impact-report-r2.md).
+
+- Phase remains `pre-decision`.
+- `IMP-001` and `IMP-002` remain `blocked`.
+- Their lifecycle delta is `unchanged`.
+- No decision or new impact was recorded.
+- Exact predecessor SHA-256: `5d0852090beae9b283d713721a82a53a75762f2cac810e3fabf197048806f5fc`.
+- Deterministic revision validation passed.
