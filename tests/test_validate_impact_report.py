@@ -39,9 +39,9 @@ VALID_REPORT = """# Requirements Impact Report
 
 ## Report State
 
-| Phase |
-| --- |
-| post-decision |
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| RPT-001 | 1 | none | post-decision |
 
 ## Original Requirement
 
@@ -86,11 +86,11 @@ VALID_REPORT = """# Requirements Impact Report
 | resolved | none |
 | mitigated | none |
 | unchanged | none |
-| accepted | IMP-001 |
+| accepted | none |
 | deferred | none |
 | blocked | none |
 | superseded | none |
-| new | none |
+| new | IMP-001 |
 
 ## Requirement Revision History
 
@@ -127,9 +127,9 @@ PRE_DECISION_REPORT = """# Requirements Impact Report
 
 ## Report State
 
-| Phase |
-| --- |
-| pre-decision |
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| RPT-001 | 1 | none | pre-decision |
 
 ## Original Requirement
 
@@ -174,12 +174,12 @@ PRE_DECISION_REPORT = """# Requirements Impact Report
 | --- | --- |
 | resolved | none |
 | mitigated | none |
-| unchanged | IMP-001 |
+| unchanged | none |
 | accepted | none |
 | deferred | none |
 | blocked | none |
 | superseded | none |
-| new | none |
+| new | IMP-001 |
 
 ## Requirement Revision History
 
@@ -233,8 +233,6 @@ POST_DECISION_REPORT = PRE_DECISION_REPORT.replace(
     "| critical | refining | verified | tests/test_exports.py | INV-001 | — | AC-001 |",
     "| critical | accepted | verified | tests/test_exports.py | INV-001 | DEC-001 | AC-001 |",
     1,
-).replace("| unchanged | IMP-001 |", "| unchanged | none |", 1).replace(
-    "| accepted | none |", "| accepted | IMP-001 |", 1
 ).replace(
     "| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — | Initial refinement. |",
     "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — | Applied selected mechanism. |",
@@ -247,6 +245,34 @@ POST_DECISION_REPORT = PRE_DECISION_REPORT.replace(
 
 
 class ValidateImpactReportTest(unittest.TestCase):
+    def test_parses_v03_report_metadata(self):
+        report, errors = VALIDATOR.parse_report(POST_DECISION_REPORT)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(report.metadata.report_id, "RPT-001")
+        self.assertEqual(report.metadata.revision, 1)
+        self.assertEqual(report.metadata.previous_sha256, "none")
+        self.assertEqual(report.metadata.phase, "post-decision")
+
+    def test_revision_one_requires_none_predecessor_and_all_impacts_new(self):
+        wrong_hash = POST_DECISION_REPORT.replace(
+            "| RPT-001 | 1 | none |",
+            f"| RPT-001 | 1 | {'a' * 64} |",
+            1,
+        )
+        wrong_delta = POST_DECISION_REPORT.replace(
+            "| unchanged | none |", "| unchanged | IMP-001 |", 1
+        ).replace("| new | IMP-001 |", "| new | none |", 1)
+
+        self.assertIn(
+            "revision 1 requires Previous SHA-256 none",
+            VALIDATOR.validate_report(wrong_hash),
+        )
+        self.assertIn(
+            "revision 1 impact IMP-001 must be new",
+            VALIDATOR.validate_report(wrong_delta),
+        )
+
     def test_accepts_both_explicit_report_phases(self):
         self.assertEqual(VALIDATOR.validate_report(PRE_DECISION_REPORT), [])
         self.assertEqual(VALIDATOR.validate_report(POST_DECISION_REPORT), [])
@@ -395,7 +421,7 @@ class ValidateImpactReportTest(unittest.TestCase):
 
     def test_delta_requires_each_category_and_each_known_impact_exactly_once(self):
         missing_category = POST_DECISION_REPORT.replace("| superseded | none |\n", "", 1)
-        missing_impact = POST_DECISION_REPORT.replace("| accepted | IMP-001 |", "| accepted | none |", 1)
+        missing_impact = POST_DECISION_REPORT.replace("| new | IMP-001 |", "| new | none |", 1)
         duplicate_impact = POST_DECISION_REPORT.replace(
             "| unchanged | none |", "| unchanged | IMP-001 |", 1
         )
@@ -415,8 +441,8 @@ class ValidateImpactReportTest(unittest.TestCase):
 
     def test_delta_rejects_repeated_identifier_within_one_cell(self):
         report = POST_DECISION_REPORT.replace(
-            "| accepted | IMP-001 |",
-            "| accepted | IMP-001, IMP-001 |",
+            "| new | IMP-001 |",
+            "| new | IMP-001, IMP-001 |",
             1,
         )
 
@@ -427,11 +453,11 @@ class ValidateImpactReportTest(unittest.TestCase):
 
     def test_delta_rejects_unknown_impacts_and_state_category_disagreement(self):
         unknown = POST_DECISION_REPORT.replace(
-            "| new | none |", "| new | IMP-999 |", 1
+            "| blocked | none |", "| blocked | IMP-999 |", 1
         )
         wrong_category = POST_DECISION_REPORT.replace(
-            "| accepted | IMP-001 |", "| resolved | IMP-001 |", 1
-        ).replace("| resolved | none |", "| accepted | none |", 1)
+            "| new | IMP-001 |", "| resolved | IMP-001 |", 1
+        ).replace("| resolved | none |", "| new | none |", 1)
 
         self.assertIn(
             "impact delta references unknown impact IMP-999",
@@ -443,11 +469,7 @@ class ValidateImpactReportTest(unittest.TestCase):
         )
 
     def test_delta_new_category_accepts_a_new_impact_regardless_of_lifecycle_state(self):
-        report = PRE_DECISION_REPORT.replace(
-            "| unchanged | IMP-001 |", "| unchanged | none |", 1
-        ).replace("| new | none |", "| new | IMP-001 |", 1)
-
-        self.assertEqual(VALIDATOR.validate_report(report), [])
+        self.assertEqual(VALIDATOR.validate_report(PRE_DECISION_REPORT), [])
 
     def test_complete_template_report_is_valid(self):
         self.assertEqual(VALIDATOR.validate_report(VALID_REPORT), [])
@@ -671,14 +693,6 @@ class ValidateImpactReportTest(unittest.TestCase):
         ).replace(
             "| critical | accepted | verified |",
             "| critical | `blocked` | `verified` |",
-            1,
-        ).replace(
-            "| accepted | IMP-001 |",
-            "| accepted | none |",
-            1,
-        ).replace(
-            "| blocked | none |",
-            "| blocked | IMP-001 |",
             1,
         ).replace(
             "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",

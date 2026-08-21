@@ -4,6 +4,12 @@ import re
 import sys
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from impact_report import parse_report, validate_baseline
+
 
 ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
 ID_LIKE_PATTERN = re.compile(r"^(?:REQ|INV|IMP|DEC|AC)-")
@@ -82,7 +88,7 @@ STATE_RULES = {
     "Unresolved, Deferred, and Blocked Items": ("State", UNRESOLVED_STATES),
 }
 TABLE_HEADERS = {
-    "Report State": ["Phase"],
+    "Report State": ["Report ID", "Revision", "Previous SHA-256", "Phase"],
     "Original Requirement": ["Requirement ID", "Original request", "Source"],
     "Current Refined Requirement": [
         "Requirement ID",
@@ -223,6 +229,8 @@ def enum_value(value: str) -> str:
 
 def validate_report(text: str) -> list[str]:
     errors: list[str] = []
+    parsed_report, report_errors = parse_report(text)
+    errors.extend(report_errors)
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
     if first_line != "# Requirements Impact Report":
         errors.append("missing canonical title: # Requirements Impact Report")
@@ -450,6 +458,7 @@ def validate_report(text: str) -> list[str]:
                 f"ledger impact {impact_id} in state {state} "
                 "is missing from unresolved items"
             )
+    errors.extend(validate_baseline(parsed_report))
     return sorted(set(errors))
 
 
