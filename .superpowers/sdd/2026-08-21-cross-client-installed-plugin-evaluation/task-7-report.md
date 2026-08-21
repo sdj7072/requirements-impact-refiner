@@ -33,3 +33,20 @@
   grep tests.
 - No live clients, raw-result changes, adapter/scorer/controller changes, or
   external reviewers were used.
+
+## Fix round 1/5: CI live-command regression coverage
+
+- Replaced the narrow text checks with a parser for GitHub Actions `run` steps
+  and argv-like shell segments. The safety contract now rejects Codex execution
+  and marketplace/plugin mutations; Claude installers, authentication, and
+  model execution; while inspecting only executable CI commands.
+- Added temporary-workflow mutation subtests for every prohibited command form,
+  including `codex exec`, marketplace upgrade/add/remove, all specified Claude
+  installers, authentication forms, print mode, and bare interactive Claude.
+- RED evidence: the initial mutation test failed for the 10 newly uncovered
+  command families; a follow-up RED case confirmed the retained `codex exec`
+  guard before it was restored in the argv classifier.
+- GREEN evidence: `python3 -m unittest tests.test_packaging -v` passed 13
+  tests; `python3 -m unittest discover -s tests -v` passed 190 tests;
+  compileall with the writable temporary bytecode cache and `git diff --check`
+  passed.

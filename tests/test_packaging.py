@@ -1,11 +1,118 @@
 import json
+import re
+import shlex
 import struct
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_COMPONENTS = {"mcpServers", "apps", "hooks", "agents", "dependencies"}
+
+
+def ci_run_commands(workflow_text):
+    """Extract executable shell content from GitHub Actions ``run`` steps."""
+    lines = workflow_text.splitlines()
+    commands = []
+    index = 0
+    while index < len(lines):
+        match = re.match(
+            r"^(?P<indent>\s*)(?:-\s+)?run:\s*(?P<content>.*)$", lines[index]
+        )
+        if match is None:
+            index += 1
+            continue
+        content = match.group("content").strip()
+        if content not in {"|", ">", "|-", ">-"}:
+            commands.append(content)
+            index += 1
+            continue
+        indentation = len(match.group("indent"))
+        index += 1
+        block = []
+        while index < len(lines):
+            line = lines[index]
+            if line.strip() and len(line) - len(line.lstrip()) <= indentation:
+                break
+            block.append(line[indentation + 2 :] if len(line) > indentation + 2 else "")
+            index += 1
+        commands.extend(line for line in block if line.strip())
+    return tuple(commands)
+
+
+def unsafe_ci_commands(workflow_text):
+    """Return run steps currently rejected by the CI safety contract."""
+    unsafe = []
+    for command in ci_run_commands(workflow_text):
+        if any(unsafe_ci_argv(argv) for argv in shell_argvs(command)):
+            unsafe.append(command)
+    return tuple(unsafe)
+
+
+def shell_argvs(command):
+    """Split a shell line into argv-like commands without executing it."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;")
+    lexer.whitespace_split = True
+    lexer.commenters = "#"
+    commands = []
+    argv = []
+    for token in lexer:
+        if token in {"|", "||", "&", "&&", ";"}:
+            if argv:
+                commands.append(tuple(argv))
+                argv = []
+        else:
+            argv.append(token)
+    if argv:
+        commands.append(tuple(argv))
+    return tuple(commands)
+
+
+def unsafe_ci_argv(argv):
+    """Classify argv-like live-client mutation, authentication, or model calls."""
+    while argv and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[0]):
+        argv = argv[1:]
+    if not argv:
+        return False
+
+    command, *arguments = argv
+    if command == "codex" and arguments[:1] == ["exec"]:
+        return True
+    if command == "codex" and arguments[:3] == ["plugin", "marketplace", "upgrade"]:
+        return True
+    if command == "codex" and tuple(arguments[:2]) in {
+        ("plugin", "add"),
+        ("plugin", "remove"),
+    }:
+        return True
+    if any("claude.ai/install.sh" in argument for argument in argv):
+        return True
+    if command == "brew" and {"install", "--cask", "claude-code"}.issubset(
+        arguments
+    ):
+        return True
+    if (
+        command == "npm"
+        and arguments
+        and arguments[0] in {"install", "i"}
+        and {"-g", "--global"}.intersection(arguments)
+        and "claude-code" in arguments
+    ):
+        return True
+    if command == "/login":
+        return True
+    if command != "claude":
+        return False
+    if not arguments or arguments[0] in {"auth", "login", "logout", "setup-token"}:
+        return True
+    return "-p" in arguments or "--print" in arguments
+
+
+def assert_safe_ci_workflow(workflow_text):
+    unsafe = unsafe_ci_commands(workflow_text)
+    if unsafe:
+        raise AssertionError("unsafe CI run command(s): %r" % (unsafe,))
 
 
 class PackagingTest(unittest.TestCase):
@@ -163,8 +270,50 @@ class PackagingTest(unittest.TestCase):
 
         self.assertIn("python3 -m unittest discover -s tests -v", workflow)
         self.assertIn("python3 -m compileall -q evals/harness", workflow)
-        self.assertNotRegex(workflow, r"(?m)^.*\bcodex\s+exec\b")
-        self.assertNotRegex(workflow, r"(?m)^.*(?:claude\.ai/install\.sh|claude.*install)")
+        self.assertEqual(unsafe_ci_commands(workflow), ())
+
+    def test_ci_safety_rejects_live_client_mutations_in_run_steps(self):
+        """Adding a live mutation/auth/model command must break CI safety."""
+        unsafe_steps = (
+            "codex exec 'evaluate this'",
+            "codex plugin marketplace upgrade requirements-impact-refiner",
+            "codex plugin add requirements-impact-refiner@requirements-impact-refiner",
+            "codex plugin remove requirements-impact-refiner@requirements-impact-refiner",
+            "curl -fsSL https://claude.ai/install.sh | bash",
+            "brew install --cask claude-code",
+            "npm install --global claude-code",
+            "claude auth login",
+            "claude auth logout",
+            "claude auth setup-token",
+            "/login",
+            "claude -p 'evaluate this'",
+            "claude --print 'evaluate this'",
+            "claude",
+        )
+        for command in unsafe_steps:
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as temporary:
+                workflow_path = Path(temporary) / "ci.yml"
+                workflow_path.write_text(
+                    "jobs:\n  test:\n    steps:\n      - run: |\n          %s\n" % command,
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(AssertionError, "unsafe CI run command"):
+                    assert_safe_ci_workflow(workflow_path.read_text(encoding="utf-8"))
+
+    def test_ci_safety_ignores_non_executable_claude_mentions(self):
+        self.assertEqual(
+            unsafe_ci_commands(
+                "Documentation may discuss `claude auth` outside a CI run step.\n"
+            ),
+            (),
+        )
+        self.assertEqual(
+            unsafe_ci_commands(
+                "jobs:\n  test:\n    steps:\n"
+                "      - run: python3 -m py_compile evals/harness/adapters/claude.py\n"
+            ),
+            (),
+        )
 
 
 if __name__ == "__main__":
