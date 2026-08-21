@@ -77,7 +77,7 @@ The controller owns repetition, paths, timestamps, and result status. Adapters o
 
 The Codex adapter uses the installed marketplace plugin, not direct prompt injection of repository skill files. Before evaluation it records the current plugin version, refreshes the marketplace, installs 0.3.0, and verifies both `codex plugin list` and the installed skill metadata.
 
-Each run uses an ephemeral fresh context through `codex exec --ephemeral --json`. The adapter captures JSONL events, the final message, stderr, exit code, client version, resolved model, reasoning level, active plugin version, and orchestrator mode. Multi-turn lineage cases use a fresh initial session plus a deliberate resume operation tied only to that case.
+Each one-turn run uses an ephemeral fresh context through `codex exec --ephemeral --json`. A multi-turn lineage case starts one new non-ephemeral session and resumes only its parsed UUID; it never uses `--last`. This is required because an ephemeral run does not persist a resumable session. The adapter captures JSONL events, the final message, stderr, exit code, client version, resolved model, reasoning level, active plugin version, orchestrator mode, and any persisted evaluation session ID. Persisted evaluation sessions remain visible in local Codex history and are disclosed as an environment side effect; the harness does not delete or reuse them across cases.
 
 The production skill remains model-neutral. This batch pins `gpt-5.6-sol` with `high` reasoning solely because the user selected that evaluation configuration.
 
@@ -193,6 +193,7 @@ Claude results use separate structural and behavioral dimensions. Successful CLI
 - Never capture the process environment wholesale.
 - Never read or store tokens, Keychain entries, API keys, or Claude credential files.
 - Record only prompts, model outputs, public command output, explicit client metadata, and exit status.
+- Record multi-turn Codex session UUIDs only as execution metadata; never use `--last` or resume an unrelated session.
 - Scan prospective evidence for likely secrets before adding it to the repository.
 - If a secret may be present, quarantine the artifact outside the repository without rewriting it and mark the execution `blocked: potential secret exposure`.
 - Do not auto-redact an artifact and then describe it as raw evidence.

@@ -4,7 +4,7 @@
 
 | Report ID | Revision | Previous SHA-256 | Phase |
 | --- | --- | --- | --- |
-| `RPT-001` | 1 | none | post-decision |
+| `RPT-001` | 2 | 92ccfd022d9baca7248de657bab86bc6459c5e6d04e06a4adf89188481524faf | post-decision |
 
 ## Original Requirement
 
@@ -16,7 +16,7 @@
 
 | Requirement ID | Revision | Refined by decision | Supersedes |
 | --- | --- | --- | --- |
-| `REQ-001` | Build a client-neutral evaluation harness with Codex and Claude adapters; preserve every execution artifact; run the installed Codex 0.3.0 plugin across 20 cases five times with the user-selected `gpt-5.6-sol` and `high` reasoning; validate Claude CLI and plugin structure without paid authentication; keep the production skill model-neutral; and update compatibility claims only from sealed evidence. | `DEC-001` | none |
+| `REQ-001` | Build a client-neutral evaluation harness with Codex and Claude adapters; preserve every execution artifact; run the installed Codex 0.3.0 plugin across 20 cases five times with the user-selected `gpt-5.6-sol` and `high` reasoning; use ephemeral contexts for one-turn cases and isolated persisted session UUIDs for multi-turn resume cases; validate Claude CLI and plugin structure without paid authentication; keep the production skill model-neutral; and update compatibility claims only from sealed evidence. | `DEC-001` | none |
 
 ## Current Behavior
 
@@ -27,6 +27,7 @@
 | `INV-003` | Existing evaluation corpora are byte-preserved with checksums and disclosed raw-whitespace exceptions. | `verified` | `.gitattributes`; `tests/test_with_skill_evidence.py`; `tests/test_release_compatibility_evidence.py`. |
 | `INV-004` | Current documentation keeps Codex behavior `not verified` and Claude behavior `blocked`. | `verified` | `README.md` — Compatibility table; `evals/results/with-skill.md` — release audit. |
 | `INV-005` | The production skill does not select or require a model. | `verified` | `skills/requirements-impact-refiner/SKILL.md`; `skills/using-requirements-impact-refiner/SKILL.md`. |
+| `INV-006` | `codex exec --ephemeral` does not persist a resumable session, while `codex exec resume` requires a session ID or `--last`. | `verified` | Local `codex-cli 0.148.0-alpha.21` help for `exec` and `exec resume`. |
 
 ## Preserved Invariants
 
@@ -37,6 +38,7 @@
 | `INV-003` | `REQ-001` | `IMP-003`, `IMP-007` | Existing `.gitattributes` and checksum tests. |
 | `INV-004` | `REQ-001` | `IMP-005`, `IMP-009` | README compatibility status and preserved audit results. |
 | `INV-005` | `REQ-001` | `IMP-002` | Canonical skill instructions contain no model-switching rule. |
+| `INV-006` | `REQ-001` | `IMP-012` | Local Codex CLI help establishes the persistence boundary. |
 
 ## Impact Ledger
 
@@ -53,6 +55,7 @@
 | `IMP-009` | `REQ-001` | functionality | high | mitigated | inferred | Substantive impact detection cannot be reduced safely to string checks; the design separates mechanical scores from quoted human adjudication. | `INV-001`, `INV-004` | `DEC-001` | `AC-009` |
 | `IMP-010` | `REQ-001` | operations | high | mitigated | verified | Updating the installed Codex plugin changes user-local state; the design requires before/after version probes and an explicit environment gate. | `INV-002` | `DEC-001` | `AC-010` |
 | `IMP-011` | `REQ-001` | operations | medium | mitigated | verified | Installing Claude Code changes the user environment; the design requires a separate approval and forbids authentication or purchase. | `INV-004` | `DEC-001` | `AC-011` |
+| `IMP-012` | `REQ-001` | operations | medium | mitigated | verified | True multi-turn resume requires non-ephemeral Codex sessions, which remain visible in local session history. | `INV-006` | `DEC-001` | `AC-012` |
 
 ## Decisions and Accepted Risks
 
@@ -66,19 +69,20 @@
 | --- | --- |
 | resolved | none |
 | mitigated | none |
-| unchanged | none |
+| unchanged | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006`, `IMP-007`, `IMP-008`, `IMP-009`, `IMP-010`, `IMP-011` |
 | accepted | none |
 | deferred | none |
 | blocked | none |
 | superseded | none |
 | reopened | none |
-| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006`, `IMP-007`, `IMP-008`, `IMP-009`, `IMP-010`, `IMP-011` |
+| new | `IMP-012` |
 
 ## Requirement Revision History
 
 | Requirement ID | Revision | Decision | Superseded impacts | Change summary |
 | --- | --- | --- | --- | --- |
 | `REQ-001` | Initial installed-plugin evaluation requirement. | `DEC-001` | none | Refined a general improvement request into a client-neutral, evidence-preserving Codex behavior and Claude structural evaluation system with explicit environment gates. |
+| `REQ-001` | Revision 2 session-persistence constraint. | `DEC-001` | none | Added the explicit one-turn ephemeral and multi-turn persisted-session boundary after inspecting the Codex CLI resume contract. |
 
 ## Acceptance and Regression Criteria
 
@@ -95,6 +99,7 @@
 | `AC-009` | `REQ-001` | `IMP-009` | `INV-001` | Mechanical and human scores are stored separately, and every human decision contains an exact quotation and rationale. | Future scoring-schema and report-generation tests. |
 | `AC-010` | `REQ-001` | `IMP-010` | `INV-002` | Codex installation mutation occurs only after version probes and produces a verified before/after record. | Future installation checkpoint and probe evidence. |
 | `AC-011` | `REQ-001` | `IMP-011` | `INV-004` | Claude installation occurs only after a fresh explicit approval and does not initiate login, purchase, or model execution. | Future structural-install checkpoint evidence. |
+| `AC-012` | `REQ-001` | `IMP-012` | `INV-006` | One-turn cases use ephemeral contexts; every multi-turn case starts a new persisted session, resumes only its parsed UUID, never uses `--last`, records the session ID, and never reuses it across cases. | Future fake-client resume tests and live smoke metadata. |
 
 ## Unresolved, Deferred, and Blocked Items
 
@@ -112,9 +117,10 @@ List only ledger impacts whose state is `deferred` or `blocked`; keep `detected`
 | Live clients | Codex CLI inventory was observed, but the new harness, Codex 0.3.0 installed run, and Claude CLI do not exist yet. | All acceptance criteria remain future targets; no new client compatibility pass is claimed. |
 | Claude behavior | Official documentation establishes the paid authentication boundary; no paid account is available. | Claude structural support may be assessed, but model behavior remains deferred and must not be inferred. |
 | Cost and duration | Exact Sol usage and rate-limit behavior cannot be known before the batch. | The user accepted the quality-first 100-run scope, but the smoke checkpoint must expose practical constraints before full execution. |
+| Codex session history | Multi-turn evaluation requires persisted sessions because ephemeral sessions cannot be resumed. | Evaluation sessions will remain in local Codex history; the harness must isolate them by explicit UUID and disclose rather than delete them. |
 
 ## Planning Handoff
 
 | Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
 | --- | --- | --- | --- | --- |
-| `REQ-001` | `RPT-001`, `INV-001`, `INV-002`, `INV-003`, `INV-004`, `INV-005`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006`, `IMP-007`, `IMP-008`, `IMP-009`, `IMP-010`, `IMP-011`, `DEC-001` | Accepted execution-cost and repository-size risks `IMP-004`, `IMP-007`; deferred Claude behavior `IMP-005`; environment mutations remain approval-gated. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006`, `AC-007`, `AC-008`, `AC-009`, `AC-010`, `AC-011` | Superpowers writing-plans after deterministic report validation. |
+| `REQ-001` | `RPT-001`, `INV-001`, `INV-002`, `INV-003`, `INV-004`, `INV-005`, `INV-006`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006`, `IMP-007`, `IMP-008`, `IMP-009`, `IMP-010`, `IMP-011`, `IMP-012`, `DEC-001` | Accepted execution-cost and repository-size risks `IMP-004`, `IMP-007`; deferred Claude behavior `IMP-005`; persisted Codex evaluation sessions `IMP-012`; environment mutations remain approval-gated. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006`, `AC-007`, `AC-008`, `AC-009`, `AC-010`, `AC-011`, `AC-012` | Superpowers writing-plans after deterministic report validation. |
