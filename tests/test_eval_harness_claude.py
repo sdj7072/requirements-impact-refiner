@@ -11,6 +11,18 @@ from evals.harness.models import CaseSpec, CaseTurn, RunRequest, RunStatus
 
 ROOT = Path(__file__).resolve().parents[1]
 
+CLAUDE_PLUGIN_LIST_FIXTURE = """[
+  {
+    "id": "requirements-impact-refiner@requirements-impact-refiner",
+    "version": "0.3.0",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "/Users/example/.claude/plugins/cache/requirements-impact-refiner/requirements-impact-refiner/0.3.0",
+    "installedAt": "2026-08-21T14:12:55.810Z",
+    "lastUpdated": "2026-08-21T14:12:55.810Z"
+  }
+]"""
+
 
 def make_request(root):
     return RunRequest(
@@ -30,7 +42,16 @@ def make_request(root):
     )
 
 
-def write_fake_claude(directory, doctor_mode="success", version_text="claude 1.2.3-test"):
+def write_fake_claude(
+    directory,
+    doctor_mode="success",
+    version_text="claude 1.2.3-test",
+    plugin_list_payload=None,
+):
+    if plugin_list_payload is None:
+        plugin_list_payload = json.dumps(
+            {"plugins": [{"id": "example-plugin", "enabled": True}]}
+        )
     script = Path(directory) / "fake-claude.py"
     script.write_text(
         "#!/usr/bin/env python3\n"
@@ -54,7 +75,7 @@ def write_fake_claude(directory, doctor_mode="success", version_text="claude 1.2
         "elif args == ['plugin', 'marketplace', 'list']:\n"
         "    print('marketplace empty')\n"
         "elif args == ['plugin', 'list', '--json']:\n"
-        "    print(json.dumps({'plugins': [{'id': 'example-plugin', 'enabled': True}]}))\n"
+        f"    print({plugin_list_payload!r})\n"
         "else:\n"
         "    print('unexpected arguments', file=sys.stderr)\n"
         "    sys.exit(2)\n",
@@ -159,6 +180,20 @@ class ClaudeAdapterTest(unittest.TestCase):
             ],
         )
         self.assertEqual(len(adapter.structural_results), 5)
+
+    def test_probe_records_enabled_requirements_impact_refiner_version(self):
+        """Leaving the installed plugin version unset hides the evaluated configuration."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_claude(
+                temporary, plugin_list_payload=CLAUDE_PLUGIN_LIST_FIXTURE
+            )
+            probe = ClaudeAdapter(executable=str(executable), cwd=Path(temporary)).probe()
+
+        self.assertEqual(probe.plugin_version, "0.3.0")
+        self.assertEqual(
+            probe.enabled_plugins,
+            ("requirements-impact-refiner@requirements-impact-refiner",),
+        )
 
     def test_doctor_timeout_blocks_only_doctor_probe(self):
         """Treating a timed-out doctor as a global failure would erase usable structure."""

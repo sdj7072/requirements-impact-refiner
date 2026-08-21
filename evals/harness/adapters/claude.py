@@ -19,6 +19,8 @@ _COMMAND_NAMES = (
     "marketplace-list",
     "plugin-list",
 )
+_REQUIREMENTS_IMPACT_REFINER_ID = "requirements-impact-refiner@requirements-impact-refiner"
+_REQUIREMENTS_IMPACT_REFINER_NAME = "requirements-impact-refiner"
 
 
 class ClaudeAdapter(ClientAdapter):
@@ -117,7 +119,11 @@ class ClaudeAdapter(ClientAdapter):
 
         version = self._result_at(results, 0)
         plugin_list = self._result_at(results, 4)
-        enabled = self._enabled_plugins(plugin_list.stdout) if plugin_list is not None else ()
+        plugin_entries = (
+            self._plugin_entries(plugin_list.stdout) if plugin_list is not None else None
+        )
+        enabled = self._enabled_plugins(plugin_entries)
+        plugin_version = self._requirements_impact_refiner_version(plugin_entries)
         version_text = version.stdout.strip() if version is not None else None
         available = bool(
             version is not None and not version.timed_out and version.returncode == 0
@@ -132,7 +138,7 @@ class ClaudeAdapter(ClientAdapter):
                 available=available,
                 version=version_text or None,
                 authenticated=None,
-                plugin_version=None,
+                plugin_version=plugin_version,
                 enabled_plugins=enabled,
                 capabilities=tuple(capabilities),
                 reason=reason,
@@ -157,23 +163,51 @@ class ClaudeAdapter(ClientAdapter):
         return "claude --version returned nonzero exit"
 
     @staticmethod
-    def _enabled_plugins(payload: str) -> Tuple[str, ...]:
+    def _plugin_entries(payload: str) -> Optional[Tuple[dict[str, Any], ...]]:
         try:
             decoded: Any = json.loads(payload)
         except json.JSONDecodeError:
-            return ()
+            return None
         if isinstance(decoded, dict):
             decoded = decoded.get("plugins", decoded.get("installed", ()))
         if not isinstance(decoded, list):
+            return None
+        entries = []
+        for item in decoded:
+            if not isinstance(item, dict):
+                return None
+            entries.append(item)
+        return tuple(entries)
+
+    @staticmethod
+    def _enabled_plugins(entries: Optional[Sequence[dict[str, Any]]]) -> Tuple[str, ...]:
+        if entries is None:
             return ()
         enabled = []
-        for item in decoded:
-            if not isinstance(item, dict) or item.get("enabled") is not True:
+        for item in entries:
+            if item.get("enabled") is not True:
                 continue
             value = item.get("pluginId") or item.get("id") or item.get("name")
-            if value is not None:
-                enabled.append(str(value))
+            if isinstance(value, str):
+                enabled.append(value)
         return tuple(enabled)
+
+    @staticmethod
+    def _requirements_impact_refiner_version(
+        entries: Optional[Sequence[dict[str, Any]]],
+    ) -> Optional[str]:
+        if entries is None:
+            return None
+        for entry in entries:
+            if (
+                entry.get("id") != _REQUIREMENTS_IMPACT_REFINER_ID
+                and entry.get("pluginId") != _REQUIREMENTS_IMPACT_REFINER_ID
+                and entry.get("name") != _REQUIREMENTS_IMPACT_REFINER_NAME
+            ):
+                continue
+            version = entry.get("version")
+            return version if isinstance(version, str) else None
+        return None
 
     @staticmethod
     def _probe_artifacts(commands: Sequence[CommandResult]) -> dict[str, str]:
