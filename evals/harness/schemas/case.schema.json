@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Installed plugin evaluation case",
+  "oneOf": [
+    { "$ref": "#/$defs/singleTurnCase" },
+    { "$ref": "#/$defs/lineageCase" }
+  ],
+  "$defs": {
+    "rubric": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "turn": {
+      "type": "object",
+      "required": ["prompt", "repository_evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "prompt": { "type": "string", "minLength": 1 },
+        "repository_evidence": { "$ref": "#/$defs/rubric" }
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": ["id", "kind", "must_detect", "must_not_do", "modes"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "must_detect": { "$ref": "#/$defs/rubric" },
+        "must_not_do": { "$ref": "#/$defs/rubric" },
+        "modes": {
+          "type": "array",
+          "items": {
+            "enum": ["generic", "codex", "claude-code", "superpowers", "claude-feature-dev", "spec-kit"]
+          }
+        }
+      }
+    },
+    "singleTurnCase": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["request", "repository_evidence"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "kind": { "enum": ["positive", "negative", "integration"] },
+            "request": { "type": "string", "minLength": 1 },
+            "repository_evidence": { "$ref": "#/$defs/rubric" },
+            "must_detect": { "$ref": "#/$defs/rubric" },
+            "must_not_do": { "$ref": "#/$defs/rubric" },
+            "modes": { "$ref": "#/$defs/common/properties/modes" }
+          }
+        }
+      ]
+    },
+    "lineageCase": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["turns", "expected_transition"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "kind": { "const": "lineage" },
+            "turns": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "$ref": "#/$defs/turn" }
+            },
+            "must_detect": { "$ref": "#/$defs/rubric" },
+            "must_not_do": { "$ref": "#/$defs/rubric" },
+            "modes": { "$ref": "#/$defs/common/properties/modes" },
+            "expected_transition": { "enum": ["unchanged", "reopened", "rejected"] }
+          }
+        }
+      ]
+    }
+  }
+}
