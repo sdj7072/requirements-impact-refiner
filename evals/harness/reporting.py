@@ -2,6 +2,7 @@
 
 from typing import Dict, Mapping, Optional, Sequence
 
+from .catalog import load_all, select_suite
 from .models import Adjudication, MechanicalScore, RunResult, RunStatus
 from .scoring import validate_adjudications
 
@@ -69,16 +70,50 @@ def _require_metadata(metadata: Mapping[str, object]) -> Dict[str, object]:
     return values
 
 
-def _verification_status(metadata: Mapping[str, object], summary: Mapping[str, int]) -> str:
-    if (
-        metadata["client"] == "codex"
-        and metadata["enabled_composition"] == "Codex with Superpowers"
-        and metadata["repetitions"] == 5
-        and summary["total"] == 85
-        and summary["strict_passes"] == 85
-    ):
-        return "verified"
-    return "not verified"
+def _environment_values(run: RunResult) -> tuple[str, ...]:
+    return tuple(value for key, value in run.metadata if key == "environment")
+
+
+def _verification_errors(
+    results: Sequence[RunResult],
+    scores: Optional[Sequence[MechanicalScore]],
+    adjudications: Sequence[Adjudication],
+) -> list[str]:
+    """Require the sealed canonical matrix, never a caller-supplied summary."""
+    cases = select_suite(load_all(), "installed-superpowers")
+    expected_runs = {
+        (case.id, repetition) for case in cases for repetition in range(1, 6)
+    }
+    errors = []
+    actual_runs = [(run.case_id, run.repetition) for run in results]
+    if len(results) != len(expected_runs) or set(actual_runs) != expected_runs:
+        errors.append("runs are not the canonical 17-case by 5-repetition matrix")
+    if len(set(actual_runs)) != len(actual_runs):
+        errors.append("runs contain duplicate case/repetition finals")
+    if any(run.status is not RunStatus.PASS for run in results):
+        errors.append("every sealed final must have pass status")
+    if any(run.client != "codex" for run in results):
+        errors.append("runs are not all Codex finals")
+    if any(_environment_values(run) != ("Codex with Superpowers",) for run in results):
+        errors.append("runs are not all Codex with Superpowers finals")
+
+    if scores is None:
+        errors.append("mechanical scores are required")
+    else:
+        score_keys = [(score.case_id, score.repetition) for score in scores]
+        if len(scores) != len(expected_runs) or set(score_keys) != expected_runs:
+            errors.append("mechanical scores do not cover the canonical matrix")
+        if len(set(score_keys)) != len(score_keys):
+            errors.append("mechanical scores contain duplicate case/repetition rows")
+        if any(score.passed is not True for score in scores):
+            errors.append("every mechanical score must pass")
+
+    adjudication_errors = validate_adjudications(adjudications, cases, results)
+    if adjudication_errors:
+        errors.append("adjudications are incomplete or untraceable")
+    if any(row.passed is not True for row in adjudications):
+        errors.append("every adjudication must pass")
+    return errors
 
 
 def render_report(
@@ -93,18 +128,24 @@ def render_report(
     Superpowers composition remain ``not verified`` regardless of their score.
     """
     required = _require_metadata(metadata)
-    adjudication_errors = validate_adjudications(adjudications)
-    if adjudication_errors:
-        raise ValueError("incomplete adjudications: %s" % "; ".join(adjudication_errors))
     summary = summarize(results, scores)
-    status = _verification_status(required, summary)
+    verification_errors = _verification_errors(results, scores, adjudications)
+    status = "verified" if not verification_errors else "not verified"
+    actual_clients = sorted({run.client for run in results})
+    actual_compositions = sorted(
+        {value for run in results for value in _environment_values(run)}
+    )
+    rendered_client = actual_clients[0] if len(actual_clients) == 1 else "mixed"
+    rendered_composition = (
+        actual_compositions[0] if len(actual_compositions) == 1 else "mixed"
+    )
     lines = (
         "# Installed Plugin Evaluation",
         "",
         "- status: %s" % status,
-        "- client: %s" % required["client"],
+        "- client: %s" % rendered_client,
         "- version: %s" % required["version"],
-        "- enabled composition: %s" % required["enabled_composition"],
+        "- enabled composition: %s" % rendered_composition,
         "- model: %s" % required["model"],
         "- reasoning: %s" % required["reasoning"],
         "- repetitions: %s" % required["repetitions"],
@@ -117,5 +158,6 @@ def render_report(
         "- invalid_evidence: %d" % summary[RunStatus.INVALID_EVIDENCE.value],
         "- mechanical failures: %d" % summary["mechanical_failed"],
         "- adjudications: %d" % len(adjudications),
+        "- verification blockers: %d" % len(verification_errors),
     )
     return "\n".join(lines) + "\n"

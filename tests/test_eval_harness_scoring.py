@@ -1,6 +1,15 @@
 import unittest
+from dataclasses import replace
 
-from evals.harness.models import Adjudication, CaseSpec, CaseTurn, RunResult, RunStatus
+from evals.harness.catalog import load_all, select_suite
+from evals.harness.models import (
+    Adjudication,
+    CaseSpec,
+    CaseTurn,
+    MechanicalScore,
+    RunResult,
+    RunStatus,
+)
 from evals.harness.reporting import render_report, summarize
 from evals.harness.scoring import score_mechanical, validate_adjudications
 from tests.test_validate_impact_report import PRE_DECISION_REPORT, VALID_REPORT
@@ -18,7 +27,14 @@ def case(case_id, kind="positive", transition=None):
     )
 
 
-def result(case_id, status, output=None, repetition=1):
+def result(
+    case_id,
+    status,
+    output=None,
+    repetition=1,
+    client="codex",
+    composition="Codex with Superpowers",
+):
     return RunResult(
         case_id=case_id,
         repetition=repetition,
@@ -26,7 +42,52 @@ def result(case_id, status, output=None, repetition=1):
         status=status,
         reason=None,
         final_output=output,
+        metadata=(("environment", composition),),
     )
+
+
+CANONICAL_CASES = select_suite(load_all(), "installed-superpowers")
+REPORT_METADATA = {
+    "client": "codex",
+    "version": "0.148.0",
+    "enabled_composition": "Codex with Superpowers",
+    "model": "gpt-5.6-sol",
+    "reasoning": "high",
+    "repetitions": 5,
+}
+
+
+def complete_matrix():
+    runs = []
+    scores = []
+    adjudications = []
+    for specification in CANONICAL_CASES:
+        for repetition in range(1, 6):
+            quotes = [
+                "[%s/%02d %s]" % (specification.id, repetition, rubric)
+                for rubric in specification.must_detect
+            ]
+            runs.append(
+                result(
+                    specification.id,
+                    RunStatus.PASS,
+                    "\n".join(quotes) or "negative exclusion confirmed",
+                    repetition,
+                )
+            )
+            scores.append(MechanicalScore(specification.id, repetition, True, ()))
+            adjudications.extend(
+                Adjudication(
+                    specification.id,
+                    repetition,
+                    rubric,
+                    True,
+                    quote,
+                    "The quote directly supports the required rubric.",
+                )
+                for rubric, quote in zip(specification.must_detect, quotes)
+            )
+    return tuple(runs), tuple(scores), tuple(adjudications)
 
 
 class EvalHarnessScoringTest(unittest.TestCase):
@@ -69,6 +130,31 @@ class EvalHarnessScoringTest(unittest.TestCase):
         )
 
         self.assertEqual(validate_adjudications([row]), [])
+
+    def test_adjudications_are_complete_unique_boolean_and_transcript_bound(self):
+        """An invented or incomplete human row cannot support a verified claim."""
+        runs, _, adjudications = complete_matrix()
+        valid = validate_adjudications(adjudications, CANONICAL_CASES, runs)
+        self.assertEqual(valid, [])
+
+        mutations = {
+            "nonboolean": replace(adjudications[0], passed="yes"),
+            "invented quote": replace(adjudications[0], quote="not in transcript"),
+            "unknown rubric": replace(adjudications[0], rubric="unknown rubric"),
+        }
+        for name, mutated in mutations.items():
+            with self.subTest(name=name):
+                errors = validate_adjudications(
+                    (mutated,) + adjudications[1:], CANONICAL_CASES, runs
+                )
+                self.assertTrue(errors)
+
+        errors = validate_adjudications(
+            adjudications + (adjudications[0],), CANONICAL_CASES, runs
+        )
+        self.assertTrue(any("duplicate adjudication" in error for error in errors))
+        errors = validate_adjudications(adjudications[1:], CANONICAL_CASES, runs)
+        self.assertTrue(any("missing adjudication" in error for error in errors))
 
     def test_positive_output_uses_the_canonical_report_validator(self):
         """A structurally invalid impact report must fail mechanical scoring."""
@@ -124,31 +210,57 @@ class EvalHarnessScoringTest(unittest.TestCase):
         self.assertFalse(score.passed)
         self.assertTrue(any("resolution" in finding for finding in score.findings))
 
-    def test_rendering_promotes_only_complete_codex_superpowers_matrix(self):
-        """A near-complete or differently composed matrix must remain not verified."""
-        results = tuple(
-            result("POS-%02d" % index, RunStatus.PASS, repetition=index)
-            for index in range(1, 86)
+    def test_lineage_rejected_case_requires_active_ledger_without_rejected_delta(self):
+        """Rejected is an evaluation outcome, never an authored Impact Delta category."""
+        accepted = score_mechanical(
+            case("LINEAGE-no-false-resolution", "lineage", "rejected"),
+            result("LINEAGE-no-false-resolution", RunStatus.PASS, VALID_REPORT),
         )
-        metadata = {
-            "client": "codex",
-            "version": "0.148.0",
-            "enabled_composition": "Codex with Superpowers",
-            "model": "gpt-5.6-sol",
-            "reasoning": "high",
-            "repetitions": 5,
-        }
-
-        verified = render_report(results, metadata)
-        not_verified = render_report(results[:-1], metadata)
-        standalone = render_report(
-            results,
-            dict(metadata, enabled_composition="Codex standalone"),
+        active = score_mechanical(
+            case("LINEAGE-no-false-resolution", "lineage", "rejected"),
+            result(
+                "LINEAGE-no-false-resolution",
+                RunStatus.PASS,
+                VALID_REPORT.replace("| accepted | verified |", "| refining | verified |", 1),
+            ),
         )
 
+        self.assertFalse(accepted.passed)
+        self.assertTrue(any("active" in finding for finding in accepted.findings))
+        self.assertTrue(active.passed, active.findings)
+
+    def test_rendering_promotes_only_complete_sealed_canonical_matrix(self):
+        """Raw pass statuses and caller metadata cannot manufacture verification."""
+        runs, scores, adjudications = complete_matrix()
+
+        verified = render_report(runs, REPORT_METADATA, scores, adjudications)
         self.assertIn("status: verified", verified)
-        self.assertIn("status: not verified", not_verified)
-        self.assertIn("status: not verified", standalone)
+
+        mutations = {
+            "empty scores": (runs, (), adjudications),
+            "empty adjudications": (runs, scores, ()),
+            "duplicate repetition": (runs[:-1] + (replace(runs[-1], repetition=1),), scores, adjudications),
+            "wrong client": (replace(runs[0], client="claude"),) + runs[1:],
+            "wrong composition": (replace(runs[0], metadata=(("environment", "Codex standalone"),)),) + runs[1:],
+            "missing run": (runs[:-1], scores[:-1], adjudications),
+            "partial result": (replace(runs[0], status=RunStatus.PARTIAL),) + runs[1:],
+            "failed mechanical score": (runs, (replace(scores[0], passed=False),) + scores[1:], adjudications),
+            "failed adjudication": (runs, scores, (replace(adjudications[0], passed=False),) + adjudications[1:]),
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(name=name):
+                if name in {"wrong client", "wrong composition", "partial result"}:
+                    mutated_runs, mutated_scores, mutated_adjudications = mutation, scores, adjudications
+                else:
+                    mutated_runs, mutated_scores, mutated_adjudications = mutation
+                rendered = render_report(
+                    mutated_runs,
+                    dict(REPORT_METADATA, client="codex", enabled_composition="Codex with Superpowers"),
+                    mutated_scores,
+                    mutated_adjudications,
+                )
+                self.assertIn("status: not verified", rendered)
+
         self.assertIn("model: gpt-5.6-sol", verified)
         self.assertIn("reasoning: high", verified)
 

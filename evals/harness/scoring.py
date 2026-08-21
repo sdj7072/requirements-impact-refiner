@@ -29,7 +29,7 @@ _AUTOMATIC_WRITING_PLANS = re.compile(
     r"|\bwriting-plans\b.{0,80}\b(?:automatically|automated|auto(?:matically)?)\b",
     re.IGNORECASE | re.DOTALL,
 )
-_RESOLVED_STATE = re.compile(r"\|\s*[^|]+\|[^\n]*\|\s*resolved\s*\|", re.IGNORECASE)
+_REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
 
 
 def _load_validator():
@@ -55,6 +55,9 @@ def _load_validator():
 
 
 _VALIDATOR = _load_validator()
+_REPORT_MODEL = sys.modules.get("impact_report")
+if _REPORT_MODEL is None:
+    raise RuntimeError("canonical impact report model is unavailable")
 
 
 def _complete_report_errors(
@@ -83,14 +86,25 @@ def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
     """Check the catalog's transition claim without making a human judgment."""
     transition = case.expected_transition
     if transition == "rejected":
-        if _RESOLVED_STATE.search(output):
-            return ["%s requires resolution rejection" % case.id]
-        return []
+        parsed, parse_errors = _VALIDATOR.parse_report(output)
+        if parse_errors:
+            return []
+        states = {
+            _VALIDATOR.enum_value(row.get("State", ""))
+            for row in parsed.tables.get("Impact Ledger", ())
+        }
+        findings = []
+        if not states or not states <= _REJECTION_ACTIVE_STATES:
+            findings.append("%s requires an active evidence-supported ledger state" % case.id)
+        authored = _REPORT_MODEL.authored_delta(parsed)
+        if authored.get("resolved") or authored.get("accepted"):
+            findings.append("%s forbids resolved or accepted Impact Delta" % case.id)
+        return findings
     if transition in {"unchanged", "reopened"}:
         parsed, parse_errors = _VALIDATOR.parse_report(output)
         if parse_errors:
             return []
-        authored = _VALIDATOR.authored_delta(parsed)
+        authored = _REPORT_MODEL.authored_delta(parsed)
         if not authored.get(transition):
             return ["%s requires %s Impact Delta transition" % (case.id, transition)]
     return []
@@ -145,13 +159,71 @@ def score_mechanical(
     return MechanicalScore(case.id, result.repetition, not findings, tuple(findings))
 
 
-def validate_adjudications(rows: Sequence[Adjudication]) -> List[str]:
-    """Require an exact transcript quote and rationale for every human rubric."""
+def validate_adjudications(
+    rows: Sequence[Adjudication],
+    cases: Optional[Sequence[CaseSpec]] = None,
+    runs: Optional[Sequence[RunResult]] = None,
+) -> List[str]:
+    """Validate human judgments against the exact catalog and sealed transcript.
+
+    Without the optional catalog/run index this retains the narrow local check
+    used by callers that only need quote/rationale completeness.  Passing both
+    enables full, one-row-per-rubric transcript validation.
+    """
     errors: List[str] = []
     for row in rows:
-        if not row.quote.strip() or not row.rationale.strip():
+        if not isinstance(row.passed, bool):
+            errors.append(
+                "%s/%02d %s passed must be boolean"
+                % (row.case_id, row.repetition, row.rubric)
+            )
+        if (
+            not isinstance(row.quote, str)
+            or not row.quote.strip()
+            or not isinstance(row.rationale, str)
+            or not row.rationale.strip()
+        ):
             errors.append(
                 "%s/%02d %s requires quote and rationale"
                 % (row.case_id, row.repetition, row.rubric)
             )
+    if cases is None and runs is None:
+        return errors
+    if cases is None or runs is None:
+        return errors + ["adjudication validation requires both cases and runs"]
+
+    expected = {
+        (case.id, repetition, rubric)
+        for case in cases
+        for repetition in range(1, 6)
+        for rubric in case.must_detect
+    }
+    run_index = {}
+    for run in runs:
+        key = (run.case_id, run.repetition)
+        if key in run_index:
+            errors.append("duplicate sealed run %s/%02d" % key)
+        else:
+            run_index[key] = run
+
+    seen = set()
+    for row in rows:
+        key = (row.case_id, row.repetition, row.rubric)
+        label = "%s/%02d %s" % key
+        if key not in expected:
+            errors.append("unknown adjudication %s" % label)
+            continue
+        if key in seen:
+            errors.append("duplicate adjudication %s" % label)
+            continue
+        seen.add(key)
+        run = run_index.get((row.case_id, row.repetition))
+        if run is None:
+            errors.append("%s has no sealed run" % label)
+        elif isinstance(row.quote, str) and row.quote.strip() not in (run.final_output or ""):
+            errors.append("%s quote is not in sealed final output" % label)
+    errors.extend(
+        "missing adjudication %s/%02d %s" % key
+        for key in sorted(expected - seen)
+    )
     return errors
