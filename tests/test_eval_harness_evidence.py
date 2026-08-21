@@ -1,0 +1,149 @@
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from evals.harness.evidence import (
+    PotentialSecretError,
+    build_manifest,
+    find_potential_secrets,
+    record_run,
+    verify_manifest,
+)
+from evals.harness.process import run_command
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class EvalHarnessEvidenceTest(unittest.TestCase):
+    def test_timeout_is_preserved(self):
+        """Removing the timeout handler would lose the timed-out result."""
+        result = run_command(
+            [sys.executable, "-c", "import time; time.sleep(2)"], ROOT, 0.01
+        )
+
+        self.assertTrue(result.timed_out)
+        self.assertIsNone(result.returncode)
+
+    def test_secret_detector_requires_concrete_value(self):
+        """A detector that flags generic prose would block safe evidence."""
+        self.assertEqual(find_potential_secrets("API key is required"), ())
+        self.assertIn(
+            "github-token",
+            find_potential_secrets("token=gho_abcdefghijklmnopqrstuvwxyz123456"),
+        )
+
+    def test_one_byte_change_breaks_manifest(self):
+        """Ignoring file contents would permit tampered raw evidence."""
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_root = Path(temporary) / "raw"
+            target = raw_root / "codex" / "POS-authorization" / "01" / "final.md"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"original evidence")
+
+            manifest = build_manifest(raw_root)
+            target.write_bytes(target.read_bytes() + b"x")
+
+            self.assertEqual(
+                verify_manifest(raw_root, manifest),
+                ["checksum mismatch: codex/POS-authorization/01/final.md"],
+            )
+
+    def test_record_run_creates_an_immutable_atomic_artifact_directory(self):
+        """Replacing an existing run would destroy preserved evidence."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw_root = root / "raw"
+            quarantine_root = root / "quarantine"
+            artifacts = {
+                "prompt.txt": "Inspect the authorization rule.",
+                "final.md": b"The rule is present.\n",
+            }
+
+            recorded = record_run(
+                raw_root, "codex", "POS-authorization", 1, artifacts, quarantine_root
+            )
+
+            self.assertEqual(recorded, raw_root / "codex" / "POS-authorization" / "01")
+            self.assertEqual(
+                (recorded / "prompt.txt").read_text(encoding="utf-8"),
+                "Inspect the authorization rule.",
+            )
+            with self.assertRaises(FileExistsError):
+                record_run(
+                    raw_root, "codex", "POS-authorization", 1, artifacts, quarantine_root
+                )
+            self.assertEqual((recorded / "final.md").read_bytes(), b"The rule is present.\n")
+
+    def test_suspicious_artifacts_are_quarantined_without_repository_write(self):
+        """Redacting or recording detected credentials would corrupt raw evidence."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw_root = root / "raw"
+            quarantine_root = root / "quarantine"
+            artifacts = {"stdout.txt": "Authorization: Bearer sk-proj-abcdefghijklmnopqrstuv"}
+
+            with self.assertRaises(PotentialSecretError) as raised:
+                record_run(
+                    raw_root, "codex", "POS-authorization", 1, artifacts, quarantine_root
+                )
+
+            self.assertEqual(raised.exception.findings, ("openai-token",))
+            self.assertFalse(raw_root.exists())
+            self.assertEqual(
+                (raised.exception.quarantine_path / "stdout.txt").read_text(encoding="utf-8"),
+                "Authorization: Bearer sk-proj-abcdefghijklmnopqrstuv",
+            )
+
+    def test_quarantine_must_be_outside_a_detected_repository(self):
+        """A quarantine directory within the repository could commit a credential."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".git").mkdir()
+
+            with self.assertRaisesRegex(ValueError, "outside repository"):
+                record_run(
+                    root / "evals" / "results" / "raw",
+                    "codex",
+                    "POS-authorization",
+                    1,
+                    {"stdout.txt": "token=gho_abcdefghijklmnopqrstuvwxyz123456"},
+                    root / "quarantine",
+                )
+
+    def test_manifest_excludes_its_own_file_and_has_deterministic_order(self):
+        """Including its own digest makes a manifest impossible to seal."""
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_root = Path(temporary) / "raw"
+            (raw_root / "z.txt").parent.mkdir(parents=True)
+            (raw_root / "z.txt").write_bytes(b"z")
+            (raw_root / "a.txt").write_bytes(b"a")
+            (raw_root / "manifest.sha256").write_text("stale\n", encoding="utf-8")
+
+            manifest = build_manifest(raw_root)
+
+            self.assertEqual([row.split(" ", 1)[0] for row in manifest.splitlines()], ["a.txt", "z.txt"])
+            self.assertTrue(manifest.endswith("\n"))
+            self.assertEqual(verify_manifest(raw_root, manifest), [])
+
+    def test_manifest_excludes_only_the_root_manifest_file(self):
+        """Skipping a nested artifact named manifest would lose raw evidence."""
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_root = Path(temporary) / "raw"
+            (raw_root / "manifest.sha256").parent.mkdir(parents=True)
+            (raw_root / "manifest.sha256").write_text("stale\n", encoding="utf-8")
+            nested_manifest = raw_root / "codex" / "manifest.sha256"
+            nested_manifest.parent.mkdir()
+            nested_manifest.write_bytes(b"raw artifact")
+
+            manifest = build_manifest(raw_root)
+
+            self.assertEqual(
+                [row.split(" ", 1)[0] for row in manifest.splitlines()],
+                ["codex/manifest.sha256"],
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
