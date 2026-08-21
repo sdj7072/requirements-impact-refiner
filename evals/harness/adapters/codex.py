@@ -4,11 +4,11 @@ import json
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple, Union
 
 from .base import ClientAdapter
 from ..evidence import PotentialSecretError, record_run
-from ..models import ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
+from ..models import CaseTurn, ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
 from ..process import run_command
 
 
@@ -68,12 +68,19 @@ class CodexAdapter(ClientAdapter):
         return tuple(command)
 
     def build_resume_command(
-        self, request: RunRequest, thread_id: str, prompt: str, final_path: Path
+        self, request: RunRequest, thread_id: str, turn: Union[CaseTurn, str], final_path: Path
     ) -> Tuple[str, ...]:
         """Resume the exact session emitted by the first persisted turn."""
         if not isinstance(thread_id, str) or not _UUID.fullmatch(thread_id):
             raise ValueError("thread_id must be a parsed UUID")
-        evidence = self._evidence_for_prompt(request, prompt)
+        if isinstance(turn, CaseTurn):
+            prompt = turn.prompt
+            evidence = turn.repository_evidence
+        elif isinstance(turn, str):
+            prompt = turn
+            evidence = self._evidence_for_prompt(request, prompt)
+        else:
+            raise TypeError("turn must be a CaseTurn or prompt string")
         return (
             self.executable,
             "exec",
@@ -184,7 +191,7 @@ class CodexAdapter(ClientAdapter):
             second_final = temporary_root / "second.final.txt"
             second_prompt = self._turn_prompt(second_turn.prompt, second_turn.repository_evidence)
             second_command = run_command(
-                self.build_resume_command(request, thread_id, second_turn.prompt, second_final),
+                self.build_resume_command(request, thread_id, second_turn, second_final),
                 self.cwd,
                 self.timeout_seconds,
             )
@@ -276,7 +283,7 @@ class CodexAdapter(ClientAdapter):
         except json.JSONDecodeError:
             return None
         if isinstance(decoded, dict):
-            decoded = decoded.get("plugins")
+            decoded = decoded.get("installed", decoded.get("plugins"))
         if not isinstance(decoded, list):
             return None
         entries = []
@@ -289,7 +296,7 @@ class CodexAdapter(ClientAdapter):
 
     @staticmethod
     def _plugin_id(entry: dict[str, Any]) -> str:
-        value = entry.get("id") or entry.get("name")
+        value = entry.get("pluginId") or entry.get("id") or entry.get("name")
         return str(value)
 
     @staticmethod
@@ -301,7 +308,7 @@ class CodexAdapter(ClientAdapter):
 
     @staticmethod
     def _plugin_name(entry: dict[str, Any]) -> str:
-        value = entry.get("name") or entry.get("id") or ""
+        value = entry.get("name") or entry.get("pluginId") or entry.get("id") or ""
         return str(value).strip().lower().replace("_", "-")
 
     def _is_rir(self, entry: dict[str, Any]) -> bool:

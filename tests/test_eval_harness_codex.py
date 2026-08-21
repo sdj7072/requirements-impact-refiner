@@ -9,14 +9,67 @@ from evals.harness.models import CaseSpec, CaseTurn, RunRequest, RunStatus
 
 
 UUID = "123e4567-e89b-12d3-a456-426614174000"
+INSTALLED_PLUGIN_LIST = {
+    "installed": [
+        {
+            "pluginId": "requirements-impact-refiner",
+            "name": "Requirements Impact Refiner",
+            "marketplaceName": "personal-marketplace",
+            "version": "0.3.0",
+            "installed": True,
+            "enabled": True,
+            "source": "marketplace",
+            "installPolicy": "user",
+            "authPolicy": "none",
+        },
+        {
+            "pluginId": "superpowers",
+            "name": "Superpowers",
+            "marketplaceName": "openai-curated-remote",
+            "version": "6.3.0",
+            "installed": True,
+            "enabled": True,
+            "source": "marketplace",
+            "installPolicy": "user",
+            "authPolicy": "none",
+        },
+        {
+            "pluginId": "other-enabled",
+            "name": "Other",
+            "marketplaceName": "openai-curated-remote",
+            "version": "1.0.0",
+            "installed": True,
+            "enabled": True,
+            "source": "marketplace",
+            "installPolicy": "user",
+            "authPolicy": "none",
+        },
+        {
+            "pluginId": "disabled",
+            "name": "Disabled",
+            "marketplaceName": "personal-marketplace",
+            "version": "1.0.0",
+            "installed": True,
+            "enabled": False,
+            "source": "marketplace",
+            "installPolicy": "user",
+            "authPolicy": "none",
+        },
+    ],
+    "available": [],
+}
 
 
-def make_request(root, turns, model=None, reasoning=None):
+def make_request(root, turns, model=None, reasoning=None, evidence=None):
+    evidence = evidence or tuple(("src/example.py",) for _ in turns)
     return RunRequest(
         case=CaseSpec(
             id="POS-example",
             kind="lineage" if len(turns) > 1 else "positive",
-            turns=tuple(CaseTurn(prompt, ("src/example.py",)) for prompt in turns),
+            turns=tuple(
+                CaseTurn(prompt, turn_evidence)
+                for prompt, turn_evidence in zip(turns, evidence)
+            ),
             must_detect=("relevant impact",),
             must_not_do=("write implementation",),
             modes=("codex",),
@@ -149,6 +202,18 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertIn("Codex with Superpowers", probe.capabilities)
         self.assertIsNone(probe.authenticated)
 
+    def test_probe_parses_real_installed_inventory_and_plugin_ids(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, INSTALLED_PLUGIN_LIST)
+            probe = CodexAdapter(executable=str(executable), cwd=Path(temporary)).probe()
+
+        self.assertTrue(probe.available)
+        self.assertEqual(probe.plugin_version, "0.3.0")
+        self.assertEqual(
+            probe.enabled_plugins,
+            ("requirements-impact-refiner", "superpowers", "other-enabled"),
+        )
+
     def test_prepare_rejects_disabled_required_plugin(self):
         plugins = [
             {"id": "requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
@@ -213,6 +278,55 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(execution_commands[1][0:2], ["exec", "resume"])
         self.assertIn(UUID, execution_commands[1])
         self.assertNotIn("--last", execution_commands[1])
+
+    def test_resume_renders_the_actual_second_turn_when_prompts_are_identical(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            request = make_request(
+                temporary,
+                ("same prompt", "same prompt"),
+                evidence=(("first.py",), ("second.py",)),
+            )
+            argv = CodexAdapter(cwd=Path(temporary)).build_resume_command(
+                request,
+                UUID,
+                request.case.turns[1],
+                Path(temporary) / "FINAL",
+            )
+
+        self.assertEqual(argv[-1], "same prompt\n\nRepository evidence:\n- second.py")
+
+    def test_execute_uses_the_second_turn_evidence_when_prompts_are_identical(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary)
+            log = Path(temporary) / "argv.jsonl"
+            request = make_request(
+                temporary,
+                ("same prompt", "same prompt"),
+                evidence=(("first.py",), ("second.py",)),
+            )
+            adapter = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            )
+            original_log = os.environ.get("FAKE_CODEX_LOG")
+            os.environ["FAKE_CODEX_LOG"] = str(log)
+            try:
+                result = adapter.execute(request)
+            finally:
+                if original_log is None:
+                    del os.environ["FAKE_CODEX_LOG"]
+                else:
+                    os.environ["FAKE_CODEX_LOG"] = original_log
+
+            commands = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+        execution_commands = [command for command in commands if command[0] == "exec"]
+        self.assertEqual(result.status, RunStatus.PASS)
+        self.assertEqual(
+            execution_commands[1][-1],
+            "same prompt\n\nRepository evidence:\n- second.py",
+        )
 
     def test_execute_classifies_bad_client_output_as_preserved_infra_error(self):
         for mode, reason in (
