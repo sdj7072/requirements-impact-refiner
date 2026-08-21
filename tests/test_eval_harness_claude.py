@@ -77,13 +77,19 @@ def write_hostile_claude(directory):
 
 
 class ClaudeAdapterTest(unittest.TestCase):
+    def test_construction_requires_an_explicit_executable(self):
+        """A default executable could silently resolve a host Claude installation."""
+        with self.assertRaises(TypeError):
+            ClaudeAdapter()
+
     def test_commands_never_authenticate_or_prompt_model(self):
         """Adding an interactive or auth argv would violate the paid-auth boundary."""
-        adapter = ClaudeAdapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            adapter = ClaudeAdapter(executable=str(write_fake_claude(temporary)))
 
-        flattened = " ".join(
-            argument for command in adapter.structural_commands(ROOT) for argument in command
-        )
+            flattened = " ".join(
+                argument for command in adapter.structural_commands(ROOT) for argument in command
+            )
 
         self.assertNotIn("login", flattened)
         self.assertNotIn("auth", flattened)

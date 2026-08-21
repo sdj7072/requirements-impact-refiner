@@ -26,7 +26,7 @@ class ClaudeAdapter(ClientAdapter):
 
     def __init__(
         self,
-        executable: str = "claude",
+        executable: str,
         cwd: Optional[Path] = None,
         timeout_seconds: float = 30.0,
         doctor_timeout_seconds: float = 5.0,
