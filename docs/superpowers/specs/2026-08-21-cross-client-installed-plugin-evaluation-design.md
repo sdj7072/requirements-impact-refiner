@@ -12,12 +12,13 @@ This design adds a reusable, client-neutral evaluation harness. It will evaluate
 
 - Use one common evaluation contract with client adapters.
 - Preserve every execution transcript and command result, not only failures.
-- Run Codex behavior with the user-selected `gpt-5.6-sol` model and `high` reasoning for this batch.
+- Run Codex behavior with the user-selected `gpt-5.6-sol` model and `high` reasoning for this batch in the actually installed Codex-with-Superpowers environment.
 - Keep the skill and harness model-neutral. A model is a run parameter, never a skill requirement or default imposed by the plugin.
 - Install the Claude Code native CLI, but do not purchase a plan, authenticate, or run model behavior.
 - Treat unavailable Claude model behavior as `blocked`, never as a pass.
 - Run live client evaluations explicitly, not in ordinary CI.
 - Do not tune the skill within the same evaluation batch.
+- Do not remove or reconfigure Superpowers to manufacture a standalone environment; bound live claims to the active installed-plugin composition.
 
 ## Architecture
 
@@ -75,7 +76,7 @@ The controller owns repetition, paths, timestamps, and result status. Adapters o
 
 ### Codex adapter
 
-The Codex adapter uses the installed marketplace plugin, not direct prompt injection of repository skill files. Before evaluation it records the current plugin version, refreshes the marketplace, installs 0.3.0, and verifies both `codex plugin list` and the installed skill metadata.
+The Codex adapter uses the installed marketplace plugin, not direct prompt injection of repository skill files. Before evaluation it records the current plugin version and enabled-plugin inventory, refreshes the marketplace, installs 0.3.0, and verifies both `codex plugin list` and the installed skill metadata. Superpowers remains installed and enabled; results apply only to the `Codex with Superpowers` composition.
 
 Each one-turn run uses an ephemeral fresh context through `codex exec --ephemeral --json`. A multi-turn lineage case starts one new non-ephemeral session and resumes only its parsed UUID; it never uses `--last`. This is required because an ephemeral run does not persist a resumable session. The adapter captures JSONL events, the final message, stderr, exit code, client version, resolved model, reasoning level, active plugin version, orchestrator mode, and any persisted evaluation session ID. Persisted evaluation sessions remain visible in local Codex history and are disclosed as an environment side effect; the harness does not delete or reuse them across cases.
 
@@ -140,14 +141,16 @@ Substantive requirements such as whether the response found an important reposit
 
 The smoke set covers at least one positive activation, one negative exclusion, one Superpowers boundary, one stable-lineage transition, one reopened transition, and one unsupported-resolution rejection. A skill failure in smoke does not justify modifying the skill in place. An infrastructure failure must be resolved before the full batch.
 
-### Full Codex matrix
+### Full Codex-with-Superpowers matrix
 
-The full matrix has 20 cases and five repetitions each:
+The full matrix has 17 cases and five repetitions each:
 
 - 8 positive cases: 40 executions;
 - 5 negative cases: 25 executions;
-- 4 integration cases: 20 executions;
+- 1 Superpowers integration case: 5 executions;
 - 3 lineage cases: 15 executions.
+
+Total live Codex execution count is 85. The generic, Claude feature-dev, and Spec Kit adapter contracts remain covered by deterministic structural tests; they receive no installed-client behavioral claim from this environment.
 
 The default concurrency is one. This avoids rate-limit distortion and hidden cross-session state. The controller continues after ordinary skill failures. It pauses or records an infrastructure state for rate limits, network failures, CLI crashes, or timeouts.
 
@@ -175,16 +178,16 @@ The default concurrency is one. This avoids rate-limit distortion and hidden cro
 
 ## Verification Thresholds
 
-Codex installed-plugin behavior may be documented as `verified` only if all of the following hold:
+Codex-with-Superpowers installed-plugin behavior may be documented as `verified` only if all of the following hold:
 
 - positive cases: 40/40 strict passes;
 - negative cases: 25/25 without false activation;
-- integration cases: 20/20 preserving exactly one orchestrator boundary;
+- Superpowers integration case: 5/5 preserving its entry and exit boundary;
 - lineage cases: 15/15 with correct Report ID, revision, predecessor SHA-256, lifecycle state, and Delta;
 - zero fabricated decisions, implementation plans, or code execution outside the impact-refinement boundary;
 - every mechanical and adjudicated claim links to preserved evidence.
 
-Any contract violation keeps the environment `not verified`. The documentation publishes the exact score and failure categories rather than softening the threshold.
+Any contract violation keeps the `Codex with Superpowers` environment `not verified`. The documentation publishes the exact score and failure categories rather than softening the threshold. Codex standalone and the other orchestrator adapters remain `not verified` or structurally tested only.
 
 Claude results use separate structural and behavioral dimensions. Successful CLI and package checks may be recorded as structurally validated. Behavior remains `blocked` until a paid authenticated execution exists.
 
@@ -237,10 +240,11 @@ After the batch:
 - JSON impact-report output;
 - MCP server or code-graph engine;
 - new orchestrator adapters;
+- temporary removal or reconfiguration of Superpowers to simulate standalone Codex;
 - GitHub marketing, releases, or Showcase submission;
 - skill wording or template changes based on this batch's results;
 - paid Claude authentication or model behavior.
 
 ## Acceptance Criteria
 
-The work is complete when the common harness and adapters pass deterministic tests, the installed Codex plugin is confirmed at 0.3.0, Claude structural checks are captured without authentication, the smoke checkpoint is reviewed, the full 100-run Codex batch is preserved and scored, the manifest verifies, and all three README compatibility tables state only what the evidence supports.
+The work is complete when the common harness and adapters pass deterministic tests, the installed Codex plugin is confirmed at 0.3.0 with Superpowers enabled, Claude structural checks are captured without authentication, the smoke checkpoint is reviewed, the full 85-run Codex-with-Superpowers batch is preserved and scored, the manifest verifies, and all three README compatibility tables state only what the evidence supports.
