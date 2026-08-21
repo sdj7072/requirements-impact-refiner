@@ -58,6 +58,7 @@ class CodexAdapter(ClientAdapter):
         command.extend(
             (
                 "--json",
+                "--skip-git-repo-check",
                 "-s",
                 "read-only",
                 "-o",
@@ -83,6 +84,7 @@ class CodexAdapter(ClientAdapter):
             "exec",
             "resume",
             "--json",
+            "--skip-git-repo-check",
             "-o",
             str(final_path),
             thread_id,
@@ -129,7 +131,7 @@ class CodexAdapter(ClientAdapter):
             )
             first_command = run_command(
                 self.build_first_turn_command(request, first_final),
-                self.cwd,
+                temporary_root,
                 self.timeout_seconds,
             )
             artifacts.update(self._turn_artifacts("first", first_prompt, first_command, first_final))
@@ -190,7 +192,7 @@ class CodexAdapter(ClientAdapter):
             second_prompt = self._turn_prompt(second_turn.prompt, second_turn.repository_evidence)
             second_command = run_command(
                 self.build_resume_command(request, thread_id, second_turn, second_final),
-                self.cwd,
+                temporary_root,
                 self.timeout_seconds,
             )
             artifacts.update(self._turn_artifacts("second", second_prompt, second_command, second_final))

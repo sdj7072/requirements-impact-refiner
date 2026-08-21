@@ -101,6 +101,7 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "import json, os, sys\n"
         "args = sys.argv[1:]\n"
         "log = os.environ.get('FAKE_CODEX_LOG')\n"
+        "cwd_log = os.environ.get('FAKE_CODEX_CWD_LOG')\n"
         "if log:\n"
         "    with open(log, 'a', encoding='utf-8') as handle:\n"
         "        handle.write(json.dumps(args) + '\\n')\n"
@@ -110,6 +111,16 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         f"    print({json.dumps(json.dumps(plugins))})\n"
         "elif args and args[0] == 'exec':\n"
         f"    mode = {exec_mode!r}\n"
+        "    if cwd_log:\n"
+        "        with open(cwd_log, 'a', encoding='utf-8') as handle:\n"
+        "            handle.write(json.dumps({'args': args, 'cwd': os.getcwd()}) + '\\n')\n"
+        "    if mode == 'require-isolated-cwd':\n"
+        "        if os.path.exists('HARNESS_REPOSITORY_MARKER') or os.path.exists('synthetic-secret-fixture'):\n"
+        "            print('repository fixture visible to model execution', file=sys.stderr)\n"
+        "            sys.exit(23)\n"
+        "        if '--skip-git-repo-check' not in args:\n"
+        "            print('missing isolated-workspace execution flag', file=sys.stderr)\n"
+        "            sys.exit(24)\n"
         "    if mode == 'reject-readonly-approval' and '-s' in args and 'read-only' in args and '--approve-for-me' in args:\n"
         "        print('error: --sandbox and --approve-for-me cannot be used together', file=sys.stderr)\n"
         "        sys.exit(2)\n"
@@ -146,7 +157,7 @@ class CodexAdapterTest(unittest.TestCase):
 
         self.assertEqual(
             argv[:10],
-            ("codex", "exec", "--ephemeral", "--json", "-s", "read-only", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
+            ("codex", "exec", "--ephemeral", "--json", "--skip-git-repo-check", "-s", "read-only", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
         )
         self.assertIn("-s", argv)
         self.assertIn("read-only", argv)
@@ -180,7 +191,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(thread_id, UUID)
         self.assertEqual(
             argv,
-            ("codex", "exec", "resume", "--json", "-o", str(Path(temporary) / "FINAL"), UUID, "second turn\n\nRepository evidence:\n- src/example.py"),
+            ("codex", "exec", "resume", "--json", "--skip-git-repo-check", "-o", str(Path(temporary) / "FINAL"), UUID, "second turn\n\nRepository evidence:\n- src/example.py"),
         )
         self.assertNotIn("--last", argv)
         self.assertNotIn("-m", argv)
@@ -297,6 +308,52 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(execution_commands[1][0:2], ["exec", "resume"])
         self.assertIn(UUID, execution_commands[1])
         self.assertNotIn("--last", execution_commands[1])
+
+    def test_execute_isolates_each_case_workspace_and_cleans_it_after_capture(self):
+        """Model execution cannot inspect harness fixtures through its working directory."""
+        with tempfile.TemporaryDirectory() as temporary:
+            harness = Path(temporary) / "harness"
+            harness.mkdir()
+            (harness / "HARNESS_REPOSITORY_MARKER").write_text("marker", encoding="utf-8")
+            (harness / "synthetic-secret-fixture").write_text(
+                "test-only-secret-shaped-fixture", encoding="utf-8"
+            )
+            executable = write_fake_codex(harness, exec_mode="require-isolated-cwd")
+            cwd_log = Path(temporary) / "execution-cwds.jsonl"
+            multi_turn = make_request(Path(temporary) / "case-one", ("first turn", "second turn"))
+            one_turn = make_request(Path(temporary) / "case-two", ("other case",))
+            adapter = CodexAdapter(
+                executable=str(executable),
+                cwd=harness,
+                quarantine_root=Path(temporary) / "quarantine",
+            )
+            original_cwd_log = os.environ.get("FAKE_CODEX_CWD_LOG")
+            os.environ["FAKE_CODEX_CWD_LOG"] = str(cwd_log)
+            try:
+                multi_turn_result = adapter.execute(multi_turn)
+                one_turn_result = adapter.execute(one_turn)
+            finally:
+                if original_cwd_log is None:
+                    del os.environ["FAKE_CODEX_CWD_LOG"]
+                else:
+                    os.environ["FAKE_CODEX_CWD_LOG"] = original_cwd_log
+
+            executions = [
+                json.loads(line)
+                for line in cwd_log.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(multi_turn_result.status, RunStatus.PASS)
+        self.assertEqual(one_turn_result.status, RunStatus.PASS)
+        self.assertEqual(len(executions), 3)
+        first_workspace = Path(executions[0]["cwd"])
+        self.assertEqual(first_workspace, Path(executions[1]["cwd"]))
+        self.assertNotEqual(first_workspace, Path(executions[2]["cwd"]))
+        self.assertNotEqual(first_workspace, harness)
+        self.assertNotEqual(Path(executions[2]["cwd"]), harness)
+        self.assertTrue(all("--skip-git-repo-check" in execution["args"] for execution in executions))
+        self.assertFalse(first_workspace.exists())
+        self.assertFalse(Path(executions[2]["cwd"]).exists())
 
     def test_execute_succeeds_when_cli_rejects_read_only_with_auto_approve(self):
         with tempfile.TemporaryDirectory() as temporary:
