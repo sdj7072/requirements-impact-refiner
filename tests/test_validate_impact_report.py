@@ -90,6 +90,7 @@ VALID_REPORT = """# Requirements Impact Report
 | deferred | none |
 | blocked | none |
 | superseded | none |
+| reopened | none |
 | new | IMP-001 |
 
 ## Requirement Revision History
@@ -179,6 +180,7 @@ PRE_DECISION_REPORT = """# Requirements Impact Report
 | deferred | none |
 | blocked | none |
 | superseded | none |
+| reopened | none |
 | new | IMP-001 |
 
 ## Requirement Revision History

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import re
 from typing import Mapping, Sequence
 
@@ -24,6 +25,29 @@ IMPACT_CATEGORIES = {
 }
 SEVERITIES = {"critical", "high", "medium", "low"}
 EVIDENCE_LEVELS = {"verified", "inferred", "unknown"}
+DELTA_CATEGORIES = (
+    "resolved",
+    "mitigated",
+    "unchanged",
+    "accepted",
+    "deferred",
+    "blocked",
+    "superseded",
+    "reopened",
+    "new",
+)
+TERMINAL_STATES = {"resolved", "accepted", "superseded"}
+ACTIVE_STATES = {"detected", "refining", "mitigated", "deferred", "blocked"}
+STATE_TO_DELTA = {
+    "detected": "unchanged",
+    "refining": "unchanged",
+    "mitigated": "mitigated",
+    "resolved": "resolved",
+    "accepted": "accepted",
+    "deferred": "deferred",
+    "blocked": "blocked",
+    "superseded": "superseded",
+}
 
 
 @dataclass(frozen=True)
@@ -309,3 +333,101 @@ def validate_semantics(report: ParsedReport) -> list[str]:
     ):
         errors.extend(validator(report))
     return sorted(set(errors))
+
+
+def impact_states(report: ParsedReport) -> dict[str, str]:
+    states: dict[str, str] = {}
+    for row in report.tables.get("Impact Ledger", ()):
+        impact_id = unquote(row.get("ID", ""))
+        if IMPACT_PATTERN.fullmatch(impact_id):
+            states[impact_id] = unquote(row.get("State", "")).lower()
+    return states
+
+
+def authored_delta(report: ParsedReport) -> dict[str, set[str]]:
+    delta = {category: set() for category in DELTA_CATEGORIES}
+    for row in report.tables.get("Impact Delta", ()):
+        category = unquote(row.get("Category", "")).lower()
+        if category in delta:
+            delta[category].update(IMPACT_PATTERN.findall(row.get("Impact IDs", "")))
+    return delta
+
+
+def calculate_delta(
+    previous: ParsedReport | None,
+    current: ParsedReport,
+) -> dict[str, list[str]]:
+    result = {category: [] for category in DELTA_CATEGORIES}
+    previous_states = impact_states(previous) if previous is not None else {}
+    for impact_id, current_state in impact_states(current).items():
+        previous_state = previous_states.get(impact_id)
+        if previous_state is None:
+            category = "new"
+        elif previous_state in TERMINAL_STATES and current_state in ACTIVE_STATES:
+            category = "reopened"
+        elif previous_state == current_state:
+            category = "unchanged"
+        else:
+            category = STATE_TO_DELTA[current_state]
+        result[category].append(impact_id)
+    for ids in result.values():
+        ids.sort(key=lambda value: int(value.removeprefix("IMP-")))
+    return result
+
+
+def validate_lineage(
+    previous: ParsedReport,
+    current: ParsedReport,
+    previous_bytes: bytes,
+) -> list[str]:
+    if previous.metadata is None or current.metadata is None:
+        return ["lineage requires valid report metadata"]
+    errors: list[str] = []
+    if current.metadata.report_id != previous.metadata.report_id:
+        errors.append("current Report ID must match previous Report ID")
+    if current.metadata.revision != previous.metadata.revision + 1:
+        errors.append(
+            f"current revision {current.metadata.revision} must follow "
+            f"previous revision {previous.metadata.revision} exactly"
+        )
+    digest = hashlib.sha256(previous_bytes).hexdigest()
+    if current.metadata.previous_sha256 != digest:
+        errors.append("Previous SHA-256 does not match predecessor bytes")
+    missing = sorted(set(impact_states(previous)) - set(impact_states(current)))
+    errors.extend(
+        f"impact {impact_id} disappeared; retain it or mark it superseded"
+        for impact_id in missing
+    )
+    return errors
+
+
+def validate_authored_delta(
+    previous: ParsedReport | None,
+    current: ParsedReport,
+) -> list[str]:
+    expected = calculate_delta(previous, current)
+    written = authored_delta(current)
+    errors: list[str] = []
+    for category, impact_ids in written.items():
+        for impact_id in sorted(impact_ids):
+            expected_category = next(
+                (
+                    candidate
+                    for candidate, expected_ids in expected.items()
+                    if impact_id in expected_ids
+                ),
+                None,
+            )
+            if expected_category is not None and category != expected_category:
+                errors.append(
+                    f"impact {impact_id} is marked {category} but expected {expected_category}"
+                )
+    return errors
+
+
+def render_delta(delta: Mapping[str, Sequence[str]]) -> str:
+    rows = ["| Category | Impact IDs |", "| --- | --- |"]
+    for category in DELTA_CATEGORIES:
+        identifiers = ", ".join(delta.get(category, ())) or "none"
+        rows.append(f"| {category} | {identifiers} |")
+    return "\n".join(rows)

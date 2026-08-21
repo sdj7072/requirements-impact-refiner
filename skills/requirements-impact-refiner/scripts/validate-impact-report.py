@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import re
 import sys
 from pathlib import Path
@@ -8,7 +10,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from impact_report import parse_report, validate_baseline, validate_semantics
+from impact_report import (
+    calculate_delta,
+    parse_report,
+    render_delta,
+    validate_authored_delta,
+    validate_baseline,
+    validate_lineage,
+    validate_semantics,
+)
 
 
 ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
@@ -37,6 +47,7 @@ DELTA_CATEGORIES = {
     "deferred",
     "blocked",
     "superseded",
+    "reopened",
     "new",
 }
 STATE_TO_DELTA = {
@@ -227,7 +238,7 @@ def enum_value(value: str) -> str:
     return value
 
 
-def validate_report(text: str) -> list[str]:
+def _validate_single_report(text: str) -> list[str]:
     errors: list[str] = []
     parsed_report, report_errors = parse_report(text)
     errors.extend(report_errors)
@@ -419,16 +430,17 @@ def validate_report(text: str) -> list[str]:
             errors.append(f"impact delta missing known impact {impact_id}")
         elif count > 1:
             errors.append(f"impact delta lists {impact_id} more than once")
-    for category, impact_ids in delta_by_category.items():
-        if category == "new":
-            continue
-        for impact_id in impact_ids:
-            state = impact_states.get(impact_id)
-            if state is not None and STATE_TO_DELTA.get(state) != category:
-                errors.append(
-                    f"impact {impact_id} state {state} "
-                    f"disagrees with delta category {category}"
-                )
+    if parsed_report.metadata and parsed_report.metadata.revision == 1:
+        for category, impact_ids in delta_by_category.items():
+            if category in {"new", "reopened"}:
+                continue
+            for impact_id in impact_ids:
+                state = impact_states.get(impact_id)
+                if state is not None and STATE_TO_DELTA.get(state) != category:
+                    errors.append(
+                        f"impact {impact_id} state {state} "
+                        f"disagrees with delta category {category}"
+                    )
 
     unresolved_counts: dict[str, int] = {}
     for row in tables["Unresolved, Deferred, and Blocked Items"]:
@@ -460,6 +472,34 @@ def validate_report(text: str) -> list[str]:
             )
     errors.extend(validate_baseline(parsed_report))
     errors.extend(validate_semantics(parsed_report))
+    return sorted(set(errors))
+
+
+def validate_report(
+    text: str,
+    *,
+    previous_text: str | None = None,
+    previous_bytes: bytes | None = None,
+) -> list[str]:
+    errors = _validate_single_report(text)
+    current, current_parse_errors = parse_report(text)
+    errors.extend(current_parse_errors)
+    if current.metadata is None:
+        return sorted(set(errors))
+    if previous_text is None:
+        if current.metadata.revision > 1:
+            errors.append(f"revision {current.metadata.revision} requires --previous")
+        return sorted(set(errors))
+    previous, previous_parse_errors = parse_report(previous_text)
+    errors.extend(previous_parse_errors)
+    errors.extend(_validate_single_report(previous_text))
+    if previous.metadata is None:
+        return sorted(set(errors))
+    if previous_bytes is None:
+        errors.append("lineage validation requires exact previous bytes")
+        return sorted(set(errors))
+    errors.extend(validate_lineage(previous, current, previous_bytes))
+    errors.extend(validate_authored_delta(previous, current))
     return sorted(set(errors))
 
 
