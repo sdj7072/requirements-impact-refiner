@@ -19,6 +19,7 @@ from .scoring import score_mechanical
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RAW_DIRECTORY = "raw"
+_DERIVED_ARTIFACTS = frozenset(("probes.json", "controller.json", "report.md", "scores.json"))
 
 
 @dataclass(frozen=True)
@@ -252,6 +253,18 @@ def _refresh_manifest(output_root: Path) -> bool:
         return False
 
 
+def _missing_manifest_with_harness_state(output_root: Path) -> bool:
+    """Fail closed rather than blessing existing harness state with a new seal."""
+    if not output_root.exists() or (output_root / "manifest.sha256").exists():
+        return False
+    if (output_root / _RAW_DIRECTORY).exists():
+        return True
+    names = {path.name for path in output_root.iterdir()}
+    return bool(names.intersection(_DERIVED_ARTIFACTS)) or any(
+        name.startswith(".") and name.endswith(".tmp") for name in names
+    )
+
+
 def _load_existing(output_root: Path, raw_root: Path, identity: dict[str, object], schedule: Sequence[ScheduledRun]):
     controller = output_root / "controller.json"
     manifest_path = output_root / "manifest.sha256"
@@ -344,12 +357,14 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
     """Append missing finals to a compatible sealed batch and reseal derived views."""
     if args.suite is None or (args.client == "claude" and (args.model is not None or args.reasoning is not None)):
         return 2
+    output_root = Path(args.output)
+    if _missing_manifest_with_harness_state(output_root):
+        return 1
     try:
         schedule = build_schedule(load_all() if cases is None else cases, args.suite, args.repetitions)
         probe = adapter.prepare()
     except (OSError, ValueError, AttributeError):
         return 1
-    output_root = Path(args.output)
     raw_root = output_root / _RAW_DIRECTORY
     identity = _batch_identity(args, probe)
     existing = _load_existing(output_root, raw_root, identity, schedule)
@@ -438,6 +453,8 @@ def run_probe(args: argparse.Namespace, adapter: Any) -> int:
     output_root = Path(args.output)
     raw_root = output_root / _RAW_DIRECTORY
     probes_path = output_root / "probes.json"
+    if _missing_manifest_with_harness_state(output_root):
+        return 1
     try:
         if (output_root / "manifest.sha256").exists() and verify_manifest(
             output_root, (output_root / "manifest.sha256").read_text(encoding="utf-8")
@@ -459,9 +476,12 @@ def run_probe(args: argparse.Namespace, adapter: Any) -> int:
         )
     except (OSError, ValueError, PotentialSecretError, AttributeError, json.JSONDecodeError):
         return 1
-    entries.append({"client": args.client, "probe_id": probe_id, "probe": _probe_payload(probe)})
-    _write_derived(probes_path, json.dumps({"probes": entries}, sort_keys=True, indent=2) + "\n")
-    return 0 if _refresh_manifest(output_root) else 1
+    try:
+        entries.append({"client": args.client, "probe_id": probe_id, "probe": _probe_payload(probe)})
+        _write_derived(probes_path, json.dumps({"probes": entries}, sort_keys=True, indent=2) + "\n")
+        return 0 if _refresh_manifest(output_root) else 1
+    except (OSError, ValueError):
+        return 1
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:

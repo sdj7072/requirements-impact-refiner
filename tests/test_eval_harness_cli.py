@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from evals.harness.catalog import load_all
 from evals.harness.evidence import record_run, verify_manifest
@@ -25,6 +26,7 @@ class FakeAdapter:
         self.statuses = list(statuses)
         self.requests = []
         self.record_evidence = record_evidence
+        self.probe_calls = 0
         self.client = client
         self.version = version
         self.plugin_version = plugin_version
@@ -46,6 +48,7 @@ class FakeAdapter:
         )
 
     def probe(self):
+        self.probe_calls += 1
         return self.prepare()
 
     def execute(self, request):
@@ -350,6 +353,59 @@ class EvalHarnessCliTest(unittest.TestCase):
             "- enabled composition: codex fake 9.0 plugins=extra,requirements-impact-refiner,superpowers",
             report,
         )
+
+    def test_missing_manifest_blocks_probe_after_a_completed_batch(self):
+        """Resealing raw batch evidence after manifest loss would hide its unsealed interval."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            smoke = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+            probe = build_parser().parse_args(
+                ["--client", "codex", "--probe-only", "--output", str(output)]
+            )
+            self.assertEqual(run_batch(smoke, FakeAdapter()), 0)
+            (output / "manifest.sha256").unlink()
+            adapter = FakeAdapter()
+
+            self.assertEqual(run_probe(probe, adapter), 1)
+
+            self.assertEqual(adapter.probe_calls, 0)
+            self.assertFalse((output / "manifest.sha256").exists())
+
+    def test_missing_manifest_blocks_batch_after_a_probe(self):
+        """A batch must not silently bless prior unsealed probe evidence."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            probe = build_parser().parse_args(
+                ["--client", "codex", "--probe-only", "--output", str(output)]
+            )
+            smoke = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+            self.assertEqual(run_probe(probe, FakeAdapter()), 0)
+            (output / "manifest.sha256").unlink()
+            adapter = FakeAdapter()
+
+            self.assertEqual(run_batch(smoke, adapter), 1)
+
+            self.assertEqual(adapter.requests, [])
+            self.assertFalse((output / "manifest.sha256").exists())
+
+    def test_probe_publication_error_returns_one_without_resealing_raw_probe(self):
+        """A probe ledger write failure must leave raw evidence unsealed rather than report success."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--probe-only", "--output", str(output)]
+            )
+
+            with patch("evals.harness.run._write_derived", side_effect=OSError("disk full")):
+                exit_code = run_probe(args, FakeAdapter())
+
+            self.assertEqual(exit_code, 1)
+            self.assertTrue((output / "raw" / "codex" / "probe-01").is_dir())
+            self.assertFalse((output / "manifest.sha256").exists())
 
     def test_missing_safe_evidence_makes_the_batch_invalid(self):
         """A result without a recorded artifact cannot support an exit-zero batch."""
