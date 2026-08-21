@@ -82,6 +82,7 @@ def _artifact_bytes(artifacts: Mapping[str, Artifact]) -> tuple[tuple[str, bytes
             not name
             or relative.is_absolute()
             or any(part in ("", ".", "..") for part in relative.parts)
+            or any(any(character.isspace() for character in part) for part in relative.parts)
             or "\\" in name
         ):
             raise ValueError("artifact names must be safe relative paths")
@@ -120,12 +121,28 @@ def _is_within(path: Path, parent: Path) -> bool:
 
 
 def _write_atomically(target: Path, artifacts: tuple[tuple[str, bytes], ...]) -> Path:
+    """Publish staging bytes under a recorder-to-recorder exclusive claim.
+
+    The portable ``O_EXCL`` claim coordinates callers of this recorder. It
+    cannot prevent unrelated filesystem writers that ignore the claim.
+    """
     if target.exists():
         raise FileExistsError(f"evidence already exists: {target}")
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
+    claim = target.parent / f".{target.name}.lock"
     try:
+        claim_descriptor = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as error:
+        raise FileExistsError(f"evidence recording already in progress: {target}") from error
+
+    temporary = None
+    try:
+        if target.exists():
+            raise FileExistsError(f"evidence already exists: {target}")
+        temporary = Path(
+            tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent)
+        )
         for name, payload in artifacts:
             destination = temporary / name
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -134,8 +151,15 @@ def _write_atomically(target: Path, artifacts: tuple[tuple[str, bytes], ...]) ->
             raise FileExistsError(f"evidence already exists: {target}")
         os.replace(temporary, target)
     except BaseException:
-        shutil.rmtree(temporary, ignore_errors=True)
+        if temporary is not None:
+            shutil.rmtree(temporary, ignore_errors=True)
         raise
+    finally:
+        os.close(claim_descriptor)
+        try:
+            claim.unlink()
+        except FileNotFoundError:
+            pass
     return target
 
 

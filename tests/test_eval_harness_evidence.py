@@ -1,8 +1,11 @@
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from evals.harness import evidence
 from evals.harness.evidence import (
     PotentialSecretError,
     build_manifest,
@@ -143,6 +146,102 @@ class EvalHarnessEvidenceTest(unittest.TestCase):
                 [row.split(" ", 1)[0] for row in manifest.splitlines()],
                 ["codex/manifest.sha256"],
             )
+
+    def test_concurrent_recorders_claim_one_run_before_publication(self):
+        """Two recorders reaching publication together must not overwrite a run."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw_root = root / "raw"
+            quarantine_root = root / "quarantine"
+            start = threading.Barrier(2)
+            replace_barrier = threading.Barrier(2)
+            outcomes = []
+            outcomes_lock = threading.Lock()
+            original_replace = evidence.os.replace
+
+            def synchronized_replace(source, destination):
+                try:
+                    replace_barrier.wait(timeout=0.2)
+                except threading.BrokenBarrierError:
+                    pass
+                return original_replace(source, destination)
+
+            def recorder(payload):
+                start.wait(timeout=1)
+                try:
+                    result = record_run(
+                        raw_root,
+                        "codex",
+                        "POS-authorization",
+                        1,
+                        {"final.md": payload},
+                        quarantine_root,
+                    )
+                except Exception as error:
+                    result = error
+                with outcomes_lock:
+                    outcomes.append(result)
+
+            with patch("evals.harness.evidence.os.replace", synchronized_replace):
+                first = threading.Thread(target=recorder, args=(b"first",))
+                second = threading.Thread(target=recorder, args=(b"second",))
+                first.start()
+                second.start()
+                first.join(timeout=2)
+                second.join(timeout=2)
+
+            self.assertFalse(first.is_alive())
+            self.assertFalse(second.is_alive())
+            self.assertEqual(sum(isinstance(item, Path) for item in outcomes), 1)
+            self.assertEqual(sum(isinstance(item, FileExistsError) for item in outcomes), 1)
+            self.assertIn(
+                (raw_root / "codex" / "POS-authorization" / "01" / "final.md").read_bytes(),
+                (b"first", b"second"),
+            )
+            self.assertEqual(
+                list((raw_root / "codex" / "POS-authorization").glob(".01.*")), []
+            )
+
+    def test_record_run_rejects_whitespace_in_any_artifact_path_component(self):
+        """Whitespace in a path would make the space-delimited manifest invalid."""
+        unsafe_names = (
+            "final evidence.md",
+            "final\tevidence.md",
+            "final\nevidence.md",
+            "nested/final evidence.md",
+            "nested/final\tevidence.md",
+            "nested/final\nevidence.md",
+        )
+
+        for name in unsafe_names:
+            with self.subTest(name=repr(name)), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                raw_root = root / "raw"
+                with self.assertRaisesRegex(ValueError, "artifact names"):
+                    record_run(
+                        raw_root,
+                        "codex",
+                        "POS-authorization",
+                        1,
+                        {name: b"safe contents"},
+                        root / "quarantine",
+                    )
+                self.assertFalse(raw_root.exists())
+
+    def test_record_run_allows_nested_posix_artifact_paths(self):
+        """Rejecting all nested paths would prevent the documented raw layout."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            recorded = record_run(
+                root / "raw",
+                "codex",
+                "POS-authorization",
+                1,
+                {"events/turn-01.jsonl": b"{}\n"},
+                root / "quarantine",
+            )
+
+            self.assertEqual((recorded / "events" / "turn-01.jsonl").read_bytes(), b"{}\n")
 
 
 if __name__ == "__main__":
