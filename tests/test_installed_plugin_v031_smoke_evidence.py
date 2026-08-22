@@ -8,15 +8,24 @@ from pathlib import Path
 
 from evals.harness.catalog import load_all, select_suite
 from evals.harness.evidence import find_potential_secrets, verify_manifest
-from evals.harness.scoring import _planning_handoff_workflow
+from evals.harness.models import Adjudication, RunResult, RunStatus
+from evals.harness.scoring import _planning_handoff_workflow, validate_adjudications
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_ROOT = ROOT / "evals" / "results" / "installed-v0.3.1"
 RAW_ROOT = RESULT_ROOT / "raw"
+INSTALLED_PAYLOAD = RESULT_ROOT / "installed-payload.json"
+INSTALLED_CACHE_ROOT = Path(
+    "/Users/p042890/.codex/plugins/cache/requirements-impact-refiner-v031-eval/"
+    "requirements-impact-refiner/0.3.1"
+)
+PAYLOAD_SOURCE = "/private/tmp/rir-v031-eval-marketplace"
+PAYLOAD_ALIAS = "requirements-impact-refiner@requirements-impact-refiner-v031-eval"
+CANONICAL_RELEASE_COMMIT = "06c76bc59089f86fee38cb370628893b47082b0e"
 
 EXPECTED_MANIFEST_SHA256 = (
-    "fe4ab995cee882e95df1fe1c6e07542512cd216aaa44d47809fdd0252add05da"
+    "716fbf0f19b0c5ef30a0279cfe66c9ec2a7793bd69791b129b66be249b33d8f6"
 )
 FINAL_CASE_IDS = tuple(
     case.id for case in select_suite(load_all(), "installed-superpowers")
@@ -57,6 +66,31 @@ def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def functional_payload_inventory(root):
+    """Return the declared functional plugin payload, never its alias wrapper."""
+    root = Path(root)
+    paths = set()
+    for directory in (".codex-plugin", "skills", "references", "assets"):
+        paths.update(path for path in (root / directory).rglob("*") if path.is_file())
+    paths.add(root / ".claude-plugin" / "plugin.json")
+    for name in ("install-agent-skill.py", "impact_report.py", "validate-impact-report.py"):
+        paths.add(root / "scripts" / name)
+    return [
+        {"path": path.relative_to(root).as_posix(), "sha256": sha256(path)}
+        for path in sorted(paths)
+    ]
+
+
+def inventory_digest(rows):
+    return hashlib.sha256(
+        "".join(f"{row['path']} {row['sha256']}\n" for row in rows).encode("utf-8")
+    ).hexdigest()
+
+
 def raw_path(case_id, repetition, turn):
     return RAW_ROOT / "codex" / case_id / f"{repetition:02d}" / f"{turn}.jsonl"
 
@@ -83,6 +117,28 @@ def report_previous_sha(report):
 
 
 class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
+    def test_installed_alias_payload_is_sealed_and_matches_the_canonical_release_bytes(self):
+        """Catch an alias cache that evaluates different functional bytes than v0.3.1."""
+        payload = load_json(INSTALLED_PAYLOAD)
+        canonical_inventory = functional_payload_inventory(ROOT)
+        installed_inventory = functional_payload_inventory(INSTALLED_CACHE_ROOT)
+
+        self.assertEqual(payload["source_type"], "local")
+        self.assertEqual(payload["source"], PAYLOAD_SOURCE)
+        self.assertEqual(payload["alias_id"], PAYLOAD_ALIAS)
+        self.assertEqual(payload["canonical_release"], "0.3.1")
+        self.assertEqual(payload["canonical_commit_basis"], CANONICAL_RELEASE_COMMIT)
+        self.assertEqual(
+            payload["excluded_alias_wrapper"],
+            {
+                "path": ".agents/plugins/marketplace.json",
+                "reason": "top-level marketplace name intentionally differs for isolated local evaluation",
+            },
+        )
+        self.assertEqual(payload["inventory"], canonical_inventory)
+        self.assertEqual(payload["inventory"], installed_inventory)
+        self.assertEqual(payload["inventory_sha256"], inventory_digest(canonical_inventory))
+
     def test_manifest_and_raw_transcripts_are_sealed_safe_and_byte_preserved(self):
         """Pin all final v0.3.1 bytes, including Git's raw-transcript treatment."""
         manifest = (RESULT_ROOT / "manifest.sha256").read_text(encoding="utf-8")
@@ -151,6 +207,18 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         self.assertEqual(identity["model"], "gpt-5.6-sol")
         self.assertEqual(identity["reasoning"], "high")
         self.assertEqual(identity["plugin_version"], "0.3.1")
+        self.assertEqual(
+            identity["catalog_sha256"],
+            "160db9762d93c70ce89bb4141152fe3dcf4f105ee9ef814f7cd5f4710b2a81dd",
+        )
+        self.assertEqual(
+            identity["harness_sha256"],
+            "4eb5e9dd11f07770d961e1c70201ae0ed0aa60dd65b770af0728f274972a9ca0",
+        )
+        self.assertEqual(
+            identity["skills_sha256"],
+            "ed337f8d828e5476dad94a38b3ad032243c5060e5027d14ecf4f337271ea3d93",
+        )
         self.assertEqual(
             tuple(identity["enabled_plugins"]), EXPECTED_CODEX_ENABLED_PLUGINS
         )
@@ -225,7 +293,10 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
             {(row["case_id"], row["repetition"], row["rubric"]) for row in adjudications},
             expected_adjudications,
         )
+        self.assertTrue(all(type(row["passed"]) is bool for row in adjudications))
         self.assertTrue(all(row["passed"] for row in adjudications))
+        self.assertTrue(all(isinstance(row["quote"], str) and row["quote"].strip() for row in adjudications))
+        self.assertTrue(all(isinstance(row["rationale"], str) and row["rationale"].strip() for row in adjudications))
         selected_outputs = {
             (row["case_id"], row["repetition"]): row["result"]["final_output"]
             for row in controller["runs"]
@@ -235,6 +306,29 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
                 row["quote"] and row["quote"] in selected_outputs[(row["case_id"], row["repetition"])]
                 for row in adjudications
             )
+        )
+        typed_adjudications = tuple(Adjudication(**row) for row in adjudications)
+        typed_runs = tuple(
+            RunResult(
+                case_id=row["case_id"],
+                repetition=row["repetition"],
+                client=row["result"]["client"],
+                status=RunStatus(row["result"]["status"]),
+                reason=row["result"]["reason"],
+                final_output=row["result"]["final_output"],
+                session_id=row["result"]["session_id"],
+                attempt=row["result"]["attempt"],
+                retry_of=row["result"]["retry_of"],
+            )
+            for row in controller["runs"]
+        )
+        self.assertEqual(
+            validate_adjudications(
+                typed_adjudications,
+                select_suite(load_all(), "installed-superpowers"),
+                typed_runs,
+            ),
+            [],
         )
 
         report = (RESULT_ROOT / "report.md").read_text(encoding="utf-8")

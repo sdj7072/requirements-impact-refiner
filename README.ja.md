@@ -113,7 +113,7 @@ Revision 1 の基準報告では両方の影響を `new` とします。次の�
 
 ## 6. 互換性
 
-以下の主張は保存済み評価根拠に限定します。「動作評価」はスキルと参照ファイルを渡した fresh-context モデル実行であり、外部プラグインローダーやオーケストレーターが実行された証明ではありません。製品、バージョン、状態の列は全翻訳で同一とし、根拠メモだけを翻訳しています。
+以下の主張は保存済み評価根拠に限定します。履歴上の Codex standalone 動作ハーネスはスキルと参照ファイルを渡した fresh-context 実行であり、外部プラグインローダーやオーケストレーターが実行された証明ではありません。これに対し、封印済み v0.3.1 Codex-with-Superpowers バッチは、正本リリースと機能 payload のバイトが一致する実際のインストール済みプラグインキャッシュで実行しました。製品、バージョン、状態の列は全翻訳で同一とし、根拠メモだけを翻訳しています。
 
 | Environment | Version | Status | Evidence note |
 | --- | --- | --- | --- |
@@ -146,7 +146,7 @@ Revision 1 の基準報告では両方の影響を `new` とします。次の�
 | release status | not verified; one mechanical verification blocker |
 | Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-正確なプラグイン識別子は `requirements-impact-refiner@requirements-impact-refiner-v031-eval` です。v0.3.1 manifest digest は `fe4ab995cee882e95df1fe1c6e07542512cd216aaa44d47809fdd0252add05da` であり、raw transcript のインベントリはバイト保存と秘密情報スキャンを維持します。唯一の機械的失敗は `POS-cache` repetition 2 の不正な Impact Ledger 行と unknown `IMP-002` 参照を正確に記録します。400 件の人手 adjudication はすべて合格し、各引用が選択された最終出力の部分文字列であることを確認しています。Claude の証拠は structural-only であり、blocked の動作互換性状態を変更しません。
+正確なプラグイン識別子は `requirements-impact-refiner@requirements-impact-refiner-v031-eval` です。これは isolated local evaluation-only marketplace の別名であり、not a public install ID or support claim です。最上位 marketplace 名は意図的に異なるため wrapper ファイルだけを除外し、すべての機能 payload コンポーネントのバイトは封印済み [installed payload](evals/results/installed-v0.3.1/installed-payload.json) インベントリで一致しています。v0.3.1 manifest digest は `716fbf0f19b0c5ef30a0279cfe66c9ec2a7793bd69791b129b66be249b33d8f6` であり、raw transcript のインベントリはバイト保存と秘密情報スキャンを維持します。唯一の機械的失敗は `POS-cache` repetition 2 の不正な Impact Ledger 行と unknown `IMP-002` 参照を正確に記録します。400 件の人手 adjudication はすべて合格し、各引用が選択された最終出力の部分文字列であることを確認しています。Claude の証拠は structural-only であり、blocked の動作互換性状態を変更しません。
 
 ## 7. 比較と非目標
 

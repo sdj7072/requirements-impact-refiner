@@ -195,6 +195,8 @@ class DocumentationTest(unittest.TestCase):
                 "structural-only",
                 "adjudication.json",
                 "report.md",
+                "isolated local evaluation-only marketplace",
+                "not a public install ID or support claim",
             ):
                 self.assertIn(required, text, f"{required} missing from {name}")
             self.assertNotIn("10/17", text, name)

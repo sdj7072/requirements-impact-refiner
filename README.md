@@ -113,7 +113,7 @@ Adapters do not invoke the upstream or downstream workflow. If more than one orc
 
 ## 6. Compatibility
 
-Compatibility claims below are limited to preserved evaluation evidence. “Behavioral evaluation” means fresh-context model runs with supplied skill/reference files; it is not proof that an external plugin loader or orchestrator executed. Product, version, and status columns are identical across all translations; only the evidence note is translated.
+Compatibility claims below are limited to preserved evaluation evidence. The historical Codex standalone behavioral harness used supplied skill/reference files in a fresh context and is not proof that an external plugin loader or orchestrator executed. By contrast, the sealed v0.3.1 Codex-with-Superpowers batch ran the actual installed-plugin cache whose functional payload is byte-matched to the canonical release. Product, version, and status columns are identical across all translations; only the evidence note is translated.
 
 | Environment | Version | Status | Evidence note |
 | --- | --- | --- | --- |
@@ -146,7 +146,7 @@ This table records the immutable final evaluation evidence. It does not promote 
 | release status | not verified; one mechanical verification blocker |
 | Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-The exact plugin identifier is `requirements-impact-refiner@requirements-impact-refiner-v031-eval`. The v0.3.1 manifest digest is `fe4ab995cee882e95df1fe1c6e07542512cd216aaa44d47809fdd0252add05da`; the raw transcript inventory remains byte-preserved and secret-scanned. The lone mechanical failure records exactly a malformed Impact Ledger row and unknown `IMP-002` references in `POS-cache` repetition 2. The 400 human adjudications all pass and their quotes are each verified as substrings of the selected final output. Claude evidence is structural-only and does not change its blocked behavioral-compatibility status.
+The exact plugin identifier is `requirements-impact-refiner@requirements-impact-refiner-v031-eval`. It is an isolated local evaluation-only marketplace alias, not a public install ID or support claim; its wrapper marketplace file is intentionally excluded because its top-level name differs, while every functional payload component is byte-matched in the sealed [installed payload](evals/results/installed-v0.3.1/installed-payload.json) inventory. The v0.3.1 manifest digest is `716fbf0f19b0c5ef30a0279cfe66c9ec2a7793bd69791b129b66be249b33d8f6`; the raw transcript inventory remains byte-preserved and secret-scanned. The lone mechanical failure records exactly a malformed Impact Ledger row and unknown `IMP-002` references in `POS-cache` repetition 2. The 400 human adjudications all pass and their quotes are each verified as substrings of the selected final output. Claude evidence is structural-only and does not change its blocked behavioral-compatibility status.
 
 ## 7. Comparison and Non-Goals
 

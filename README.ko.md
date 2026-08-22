@@ -113,7 +113,7 @@ Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다
 
 ## 6. 호환성
 
-아래 주장은 보존된 평가 근거로 한정됩니다. “동작 평가”는 스킬과 참조 파일을 제공한 fresh-context 모델 실행을 뜻하며 외부 플러그인 로더나 오케스트레이터가 실제 실행되었다는 증명이 아닙니다. 제품, 버전, 상태 열은 모든 번역본에서 동일하며 근거 설명만 번역했습니다.
+아래 주장은 보존된 평가 근거로 한정됩니다. 역사적인 Codex standalone 동작 하네스는 스킬과 참조 파일을 제공한 fresh-context 실행이며 외부 플러그인 로더나 오케스트레이터가 실제 실행되었다는 증명이 아닙니다. 반대로 봉인된 v0.3.1 Codex-with-Superpowers 배치는 정식 릴리스와 기능 payload 바이트가 일치하는 실제 설치 플러그인 캐시에서 실행되었습니다. 제품, 버전, 상태 열은 모든 번역본에서 동일하며 근거 설명만 번역했습니다.
 
 | Environment | Version | Status | Evidence note |
 | --- | --- | --- | --- |
@@ -146,7 +146,7 @@ Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다
 | release status | not verified; one mechanical verification blocker |
 | Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-정확한 플러그인 식별자는 `requirements-impact-refiner@requirements-impact-refiner-v031-eval`입니다. v0.3.1 manifest digest는 `fe4ab995cee882e95df1fe1c6e07542512cd216aaa44d47809fdd0252add05da`이며 raw transcript 인벤토리는 바이트 보존 및 비밀정보 검사를 유지합니다. 유일한 기계 실패는 `POS-cache` 반복 2에서 잘못된 Impact Ledger 행과 알 수 없는 `IMP-002` 참조를 정확히 기록합니다. 400건의 사람 adjudication은 모두 통과했고 각 인용문이 선택된 최종 출력의 부분 문자열인지 확인했습니다. Claude 증거는 structural-only이며 차단된 동작 호환성 상태를 바꾸지 않습니다.
+정확한 플러그인 식별자는 `requirements-impact-refiner@requirements-impact-refiner-v031-eval`입니다. 이는 isolated local evaluation-only marketplace 별칭이며 not a public install ID or support claim입니다. 상위 marketplace 이름이 의도적으로 다르므로 wrapper 파일만 제외했고, 모든 기능 payload 구성요소의 바이트는 봉인된 [installed payload](evals/results/installed-v0.3.1/installed-payload.json) 인벤토리에서 일치합니다. v0.3.1 manifest digest는 `716fbf0f19b0c5ef30a0279cfe66c9ec2a7793bd69791b129b66be249b33d8f6`이며 raw transcript 인벤토리는 바이트 보존 및 비밀정보 검사를 유지합니다. 유일한 기계 실패는 `POS-cache` 반복 2에서 잘못된 Impact Ledger 행과 알 수 없는 `IMP-002` 참조를 정확히 기록합니다. 400건의 사람 adjudication은 모두 통과했고 각 인용문이 선택된 최종 출력의 부분 문자열인지 확인했습니다. Claude 증거는 structural-only이며 차단된 동작 호환성 상태를 바꾸지 않습니다.
 
 ## 7. 비교와 비목표
 
