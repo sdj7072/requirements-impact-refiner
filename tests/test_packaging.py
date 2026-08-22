@@ -77,6 +77,13 @@ def unsafe_ci_argv(argv):
         return False
 
     command, *arguments = argv
+    if Path(command).name == "env":
+        for index, argument in enumerate(arguments):
+            if re.fullmatch(
+                r"python(?:\d+(?:\.\d+)*)?", Path(argument).name
+            ):
+                command, arguments = argument, arguments[index + 1 :]
+                break
     python_name = Path(command).name
     if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", python_name):
         if any(
@@ -395,6 +402,10 @@ class PackagingTest(unittest.TestCase):
             "python3.11 -m evals.harness.run --client claude --probe-only --output out",
             "/usr/bin/python3 -m evals.harness.run --client codex --suite installed-superpowers --output out",
             "PYTHONPYCACHEPREFIX=/tmp/ci python3 -m evals.harness.run --client codex --probe-only --output out",
+            "env python3 -m evals.harness.run --client codex --probe-only --output out",
+            "/usr/bin/env python3 -m evals.harness.run --client claude --probe-only --output out",
+            "/usr/bin/env FOO=bar python3 -m evals.harness.run --client codex --suite smoke --output out",
+            "env -i python3 -m evals.harness.run --client codex --suite smoke --output out",
         )
         for command in unsafe_steps:
             with self.subTest(command=command), tempfile.TemporaryDirectory() as temporary:
@@ -428,6 +439,7 @@ class PackagingTest(unittest.TestCase):
             "          python3 -m unittest discover -s tests -v\n"
             "          python3 -m py_compile evals/harness/run.py\n"
             "          python3 -m compileall -q evals/harness\n"
+            "          env PYTHONPYCACHEPREFIX=/tmp/ci python3 -m unittest discover -s tests -v\n"
         )
         self.assertEqual(unsafe_ci_commands(workflow), ())
 

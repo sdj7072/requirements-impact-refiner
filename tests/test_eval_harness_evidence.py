@@ -130,6 +130,17 @@ class EvalHarnessEvidenceTest(unittest.TestCase):
             self.assertTrue(manifest.endswith("\n"))
             self.assertEqual(verify_manifest(raw_root, manifest), [])
 
+    def test_empty_manifest_round_trips_through_its_own_verifier(self):
+        """The canonical zero-file inventory is empty, not a blank row."""
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_root = Path(temporary) / "raw"
+            raw_root.mkdir()
+
+            manifest = build_manifest(raw_root)
+
+            self.assertEqual(manifest, "")
+            self.assertEqual(verify_manifest(raw_root, manifest), [])
+
     def test_manifest_excludes_only_the_root_manifest_file(self):
         """Skipping a nested artifact named manifest would lose raw evidence."""
         with tempfile.TemporaryDirectory() as temporary:

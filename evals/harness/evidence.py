@@ -281,7 +281,7 @@ def build_manifest(raw_root: Path) -> str:
     for path in _evidence_files(root):
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         rows.append(f"{path.relative_to(root).as_posix()} {digest}")
-    return "\n".join(rows) + "\n"
+    return "\n".join(rows) + ("\n" if rows else "")
 
 
 def _parse_manifest(manifest: str) -> tuple[dict[str, str], list[str]]:
