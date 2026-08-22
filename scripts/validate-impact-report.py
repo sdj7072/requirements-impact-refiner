@@ -75,6 +75,7 @@ COMMON_REQUIRED_SECTIONS = {
     "Analysis Scope and Limitations",
     "Planning Handoff",
 }
+SUMMARY_SECTION = "Change Impact Summary"
 PHASE_REQUIRED_SECTION = {
     "pre-decision": "Decision Needed",
     "post-decision": "Decisions and Accepted Risks",
@@ -100,6 +101,16 @@ STATE_RULES = {
     "Unresolved, Deferred, and Blocked Items": ("State", UNRESOLVED_STATES),
 }
 TABLE_HEADERS = {
+    SUMMARY_SECTION: [
+        "Impact ID",
+        "Changed feature",
+        "Possible issue",
+        "Affected feature or user",
+        "Trigger",
+        "Severity",
+        "Prevention or check",
+        "Status",
+    ],
     "Report State": ["Report ID", "Revision", "Previous SHA-256", "Phase"],
     "Original Requirement": ["Requirement ID", "Original request", "Source"],
     "Current Refined Requirement": [
@@ -196,6 +207,15 @@ def markdown_sections(text: str) -> dict[str, str]:
     return {name: "\n".join(lines) for name, lines in sections.items()}
 
 
+def duplicate_section_names(text: str) -> set[str]:
+    counts: dict[str, int] = {}
+    for line in text.splitlines():
+        if line.startswith("## "):
+            name = line[3:].strip()
+            counts[name] = counts.get(name, 0) + 1
+    return {name for name, count in counts.items() if count > 1}
+
+
 def table_cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
@@ -239,7 +259,7 @@ def enum_value(value: str) -> str:
     return value
 
 
-def _validate_single_report(text: str) -> list[str]:
+def _validate_single_report(text: str, *, require_summary: bool = False) -> list[str]:
     errors: list[str] = []
     parsed_report, report_errors = parse_report(text)
     errors.extend(report_errors)
@@ -247,6 +267,10 @@ def _validate_single_report(text: str) -> list[str]:
     if first_line != "# Requirements Impact Report":
         errors.append("missing canonical title: # Requirements Impact Report")
     sections = markdown_sections(text)
+    for name in sorted(duplicate_section_names(text) & TABLE_HEADERS.keys()):
+        errors.append(f"duplicate section: {name}")
+    if require_summary and SUMMARY_SECTION not in sections:
+        errors.append(f"missing section: {SUMMARY_SECTION}")
     for name in sorted(COMMON_REQUIRED_SECTIONS - sections.keys()):
         errors.append(f"missing section: {name}")
 
@@ -269,6 +293,9 @@ def _validate_single_report(text: str) -> list[str]:
 
     tables: dict[str, list[dict[str, str]]] = {}
     for name, headers in TABLE_HEADERS.items():
+        if name == SUMMARY_SECTION and name not in sections:
+            tables[name] = []
+            continue
         if name in {"Decision Needed", "Decisions and Accepted Risks"} and name not in sections:
             tables[name] = []
             continue
@@ -416,6 +443,55 @@ def _validate_single_report(text: str) -> list[str]:
     if not has_requirement_relationship:
         errors.append("report requires at least one impact with REQ relationship")
 
+    if SUMMARY_SECTION in sections:
+        summary_counts: dict[str, int] = {}
+        for row in tables[SUMMARY_SECTION]:
+            impact_id = row.get("Impact ID", "").strip("`")
+            if not ID_PATTERN.fullmatch(impact_id) or not impact_id.startswith("IMP-"):
+                errors.append("impact summary row requires exactly one canonical IMP identifier")
+                continue
+            summary_counts[impact_id] = summary_counts.get(impact_id, 0) + 1
+            if impact_id not in impact_states:
+                errors.append(f"impact summary references unknown impact {impact_id}")
+            for column in (
+                "Changed feature",
+                "Possible issue",
+                "Affected feature or user",
+                "Trigger",
+                "Prevention or check",
+            ):
+                if not row.get(column, "").strip():
+                    errors.append(f"impact summary {impact_id} requires {column}")
+            ledger_row = next(
+                (
+                    impact
+                    for impact in tables["Impact Ledger"]
+                    if impact.get("ID", "").strip("`") == impact_id
+                ),
+                None,
+            )
+            if ledger_row is not None:
+                summary_severity = enum_value(row.get("Severity", ""))
+                ledger_severity = enum_value(ledger_row.get("Severity", ""))
+                if summary_severity != ledger_severity:
+                    errors.append(
+                        f"impact summary {impact_id} severity {summary_severity or '<empty>'} "
+                        f"disagrees with ledger {ledger_severity or '<empty>'}"
+                    )
+                summary_status = enum_value(row.get("Status", ""))
+                ledger_status = enum_value(ledger_row.get("State", ""))
+                if summary_status != ledger_status:
+                    errors.append(
+                        f"impact summary {impact_id} status {summary_status or '<empty>'} "
+                        f"disagrees with ledger {ledger_status or '<empty>'}"
+                    )
+        for impact_id, count in summary_counts.items():
+            if count > 1:
+                errors.append(f"impact summary lists {impact_id} more than once")
+        for impact_id in sorted(impact_states):
+            if summary_counts.get(impact_id, 0) == 0:
+                errors.append(f"impact summary missing known impact {impact_id}")
+
     delta_rows = tables["Impact Delta"]
     delta_by_category: dict[str, set[str]] = {}
     delta_counts: dict[str, int] = {}
@@ -510,8 +586,9 @@ def validate_report(
     *,
     previous_text: str | None = None,
     previous_bytes: bytes | None = None,
+    require_summary: bool = False,
 ) -> list[str]:
-    errors = _validate_single_report(text)
+    errors = _validate_single_report(text, require_summary=require_summary)
     current, current_parse_errors = parse_report(text)
     errors.extend(current_parse_errors)
     if current.metadata is None:
@@ -553,6 +630,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("report", type=Path)
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--print-expected-delta", action="store_true")
+    parser.add_argument("--require-summary", action="store_true")
     return parser
 
 
@@ -572,6 +650,7 @@ def main(argv: list[str] | None = None) -> int:
         current_text,
         previous_text=previous_text,
         previous_bytes=previous_bytes,
+        require_summary=args.require_summary,
     )
     if args.print_expected_delta and not errors:
         current_report, current_errors = parse_report(current_text)

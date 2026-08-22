@@ -96,8 +96,21 @@ class DocumentationTest(unittest.TestCase):
     def test_top_release_descriptions_identify_the_current_patch_release(self):
         for name in READMES:
             description = (ROOT / name).read_text(encoding="utf-8").splitlines()[4]
-            self.assertIn("`0.3.1`", description, name)
+            self.assertIn("`0.3.2`", description, name)
             self.assertNotIn("`0.3.0`", description, name)
+
+    def test_presentation_modes_and_repository_setting_are_documented(self):
+        for name in READMES:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for token in (
+                ".requirements-impact-refiner.json",
+                "simple",
+                "balanced",
+                "technical",
+                "Change Impact Summary",
+                "--require-summary",
+            ):
+                self.assertIn(token, text, f"{token} missing from {name}")
 
     def test_v03_lineage_and_migration_contract_is_synchronized(self):
         for name in READMES:

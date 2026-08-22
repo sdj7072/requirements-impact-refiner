@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.3.1` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
+Requirements Impact Refiner `0.3.2` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化するリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
 
 ## 1. 課題
 
@@ -76,6 +76,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 インストーラーは既存のインストールを上書きしません。クライアント固有の選択肢として `~/.codex/skills` と `~/.claude/skills` も利用できますが、Codex と Claude Code では上記のマーケットプレイス方式の方が更新を管理しやすくなります。
 
 プラグインが有効な場合、[`using-requirements-impact-refiner`](skills/using-requirements-impact-refiner/SKILL.md) がソフトウェア開発の会話を自動確認し、具体的な動作変更では計画前の適切な境界で中核スキルを呼び出します。専用の呼び出し文句は不要です。自動確認を止めるには、クライアントのプラグイン設定でこのプラグインを無効にします。
+
+各報告書の先頭には、利用者向けの `Change Impact Summary` が表示されます。変更される機能、起こり得る問題、影響を受ける機能や利用者、発生条件、予防または確認方法を示します。既定値は `balanced` で、リポジトリルートの `.requirements-impact-refiner.json` で設定できます。
+
+```json
+{"audience":"balanced"}
+```
+
+指定できる値は `simple`, `balanced`, `technical` です。現在の会話で明示した値がリポジトリ設定より優先されます。`balanced` は平易な説明と有用な技術的手掛かりを組み合わせます。これは Codex や Claude 専用の設定画面ではなく、クライアント間で利用できるスキル設定です。
 
 読み込み後、変更とリポジトリ範囲を併記して依頼します。例: 「計画前に `displayName` API 名変更を API、iOS DTO、キャッシュ済みプロフィール経路に対して精緻化して」。複数のオーケストレーターがある場合は、正確に一つだけ選びます。
 
@@ -173,7 +181,7 @@ v0.2 は履歴形式です。`0.3.0` への移行は manual migration です。�
 完成した報告書は標準ライブラリだけの検証器で確認します。
 
 ```sh
-python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py path/to/report.md
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --require-summary path/to/report.md
 ```
 
 後続リビジョンは正確な predecessor とともに検証し、両ファイルを変更せず計算済み Delta を表示できます。
@@ -183,7 +191,7 @@ python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --p
 python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md --print-expected-delta current.md
 ```
 
-検証器は必須セクション、定義と参照、正確な根拠/状態 enum、`accepted` の決定リンク、`resolved` の根拠、critical 影響の `AC-###` リンク、連続リビジョン番号、安定した報告書/影響 ID、正確な predecessor digest、`reopened` を含む決定的 Delta 遷移を確認します。引用したリポジトリ事実の真偽は検証せず、predecessor を自動検索もしません。任意のローカル skill/plugin platform validator は前述の環境問題で `blocked` され、成功は主張しません。
+検証器は必須セクション、定義と参照、正確な根拠/状態 enum、`accepted` の決定リンク、`resolved` の根拠、critical 影響の `AC-###` リンク、連続リビジョン番号、安定した報告書/影響 ID、正確な predecessor digest、`reopened` を含む決定的 Delta 遷移を確認します。`--require-summary` を付けると、各 impact に要約行が一つだけあること、および severity と status が台帳と一致することも検査します。0.3.2 より前の報告書は、このフラグなしで引き続き検証できます。引用したリポジトリ事実の真偽は検証せず、predecessor を自動検索もしません。任意のローカル skill/plugin platform validator は前述の環境問題で `blocked` され、成功は主張しません。
 
 ## 10. 開発とコントリビューション
 

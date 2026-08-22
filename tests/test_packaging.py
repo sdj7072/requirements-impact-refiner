@@ -195,14 +195,14 @@ class PackagingTest(unittest.TestCase):
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.3.1")
+        self.assertEqual(manifest["version"], "0.3.2")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.3.1")
+        self.assertEqual(manifest["version"], "0.3.2")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_automatic_bootstrap_skill_is_discoverable(self):
@@ -211,7 +211,7 @@ class PackagingTest(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("name: using-requirements-impact-refiner", text)
         self.assertIn("Use when starting any software-development conversation", text)
-        self.assertIn('version: "0.3.1"', text)
+        self.assertIn('version: "0.3.2"', text)
 
     def test_automatic_entrypoint_owns_activation_boundaries(self):
         bootstrap = (
@@ -252,6 +252,7 @@ class PackagingTest(unittest.TestCase):
                 "| Report ID | Revision | Previous SHA-256 | Phase |", text
             )
             self.assertIn("## Impact Delta", text)
+            self.assertIn("## Change Impact Summary", text)
             self.assertIn("List only ledger impacts whose state is `deferred` or `blocked`", text)
             for category in (
                 "resolved",

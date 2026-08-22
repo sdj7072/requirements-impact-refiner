@@ -8,6 +8,12 @@
 
 For a later revision, preserve the Report ID, increment Revision by one, and replace `none` with the lowercase SHA-256 of the exact predecessor bytes.
 
+## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-###` | Name the behavior being changed. | State the concrete failure or regression. | Name the affected feature or user. | State when it can occur. | Match the ledger severity. | Explain the preservation or verification step. | Match the ledger state. |
+
 ## Original Requirement
 
 | Requirement ID | Original request | Source |

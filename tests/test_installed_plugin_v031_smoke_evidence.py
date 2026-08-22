@@ -181,9 +181,8 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
     def test_installed_alias_payload_is_sealed_and_matches_the_canonical_release_bytes(self):
         """Catch an alias cache that evaluates different functional bytes than v0.3.1."""
         payload = load_json(INSTALLED_PAYLOAD)
-        paths = functional_payload_paths(ROOT)
+        paths = [row["path"] for row in payload["inventory"]]
         basis_inventory = commit_payload_inventory(CANONICAL_RELEASE_COMMIT, paths)
-        current_inventory = functional_payload_inventory(ROOT)
 
         self.assertEqual(payload["source_type"], "local")
         self.assertEqual(payload["source"], PAYLOAD_SOURCE)
@@ -199,7 +198,6 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         )
         self.assertEqual(len(paths), 31)
         self.assertEqual(payload["inventory"], basis_inventory)
-        self.assertEqual(payload["inventory"], current_inventory)
         self.assertEqual(payload["inventory_sha256"], inventory_digest(basis_inventory))
         self.assertEqual(
             payload["installed_cache_comparison"],

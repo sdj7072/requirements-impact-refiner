@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.3.1` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.3.2` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
@@ -76,6 +76,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 The installer refuses to overwrite an existing installation. Client-native alternatives include `~/.codex/skills` and `~/.claude/skills`, but the marketplace flows above provide cleaner updates for Codex and Claude Code.
 
 When the plugin is enabled, [`using-requirements-impact-refiner`](skills/using-requirements-impact-refiner/SKILL.md) automatically checks software-development conversations and invokes the core skill for concrete behavior changes at the correct pre-planning boundary. No invocation phrase is required. Disable the plugin in the client's plugin settings to turn this automatic check off.
+
+Every report now starts with a user-facing `Change Impact Summary`: which feature changes, what can go wrong, who or what is affected, when it happens, and how to prevent or check it. Its audience defaults to `balanced`. Set a repository preference in `.requirements-impact-refiner.json`:
+
+```json
+{"audience":"balanced"}
+```
+
+Allowed values are `simple`, `balanced`, and `technical`. An explicit request in the current conversation overrides the repository file; `balanced` combines plain-language consequences with useful technical pointers. This is a cross-client skill setting rather than a custom Codex or Claude settings-screen control.
 
 After loading, ask for impact refinement with a concrete change and repository scope, for example: “Before planning, refine the `displayName` API rename against the API, iOS DTO, and cached-profile paths.” If multiple orchestrators are present, select exactly one.
 
@@ -173,7 +181,7 @@ Start from the [`template chooser`](skills/requirements-impact-refiner/assets/im
 Validate a completed report with the standard-library validator:
 
 ```sh
-python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py path/to/report.md
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --require-summary path/to/report.md
 ```
 
 Validate a later revision against its exact predecessor, or print the computed Delta without modifying either file:
@@ -183,7 +191,7 @@ python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --p
 python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md --print-expected-delta current.md
 ```
 
-The validator checks required sections, definitions and references, exact evidence/state enums, decision links for `accepted`, evidence for `resolved`, `AC-###` links for critical impacts, consecutive revision numbers, stable report/impact IDs, the exact predecessor digest, and deterministic Delta transitions including `reopened`. It does not verify that cited repository facts are true or locate the predecessor automatically. The optional local skill/plugin platform validators were `blocked` in this environment as described above; no pass is claimed for them.
+The validator checks required sections, definitions and references, exact evidence/state enums, decision links for `accepted`, evidence for `resolved`, `AC-###` links for critical impacts, consecutive revision numbers, stable report/impact IDs, the exact predecessor digest, and deterministic Delta transitions including `reopened`. With `--require-summary`, it also requires exactly one summary row per impact and checks that its severity and status match the ledger. Reports created before 0.3.2 remain valid without that flag. It does not verify that cited repository facts are true or locate the predecessor automatically. The optional local skill/plugin platform validators were `blocked` in this environment as described above; no pass is claimed for them.
 
 ## 10. Development and Contributing
 

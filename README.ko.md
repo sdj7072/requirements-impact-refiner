@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.3.1`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.3.2`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -76,6 +76,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 설치기는 기존 설치를 덮어쓰지 않습니다. 클라이언트 고유 경로로 `~/.codex/skills`와 `~/.claude/skills`도 사용할 수 있지만, Codex와 Claude Code에서는 위 마켓플레이스 방식이 업데이트 관리에 더 적합합니다.
 
 플러그인이 활성화되어 있으면 [`using-requirements-impact-refiner`](skills/using-requirements-impact-refiner/SKILL.md)가 소프트웨어 개발 대화를 자동으로 확인하고, 구체적인 동작 변경에는 계획 전의 올바른 지점에서 핵심 스킬을 호출합니다. 별도 호출 문구는 필요하지 않습니다. 자동 확인을 끄려면 클라이언트의 플러그인 설정에서 이 플러그인을 비활성화합니다.
+
+이제 모든 보고서 앞에는 사용자 친화적인 `Change Impact Summary`가 붙습니다. 어떤 기능이 바뀌는지, 어떤 문제가 생길 수 있는지, 누구 또는 어떤 기능이 영향을 받는지, 언제 발생하는지, 어떻게 예방하거나 확인할지를 보여줍니다. 기본 대상은 `balanced`이며 저장소 루트의 `.requirements-impact-refiner.json`에서 설정할 수 있습니다.
+
+```json
+{"audience":"balanced"}
+```
+
+허용값은 `simple`, `balanced`, `technical`입니다. 현재 대화에서 명시한 값이 저장소 설정보다 우선하며, `balanced`는 쉬운 설명과 유용한 기술 근거를 함께 제공합니다. 이는 Codex나 Claude의 전용 설정 화면이 아니라 모든 클라이언트에서 사용할 수 있는 스킬 설정입니다.
 
 로딩 후에는 변경과 저장소 범위를 함께 제시합니다. 예: “계획 전에 `displayName` API 이름 변경이 API, iOS DTO, 캐시된 프로필 경로에 미치는 영향을 정제해 줘.” 오케스트레이터가 여러 개라면 정확히 하나를 선택합니다.
 
@@ -173,7 +181,7 @@ v0.2는 과거 형식입니다. `0.3.0`으로의 마이그레이션은 수동 mi
 완성된 보고서는 표준 라이브러리 기반 검증기로 확인합니다.
 
 ```sh
-python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py path/to/report.md
+python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --require-summary path/to/report.md
 ```
 
 이후 리비전은 정확한 이전 파일과 함께 검증하며, 두 파일을 수정하지 않고 계산된 Delta를 출력할 수도 있습니다.
@@ -183,7 +191,7 @@ python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --p
 python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md --print-expected-delta current.md
 ```
 
-검증기는 필수 섹션, 정의와 참조, 정확한 근거/상태 enum, `accepted`의 결정 연결, `resolved`의 근거, critical 영향의 `AC-###` 연결, 연속 리비전 번호, 안정적인 보고서/영향 ID, 정확한 이전 해시, `reopened`를 포함한 결정적 Delta 전이를 검사합니다. 인용한 저장소 사실이 참인지는 검증하지 않으며 이전 파일을 자동으로 찾지도 않습니다. 선택적인 로컬 스킬/플러그인 플랫폼 검증기는 위에 설명한 환경 문제로 `blocked`되었으며 성공했다고 주장하지 않습니다.
+검증기는 필수 섹션, 정의와 참조, 정확한 근거/상태 enum, `accepted`의 결정 연결, `resolved`의 근거, critical 영향의 `AC-###` 연결, 연속 리비전 번호, 안정적인 보고서/영향 ID, 정확한 이전 해시, `reopened`를 포함한 결정적 Delta 전이를 검사합니다. `--require-summary`를 사용하면 영향마다 요약 행이 정확히 하나인지, 심각도와 상태가 원장과 일치하는지도 검사합니다. 0.3.2 이전 보고서는 이 플래그 없이 계속 검증할 수 있습니다. 인용한 저장소 사실이 참인지는 검증하지 않으며 이전 파일을 자동으로 찾지도 않습니다. 선택적인 로컬 스킬/플러그인 플랫폼 검증기는 위에 설명한 환경 문제로 `blocked`되었으며 성공했다고 주장하지 않습니다.
 
 ## 10. 개발과 기여
 

@@ -247,6 +247,101 @@ POST_DECISION_REPORT = PRE_DECISION_REPORT.replace(
 
 
 class ValidateImpactReportTest(unittest.TestCase):
+    def test_friendly_summary_is_required_only_when_requested(self):
+        self.assertEqual(VALIDATOR.validate_report(POST_DECISION_REPORT), [])
+
+        errors = VALIDATOR.validate_report(
+            POST_DECISION_REPORT, require_summary=True
+        )
+
+        self.assertIn("missing section: Change Impact Summary", errors)
+
+    def test_friendly_summary_covers_each_impact_and_matches_ledger(self):
+        summary = """## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | Public sharing | Existing private exports could become public. | People using private exports | Opening a sharing link | critical | Keep private-by-default regression coverage. | accepted |
+
+"""
+        report = POST_DECISION_REPORT.replace(
+            "## Original Requirement\n", summary + "## Original Requirement\n", 1
+        )
+
+        self.assertEqual(
+            VALIDATOR.validate_report(report, require_summary=True), []
+        )
+
+        wrong = report.replace(
+            "| critical | Keep private-by-default", "| low | Keep private-by-default", 1
+        )
+        self.assertIn(
+            "impact summary IMP-001 severity low disagrees with ledger critical",
+            VALIDATOR.validate_report(wrong, require_summary=True),
+        )
+
+    def test_friendly_summary_rejects_unknown_duplicate_and_missing_impacts(self):
+        summary = """## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-999 | Public sharing | Existing private exports could become public. | People using private exports | Opening a sharing link | critical | Keep private-by-default regression coverage. | accepted |
+| IMP-999 | Public sharing | Existing private exports could become public. | People using private exports | Opening a sharing link | critical | Keep private-by-default regression coverage. | accepted |
+
+"""
+        report = POST_DECISION_REPORT.replace(
+            "## Original Requirement\n", summary + "## Original Requirement\n", 1
+        )
+
+        errors = VALIDATOR.validate_report(report, require_summary=True)
+
+        self.assertIn("impact summary references unknown impact IMP-999", errors)
+        self.assertIn("impact summary lists IMP-999 more than once", errors)
+        self.assertIn("impact summary missing known impact IMP-001", errors)
+
+    def test_friendly_summary_requires_plain_language_fields(self):
+        summary = """## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | Public sharing |  | People using private exports | Opening a sharing link | critical | Keep private-by-default regression coverage. | accepted |
+
+"""
+        report = POST_DECISION_REPORT.replace(
+            "## Original Requirement\n", summary + "## Original Requirement\n", 1
+        )
+
+        self.assertIn(
+            "impact summary IMP-001 requires Possible issue",
+            VALIDATOR.validate_report(report, require_summary=True),
+        )
+
+    def test_friendly_summary_rejects_duplicate_section_bypass(self):
+        wrong = """## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | Public sharing | Private exports become public. | Export users | Sharing | low | None. | resolved |
+
+"""
+        correct = """## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | Public sharing | Private exports become public. | Export users | Sharing | critical | Preserve private defaults. | accepted |
+
+"""
+        report = POST_DECISION_REPORT.replace(
+            "## Original Requirement\n",
+            wrong + correct + "## Original Requirement\n",
+            1,
+        )
+
+        self.assertIn(
+            "duplicate section: Change Impact Summary",
+            VALIDATOR.validate_report(report, require_summary=True),
+        )
+
     def test_parses_v03_report_metadata(self):
         report, errors = VALIDATOR.parse_report(POST_DECISION_REPORT)
 
