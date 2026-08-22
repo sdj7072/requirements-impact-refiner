@@ -11,17 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.ko.md", "README.ja.md"]
 LANGUAGE_TARGETS = {"README.md", "README.ko.md", "README.ja.md"}
 SKILL_ROOT = ROOT / "skills" / "requirements-impact-refiner"
-PRE_LIVE_CONTRACT = {
-    "planned-live-composition": "Codex with Superpowers",
-    "planned-live-finals": "85",
-    "run-local-model": "gpt-5.6-sol",
-    "model-selection-owner": "user",
-    "skill-model-selection": "none",
-    "claude-evaluation": "structural-only",
-    "claude-paid-auth": "blocked: paid authentication unavailable",
-    "raw-evidence": "all outcomes and attempts",
-    "approval-gates": "plugin replacement; Claude installation; full batch",
-    "rerun-policy": "no selective rerun of a valid model result",
+SEALED_V031_EVIDENCE = {
+    "release": "0.3.1",
+    "composition": "Codex with Superpowers",
+    "Codex client": "codex-cli 0.148.0-alpha.21",
+    "RIR plugin": "requirements-impact-refiner@requirements-impact-refiner-v031-eval",
+    "model / reasoning": "gpt-5.6-sol / high",
+    "runtime outcomes": "85/85 pass; 85 attempt 1 selections; no retries",
+    "mechanical score": "84/85; one failure: POS-cache repetition 2",
+    "human adjudication": "400/400 passed; every adjudication quote is bound to its selected final output",
+    "release status": "not verified; one mechanical verification blocker",
+    "Claude probe": "2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked",
 }
 PRE_LIVE_COMPATIBILITY = {
     "Codex standalone behavioral harness": "not verified",
@@ -171,15 +171,34 @@ class DocumentationTest(unittest.TestCase):
                 name,
             )
 
-    def test_pre_live_contract_is_structured_and_synchronized(self):
-        canonical = markdown_table(ROOT / "README.md", "| Contract key | Requirement |")
-        self.assertEqual(canonical, PRE_LIVE_CONTRACT)
+    def test_sealed_v031_evidence_is_structured_and_synchronized(self):
+        canonical = markdown_table(ROOT / "README.md", "| Evidence key | Sealed value |")
+        self.assertEqual(canonical, SEALED_V031_EVIDENCE)
         for name in READMES[1:]:
             self.assertEqual(
-                markdown_table(ROOT / name, "| Contract key | Requirement |"),
+                markdown_table(ROOT / name, "| Evidence key | Sealed value |"),
                 canonical,
                 name,
             )
+
+    def test_readmes_replace_obsolete_pre_live_claims_with_final_v031_evidence(self):
+        for name in READMES:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for required in (
+                "84/85",
+                "85/85",
+                "400/400",
+                "requirements-impact-refiner@requirements-impact-refiner-v031-eval",
+                "codex-cli 0.148.0-alpha.21",
+                "gpt-5.6-sol",
+                "not verified",
+                "structural-only",
+                "adjudication.json",
+                "report.md",
+            ):
+                self.assertIn(required, text, f"{required} missing from {name}")
+            self.assertNotIn("10/17", text, name)
+            self.assertNotIn("No all-17-times-five rerun was performed", text, name)
 
     def test_runbook_commands_are_parseable_and_cover_the_approved_batch(self):
         commands = harness_commands(ROOT / "evals/runbook.md")
@@ -194,7 +213,7 @@ class DocumentationTest(unittest.TestCase):
         self.assertEqual(parsed[2].reasoning, "high")
         self.assertEqual(
             len(select_suite(load_all(), parsed[2].suite)) * parsed[2].repetitions,
-            int(PRE_LIVE_CONTRACT["planned-live-finals"]),
+            85,
         )
 
     def test_runbook_records_exact_predecessor_handoff_without_rubric_disclosure(self):

@@ -10,40 +10,42 @@
 
 | Requirement ID | Original request | Source |
 | --- | --- | --- |
-| `REQ-001` | Refine repository impacts for the approved Superpowers brainstorming design before `writing-plans` starts. | User request and repository evidence statement. |
+| `REQ-001` | Refine repository impacts for the brainstorming-approved design before `writing-plans` starts. | User request and supplied workflow evidence: Superpowers brainstorming is complete; `writing-plans` has not started. |
 
 ## Current Refined Requirement
 
 | Requirement ID | Revision | Refined by decision | Supersedes |
 | --- | --- | --- | --- |
-| `REQ-001` | Preserve the approved design as the behavior-change baseline and refine its repository impacts before `writing-plans`; the concrete design and repository evidence must first be made available because the inspected workspace is empty. | — | — |
+| `REQ-001` | Assess the approved design against current repository behavior, preserve discovered invariants, identify testable acceptance and regression criteria, and hand the result back before `writing-plans`; the approved design baseline and repository contents must first be made available. | — | — |
 
 ## Current Behavior
 
 | Invariant ID | Current behavior | Evidence level | Evidence |
 | --- | --- | --- | --- |
-| `INV-001` | Existing observable software behavior and the approved target design cannot currently be established. | `unknown` | Workspace inspection found no files, source tree, tests, Git metadata, design artifact, or prior v0.3 impact report. |
+| `INV-001` | Target software behavior cannot be established from the current workspace. | `verified` | Workspace root inspection on 2026-08-22 found only `.` and `..`; `rg --files` returned no repository files. |
+| `INV-002` | The concrete approved behavior change cannot be established from the supplied conversation evidence. | `verified` | User supplied only workflow-state evidence and did not supply the approved design text, artifact, path, or behavior statement. |
 
 ## Preserved Invariants
 
 | Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
 | --- | --- | --- | --- |
-| `INV-001` | `REQ-001` | `IMP-001`, `IMP-002` | The empty inspected workspace provides no baseline from which preserved behavior can be identified. |
+| `INV-001` | `REQ-001` | `IMP-001` | Workspace root inspection and empty `rg --files` result. |
+| `INV-002` | `REQ-001` | `IMP-002` | Supplied conversation contains workflow state but no approved design content. |
 
 ## Impact Ledger
 
 | ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `IMP-001` | `REQ-001` | functionality | critical | blocked | `unknown` | The approved design’s concrete behavior change, constraints, and Planning Handoff are absent from the request and workspace, so affected entry points and flows cannot be identified. | `INV-001` | the pending decision | `AC-001` |
-| `IMP-002` | `REQ-001` | regression | critical | blocked | `unknown` | Workspace inspection found no repository files or tests, so current behavior, adjacent flows, and regression coverage cannot be traced. | `INV-001` | the pending decision | `AC-002` |
+| `IMP-001` | `REQ-001` | `regression` | `critical` | `blocked` | `unknown` | Repository files, tests, schemas, configuration, and history are absent from the current workspace, so current behavior and regression surfaces cannot be inspected. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | `functionality` | `critical` | `blocked` | `unknown` | The approved design artifact or equivalent concrete behavior specification was not supplied, so affected entry points and expected behavior cannot be identified. | `INV-002` | the pending decision | `AC-002` |
 
 ## Decision Needed
 
 | Question | Option | Impact IDs | Trade-off |
 | --- | --- | --- | --- |
-| Which evidence package should be used to continue repository-impact refinement? | Provide the approved design artifact and populate or attach the repository. | `IMP-001`, `IMP-002` | Enables direct, repository-cited refinement across behavior, interfaces, data, operations, compatibility, and regression coverage. |
-| Which evidence package should be used to continue repository-impact refinement? | Provide the approved design plus relevant source, schema, configuration, and test excerpts. | `IMP-001`, `IMP-002` | Allows bounded refinement, but impacts outside the supplied excerpts will remain explicitly unknown or blocked. |
-| Which evidence package should be used to continue repository-impact refinement? | Provide only the approved design and proceed without repository evidence. | `IMP-001`, `IMP-002` | Clarifies the requested behavior, but repository-specific findings will remain blocked and the result will not be ready for planning. |
+| Which evidence package should be used to continue impact refinement? | Provide the approved design artifact and populate the current workspace with the target repository. | `IMP-001`, `IMP-002` | Enables evidence-backed, repository-wide refinement and is the recommended route, but requires both inputs. |
+| Which evidence package should be used to continue impact refinement? | Provide the approved design plus curated repository files or excerpts. | `IMP-001`, `IMP-002` | Allows a scoped refinement, but impacts outside the supplied subset will remain blocked or unknown. |
+| Which evidence package should be used to continue impact refinement? | Provide the approved design only. | `IMP-001`, `IMP-002` | Clarifies intended behavior, but repository impacts remain blocked and the report cannot become planning-ready. |
 
 ## Impact Delta
 
@@ -63,32 +65,33 @@
 
 | Requirement ID | Revision | Decision | Superseded impacts | Change summary |
 | --- | --- | --- | --- | --- |
-| `REQ-001` | 1 | the pending decision | none | Initial refinement identifies the missing approved-design artifact and empty repository as evidence blockers. |
+| `REQ-001` | Initial refinement from the supplied workflow-state request. | the pending decision | none | Preserved the approved-design baseline and pre-planning boundary; identified missing design and repository evidence. |
 
 ## Acceptance and Regression Criteria
 
 | Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
 | --- | --- | --- | --- | --- | --- |
-| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | The next report states the approved behavior change and supplied constraints, cites its source artifact, and maps each affected repository entry point or explicitly names the remaining evidence gap. | Inspect the approved design and trace identified flows in the supplied repository evidence. |
-| `AC-002` | `REQ-001` | `IMP-002` | `INV-001` | The next report identifies current behavior to preserve and cites relevant existing tests or explicitly records each uncovered regression boundary. | Inspect source and tests, then trace acceptance criteria to named tests or validation gaps. |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Repository files are available and the report cites inspected entry points, data and interface contracts, authorization boundaries, state/concurrency behavior, operations configuration, compatibility surfaces, and relevant tests or explicit gaps. | Future repository inspection plus targeted test and configuration inventory; currently a coverage gap. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | The approved design is available as a stable artifact or concrete behavior specification, and each refined requirement can be traced to that source. | Future artifact inspection and requirement-to-source trace; approved design is currently unavailable. |
 
 ## Unresolved, Deferred, and Blocked Items
 
 | Impact ID | State | Information gap or rationale | Linked decision | Next owner |
 | --- | --- | --- | --- | --- |
-| `IMP-001` | `blocked` | Missing approved design content and its current Planning Handoff. | the pending decision | User or design-artifact owner. |
-| `IMP-002` | `blocked` | The inspected workspace contains no repository files, configuration, schemas, or tests. | the pending decision | User or repository owner. |
+| `IMP-001` | `blocked` | The current workspace contains no repository files to inspect. | none | User or repository provider |
+| `IMP-002` | `blocked` | The approved design content or artifact location was not supplied. | none | User or design artifact owner |
 
 ## Analysis Scope and Limitations
 
 | Scope or limitation | Inspected evidence | Consequence for confidence |
 | --- | --- | --- |
-| Workspace contents | Recursive file listing, text search, and Git status in the provided workspace returned no repository content or Git metadata. | Repository-specific impacts cannot be verified or inferred. |
-| Approved design and lineage | The request states brainstorming is complete and `writing-plans` has not started, but supplies neither the design nor a prior v0.3 report. | The Superpowers sequencing is verified from the request; the behavior baseline is unknown, and this is a first report with predecessor `none`. |
-| Report validation | The v0.3 deterministic validator completed successfully. | The report structure and lifecycle delta are valid. |
+| Current workspace contents | `ls -la`, `find . -maxdepth 3`, `rg --files`, and repository-wide report/design searches in the workspace root. | High confidence that the mounted workspace is empty; no confidence about target software behavior. |
+| Supplied design evidence | User statement that brainstorming is complete and `writing-plans` has not started. | High confidence in workflow stage; no confidence in the behavior change because the approved design itself is absent. |
+| Report lineage | Repository-wide search found no v0.3 predecessor report. | This is a first report with Revision 1 and predecessor `none`. |
+| Validation | The canonical v0.3 validator completed successfully using in-memory input because the workspace is read-only. | Report structure and lifecycle semantics are deterministically valid. |
 
 ## Planning Handoff
 
 | Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
 | --- | --- | --- | --- | --- |
-| Not ready until the pending evidence-package decision is selected and the approved design is supplied; repository-specific readiness additionally requires repository evidence. | `REQ-001`, `INV-001`, `IMP-001`, `IMP-002` | The approved behavior change is unknown (`IMP-001`), and current behavior plus regression coverage cannot be inspected (`IMP-002`). | `AC-001`, `AC-002` | superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans |
+| Not ready until the pending evidence-package decision is selected and the approved design plus sufficient repository evidence are supplied. | `REQ-001`, `INV-001`, `INV-002`, `IMP-001`, `IMP-002` | The pending decision; `IMP-001` and `IMP-002` remain blocked. | `AC-001`, `AC-002` | superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans |

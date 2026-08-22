@@ -1,0 +1,6 @@
+Rename displayName to name.
+
+Repository evidence:
+- ios/UserDTO.swift decodes displayName
+- cached profile JSON persists displayName
+- the public API changelog promises one-version deprecation

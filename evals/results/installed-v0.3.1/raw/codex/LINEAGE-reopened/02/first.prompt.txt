@@ -1,0 +1,5 @@
+Record an impact report for removing a profile field. The supplied migration evidence supports resolving the client compatibility impact.
+
+Repository evidence:
+- mobile clients consume profile.displayName
+- the approved migration preserves the field for one release

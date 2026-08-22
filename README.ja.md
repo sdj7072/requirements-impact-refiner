@@ -118,35 +118,35 @@ Revision 1 の基準報告では両方の影響を `new` とします。次の�
 | Environment | Version | Status | Evidence note |
 | --- | --- | --- | --- |
 | Codex standalone behavioral harness | `codex-cli 0.148.0-alpha.15`; `gpt-5.6-luna`; hosted runtime unavailable | `not verified` | 1ケース1回の厳格評価は **7/17** で失敗しました。陽性 0/8、陰性 3/5、統合 4/4 です。 |
-| Codex with Superpowers | executed client/model/version not recorded in selected transcripts | `not verified` | 1ケース1回の厳格評価は **10/17** で失敗しました。陽性は1件合格、7件部分合格で、陰性 5/5 と統合 4/4 は合格しました。 |
+| Codex with Superpowers | `codex-cli 0.148.0-alpha.21`; `gpt-5.6-sol`; `high`; RIR `0.3.1` | `not verified` | 封印済み v0.3.1 バッチでは、リトライなしの初回 85 件がすべてランタイム合格（85/85）でしたが、機械スコアは 84/85 です。`POS-cache` repetition 2 の不正な ledger/unknown `IMP-002` 失敗が唯一であり、検証ブロッカーが 1 件残ります。 |
 | Codex skill quick validator | local system snapshot | `blocked` | PyYAML がありません。静的監査では、この検証器の許可キー一覧に Agent Skills の `compatibility` キーがないことも確認しました。実行合格とは主張しません。 |
 | Codex plugin validator | local system snapshot | `blocked` | `ModuleNotFoundError: yaml` で実行が停止しました。manifest テストをこの検証器の合格として代用しません。 |
-| Claude Code standalone | version unavailable | `blocked` | `claude` 実行ファイルがありません。 |
-| Claude Code with Superpowers | version unavailable | `blocked` | `claude` 実行ファイルと Claude 側 Superpowers ランタイムがありません。 |
-| Claude Code with `feature-dev` | version unavailable | `blocked` | `claude` 実行ファイルと `feature-dev` ランタイムがありません。 |
-| Claude Code with Spec Kit | version unavailable | `blocked` | `claude` 実行ファイルと Spec Kit ランタイムがありません。 |
+| Claude Code standalone | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、認証済み Claude 動作評価は実行していません。 |
+| Claude Code with Superpowers | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、Claude 側 Superpowers の動作互換性は引き続き blocked です。 |
+| Claude Code with `feature-dev` | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、`feature-dev` の動作互換性は引き続き blocked です。 |
+| Claude Code with Spec Kit | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、Spec Kit の動作互換性は引き続き blocked です。 |
 | Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | 名前付きまたは設定済みの汎用ハーネス実行ファイルがありません。 |
 
-両方の Codex 評価で陽性の表層項目 **24/24** を検出し、統合所有境界 **4/4** を維持しました。これは観察された動作であり、互換性やサポートではありません。全17ケースを5回ずつ再実行していません。Task 7 ではスキルまたはアダプター文言を変更しておらず、1回実行のコーパスがすでに厳格なサポート基準に失敗したためです。全 transcript、再実行、scorecard、checksum は [`evals/results/with-skill.md`](evals/results/with-skill.md) にあります。
+履歴上の Codex standalone 結果 **7/17** はサポートの根拠ではありません。封印済み Codex-with-Superpowers v0.3.1 の証拠は、旧来の 1 回実行結果を置き換えます。選択された 85 件のランタイム出力はすべて合格しましたが、決定的な機械チェック 1 件が検証を妨げます。最終 report、controller、scorecard、manifest、raw transcript、引用がバインドされた adjudication は [`evals/results/installed-v0.3.1/report.md`](evals/results/installed-v0.3.1/report.md) と [`evals/results/installed-v0.3.1/adjudication.json`](evals/results/installed-v0.3.1/adjudication.json) に保存されています。
 
-### ライブ前評価契約
+### 封印済み v0.3.1 評価証拠
 
-以下は承認済みの評価計画であり、封印済みの動作証拠ではありません。上記の互換性ステータスは変更しません。
+以下の表は変更不能な最終評価証拠を記録します。この表によってリリース状態が verified に昇格することはありません。
 
-| Contract key | Requirement |
+| Evidence key | Sealed value |
 | --- | --- |
-| planned-live-composition | Codex with Superpowers |
-| planned-live-finals | 85 |
-| run-local-model | gpt-5.6-sol |
-| model-selection-owner | user |
-| skill-model-selection | none |
-| claude-evaluation | structural-only |
-| claude-paid-auth | blocked: paid authentication unavailable |
-| raw-evidence | all outcomes and attempts |
-| approval-gates | plugin replacement; Claude installation; full batch |
-| rerun-policy | no selective rerun of a valid model result |
+| release | 0.3.1 |
+| composition | Codex with Superpowers |
+| Codex client | codex-cli 0.148.0-alpha.21 |
+| RIR plugin | requirements-impact-refiner@requirements-impact-refiner-v031-eval |
+| model / reasoning | gpt-5.6-sol / high |
+| runtime outcomes | 85/85 pass; 85 attempt 1 selections; no retries |
+| mechanical score | 84/85; one failure: POS-cache repetition 2 |
+| human adjudication | 400/400 passed; every adjudication quote is bound to its selected final output |
+| release status | not verified; one mechanical verification blocker |
+| Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-ユーザーが選択した評価モデルは、予定された 85 件の Codex-with-Superpowers 最終バッチに限る `gpt-5.6-sol` と `high` reasoning です。モデルと reasoning は実行ローカルの入力であり、スキルがモデルを選択することはありません。Claude の作業は構造検証のみで認証しません。有料認証またはモデル動作の境界は動作互換性として主張せず、引き続き `blocked` と記録します。すべての raw outcome と attempt を保存し、列挙した各ゲートで新しい承認を得て、Superpowers を維持し、有効なモデル結果を選択的に再実行しません。
+正確なプラグイン識別子は `requirements-impact-refiner@requirements-impact-refiner-v031-eval` です。v0.3.1 manifest digest は `fe4ab995cee882e95df1fe1c6e07542512cd216aaa44d47809fdd0252add05da` であり、raw transcript のインベントリはバイト保存と秘密情報スキャンを維持します。唯一の機械的失敗は `POS-cache` repetition 2 の不正な Impact Ledger 行と unknown `IMP-002` 参照を正確に記録します。400 件の人手 adjudication はすべて合格し、各引用が選択された最終出力の部分文字列であることを確認しています。Claude の証拠は structural-only であり、blocked の動作互換性状態を変更しません。
 
 ## 7. 比較と非目標
 
@@ -160,7 +160,7 @@ Superpowers はブレインストーミング、計画、実行、デバッグ�
 
 中核評価は 25/25 ではなく **24/25** です。既知の単一確率的失敗 `POS-payments-5` は、ユーザーがリトライ方針を選ぶ前に reconcile-before-retry の仕組みを要求へ埋め込みました。最終チェックリストはこのパターンに対処しますが、許可された修正ラウンドを使い切ったため制限を開示しています。別のワークフロー統合最終構成は **30/30** です。これらは記録済み Codex ハーネスの結果であり、未試験クライアントへ一般化してはいけません。
 
-より広い Task 7 リリース監査は、クライアント対応を推論できない結果です。Codex standalone は厳格評価 **7/17**、Codex with Superpowers は **10/17** で失敗しました。各ケースの採用結果は1件だけで、runbook の5回サポート基準にも届きません。したがって、このリリース根拠では両環境とも検証済みまたはサポート済みではありません。
+より広いリリース記録はクライアントサポートを推論しません。Codex standalone は厳格評価 **7/17** に失敗しました。Codex with Superpowers は全 5 回反復、85 final の v0.3.1 バッチを完了しましたが、85/85 のランタイムと 400/400 の adjudication 件数にもかかわらず、`POS-cache` repetition 2 の機械的失敗がリリースブロッカーであるため、引き続き `not verified` です。
 
 スキルは調査範囲外の影響を見逃す可能性があります。未解決、`deferred`、`blocked`、`accepted` のリスクを計画中も可視化し、重要な動作は適切な人手レビューとテストで検証してください。
 

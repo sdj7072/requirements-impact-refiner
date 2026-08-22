@@ -6,6 +6,7 @@ import unittest
 import uuid
 from pathlib import Path
 
+from evals.harness.catalog import load_all, select_suite
 from evals.harness.evidence import find_potential_secrets, verify_manifest
 from evals.harness.scoring import _planning_handoff_workflow
 
@@ -15,17 +16,10 @@ RESULT_ROOT = ROOT / "evals" / "results" / "installed-v0.3.1"
 RAW_ROOT = RESULT_ROOT / "raw"
 
 EXPECTED_MANIFEST_SHA256 = (
-    "57384994fda74ce7e566ce79d3a03e408121e837d7ed97759cf621188a574c5e"
+    "fe4ab995cee882e95df1fe1c6e07542512cd216aaa44d47809fdd0252add05da"
 )
-SMOKE_CASE_IDS = frozenset(
-    (
-        "POS-authorization",
-        "NEG-debugging",
-        "INT-superpowers",
-        "LINEAGE-stable-blocked",
-        "LINEAGE-reopened",
-        "LINEAGE-no-false-resolution",
-    )
+FINAL_CASE_IDS = tuple(
+    case.id for case in select_suite(load_all(), "installed-superpowers")
 )
 LINEAGE_CASE_IDS = (
     "LINEAGE-stable-blocked",
@@ -41,7 +35,7 @@ EXPECTED_CODEX_ENABLED_PLUGINS = (
     "google-calendar@openai-curated",
     "pdf@openai-primary-runtime",
     "presentations@openai-primary-runtime",
-    "requirements-impact-refiner@requirements-impact-refiner",
+    "requirements-impact-refiner@requirements-impact-refiner-v031-eval",
     "sites@openai-bundled",
     "slack@openai-curated",
     "spreadsheets@openai-primary-runtime",
@@ -63,8 +57,8 @@ def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def raw_path(case_id, turn):
-    return RAW_ROOT / "codex" / case_id / "01" / f"{turn}.jsonl"
+def raw_path(case_id, repetition, turn):
+    return RAW_ROOT / "codex" / case_id / f"{repetition:02d}" / f"{turn}.jsonl"
 
 
 def thread_started_ids(path):
@@ -130,8 +124,8 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
             self.assertEqual(attributes[path]["text"], "unset", path)
             self.assertEqual(attributes[path]["whitespace"], "unset", path)
 
-    def test_final_smoke_provenance_and_runtime_inventory_are_exact(self):
-        """Catch changes to client composition, model, selection, or retry history."""
+    def test_final_batch_provenance_and_runtime_inventory_are_exact(self):
+        """Catch a client, model, alias, selection, or retry-history regression."""
         controller = load_json(RESULT_ROOT / "controller.json")
         probes = {
             row["client"]: row["probe"]
@@ -143,14 +137,17 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
             self.assertTrue(probes[client]["available"])
             self.assertEqual(probes[client]["plugin_version"], "0.3.1")
         self.assertIn("superpowers@openai-curated", probes["codex"]["enabled_plugins"])
-        self.assertIn(
-            "requirements-impact-refiner@requirements-impact-refiner",
-            probes["codex"]["enabled_plugins"],
+        self.assertEqual(probes["claude"]["version"], "2.1.228 (Claude Code)")
+        self.assertEqual(probes["claude"]["plugin_version"], "0.3.1")
+        self.assertEqual(
+            tuple(probes["claude"]["enabled_plugins"]),
+            ("requirements-impact-refiner@requirements-impact-refiner",),
         )
 
         identity = controller["identity"]
-        self.assertEqual(controller["suite"], "smoke")
-        self.assertEqual(controller["repetitions"], 1)
+        self.assertEqual(controller["suite"], "installed-superpowers")
+        self.assertEqual(controller["repetitions"], 5)
+        self.assertEqual(identity["version"], "codex-cli 0.148.0-alpha.21")
         self.assertEqual(identity["model"], "gpt-5.6-sol")
         self.assertEqual(identity["reasoning"], "high")
         self.assertEqual(identity["plugin_version"], "0.3.1")
@@ -168,19 +165,21 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         )
 
         selected = controller["runs"]
-        self.assertEqual(len(selected), 6)
+        expected_keys = {(case_id, repetition) for case_id in FINAL_CASE_IDS for repetition in range(1, 6)}
+        self.assertEqual(len(FINAL_CASE_IDS), 17)
+        self.assertEqual(len(selected), 85)
         self.assertEqual(
             {(row["case_id"], row["repetition"]) for row in selected},
-            {(case_id, 1) for case_id in SMOKE_CASE_IDS},
+            expected_keys,
         )
         self.assertTrue(all(row["selected_attempt"] == 1 for row in selected))
         self.assertTrue(all(row["result"]["status"] == "pass" for row in selected))
 
         attempts = controller["attempts"]
-        self.assertEqual(len(attempts), 6)
+        self.assertEqual(len(attempts), 85)
         self.assertEqual(
             {(row["case_id"], row["repetition"]) for row in attempts},
-            {(case_id, 1) for case_id in SMOKE_CASE_IDS},
+            expected_keys,
         )
         for attempt in attempts:
             result = attempt["result"]
@@ -191,71 +190,115 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
             self.assertEqual(result["status"], "pass")
             self.assertFalse(result["command"]["timed_out"])
 
-    def test_mechanical_score_report_and_required_human_adjudication_boundary(self):
-        """Pin 6/6 deterministic success without promoting absent human review."""
+    def test_mechanical_score_human_adjudication_and_report_preserve_the_one_blocker(self):
+        """Catch a false verified claim or a changed sole mechanical failure."""
         controller = load_json(RESULT_ROOT / "controller.json")
-        scores = controller["mechanical_scores"]
-        self.assertEqual(len(scores), 6)
+        scores = load_json(RESULT_ROOT / "scores.json")
+        self.assertEqual(len(scores), 85)
         self.assertEqual(
             {(row["case_id"], row["repetition"]) for row in scores},
-            {(case_id, 1) for case_id in SMOKE_CASE_IDS},
+            {(case_id, repetition) for case_id in FINAL_CASE_IDS for repetition in range(1, 6)},
         )
-        self.assertTrue(all(row["passed"] and not row["findings"] for row in scores))
+        failed = [row for row in scores if not row["passed"]]
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0]["case_id"], "POS-cache")
+        self.assertEqual(failed[0]["repetition"], 2)
+        self.assertEqual(
+            failed[0]["findings"],
+            [
+                "impact delta references unknown impact IMP-002",
+                "malformed table row in Impact Ledger: expected 10 cells, got 9",
+                "unknown reference IMP-002",
+            ],
+        )
+        self.assertEqual(controller["mechanical_scores"], scores)
+
+        adjudications = load_json(RESULT_ROOT / "adjudication.json")
+        expected_adjudications = {
+            (case.id, repetition, rubric)
+            for case in select_suite(load_all(), "installed-superpowers")
+            for repetition in range(1, 6)
+            for rubric in (*case.must_detect, *case.must_not_do)
+        }
+        self.assertEqual(len(adjudications), 400)
+        self.assertEqual(
+            {(row["case_id"], row["repetition"], row["rubric"]) for row in adjudications},
+            expected_adjudications,
+        )
+        self.assertTrue(all(row["passed"] for row in adjudications))
+        selected_outputs = {
+            (row["case_id"], row["repetition"]): row["result"]["final_output"]
+            for row in controller["runs"]
+        }
+        self.assertTrue(
+            all(
+                row["quote"] and row["quote"] in selected_outputs[(row["case_id"], row["repetition"])]
+                for row in adjudications
+            )
+        )
 
         report = (RESULT_ROOT / "report.md").read_text(encoding="utf-8")
         for line in (
             "- status: not verified",
-            "- strict score: 6/6",
-            "- adjudications: 0",
-            "- verification blockers: 4",
+            "- strict score: 84/85",
+            "- adjudications: 400",
+            "- verification blockers: 1",
         ):
             self.assertIn(line, report)
         self.assertNotIn("- status: verified", report)
-        self.assertEqual(controller.get("adjudications", []), [])
 
     def test_lineage_turns_bind_controller_output_sessions_prompts_and_predecessor_bytes(self):
         """Catch a cross-case session, resume prompt, raw-final, or byte-lineage swap."""
         controller = load_json(RESULT_ROOT / "controller.json")
-        selected = {row["case_id"]: row["result"] for row in controller["runs"]}
+        selected = {
+            (row["case_id"], row["repetition"]): row["result"]
+            for row in controller["runs"]
+        }
         session_ids = []
 
         for case_id in LINEAGE_CASE_IDS:
-            result = selected[case_id]
-            case_root = RAW_ROOT / "codex" / case_id / "01"
-            metadata = load_json(case_root / "metadata.json")
-            first_final = (case_root / "first.final.txt").read_bytes()
-            second_final = (case_root / "second.final.txt").read_text(encoding="utf-8")
-            second_prompt = (case_root / "second.prompt.txt").read_text(encoding="utf-8")
-            session_id = result["session_id"]
+            for repetition in range(1, 6):
+                result = selected[(case_id, repetition)]
+                case_root = RAW_ROOT / "codex" / case_id / f"{repetition:02d}"
+                metadata = load_json(case_root / "metadata.json")
+                first_final = (case_root / "first.final.txt").read_bytes()
+                second_final = (case_root / "second.final.txt").read_text(encoding="utf-8")
+                second_prompt = (case_root / "second.prompt.txt").read_text(encoding="utf-8")
+                session_id = result["session_id"]
 
-            self.assertEqual(str(uuid.UUID(session_id)), session_id)
-            session_ids.append(session_id)
-            self.assertEqual(thread_started_ids(raw_path(case_id, "first")), (session_id,))
-            self.assertEqual(thread_started_ids(raw_path(case_id, "second")), (session_id,))
-            self.assertEqual(result["final_output"], second_final)
-            self.assertEqual(report_previous_sha(second_final), hashlib.sha256(first_final).hexdigest())
+                self.assertEqual(str(uuid.UUID(session_id)), session_id)
+                session_ids.append(session_id)
+                self.assertEqual(thread_started_ids(raw_path(case_id, repetition, "first")), (session_id,))
+                self.assertEqual(thread_started_ids(raw_path(case_id, repetition, "second")), (session_id,))
+                self.assertEqual(result["final_output"], second_final)
+                self.assertEqual(report_previous_sha(second_final), hashlib.sha256(first_final).hexdigest())
 
-            resume_argv = metadata["execution_commands"][1]["argv"]
-            self.assertEqual(resume_argv[-2], session_id)
-            self.assertEqual(resume_argv[-1], second_prompt)
-            self.assertEqual(second_prompt.count(PREDECESSOR_ARTIFACT_NOTE), 1)
-            self.assertIn("--skip-git-repo-check", resume_argv)
+                resume_argv = metadata["execution_commands"][1]["argv"]
+                self.assertEqual(resume_argv[-2], session_id)
+                self.assertEqual(resume_argv[-1], second_prompt)
+                self.assertEqual(second_prompt.count(PREDECESSOR_ARTIFACT_NOTE), 1)
+                self.assertIn("--skip-git-repo-check", resume_argv)
 
         self.assertEqual(len(session_ids), len(set(session_ids)))
 
     def test_non_lineage_and_integration_raw_final_bindings_are_exact(self):
         """Catch substitution of a selected final transcript outside lineage cases."""
         controller = load_json(RESULT_ROOT / "controller.json")
-        selected = {row["case_id"]: row["result"] for row in controller["runs"]}
-        for case_id in SMOKE_CASE_IDS - set(LINEAGE_CASE_IDS):
-            raw_final = (
-                RAW_ROOT / "codex" / case_id / "01" / "first.final.txt"
-            ).read_text(encoding="utf-8")
-            self.assertEqual(selected[case_id]["final_output"], raw_final)
-        self.assertEqual(
-            _planning_handoff_workflow(selected["INT-superpowers"]["final_output"]),
-            SUPERPOWERS_HANDOFF_MARKER,
-        )
+        selected = {
+            (row["case_id"], row["repetition"]): row["result"]
+            for row in controller["runs"]
+        }
+        for case_id in set(FINAL_CASE_IDS) - set(LINEAGE_CASE_IDS):
+            for repetition in range(1, 6):
+                raw_final = (
+                    RAW_ROOT / "codex" / case_id / f"{repetition:02d}" / "first.final.txt"
+                ).read_text(encoding="utf-8")
+                self.assertEqual(selected[(case_id, repetition)]["final_output"], raw_final)
+        for repetition in range(1, 6):
+            self.assertEqual(
+                _planning_handoff_workflow(selected[("INT-superpowers", repetition)]["final_output"]),
+                SUPERPOWERS_HANDOFF_MARKER,
+            )
 
 
 if __name__ == "__main__":

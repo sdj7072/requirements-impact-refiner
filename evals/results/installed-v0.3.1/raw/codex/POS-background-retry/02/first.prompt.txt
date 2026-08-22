@@ -1,0 +1,6 @@
+Retry failed export jobs forever.
+
+Repository evidence:
+- exports write to a deterministic object key
+- worker retries currently stop after five attempts
+- alerts consume dead_letter events

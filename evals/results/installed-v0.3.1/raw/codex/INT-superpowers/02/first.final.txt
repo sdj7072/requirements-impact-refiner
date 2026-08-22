@@ -1,0 +1,94 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Refine repository impacts for the approved design after Superpowers brainstorming and before writing-plans. | User request and supplied workflow evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Assess every repository-visible impact of the approved design, preserve its approved behavior baseline, and stop at a manual handoff before writing-plans; the design artifact and repository contents must be supplied before the assessment can be completed. | none | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Superpowers brainstorming is complete, its approved design is the requirement baseline, and writing-plans has not started. | `verified` | User-supplied repository evidence: Superpowers brainstorming is complete and writing-plans has not started. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001`, `IMP-002` | The Superpowers workflow state supplied by the user fixes the approved design as the baseline and requires impact refinement before writing-plans. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `functionality` | `critical` | `blocked` | `unknown` | Named information gap: no approved design artifact or concrete behavior change is present in the request or workspace, so affected entry points and flows cannot be identified. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | `regression` | `critical` | `blocked` | `verified` | Repository root inspection found no files; `rg --files -uu` and `find . -maxdepth 3` returned no repository artifacts, implementation, configuration, schema, or tests to inspect. | `INV-001` | the pending decision | `AC-002` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which evidence package should be used to unblock repository impact refinement? | Provide the approved design and populate or identify the repository. | `IMP-001`, `IMP-002` | Enables a repository-grounded refinement across behavior, data, interfaces, security, concurrency, operations, compatibility, policy, and regression surfaces. |
+| Which evidence package should be used to unblock repository impact refinement? | Provide the approved design only. | `IMP-001`, `IMP-002` | Enables requirement-specific reasoning, but repository impacts and current behavior remain blocked and cannot be verified. |
+| Which evidence package should be used to unblock repository impact refinement? | Populate or identify the repository only. | `IMP-001`, `IMP-002` | Enables current-behavior inspection, but the requested change and its intended mechanics remain blocked without the approved design. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | Initial pre-decision refinement. | the pending decision | none | Preserved the approved-design workflow baseline and identified the missing design and empty repository as blockers. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Every approved behavior and constraint is mapped to concrete repository entry points, flows, interfaces, and affected components without reopening the approved design. | Future inspection against the supplied approved design and repository; currently blocked by the missing design artifact. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-001` | Existing observable behavior, tests, fixtures, configuration, schemas, and operational safeguards affected by the design are cited, and each critical impact has a testable regression criterion or named validation gap. | Future repository inspection and test inventory; currently blocked because the workspace contains no files. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-001` | `blocked` | The approved design artifact or an equivalent complete statement of the behavior change is missing. | none | User or brainstorming artifact owner. |
+| `IMP-002` | `blocked` | The workspace is empty and no alternate repository path was supplied. | none | User or repository owner. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Workflow entry state. | User-supplied evidence that brainstorming is complete and writing-plans has not started. | The Superpowers handoff position is verified, but the approved design content is not. |
+| Repository availability. | Workspace root listing, `rg --files -uu`, and `find . -maxdepth 3`; all showed no files. | No code, schema, configuration, tests, documentation, or earlier v0.3 impact report could be assessed; all product-specific impacts remain unknown. |
+| Lineage. | No predecessor report was found in the empty workspace. | This is `RPT-001` Revision 1 with predecessor `none`; every recorded impact is new. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the approved design and an inspectable repository are supplied; then complete repository impact refinement without reopening brainstorming. | `RPT-001`, `REQ-001`, `INV-001`, `IMP-001`, `IMP-002` | `IMP-001` and `IMP-002` remain blocked by named evidence gaps. | `AC-001`, `AC-002` | superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans |

@@ -241,19 +241,19 @@
       "authPolicy": "ON_INSTALL"
     },
     {
-      "pluginId": "requirements-impact-refiner@requirements-impact-refiner",
+      "pluginId": "requirements-impact-refiner@requirements-impact-refiner-v031-eval",
       "name": "requirements-impact-refiner",
-      "marketplaceName": "requirements-impact-refiner",
+      "marketplaceName": "requirements-impact-refiner-v031-eval",
       "version": "0.3.1",
       "installed": true,
       "enabled": true,
       "source": {
         "source": "local",
-        "path": "/Users/p042890/Documents/Codex/2026-08-12/new-chat-3/.worktrees/cross-client-eval-harness"
+        "path": "/private/tmp/rir-v031-eval-marketplace"
       },
       "marketplaceSource": {
         "sourceType": "local",
-        "source": "/Users/p042890/Documents/Codex/2026-08-12/new-chat-3/.worktrees/cross-client-eval-harness"
+        "source": "/private/tmp/rir-v031-eval-marketplace"
       },
       "installPolicy": "AVAILABLE",
       "authPolicy": "ON_INSTALL"

@@ -27,7 +27,7 @@
           "google-calendar@openai-curated",
           "slack@openai-curated",
           "superpowers@openai-curated",
-          "requirements-impact-refiner@requirements-impact-refiner"
+          "requirements-impact-refiner@requirements-impact-refiner-v031-eval"
         ],
         "plugin_version": "0.3.1",
         "reason": null,

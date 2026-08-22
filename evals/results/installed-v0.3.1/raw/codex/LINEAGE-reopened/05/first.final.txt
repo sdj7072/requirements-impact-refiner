@@ -1,0 +1,86 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | post-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Remove the `profile.displayName` field. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Remove `profile.displayName` only after preserving it for one release as the approved client-compatibility window. | `DEC-001` | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Mobile clients consume `profile.displayName`. | `verified` | Supplied repository evidence—mobile clients consume `profile.displayName`. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Supplied approved migration evidence—the field is preserved for one release. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `compatibility` | `high` | `resolved` | `verified` | Supplied repository evidence identifies mobile consumption; supplied approved migration evidence preserves `profile.displayName` for one release, eliminating immediate-removal incompatibility. | `INV-001` | `DEC-001` | `AC-001` |
+
+## Decisions and Accepted Risks
+
+| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |
+| --- | --- | --- | --- | --- |
+| `DEC-001` | Preserve `profile.displayName` for one release before removing it. | `REQ-001` | none | The approved migration provides the compatibility window required by known mobile consumers and resolves `IMP-001`. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1—add a one-release compatibility window before field removal. | `DEC-001` | none | Preserves `profile.displayName` for known mobile consumers during the approved migration release. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | For one full release before removal, profile responses continue to include `profile.displayName`, and existing mobile clients can consume it successfully. | Future compatibility test or release verification covering an existing mobile-client decoder against the migration-release profile response. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Assessment is limited to the supplied repository and approved migration evidence; repository paths and executable tests were not provided. | Mobile clients consume `profile.displayName`; the approved migration preserves the field for one release. | The known client-compatibility impact is resolved at requirement level, while implementation conformance remains to be verified by `AC-001`. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| `REQ-001`: remove `profile.displayName` after one release in which it remains available to mobile clients. | `RPT-001`, `INV-001`, `IMP-001`, `DEC-001` | No material impact remains unresolved; implementation conformance is a validation obligation. | `AC-001` | Generic |

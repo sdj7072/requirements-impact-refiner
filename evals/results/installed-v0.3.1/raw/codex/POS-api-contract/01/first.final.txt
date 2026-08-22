@@ -1,0 +1,99 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Rename `displayName` to `name`. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Rename the public profile field from `displayName` to `name`, preserve legacy iOS decoding and cached-profile reads, and honor the promised one-version deprecation window; the cache write and downgrade-compatibility policy remains pending. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | The iOS user DTO decodes the `displayName` key. | `verified` | User-supplied repository evidence: `ios/UserDTO.swift` decodes `displayName`; workspace contents were unavailable for direct symbol inspection. |
+| `INV-002` | Cached profile JSON persists the `displayName` key. | `verified` | User-supplied repository evidence: cached profile JSON persists `displayName`; no cache path or schema was available in the workspace. |
+| `INV-003` | The public API promises a one-version deprecation before removal. | `verified` | User-supplied repository evidence: public API changelog commitment; the changelog file was unavailable in the workspace. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Existing `displayName` payloads must remain decodable during the compatibility window. |
+| `INV-002` | `REQ-001` | `IMP-002` | Profiles already cached under `displayName` must remain readable after upgrade. |
+| `INV-003` | `REQ-001` | `IMP-003` | Existing public callers must retain a deprecated `displayName` access path for one released version. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | interfaces | high | refining | verified | `ios/UserDTO.swift` is reported to decode `displayName`; immediately switching the decoder to only `name` would reject legacy payloads. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | data | critical | refining | verified | Cached profile JSON is reported to persist `displayName`; a name-only reader would lose or fail to restore existing cached values. | `INV-002` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | compatibility | high | refining | verified | The supplied changelog commitment requires a one-version deprecation; immediate public removal would violate that contract. | `INV-003` | the pending decision | `AC-003` |
+| `IMP-004` | `REQ-001` | regression | medium | blocked | unknown | The workspace is empty, so existing decoder, cache migration, public API, and downgrade tests could not be inspected or run. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-004` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| During the one-version deprecation window, which compatibility policy should govern `displayName` and `name` across decoding and cached JSON? | Canonical-write / dual-read (recommended): expose `name`, keep a deprecated `displayName` alias, read both keys with `name` taking precedence, and write only `name`. | `IMP-001`, `IMP-002`, `IMP-003` | Avoids duplicate persisted fields and naturally migrates on write, but an immediately downgraded previous app version may not read cache written by the new version. |
+| During the one-version deprecation window, which compatibility policy should govern `displayName` and `name` across decoding and cached JSON? | Dual-write / dual-read: expose `name`, keep the deprecated alias, read both keys with `name` taking precedence, and write both keys for one version. | `IMP-001`, `IMP-002`, `IMP-003` | Preserves upgrade and downgrade cache compatibility, but duplicates data and requires later cleanup. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement adds the supplied decoder, persisted-cache, and one-version deprecation constraints. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | During the deprecation version, iOS decodes payloads containing either key and applies the selected precedence when both are present. | Add or update `UserDTO` decoding tests after repository contents are available. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | A profile cached with only `displayName` before upgrade restores the same value after upgrade; new cache output follows the selected write policy. | Add a legacy-cache fixture plus round-trip and, if selected, downgrade tests. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-003` | `name` is the canonical public property, while `displayName` remains callable and marked deprecated for exactly one released version before removal. | Compile-time public API test and changelog/version assertion. |
+| `AC-004` | `REQ-001` | `IMP-004` | `INV-001`, `INV-002`, `INV-003` | All decoder, cache compatibility, public API, and selected downgrade scenarios pass in the repository test suite. | Test commands are unknown until the repository is available. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-004` | blocked | Repository files and test commands are unavailable in the empty workspace. | the pending decision | Repository owner supplies or mounts the repository. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Repository inspection | The workspace contained no files; analysis used only the three user-supplied evidence statements. | Affected symbols, generated contracts, exact cache schema, tests, and versioning mechanics remain unverified. |
+| External consumers | No SDKs, OpenAPI contract, or downstream client inventory was supplied. | Additional consumers of `displayName` may exist and require the same compatibility window. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending compatibility policy is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Cache downgrade behavior is undecided; repository and tests are unavailable. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |

@@ -1,0 +1,516 @@
+[
+  {
+    "case_id": "POS-authorization",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-authorization",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-authorization",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-authorization",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-authorization",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "POS-deletion",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-deletion",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-deletion",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-deletion",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-deletion",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "POS-api-contract",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-api-contract",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-api-contract",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-api-contract",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-api-contract",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "POS-cache",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-cache",
+    "findings": [
+      "impact delta references unknown impact IMP-002",
+      "malformed table row in Impact Ledger: expected 10 cells, got 9",
+      "unknown reference IMP-002"
+    ],
+    "passed": false,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-cache",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-cache",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-cache",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "POS-payments",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-payments",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-payments",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-payments",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-payments",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "POS-sharing",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-sharing",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-sharing",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-sharing",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-sharing",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "POS-background-retry",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "POS-background-retry",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "POS-background-retry",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "POS-background-retry",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "POS-background-retry",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "NEG-planning",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "NEG-planning",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "NEG-planning",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "NEG-planning",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "NEG-planning",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "NEG-debugging",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "NEG-debugging",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "NEG-debugging",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "NEG-debugging",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "NEG-debugging",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "NEG-code-review",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "NEG-code-review",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "NEG-code-review",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "NEG-code-review",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "NEG-code-review",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "INT-superpowers",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "INT-superpowers",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "INT-superpowers",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "INT-superpowers",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "INT-superpowers",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "findings": [],
+    "passed": true,
+    "repetition": 1
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "findings": [],
+    "passed": true,
+    "repetition": 2
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "findings": [],
+    "passed": true,
+    "repetition": 3
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "findings": [],
+    "passed": true,
+    "repetition": 4
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "findings": [],
+    "passed": true,
+    "repetition": 5
+  }
+]

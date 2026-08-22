@@ -1,0 +1,5 @@
+Record an impact report for a data export change. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.
+
+Repository evidence:
+- exports.py writes files to the tenant archive
+- retention ownership is not documented

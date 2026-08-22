@@ -1,0 +1,100 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Cache the dashboard response for one hour. | User request and supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Cache dashboard responses for one hour while preserving tenant-specific results, existing role-change behavior, and the dashboard write update signal. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Dashboard results depend on `tenant_id`. | `verified` | Supplied repository evidence; repository files are unavailable in the workspace. |
+| `INV-002` | Role changes invalidate `permission_cache` only. | `verified` | Supplied repository evidence; repository files are unavailable in the workspace. |
+| `INV-003` | Dashboard writes publish `dashboard.updated`. | `verified` | Supplied repository evidence; repository files are unavailable in the workspace. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Dashboard results are tenant-specific. |
+| `INV-002` | `REQ-001` | `IMP-003` | Current role-change invalidation is limited to `permission_cache`. |
+| `INV-003` | `REQ-001` | `IMP-002` | Dashboard writes already provide an update signal. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | authorization/privacy | critical | refining | verified | Cache entries must preserve tenant separation because results depend on `tenant_id`; exact cache code is unavailable. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | state/concurrency | high | refining | The one-hour cache introduces a freshness choice around the existing `dashboard.updated` signal. | `INV-003` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | authorization/privacy | critical | blocked | unknown | The unavailable implementation does not show whether cached dashboard responses are permission-filtered and therefore affected by role changes. | `INV-002` | the pending decision | `AC-003` |
+| `IMP-004` | `REQ-001` | regression | medium | blocked | unknown | The workspace contains no application or test files, so cache backend behavior and existing coverage cannot be inspected. | `INV-001`, `INV-003` | the pending decision | `AC-004` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which invalidation policy should accompany the one-hour tenant-specific dashboard cache? | Invalidate the affected tenant’s entry on `dashboard.updated`; keep role changes limited to `permission_cache` unless code inspection proves dashboard responses are permission-filtered. | `IMP-001`, `IMP-002`, `IMP-003` | Recommended: uses the existing update signal and preserves the supplied role-change boundary. |
+| Which invalidation policy should accompany the one-hour tenant-specific dashboard cache? | Use TTL-only expiration. | `IMP-001`, `IMP-002`, `IMP-003` | Simplest, but writes and possibly role changes can leave responses stale for up to one hour. |
+| Which invalidation policy should accompany the one-hour tenant-specific dashboard cache? | Invalidate on both `dashboard.updated` and role changes. | `IMP-001`, `IMP-002`, `IMP-003` | Safest for permission-filtered responses, but expands role-change behavior and increases invalidation churn. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement adds the supplied tenant, role-invalidation, and dashboard-update constraints. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Different tenants cannot read or evict one another’s cached responses; entries expire within one hour absent earlier invalidation. | Future cache-key and cross-tenant isolation tests. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-003` | Tests demonstrate the selected response behavior immediately after a dashboard write and across the TTL boundary. | Future write/event integration tests. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | A role change cannot expose unauthorized data from a cached dashboard response. | Future authorization regression test after inspecting dashboard permission dependencies. |
+| `AC-004` | `REQ-001` | `IMP-004` | `INV-001`, `INV-003` | Cache hit, miss, backend failure, expiration, and invalidation preserve the uncached response contract. | Future repository tests. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-003` | `blocked` | Dashboard authorization dependencies cannot be inspected because repository files are absent. | none | Repository owner must provide the dashboard implementation and authorization path. |
+| `IMP-004` | `blocked` | Cache backend, failure semantics, and tests cannot be inspected because the workspace is empty. | none | Repository owner must provide the repository checkout. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Supplied evidence only; the workspace is empty and is not a Git checkout. | User-provided tenant, role-invalidation, and `dashboard.updated` facts. | Implementation points and permission sensitivity remain unknown. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until an invalidation option is selected and the repository checkout is available. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Pending invalidation decision; unavailable implementation and test evidence. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |

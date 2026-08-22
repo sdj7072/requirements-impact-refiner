@@ -1,0 +1,5 @@
+Record an impact report for changing webhook delivery retries. The supplied evidence identifies an unresolved duplicate-delivery risk.
+
+Repository evidence:
+- delivery retries can repeat after a provider timeout
+- no idempotency behavior is documented

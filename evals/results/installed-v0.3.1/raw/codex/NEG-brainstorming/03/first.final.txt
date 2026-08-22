@@ -1,0 +1,50 @@
+Since no repository evidence was included, I’ll treat this as greenfield ideation. The strongest opportunities are apps that solve a narrow behavioral problem—not another generic workout library.
+
+### Promising concepts
+
+1. **Minimum Viable Workout**  
+   Creates workouts based on the user’s available time, energy, location, and equipment—even if they only have five minutes. Progress is measured by consistency rather than calories.
+
+2. **Adaptive Comeback Coach**  
+   Designed for people returning after injury, illness, burnout, or a long break. It rebuilds capacity gradually and adjusts when users report pain, soreness, or missed sessions.
+
+3. **Workout Autopilot**  
+   The user enters a goal and schedule; the app continuously reshuffles workouts around missed sessions, poor sleep, travel, and changing availability.
+
+4. **Real-Life Strength**  
+   Programs built around practical goals: carrying a child, hiking comfortably, improving posture, preparing for ski season, or staying independent with age.
+
+5. **Movement Snacks**  
+   Delivers short activity prompts throughout the day based on context: desk breaks, mobility, stairs, walking calls, or brief strength sets.
+
+6. **Co-op Fitness**  
+   Small groups complete shared weekly goals. Different activities contribute fairly, so runners, lifters, walkers, and beginners can participate together.
+
+7. **Form Feedback Lite**  
+   Uses the phone camera for simple rep counting, tempo guidance, range-of-motion cues, and side-by-side progress—not medical-grade posture claims.
+
+8. **Fitness Quest**  
+   Exercise powers a story or exploration game. Walking unlocks locations, strength sessions defeat challenges, and recovery maintains the player’s resources.
+
+9. **Invisible Progress**  
+   Focuses on improvements scales often miss: energy, mood, sleep, mobility, strength, resting heart rate, and everyday tasks becoming easier.
+
+10. **Gym Confidence Coach**  
+    Helps beginners navigate a gym: what equipment looks like, how to adjust it, what to do when it is occupied, and how to complete a first session without feeling lost.
+
+### My strongest product direction
+
+Combine **Minimum Viable Workout** with **Workout Autopilot**:
+
+> “Tell us how much time and energy you have today, and we’ll give you the smallest workout that keeps your plan moving.”
+
+A compelling first version could include:
+
+- A daily time-and-energy check-in
+- Personalized 5-, 15-, and 30-minute alternatives
+- Automatic schedule repair after missed workouts
+- Home, gym, travel, and no-equipment modes
+- Progress based on weekly consistency and capability
+- A “do less today” option that removes guilt without breaking the habit
+
+Its differentiation is adaptability: most fitness apps prescribe an ideal plan, while this one responds to real life.

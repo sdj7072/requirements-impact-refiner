@@ -1,11 +1,10 @@
-The workspace is empty, so I can’t inspect the failing test or CI setup. “Only fails in CI” is insufficient to identify the cause.
+I can’t determine the cause from the available evidence: the workspace is empty and is not a Git repository. “Only in CI” alone is insufficient to distinguish a race condition, test-order dependence, resource exhaustion, timing, timezone/locale, or environment mismatch.
 
-Please provide the repository or paste:
+Please provide:
 
-- The test and code under test
-- CI failure output/stack trace
-- CI workflow/configuration
-- Relevant package/runtime versions
-- Any retries, timing, randomness, timezone, concurrency, filesystem, or network dependencies
+- The repository or relevant test and implementation files
+- A failing CI log/stack trace
+- The CI workflow configuration
+- Ideally, one successful CI log for comparison
 
-With those, I can trace the intermittent failure without modifying the code.
+With those, I can trace the intermittent failure to a concrete cause.

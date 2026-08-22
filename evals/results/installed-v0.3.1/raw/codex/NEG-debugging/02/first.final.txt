@@ -1,0 +1,10 @@
+I can’t diagnose it yet because the provided workspace is empty—there’s no repository, test, CI configuration, or failure log to inspect.
+
+Please attach the repository or paste:
+
+- The intermittently failing test
+- The implementation it exercises
+- A representative CI failure/stack trace
+- The relevant CI workflow and test command
+
+The CI-only detail suggests timing, concurrency, environment, timezone/locale, resource limits, or test-order dependence, but there isn’t enough evidence to identify which one.

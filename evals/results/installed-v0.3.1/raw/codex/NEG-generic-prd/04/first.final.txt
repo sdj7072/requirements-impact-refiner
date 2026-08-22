@@ -1,0 +1,6 @@
+Please provide the missing inputs:
+
+1. **Product idea** — the feature/product concept, target users, and problem to solve.
+2. **Repository evidence** — relevant file paths, code excerpts, architecture notes, or existing behavior.
+
+The workspace is currently empty, so there’s no repository evidence I can inspect. Once supplied, I can produce a complete, implementation-ready PRD with scope, user stories, requirements, UX flows, data/API impacts, edge cases, acceptance criteria, metrics, rollout, risks, and open decisions.

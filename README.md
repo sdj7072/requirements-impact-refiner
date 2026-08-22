@@ -118,35 +118,35 @@ Compatibility claims below are limited to preserved evaluation evidence. “Beha
 | Environment | Version | Status | Evidence note |
 | --- | --- | --- | --- |
 | Codex standalone behavioral harness | `codex-cli 0.148.0-alpha.15`; `gpt-5.6-luna`; hosted runtime unavailable | `not verified` | Strict evaluation failed at **7/17** from one repetition per case: positives 0/8, negatives 3/5, integrations 4/4. |
-| Codex with Superpowers | executed client/model/version not recorded in selected transcripts | `not verified` | Strict evaluation failed at **10/17** from one repetition per case: one positive passed and seven were partial; negatives 5/5 and integrations 4/4 passed. |
+| Codex with Superpowers | `codex-cli 0.148.0-alpha.21`; `gpt-5.6-sol`; `high`; RIR `0.3.1` | `not verified` | Sealed v0.3.1 batch: 85/85 runtime passes from 85 first-attempt selections with no retries, but the mechanical score is 84/85. `POS-cache` repetition 2 has the sole malformed-ledger/unknown-`IMP-002` failure, so one verification blocker remains. |
 | Codex skill quick validator | local system snapshot | `blocked` | PyYAML is absent. Static audit also found that this validator's allowed-key list omits the Agent Skills `compatibility` key; no executed pass is claimed. |
 | Codex plugin validator | local system snapshot | `blocked` | Execution stopped at `ModuleNotFoundError: yaml`; manifest tests are not substituted for this validator. |
-| Claude Code standalone | version unavailable | `blocked` | The `claude` executable was absent. |
-| Claude Code with Superpowers | version unavailable | `blocked` | The `claude` executable and Claude-side Superpowers runtime were unavailable. |
-| Claude Code with `feature-dev` | version unavailable | `blocked` | The `claude` executable and `feature-dev` runtime were unavailable. |
-| Claude Code with Spec Kit | version unavailable | `blocked` | The `claude` executable and Spec Kit runtime were unavailable. |
+| Claude Code standalone | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; no authenticated Claude behavioral evaluation ran. |
+| Claude Code with Superpowers | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; Claude-side Superpowers behavioral compatibility remains blocked. |
+| Claude Code with `feature-dev` | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; `feature-dev` behavioral compatibility remains blocked. |
+| Claude Code with Spec Kit | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; Spec Kit behavioral compatibility remains blocked. |
 | Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | No named or configured generic harness executable was available. |
 
-Both Codex audits detected all **24/24** positive surface topics and preserved all **4/4** integration ownership boundaries. These are observed behaviors, not compatibility or support. No all-17-times-five rerun was performed: no skill or adapter wording changed in Task 7, and the one-run corpora already failed strict support criteria. Full transcripts, reruns, scorecards, and checksums are in [`evals/results/with-skill.md`](evals/results/with-skill.md).
+The historical Codex standalone result remains **7/17** and is not evidence of support. The sealed Codex-with-Superpowers v0.3.1 evidence supersedes the obsolete one-run result: all 85 selected runtime outputs passed, while one deterministic mechanical check prevents verification. The final report, controller, scorecard, manifest, raw transcripts, and quote-bound adjudications are preserved in [`evals/results/installed-v0.3.1/report.md`](evals/results/installed-v0.3.1/report.md) and [`evals/results/installed-v0.3.1/adjudication.json`](evals/results/installed-v0.3.1/adjudication.json).
 
-### Pre-live evaluation contract
+### Sealed v0.3.1 evaluation evidence
 
-This is the approved evaluation plan, not sealed behavioral evidence. It does not change any compatibility status above.
+This table records the immutable final evaluation evidence. It does not promote the release to verified status.
 
-| Contract key | Requirement |
+| Evidence key | Sealed value |
 | --- | --- |
-| planned-live-composition | Codex with Superpowers |
-| planned-live-finals | 85 |
-| run-local-model | gpt-5.6-sol |
-| model-selection-owner | user |
-| skill-model-selection | none |
-| claude-evaluation | structural-only |
-| claude-paid-auth | blocked: paid authentication unavailable |
-| raw-evidence | all outcomes and attempts |
-| approval-gates | plugin replacement; Claude installation; full batch |
-| rerun-policy | no selective rerun of a valid model result |
+| release | 0.3.1 |
+| composition | Codex with Superpowers |
+| Codex client | codex-cli 0.148.0-alpha.21 |
+| RIR plugin | requirements-impact-refiner@requirements-impact-refiner-v031-eval |
+| model / reasoning | gpt-5.6-sol / high |
+| runtime outcomes | 85/85 pass; 85 attempt 1 selections; no retries |
+| mechanical score | 84/85; one failure: POS-cache repetition 2 |
+| human adjudication | 400/400 passed; every adjudication quote is bound to its selected final output |
+| release status | not verified; one mechanical verification blocker |
+| Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-The user-selected evaluation model is `gpt-5.6-sol` with `high` reasoning for the planned 85-final Codex-with-Superpowers batch. Model and reasoning are run-local inputs: the skill does not select a model. Claude work is structural-only and unauthenticated; any paid-authentication or model-behavior boundary remains `blocked`, never behavioral compatibility. Preserve all raw outcomes and attempts, request fresh approval at each listed gate, retain Superpowers, and never selectively rerun a valid model result.
+The exact plugin identifier is `requirements-impact-refiner@requirements-impact-refiner-v031-eval`. The v0.3.1 manifest digest is `fe4ab995cee882e95df1fe1c6e07542512cd216aaa44d47809fdd0252add05da`; the raw transcript inventory remains byte-preserved and secret-scanned. The lone mechanical failure records exactly a malformed Impact Ledger row and unknown `IMP-002` references in `POS-cache` repetition 2. The 400 human adjudications all pass and their quotes are each verified as substrings of the selected final output. Claude evidence is structural-only and does not change its blocked behavioral-compatibility status.
 
 ## 7. Comparison and Non-Goals
 
@@ -160,7 +160,7 @@ Repository access, search, and tests improve confidence, but supplied files may 
 
 The core evaluation is **24/25**, not 25/25. The single known stochastic failure in `POS-payments-5` embedded reconcile-before-retry mechanics before the user selected a retry policy. The final checklist addresses the pattern, but the allowed correction rounds were exhausted, so the limitation remains disclosed. The separate workflow-integration final composition is **30/30**. These scores come from the recorded Codex harness and must not be generalized to untested clients.
 
-The broader Task 7 release audits supersede any inference of client support: Codex standalone strictly failed at **7/17**, and Codex with Superpowers strictly failed at **10/17**. Each used only one nominated result per case, below the runbook's five-repetition support threshold. Therefore neither environment is verified or supported by this release evidence.
+The broader release record does not infer client support. Codex standalone strictly failed at **7/17**. Codex with Superpowers completed the full five-repetition, 85-final v0.3.1 batch, but remains `not verified` because the `POS-cache` repetition-2 mechanical failure is a release blocker despite the 85/85 runtime and 400/400 adjudication counts.
 
 The skill can miss impacts outside the inspected scope. Users should keep unresolved, deferred, blocked, and accepted risks visible through planning and validate critical behavior with appropriate human review and tests.
 

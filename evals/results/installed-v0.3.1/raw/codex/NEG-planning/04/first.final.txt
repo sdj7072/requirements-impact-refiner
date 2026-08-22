@@ -1,0 +1,1 @@
+The workspace is empty, and the approved impact report/specification wasn’t included. Please paste or attach it (or provide its repository path), and I’ll turn it into ordered, implementation-ready coding tasks with file targets, dependencies, acceptance criteria, and tests.

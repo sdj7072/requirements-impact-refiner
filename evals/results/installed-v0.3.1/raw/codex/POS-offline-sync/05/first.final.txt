@@ -1,0 +1,102 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Sync offline edits when the app reconnects. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | On reconnect, synchronize queued offline record mutations while accounting for record `updated_at` timestamps, server deletion tombstones retained for 24 hours, and a client queue whose only ordering guarantee is local creation order. The conflict policy remains pending. | none | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Records carry an `updated_at` timestamp. | `verified` | User-supplied repository evidence: records carry an `updated_at` timestamp. |
+| `INV-002` | A server deletion creates a tombstone retained for 24 hours. | `verified` | User-supplied repository evidence: server tombstones have 24-hour retention. |
+| `INV-003` | The client queue preserves local creation order and provides no additional ordering guarantee. | `verified` | User-supplied repository evidence: the queue preserves local creation order only. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001`, `IMP-005` | User-supplied `updated_at` evidence. |
+| `INV-002` | `REQ-001` | `IMP-002` | User-supplied 24-hour tombstone evidence. |
+| `INV-003` | `REQ-001` | `IMP-003`, `IMP-004` | User-supplied client-queue ordering evidence. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `inferred` | A queued local mutation can target a record whose `updated_at` changed on the server while the client was offline; the supplied evidence does not define which value wins. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | `data` | `high` | `detected` | `inferred` | An offline edit replayed against a 24-hour tombstone can conflict with deletion, and after tombstone expiry a long-offline client may be unable to distinguish deletion from absence. | `INV-002` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | `state/concurrency` | `high` | `detected` | `verified` | User-supplied evidence guarantees local creation order only, so sync cannot rely on server order, cross-client order, or an unstated per-record causal order. | `INV-003` | the pending decision | `AC-003` |
+| `IMP-004` | `REQ-001` | `state/concurrency` | `high` | `blocked` | `unknown` | Queue retry behavior, acknowledgement boundaries, mutation identifiers, and server idempotency support are unavailable because no queue or sync protocol artifacts were supplied. | `INV-003` | the pending decision | `AC-004` |
+| `IMP-005` | `REQ-001` | `data` | `high` | `blocked` | `unknown` | The authority, precision, and clock semantics of `updated_at`, and whether tombstones expose a comparable deletion version, are unavailable because no schema or API contract was supplied. | `INV-001` | the pending decision | `AC-005` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| When a queued local mutation targets a record changed or deleted on the server since the client last saw it, which conflict policy should reconnect sync use? | Detect and surface conflicts: apply automatically only when the server version still matches the queued mutation's base version; never auto-resurrect a tombstoned record. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-005` | Best protection against silent data loss, but requires capturing a base version and providing a conflict-resolution path. |
+| When a queued local mutation targets a record changed or deleted on the server since the client last saw it, which conflict policy should reconnect sync use? | Server wins: discard the queued local mutation when the server changed or deleted the record. | `IMP-001`, `IMP-002`, `IMP-003` | Simplest deterministic policy and respects deletions, but can silently lose offline work unless the app preserves or reports rejected edits. |
+| When a queued local mutation targets a record changed or deleted on the server since the client last saw it, which conflict policy should reconnect sync use? | Client wins for updates, but an unexpired server tombstone wins over local edits. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-005` | Preserves more offline edits, but may overwrite newer remote changes and remains unsafe after tombstone expiry without a durable deletion version. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | Revision 1 adds the supplied timestamp, tombstone-retention, and queue-order constraints. | the pending decision | none | Initial impact refinement; conflict behavior is not yet selected. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Given a queued local mutation and a newer server version of the same record, reconnect produces the selected deterministic outcome without silently applying both versions. | Future integration test with controlled local and server versions. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | A queued edit tested both before and after the 24-hour tombstone expiry follows the selected deletion policy and does not unintentionally resurrect deleted data. | Future tombstone-boundary integration tests. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-003` | Reconnect preserves local creation order for queued mutations and remains correct without assuming any stronger server or cross-client ordering. | Future multi-record and same-record replay tests. |
+| `AC-004` | `REQ-001` | `IMP-004` | `INV-003` | Retrying after interruption at every acknowledgement boundary converges to one logical application of each mutation. | Future fault-injection test after queue protocol and idempotency behavior are identified. |
+| `AC-005` | `REQ-001` | `IMP-005` | `INV-001` | Version comparisons use an authoritative, documented value with sufficient precision, including a deletion version when the selected policy requires one. | Future schema/API contract inspection and clock-skew test. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-004` | `blocked` | Need the client queue schema, reconnect retry/acknowledgement behavior, and server idempotency contract. | the pending decision | Sync implementation owner. |
+| `IMP-005` | `blocked` | Need the source and semantics of `updated_at` plus the tombstone schema, including any deletion version. | the pending decision | Data/API owner. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The workspace contains no repository files; analysis is limited to the three facts supplied in the request. | `rg --files` returned no files; user-supplied evidence covered `updated_at`, 24-hour tombstones, and local queue order. | The conflict, ordering, retry, and versioning impacts are identified, but implementation-specific behavior cannot be verified. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending conflict-policy decision is selected. | `RPT-001`, `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | The pending decision plus blocked `IMP-004` and `IMP-005`. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |
