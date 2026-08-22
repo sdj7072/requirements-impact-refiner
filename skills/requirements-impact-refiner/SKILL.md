@@ -1,8 +1,8 @@
 ---
 name: requirements-impact-refiner
-description: Use when the automatic bootstrap has selected a concrete software behavior change for impact refinement, or the user explicitly requests it, before planning; with Superpowers, after approved brainstorming; excludes ideation, explanation, debugging, code review, status, and execution of an already impact-refined requirement or plan
+description: Use when the automatic bootstrap has selected a concrete behavior change needing impact refinement, or the user explicitly requests it, before planning; with Superpowers, after approved brainstorming; excludes ideation, explanation, debugging, code review, status, and an already impact-refined requirement or plan
 license: MIT
-compatibility: Works with Agent Skills clients that can inspect supplied files; repository access, search, and tests improve evidence quality but are not required.
+compatibility: Agent Skills clients; repository access and tests improve evidence.
 metadata:
   version: "0.3.1"
 ---
@@ -13,7 +13,7 @@ Use for concrete pre-planning changes; not ideation, debugging, code review, or 
 
 ## Resource paths
 
-Resolve every `references/`, `assets/`, and `scripts/` path from the directory that contains this `SKILL.md`. Set `SKILL_DIR` to that directory, then read `SKILL_DIR/references/evidence-model.md`, `SKILL_DIR/references/impact-taxonomy.md`, `SKILL_DIR/references/refinement-loop.md`, and `SKILL_DIR/assets/impact-report-template.md`; use the same base for templates and the validator. Resolve paths from that directory, not the plugin root or workspace root.
+Resolve every `references/`, `assets/`, and `scripts/` path from the directory that contains this `SKILL.md`. Set `SKILL_DIR` to it; read `SKILL_DIR/references/evidence-model.md`, `SKILL_DIR/references/impact-taxonomy.md`, `SKILL_DIR/references/refinement-loop.md`, `SKILL_DIR/assets/impact-report-template.md`, templates, and validator from it, not the plugin root or workspace root. Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`; they never replace it as canonical.
 
 1. Locate the latest v0.3 predecessor; record `REQ-###`, inspect evidence, and preserve current behavior as `INV-###`.
 2. First report: `RPT-###`, Revision 1, predecessor `none`, and all impacts `new`. Later, preserve IDs, increment once, and hash exact predecessor bytes; never invent lineage.
@@ -41,4 +41,4 @@ Read exactly one adapter after the orchestrator is known; apply its Entry before
 
 ## Output shape
 
-Return no preamble. The first non-empty line exactly `# Requirements Impact Report`; then return the complete canonical current report inline. Do not return only a summary, a temporary-file link, or a saved-file path. A saved file is supplementary only. Every lineage turn returns the complete revised report inline, including its Report State, ledger, Impact Delta, and Planning Handoff.
+No preamble. The first non-empty line exactly `# Requirements Impact Report`; then return the complete canonical current report inline. Do not return only a summary, a temporary-file link, or a saved-file path. A saved file is supplementary only. Every lineage turn returns the complete revised report inline, including its Report State, ledger, Impact Delta, and Planning Handoff.

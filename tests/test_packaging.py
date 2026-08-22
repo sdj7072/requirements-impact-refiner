@@ -236,6 +236,39 @@ class PackagingTest(unittest.TestCase):
 
         self.assertTrue((scripts / "impact_report.py").is_file())
 
+    def test_plugin_root_resource_fallback_mirrors_are_complete_and_identical(self):
+        """Plugin-root fallbacks must exactly preserve canonical skill resources."""
+        canonical = ROOT / "skills" / "requirements-impact-refiner"
+        mirror_contract = {
+            "references": set(),
+            "assets": {Path("logo.png")},
+            "scripts": {Path("install-agent-skill.py")},
+        }
+
+        for directory, root_only_files in mirror_contract.items():
+            canonical_dir = canonical / directory
+            canonical_files = {
+                path.relative_to(canonical_dir)
+                for path in canonical_dir.rglob("*")
+                if path.is_file()
+            }
+            mirror_dir = ROOT / directory
+            mirror_files = {
+                path.relative_to(mirror_dir)
+                for path in mirror_dir.rglob("*")
+                if path.is_file()
+            }
+
+            self.assertEqual(mirror_files, canonical_files | root_only_files)
+            for relative_path in canonical_files:
+                self.assertEqual(
+                    (mirror_dir / relative_path).read_bytes(),
+                    (canonical_dir / relative_path).read_bytes(),
+                    f"{directory}/{relative_path} must be byte-identical to canonical",
+                )
+
+        self.assertFalse((ROOT / "SKILL.md").exists())
+
     def test_codex_manifest_references_a_standard_root_logo(self):
         manifest = self.load(".codex-plugin/plugin.json")
         interface = manifest["interface"]
@@ -268,6 +301,10 @@ class PackagingTest(unittest.TestCase):
             "read `SKILL_DIR/references/evidence-model.md`", core,
         )
         self.assertIn("not the plugin root or workspace root", core)
+        self.assertIn(
+            "Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`",
+            core,
+        )
 
     def test_core_skill_requires_an_inline_canonical_report(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
