@@ -20,19 +20,6 @@ _REPORT_WORKFLOW = re.compile(
     r"|\b(?:begin|start|activate|perform)\s+(?:the\s+)?impact refinement\b",
     re.IGNORECASE,
 )
-_CLAUSE_BOUNDARY = re.compile(r"[|;\n]+|(?<=[.!?])\s+")
-_AUTOMATIC_TERM = re.compile(r"\bautomatic(?:ally)?\b", re.IGNORECASE)
-_WRITING_PLANS_TERM = re.compile(r"\bwriting-plans\b", re.IGNORECASE)
-_PLANNING_ACTION = re.compile(
-    r"\b(?:invok(?:e|es|ed|ing)|invocation|start(?:s|ed|ing)?|"
-    r"trigger(?:s|ed|ing)?|run|runs|ran|running|launch(?:es|ed|ing)?|"
-    r"call(?:s|ed|ing)?)\b",
-    re.IGNORECASE,
-)
-_AUTOMATIC_DENIAL = re.compile(
-    r"\b(?:not|never|without)\b|\bmanual\s+handoff\b",
-    re.IGNORECASE,
-)
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
 
 
@@ -97,19 +84,6 @@ def _planning_handoff_workflow(output: str) -> Optional[str]:
     return _REPORT_MODEL.unquote(rows[0].get("Selected planning workflow", ""))
 
 
-def _has_automatic_writing_plans_contradiction(output: str) -> bool:
-    """Detect automatic planning semantically within one bounded clause."""
-    for clause in _CLAUSE_BOUNDARY.split(output):
-        if (
-            _AUTOMATIC_TERM.search(clause)
-            and _WRITING_PLANS_TERM.search(clause)
-            and _PLANNING_ACTION.search(clause)
-            and not _AUTOMATIC_DENIAL.search(clause)
-        ):
-            return True
-    return False
-
-
 def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
     """Check the catalog's transition claim without making a human judgment."""
     transition = case.expected_transition
@@ -147,7 +121,9 @@ def score_mechanical(
 
     ``previous_bytes`` must be the exact immutable first-turn artifact for a
     lineage second turn.  It remains optional so an incomplete raw result can
-    still be scored as a mechanical failure.
+    still be scored as a mechanical failure.  The ``INT-superpowers`` boundary
+    is mechanical only when expressed as the exact structured Planning Handoff
+    workflow marker; semantic prose remains quoted human adjudication.
     """
     findings: List[str] = []
     if result.case_id != case.id:
@@ -180,9 +156,6 @@ def score_mechanical(
             findings.append(
                 "INT-superpowers requires the exact structured Planning Handoff marker"
             )
-        if _has_automatic_writing_plans_contradiction(output):
-            findings.append("INT-superpowers forbids automatic writing-plans")
-
     if case.kind == "lineage":
         findings.extend(_lineage_findings(case, output))
 

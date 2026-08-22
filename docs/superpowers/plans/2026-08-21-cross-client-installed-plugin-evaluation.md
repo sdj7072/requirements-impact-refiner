@@ -318,7 +318,7 @@ Run: `python3 -m unittest tests.test_eval_harness_scoring -v`
 
 - [ ] **Step 3: Implement mechanical scoring**
 
-Use the canonical report validator for complete reports. Negative cases pass only without refinement IDs/workflow. `INT-superpowers` checks approved entry/exit and no automatic planning. Lineage checks transition and resolution rejection.
+Use the canonical report validator for complete reports. Negative cases pass only without refinement IDs/workflow. `INT-superpowers` mechanically requires only the exact structured `Planning Handoff` workflow marker; free-text semantics such as no automatic planning remain quoted human adjudication. Lineage checks transition and resolution rejection.
 
 - [ ] **Step 4: Implement bounded rendering**
 
@@ -524,4 +524,3 @@ Use `superpowers:requesting-code-review`. Probe model pass-through, composition,
 - [ ] **Step 11: Fix P0–P2 with RED tests and report local readiness**
 
 Use `receiving-code-review` and `systematic-debugging`; never edit sealed raw evidence. Report test count, environment, score, manifest digest, commit range, and clean status. Do not merge or push without user instruction.
-
