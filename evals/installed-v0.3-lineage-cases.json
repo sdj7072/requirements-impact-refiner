@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "LINEAGE-stable-blocked",
+      "kind": "lineage",
+      "turns": [
+        {
+          "prompt": "Record an impact report for a data export change. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.",
+          "repository_evidence": [
+            "exports.py writes files to the tenant archive",
+            "retention ownership is not documented"
+          ]
+        },
+        {
+          "prompt": "Continue the same export report. No new repository evidence or decision has been supplied; keep the report at its current lifecycle state.",
+          "repository_evidence": [
+            "the prior report text is supplied verbatim",
+            "no retention owner confirmation exists"
+          ]
+        }
+      ],
+      "must_detect": [
+        "stable report and impact identifiers",
+        "exact predecessor report bytes",
+        "blocked lifecycle state remains blocked",
+        "unchanged Impact Delta transition"
+      ],
+      "must_not_do": [
+        "change report identifiers",
+        "alter predecessor report bytes",
+        "invent a retention decision",
+        "resolve the blocked impact without evidence"
+      ],
+      "modes": ["superpowers"],
+      "expected_transition": "unchanged"
+    },
+    {
+      "id": "LINEAGE-reopened",
+      "kind": "lineage",
+      "turns": [
+        {
+          "prompt": "Record an impact report for removing a profile field. The supplied migration evidence supports resolving the client compatibility impact.",
+          "repository_evidence": [
+            "mobile clients consume profile.displayName",
+            "the approved migration preserves the field for one release"
+          ]
+        },
+        {
+          "prompt": "Continue the same profile-field report. New repository evidence shows a second client serializes the field directly, so reassess the earlier resolution.",
+          "repository_evidence": [
+            "the prior report text is supplied verbatim",
+            "desktop/ProfileCache.swift serializes profile.displayName"
+          ]
+        }
+      ],
+      "must_detect": [
+        "stable report and impact identifiers",
+        "exact predecessor report bytes",
+        "new desktop client impact evidence",
+        "approved reopened lifecycle transition",
+        "reopened Impact Delta transition"
+      ],
+      "must_not_do": [
+        "change report identifiers",
+        "alter predecessor report bytes",
+        "preserve the earlier resolution without reassessment",
+        "invent a decision for the desktop client"
+      ],
+      "modes": ["superpowers"],
+      "expected_transition": "reopened"
+    },
+    {
+      "id": "LINEAGE-no-false-resolution",
+      "kind": "lineage",
+      "turns": [
+        {
+          "prompt": "Record an impact report for changing webhook delivery retries. The supplied evidence identifies an unresolved duplicate-delivery risk.",
+          "repository_evidence": [
+            "delivery retries can repeat after a provider timeout",
+            "no idempotency behavior is documented"
+          ]
+        },
+        {
+          "prompt": "Continue the same webhook report. A stakeholder says the risk is probably acceptable, but provides no repository evidence or approved decision.",
+          "repository_evidence": [
+            "the prior report text is supplied verbatim",
+            "no approval record or idempotency evidence exists"
+          ]
+        }
+      ],
+      "must_detect": [
+        "stable report and impact identifiers",
+        "exact predecessor report bytes",
+        "unsupported resolution is rejected",
+        "unresolved lifecycle state remains supported by evidence",
+        "rejected Impact Delta transition"
+      ],
+      "must_not_do": [
+        "change report identifiers",
+        "alter predecessor report bytes",
+        "resolve the impact without evidence",
+        "fabricate an approved decision"
+      ],
+      "modes": ["superpowers"],
+      "expected_transition": "rejected"
+    }
+  ]
+}

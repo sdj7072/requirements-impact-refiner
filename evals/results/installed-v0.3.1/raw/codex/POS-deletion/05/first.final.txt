@@ -1,0 +1,100 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Delete an account immediately. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | 1 — Provide immediate account deletion while preserving invoice referential integrity, the required 30-day finance retention period, and cleanup consumption by the background worker. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | An account referenced by an invoice cannot be physically deleted while the reference remains because `invoice.account_id` uses `RESTRICT`. | `verified` | User-supplied repository evidence — `invoice.account_id` foreign-key delete behavior. |
+| `INV-002` | Finance data must be retained for 30 days. | `verified` | User-supplied repository evidence — `privacy.md` finance-retention requirement. |
+| `INV-003` | Account cleanup is consumed by a background worker rather than completed entirely in the initiating request. | `verified` | User-supplied repository evidence — account-cleanup consumer. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | `invoice.account_id` uses `RESTRICT`. |
+| `INV-002` | `REQ-001` | `IMP-002`, `IMP-003` | `privacy.md` requires 30-day finance retention. |
+| `INV-003` | `REQ-001` | `IMP-003`, `IMP-004` | Account cleanup is consumed by a background worker. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | data | critical | refining | verified | Immediate physical deletion can fail while invoices still reference the account because the foreign key uses `RESTRICT`. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | legal/policy | critical | refining | verified | Literal immediate erasure of retained finance data conflicts with the 30-day requirement in `privacy.md`. | `INV-002` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | state/concurrency | high | blocked | unknown | Worker retry, ordering, idempotency, retention-timer, and terminal-state behavior cannot be assessed because the repository is empty and no worker contract or implementation was supplied. | `INV-002`, `INV-003` | the pending decision | `AC-004` |
+| `IMP-004` | `REQ-001` | authorization/privacy | critical | refining | inferred | “Immediately” does not distinguish immediate access revocation and user-facing disappearance from physical deletion; the worker-based cleanup path makes those observables materially different. | `INV-003` | the pending decision | `AC-003` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| What must “immediately” mean for the caller and stored data? | A — Immediately revoke authentication and hide/anonymize non-finance account data, retain the minimum finance-linked record for 30 days, then let the worker physically purge it. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Best aligns the user-visible result with retention and `RESTRICT`; some data necessarily remains for 30 days and final purging is asynchronous. |
+| What must “immediately” mean for the caller and stored data? | B — Immediately mark the account deleted and block access, retain the full account shell and finance data for 30 days, then let the worker purge it. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Simplest compatibility path, but retains more personal data than option A during the retention window. |
+| What must “immediately” mean for the caller and stored data? | C — Physically delete the account and associated data in the request. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Cannot preserve the supplied foreign-key, retention, and worker constraints without an approved policy/schema redesign or exception. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement incorporating the supplied foreign-key, retention, and worker constraints. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | The selected deletion flow completes without a foreign-key violation and retained invoices remain referentially valid throughout the retention window. | Future integration test with an account referenced by at least one invoice. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | Finance records are not physically purged before the 30-day retention deadline and become purge-eligible at the deadline. | Future retention-boundary tests immediately before and at/after 30 days. |
+| `AC-003` | `REQ-001` | `IMP-004` | `INV-003` | A deletion-request test measures acknowledgement, authentication, session, profile-visibility, and physical-removal behavior against the selected definition of “immediately.” | Exact observable threshold and expected states pending the decision. |
+| `AC-004` | `REQ-001` | `IMP-003` | `INV-002`, `INV-003` | Duplicate, retried, or out-of-order cleanup deliveries do not purge finance data early and eventually reach the selected terminal state. | Future worker contract and idempotency tests; current implementation unavailable. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-003` | blocked | The cleanup message schema, producer transaction boundary, worker retry/idempotency behavior, and retention scheduling implementation are unavailable. | the pending decision | Repository owner to provide the cleanup producer/consumer and related tests. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The workspace contains no repository files; only the three evidence statements in the request were available. | Empty workspace plus the supplied `invoice.account_id`, `privacy.md`, and background-worker facts. | The constraint conflicts are high-confidence, but exact API, schema, queue, authorization, and test impacts remain unverified. |
+| No earlier v0.3 impact report was present. | Empty workspace. | This is Revision 1 with predecessor `none`. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending decision defines “immediately.” | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | The pending deletion-semantics decision and blocked worker-contract impact `IMP-003`. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |

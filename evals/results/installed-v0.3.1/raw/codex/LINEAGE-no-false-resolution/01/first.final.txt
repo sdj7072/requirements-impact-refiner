@@ -1,0 +1,92 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Record the impact of changing webhook delivery retries, with an unresolved duplicate-delivery risk. | User request and supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Change webhook delivery retry behavior while accounting for retries that can repeat after a provider timeout and without assuming undocumented idempotency behavior. | the pending decision | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Webhook delivery retries can repeat after a provider timeout. | `verified` | Supplied repository evidence: delivery retries can repeat after a provider timeout. |
+| `INV-002` | No idempotency behavior is documented, so current duplicate-suppression behavior is unknown. | `unknown` | Supplied repository evidence: no idempotency behavior is documented; implementation and runtime behavior are unavailable. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` must retain an explicitly defined outcome for provider-timeout recovery. | `IMP-001` | Supplied evidence establishes that the current retry path can repeat after a provider timeout. |
+| `INV-002` | `REQ-001` must not assume an idempotency guarantee that has not been documented or verified. | `IMP-001` | Supplied evidence identifies the documentation gap; implementation evidence is unavailable. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `blocked` | `unknown` | Repeated retries after a provider timeout are established, but no documented or inspected idempotency mechanism shows whether duplicate receiver effects are suppressed; implementation and provider semantics are unavailable. | `INV-001`, `INV-002` | the pending decision | `AC-001` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which duplicate-delivery policy should govern webhook retries after an ambiguous provider timeout? | Retry with a stable idempotency identity | `IMP-001` | Preserves timeout recovery and can prevent duplicate effects, but requires verified end-to-end idempotency support and defined key-retention semantics. |
+| Which duplicate-delivery policy should govern webhook retries after an ambiguous provider timeout? | Do not retry ambiguous timeouts | `IMP-001` | Avoids retry-caused duplicates, but can lose deliveries when the first attempt was not processed. |
+| Which duplicate-delivery policy should govern webhook retries after an ambiguous provider timeout? | Retain at-least-once retries | `IMP-001` | Maximizes delivery attempts, but leaves duplicate handling as an explicit consumer responsibility and retained risk. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 — Initial pre-decision refinement. | the pending decision | none | Added the supplied timeout-retry constraint and recorded the unresolved duplicate-delivery risk without assuming idempotency. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001`, `INV-002` | For a simulated provider timeout in which the first attempt may have been processed, the observed retry and duplicate-delivery outcome matches the selected policy. | Future automated integration test plus inspection of the retry contract and any idempotency mechanism; current coverage is unavailable. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-001` | `blocked` | The retry implementation, provider timeout semantics, idempotency-key behavior, and duplicate-effect test coverage are unavailable; the governing retry policy is also pending. | the pending decision | Webhook delivery maintainer and provider-integration owner. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Analysis is limited to the two supplied repository-evidence statements; the workspace contains no repository files. | Supplied statements on repeat retries after provider timeout and absent idempotency documentation; empty workspace confirmed. | Retry repetition is supported, but actual duplicate suppression, provider behavior, and regression coverage cannot be verified. |
+| Deterministic validation could not run because the read-only environment prevented the available Python toolchain from creating its required cache file. | The report was compared conceptually against the canonical pre-decision schema and lifecycle rules. | The report was not machine-validated. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending retry and duplicate-delivery policy is selected. | `RPT-001`, `REQ-001`, `INV-001`, `INV-002`, `IMP-001` | `IMP-001` remains blocked by unavailable implementation and provider evidence and by the pending policy decision. | `AC-001` | Not ready |

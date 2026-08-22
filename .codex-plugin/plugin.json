@@ -1,6 +1,6 @@
 {
   "name": "requirements-impact-refiner",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Refines software requirements by exposing repository-backed change impacts and regression risks before planning.",
   "author": {
     "name": "Requirements Impact Refiner Contributors",
@@ -34,7 +34,7 @@
     "websiteURL": "https://github.com/sdj7072/requirements-impact-refiner",
     "privacyPolicyURL": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
     "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
-    "composerIcon": "./.codex-plugin/assets/logo.png",
-    "logo": "./.codex-plugin/assets/logo.png"
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png"
   }
 }

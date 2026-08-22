@@ -25,6 +25,27 @@ claude plugin validate .
 
 Record an unavailable dependency or CLI as `blocked`; do not report a validator pass you did not observe. In the original release environment the Python platform validators were blocked by missing PyYAML, and the Claude validator was blocked because `claude` was unavailable.
 
+## Installed-plugin evaluation boundary
+
+Ordinary CI runs deterministic harness tests with fake executables and compiles
+the harness. It does not run a live Codex model, replace a plugin, install
+Claude Code, authenticate, or purchase access. Those are separate live-release
+operations that require fresh approval before Codex plugin replacement, Claude
+installation, and the full 85-final Codex-with-Superpowers batch.
+
+For that planned batch, `gpt-5.6-sol` with `high` reasoning is a user-selected,
+run-local evaluation configuration. The production skill does not select a
+model or reasoning level. Claude validation is structural-only; any paid-auth
+or model-behavior boundary is recorded as `blocked: paid authentication
+unavailable`, not as behavioral compatibility.
+
+Preserve all raw outcomes and attempts, including failures and blocked results,
+then seal the raw tree and manifest before adjudication or compatibility edits.
+Keep Superpowers enabled, make no same-batch skill changes, and never
+selectively rerun a valid model result. Only classified infrastructure failures
+may be retried, with the original attempt and retry relationship retained. See
+[the evaluation runbook](evals/runbook.md) for the approved command sequence.
+
 ## Behavioral changes require RED first
 
 Before changing skill instructions, references, templates, or wording intended to alter behavior:

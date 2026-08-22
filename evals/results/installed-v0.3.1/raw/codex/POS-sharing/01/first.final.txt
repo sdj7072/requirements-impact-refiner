@@ -1,0 +1,106 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Make shared links permanent. | User request and supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Remove the seven-day lifetime limit from shared links while retaining 90-day signing-key rotation; the allowed authorization and revocation endpoints remain pending. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Share tokens expire after seven days. | `verified` | User-supplied repository evidence: “share tokens currently expire after seven days.” |
+| `INV-002` | Permission changes revoke active share tokens. | `verified` | User-supplied repository evidence: “permission changes revoke active tokens.” |
+| `INV-003` | Token signing keys rotate every 90 days. | `verified` | User-supplied repository evidence: “token signing keys rotate every 90 days.” |
+| `INV-004` | Shared-link access depends on signed tokens. | `inferred` | Inferred from the supplied references to share tokens and rotating token-signing keys; implementation is unavailable. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-003` | `REQ-001` | `IMP-003` | The supplied evidence establishes the 90-day rotation cadence; permanence must coexist with rotation rather than stop it. |
+| `INV-004` | `REQ-001` | `IMP-003`, `IMP-004`, `IMP-006` | Signed-token authenticity remains a security boundary inferred from the supplied token-signing evidence. |
+| `INV-002` | `REQ-001` | `IMP-002` | The existing permission-triggered revocation behavior must be changed or deliberately retained through the pending decision. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | functionality | high | refining | `verified` | The supplied evidence confirms a seven-day expiry that directly conflicts with age-independent permanence. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | authorization/privacy | critical | refining | `verified` | The supplied evidence confirms permission changes currently revoke active tokens; allowing links to survive those changes can preserve access after a user loses permission. | `INV-002` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | operations | critical | blocked | `unknown` | No repository is present, so key identifiers, verifier key-retention behavior, and whether 90-day rotation invalidates older tokens cannot be inspected. | `INV-003`, `INV-004` | the pending decision | `AC-003` |
+| `IMP-004` | `REQ-001` | data | critical | blocked | `unknown` | No repository is present to establish whether tokens are self-contained or state-backed, or whether explicit link revocation and resource deletion are supported. | `INV-004` | the pending decision | `AC-004` |
+| `IMP-005` | `REQ-001` | interfaces | medium | blocked | `unknown` | No repository or contract is present to inspect expiration fields, client messaging, API responses, cleanup jobs, or caches that assume a seven-day lifetime. | `INV-001` | the pending decision | `AC-005` |
+| `IMP-006` | `REQ-001` | authorization/privacy | high | detected | `inferred` | Removing age-based expiry increases the useful lifetime of leaked links; this follows from extending token validity but repository-visible mitigations cannot be inspected. | `INV-004` | the pending decision | `AC-006` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which events may end a “permanent” shared link? | Link-scoped permanence: it survives time, permission changes, and key rotations; only explicit revocation of that link or deletion of the resource ends access. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-006` | Strongest link durability, but anyone retaining the URL keeps access after later permission loss until the link itself is revoked. |
+| Which events may end a “permanent” shared link? | Authorization-bound permanence: it has no age expiry and survives key rotations, but permission loss, explicit revocation, or resource deletion ends access. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-006` | Preserves current authorization revocation semantics, but the link is not permanent across permission changes. |
+| Which events may end a “permanent” shared link? | Immutable link: it survives time, permission changes, key rotations, and ordinary revocation; only an exceptional security shutdown ends access. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-006` | Literal permanence, with the highest disclosure, deletion, and incident-response risk. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement separates age expiry, authorization revocation, key rotation, and explicit invalidation semantics. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | A shared link remains usable more than seven days after creation when no selected invalidation event occurs. | Future time-controlled integration test; no repository test is available. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | After each permission-change class, link access matches the selected permanence option and direct access still follows current authorization rules. | Future authorization matrix test; permission-change classes are unavailable. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-003` | A valid shared link created before at least one 90-day key rotation remains verifiable afterward unless a selected invalidation event occurred, while newly issued tokens use the new signing key. | Future multi-key rotation integration test; key implementation is unavailable. |
+| `AC-004` | `REQ-001` | `IMP-004` | `INV-004` | Explicit revocation and resource deletion produce the result selected by the permanence option, with no stale cache restoring access. | Future revocation, deletion, and cache invalidation tests; storage model is unavailable. |
+| `AC-005` | `REQ-001` | `IMP-005` | `INV-001` | APIs, clients, jobs, and user-facing copy no longer report or enforce a seven-day expiry, except where required by the selected invalidation policy. | Future contract, UI, and job inspection; repository is unavailable. |
+| `AC-006` | `REQ-001` | `IMP-006` | `INV-004` | A leaked link can be invalidated according to the selected option, and access/revocation events remain auditable without logging token secrets. | Future security integration and log-redaction tests; observability implementation is unavailable. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-003` | blocked | Repository needed to inspect signing, verification, key identifiers, retained verification keys, and rotation jobs. | the pending decision | Repository owner |
+| `IMP-004` | blocked | Repository needed to inspect token storage, explicit revocation, deletion behavior, and cache invalidation. | the pending decision | Repository owner |
+| `IMP-005` | blocked | Repository and API/client contracts needed to enumerate expiry assumptions and cleanup paths. | the pending decision | Repository owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The supplied workspace is empty and is not a Git repository. | Directory listing contained no files; only the three user-supplied repository facts were available. | Current facts are treated as verified supplied evidence, but code paths, schemas, interfaces, tests, and operational controls remain unverified or blocked. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending invalidation decision is selected and the repository is available for blocked-impact inspection. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `INV-004`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006` | Pending permanence boundary plus blocked `IMP-003`, `IMP-004`, and `IMP-005`; inferred leakage risk `IMP-006`. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006` | Not ready |

@@ -1,0 +1,99 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| RPT-001 | 1 | none | post-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| REQ-001 | Let workspace members edit every project. | User request, 2026-08-22. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| REQ-001 | Permit users with the member, owner, or admin role in a workspace to edit every project in that same workspace. Preserve existing owner and admin edit access, and continue emitting the project-edit audit event with the actual actor role, including member. | DEC-001 | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | Project editing is currently authorized for project owners and workspace admins. | verified | User-supplied repository evidence — `authorizeProjectEdit` currently permits owner and admin roles. |
+| INV-002 | Workspace invitations assign the member role by default. | verified | User-supplied repository evidence — workspace invitations default to member. |
+| INV-003 | A project edit emits an audit event containing the actor role. | verified | User-supplied repository evidence — project edits emit an actor-role audit event. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | REQ-001 | IMP-001, IMP-003 | Existing owner and admin authorization must remain valid. |
+| INV-002 | REQ-001 | IMP-002 | The default invitation role remains member; no invitation-role migration was requested. |
+| INV-003 | REQ-001 | IMP-004 | Existing project-edit audit emission remains required and must report the actual member actor role. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | REQ-001 | authorization/privacy | high | resolved | verified | DEC-001 explicitly expands edit authorization to member while preserving the owner and admin baseline in INV-001. | INV-001 | DEC-001 | AC-001 |
+| IMP-002 | REQ-001 | authorization/privacy | high | accepted | verified | Because invitations default to member under INV-002, DEC-001 intentionally gives newly invited users edit access to every project in that workspace. | INV-002 | DEC-001 | AC-002 |
+| IMP-003 | REQ-001 | regression | high | resolved | verified | REQ-001 explicitly preserves owner and admin authorization. | INV-001 | DEC-001 | AC-003 |
+| IMP-004 | REQ-001 | interfaces | high | resolved | verified | REQ-001 preserves the audit-event contract and requires the actual actor role `member` for member edits. | INV-003 | DEC-001 | AC-004 |
+| IMP-005 | REQ-001 | authorization/privacy | critical | blocked | unknown | The workspace contains no repository files, so membership scoping, cross-workspace project checks, and authorization call sites cannot be inspected. | INV-001 | DEC-001 | AC-005 |
+
+## Decisions and Accepted Risks
+
+| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |
+| --- | --- | --- | --- | --- |
+| DEC-001 | Treat workspace membership as sufficient edit authority for every project in the same workspace, while retaining owner and admin access and actor-role audit emission. | REQ-001 | IMP-002 | The request explicitly grants access to workspace members and states that invitations default to member, making immediate edit authority for invited members an intentional consequence. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| REQ-001 | Revision 1 clarifies same-workspace scope and preserved authorization and audit behavior. | DEC-001 | none | Expanded project edit authorization to member and made the default-invitation consequence explicit. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| AC-001 | REQ-001 | IMP-001 | INV-001 | A workspace member can edit any project belonging to that workspace, regardless of project ownership. | Future authorization test covering a non-owner member editing another workspace project. |
+| AC-002 | REQ-001 | IMP-002 | INV-002 | A user accepting a default workspace invitation receives member role and can edit all existing and subsequently created projects in that workspace. | Future invitation-to-project integration test. |
+| AC-003 | REQ-001 | IMP-003 | INV-001 | Existing owner and admin project-edit cases remain authorized. | Future owner and admin regression tests. |
+| AC-004 | REQ-001 | IMP-004 | INV-003 | A successful member project edit emits the existing audit event with actor role `member`; owner and admin events retain their actual roles. | Future audit-event regression test for member, owner, and admin actors. |
+| AC-005 | REQ-001 | IMP-005 | INV-001 | A non-member, including a member of another workspace, cannot edit the project; a same-workspace member can. | Future negative authorization tests after repository access makes the workspace boundary inspectable. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| IMP-005 | blocked | Repository source and tests are absent, so the same-workspace boundary and all authorization entry points cannot be verified. | DEC-001 | Repository owner must provide or mount the implementation repository. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The provided workspace is empty and is not a Git repository. | Workspace listing returned no files; analysis used only the three supplied repository-evidence statements. | The requirement and acceptance boundary are refined, but implementation locations, call-site coverage, and current tests remain unknown. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| REQ-001 permits member, owner, and admin users to edit every project in the same workspace and preserves actual actor-role auditing. | RPT-001, REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, DEC-001 | IMP-002 is accepted; IMP-005 is blocked until repository source and tests are available. | AC-001, AC-002, AC-003, AC-004, AC-005 | Not ready |

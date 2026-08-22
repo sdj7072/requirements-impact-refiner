@@ -1,0 +1,103 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Rename `displayName` to `name`. | User request with supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | 1: Rename the profile field `displayName` to `name` while preserving cached-profile readability and the public API’s promised one-version deprecation period. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | The iOS user DTO decoder reads `displayName`. | `inferred` | User-supplied repository evidence: `ios/UserDTO.swift` decoder behavior; file unavailable for direct inspection. |
+| `INV-002` | Cached profile JSON persists the `displayName` key. | `inferred` | User-supplied repository evidence; cache implementation unavailable for direct inspection. |
+| `INV-003` | The public API promises one version of deprecation before removal. | `inferred` | User-supplied changelog evidence; changelog unavailable for direct inspection. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001`, `IMP-004` | The DTO must decode payloads permitted during the compatibility window. |
+| `INV-002` | `REQ-001` | `IMP-002`, `IMP-004` | Existing cached profiles using `displayName` must remain readable. |
+| `INV-003` | `REQ-001` | `IMP-003`, `IMP-004` | Removal cannot precede the promised one-version deprecation interval. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `interfaces` | `high` | `refining` | `inferred` | The supplied evidence says `ios/UserDTO.swift` decodes `displayName`; changing to a single new key could break transitional payloads. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | `data` | `high` | `refining` | `inferred` | Cached JSON reportedly contains `displayName`; changing the persisted key without a legacy read path could invalidate existing cache entries. | `INV-002` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | `compatibility` | `high` | `refining` | `inferred` | Immediate public removal would conflict with the supplied one-version deprecation promise. | `INV-003` | the pending decision | `AC-003` |
+| `IMP-004` | `REQ-001` | `compatibility` | `medium` | `refining` | `inferred` | If `name` and `displayName` coexist with different values, unspecified precedence could produce inconsistent DTO and cache state. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-004` |
+| `IMP-005` | `REQ-001` | `regression` | `medium` | `blocked` | `unknown` | The workspace contains no repository files, so related producers, consumers, schemas, fixtures, and tests cannot be inspected. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-005` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| What compatibility policy should apply during the promised one-version deprecation window? | Additive bridge: expose `name`, retain deprecated `displayName` as an alias for one version, accept both JSON keys with `name` winning conflicts, and write only `name` for new payloads and cache entries. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | Recommended; establishes the new canonical format, but an older app may not read cache entries rewritten with only `name`. |
+| What compatibility policy should apply during the promised one-version deprecation window? | Conservative bridge: expose `name`, retain deprecated `displayName` as an alias for one version, accept both keys with `name` winning conflicts, and continue writing `displayName` until the next version. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | Preserves downgrade compatibility, but postpones the stored-key migration. |
+| What compatibility policy should apply during the promised one-version deprecation window? | Immediate rename: expose, read, and write only `name`, without a legacy alias or JSON fallback. | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | Simplest end state, but breaks existing cache data and conflicts with the stated deprecation promise. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement adds cache readability and the one-version deprecation constraint. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | During the compatibility window, the DTO decodes every JSON key allowed by the selected policy into one `name` value. | Test legacy-only, new-only, both-equal, both-conflicting, and missing-key payloads as applicable. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | A cache written before the rename loads after upgrade, and new cache JSON uses the selected write key. | Add an old-cache fixture migration test and assert the serialized key. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-003` | For one released version, callers can use deprecated `displayName` while new callers use `name`; removal occurs no earlier than the following version. | Verify source compatibility, deprecation annotations, changelog, and API documentation. |
+| `AC-004` | `REQ-001` | `IMP-004` | `INV-001`, `INV-002`, `INV-003` | When both keys are present, every decoding and cache path follows the selected precedence rule. | Add conflicting-dual-key DTO and cache-restoration tests. |
+| `AC-005` | `REQ-001` | `IMP-005` | `INV-001`, `INV-002`, `INV-003` | A complete repository search and relevant test suites show no unhandled `displayName` producer, consumer, fixture, schema, or public symbol. | Repository-wide search plus API, decoder, cache-migration, and downgrade test results; currently unavailable. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-005` | `blocked` | Repository and test files are absent from the provided workspace. | none | User or repository owner to provide the repository contents. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Supplied evidence only. | The user’s statements about `ios/UserDTO.swift`, cached profile JSON, and the public API changelog. | Exact symbols, encoding behavior, schemas, fixtures, and related call sites remain unverified. |
+| Empty, read-only workspace. | File listing and repository-wide searches returned no files. | Implementation and test execution were unavailable. |
+| Deterministic validation unavailable. | The validator could be read, but its input redirection required a temporary file prohibited by the read-only environment. | The report was checked conceptually against the canonical pre-decision schema. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending compatibility policy is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | Select the one-version source, wire, and cache policy; repository inspection remains blocked. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |

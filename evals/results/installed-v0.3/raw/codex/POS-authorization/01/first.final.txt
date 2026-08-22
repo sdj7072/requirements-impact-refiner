@@ -1,0 +1,104 @@
+No code was changed because the workspace is empty—there is no repository to inspect or edit. The impact refinement also identified the same-workspace boundary and audit-role handling as required security checks.
+
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | post-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Let workspace members edit every project. | User request and supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Permit owner, admin, and member roles to edit every project in their workspace. Do not grant access across workspace boundaries. Continue emitting project-edit audit events containing the actor’s actual role, including `member`. Keep invitation role defaults unchanged. | `DEC-001` | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Owners and admins can edit projects. | verified | Supplied evidence: `authorizeProjectEdit`. |
+| `INV-002` | Workspace invitations default to member. | verified | Supplied repository evidence. |
+| `INV-003` | Project edits emit an actor-role audit event. | verified | Supplied repository evidence. |
+| `INV-004` | Enforcement of same-workspace and nonmember denial could not be inspected. | unknown | Workspace contains no repository files. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Existing owner/admin access must continue. |
+| `INV-002` | `REQ-001` | `IMP-001` | Invitation defaults remain `member`. |
+| `INV-003` | `REQ-001` | `IMP-002` | Every successful edit retains actor-role auditing. |
+| `INV-004` | `REQ-001` | `IMP-003` | Access must remain limited to the project’s workspace. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | authorization/privacy | high | blocked | verified | Current owner/admin-only rule supplied; implementation unavailable. | `INV-001`, `INV-002` | `DEC-001` | `AC-001`, `AC-002` |
+| `IMP-002` | `REQ-001` | interfaces | high | blocked | inferred | Audit events must accommodate `member`; schema and consumers unavailable. | `INV-003` | `DEC-001` | `AC-003` |
+| `IMP-003` | `REQ-001` | authorization/privacy | critical | blocked | unknown | Same-workspace enforcement could not be inspected. | `INV-004` | `DEC-001` | `AC-004` |
+
+## Decisions and Accepted Risks
+
+| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |
+| --- | --- | --- | --- | --- |
+| `DEC-001` | Make the member role sufficient to edit every project within that member’s workspace. | `REQ-001` | none | Explicitly selected by the user; supplied evidence establishes the current role restriction and related audit behavior. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | `DEC-001` | none | Defines member access, same-workspace confinement, and audit preservation. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Owners, admins, and members can edit any project in their workspace. | Authorization tests required. |
+| `AC-002` | `REQ-001` | `IMP-001` | `INV-002` | An accepted default member invitation can edit projects without role promotion. | Invitation-to-edit integration test required. |
+| `AC-003` | `REQ-001` | `IMP-002` | `INV-003` | A member edit emits an audit event whose actor role is `member`; owner/admin events remain unchanged. | Audit event tests required. |
+| `AC-004` | `REQ-001` | `IMP-003` | `INV-004` | Nonmembers and members of another workspace remain unable to edit the project. | Negative authorization tests required. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-001` | blocked | Authorization implementation and tests are absent. | `DEC-001` | Repository provider |
+| `IMP-002` | blocked | Audit schema, consumers, and tests are absent. | `DEC-001` | Repository provider |
+| `IMP-003` | blocked | Workspace-boundary enforcement is absent. | `DEC-001` | Repository provider |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The workspace directory is empty. | User-supplied repository evidence only. | No implementation, call-site, schema, or test verification was possible; deterministic report validation was not run. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | `INV-001`, `INV-002`, `INV-003`, `INV-004`, `IMP-001`, `IMP-002`, `IMP-003`, `DEC-001` | All implementation impacts remain blocked until the repository is available. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |
+
+Populate or attach the repository in the workspace, and I can implement and test the change.

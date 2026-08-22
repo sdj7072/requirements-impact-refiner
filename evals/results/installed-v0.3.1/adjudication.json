@@ -1,0 +1,3202 @@
+[
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose place refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose stop at a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output stops at a manual pre-writing-plans handoff and does not invoke planning."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output treats brainstorming as already approved and does not reopen it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose place refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose stop at a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output stops at a manual pre-writing-plans handoff and does not invoke planning."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output treats brainstorming as already approved and does not reopen it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose place refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose stop at a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output stops at a manual pre-writing-plans handoff and does not invoke planning."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output treats brainstorming as already approved and does not reopen it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose place refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose stop at a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output stops at a manual pre-writing-plans handoff and does not invoke planning."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output treats brainstorming as already approved and does not reopen it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose place refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The structured workflow marker and prose stop at a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output stops at a manual pre-writing-plans handoff and does not invoke planning."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The output treats brainstorming as already approved and does not reopen it."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 82b7dc6524583de103262fcc2353f1561983407e6ee8b2efd3e21971afc905c4 | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 6160 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 82b7dc6524583de103262fcc2353f1561983407e6ee8b2efd3e21971afc905c4 | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 82b7dc6524583de103262fcc2353f1561983407e6ee8b2efd3e21971afc905c4 | pre-decision |",
+    "rationale": "SHA-256 over the exact 6160 predecessor bytes is 82b7dc6524583de103262fcc2353f1561983407e6ee8b2efd3e21971afc905c4, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `blocked` | `unknown` | Repeated retries after a provider timeout are established, but no documented or inspected idempotency mechanism shows whether duplicate receiver effects are suppressed. The stakeholder's view that the risk is probably acceptable is not an approval record and supplies no technical evidence. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The decision link remains pending, and the stakeholder's tentative opinion is expressly not treated as approval."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001` |",
+    "rationale": "The unsupported proposed disposition is rejected by leaving every predecessor impact unchanged; rejected is the adjudicated outcome, not a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `blocked` | `unknown` | Repeated retries after a provider timeout are established, but no documented or inspected idempotency mechanism shows whether duplicate receiver effects are suppressed. The stakeholder's view that the risk is probably acceptable is not an approval record and supplies no technical evidence. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The quoted ledger keeps the risk active and explicitly says the stakeholder statement supplies no approval or idempotency evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 82b7dc6524583de103262fcc2353f1561983407e6ee8b2efd3e21971afc905c4 | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `blocked` | `unknown` | Repeated retries after a provider timeout are established, but no documented or inspected idempotency mechanism shows whether duplicate receiver effects are suppressed. The stakeholder's view that the risk is probably acceptable is not an approval record and supplies no technical evidence. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The impact remains in its prior active lifecycle state and cites the unresolved timeout/idempotency evidence gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `blocked` | `unknown` | Repeated retries after a provider timeout are established, but no documented or inspected idempotency mechanism shows whether duplicate receiver effects are suppressed. The stakeholder's view that the risk is probably acceptable is not an approval record and supplies no technical evidence. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The report treats the stakeholder's tentative acceptability statement as neither approval nor technical evidence and does not accept or resolve the impact."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 19e04e193341b29cd101379e8786bcec05a7e56918ace59f52d5d6eb74ae43b1 | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 8972 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 19e04e193341b29cd101379e8786bcec05a7e56918ace59f52d5d6eb74ae43b1 | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\",\"IMP-003\",\"IMP-004\"]."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 19e04e193341b29cd101379e8786bcec05a7e56918ace59f52d5d6eb74ae43b1 | pre-decision |",
+    "rationale": "SHA-256 over the exact 8972 predecessor bytes is 19e04e193341b29cd101379e8786bcec05a7e56918ace59f52d5d6eb74ae43b1, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `critical` | `detected` | `verified` | The exact predecessor records that timeout retries can repeat delivery without documented idempotency. The new stakeholder statement is only that the risk is “probably acceptable,” and the supplied evidence explicitly states that no approval record exists; the duplicate-side-effect risk is therefore not accepted or resolved. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The decision link remains pending, and the stakeholder's tentative opinion is expressly not treated as approval."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` |",
+    "rationale": "The unsupported proposed disposition is rejected by leaving every predecessor impact unchanged; rejected is the adjudicated outcome, not a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `critical` | `detected` | `verified` | The exact predecessor records that timeout retries can repeat delivery without documented idempotency. The new stakeholder statement is only that the risk is “probably acceptable,” and the supplied evidence explicitly states that no approval record exists; the duplicate-side-effect risk is therefore not accepted or resolved. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The quoted ledger keeps the risk active and explicitly says the stakeholder statement supplies no approval or idempotency evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 19e04e193341b29cd101379e8786bcec05a7e56918ace59f52d5d6eb74ae43b1 | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\",\"IMP-003\",\"IMP-004\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `critical` | `detected` | `verified` | The exact predecessor records that timeout retries can repeat delivery without documented idempotency. The new stakeholder statement is only that the risk is “probably acceptable,” and the supplied evidence explicitly states that no approval record exists; the duplicate-side-effect risk is therefore not accepted or resolved. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The impact remains in its prior active lifecycle state and cites the unresolved timeout/idempotency evidence gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `critical` | `detected` | `verified` | The exact predecessor records that timeout retries can repeat delivery without documented idempotency. The new stakeholder statement is only that the risk is “probably acceptable,” and the supplied evidence explicitly states that no approval record exists; the duplicate-side-effect risk is therefore not accepted or resolved. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The report treats the stakeholder's tentative acceptability statement as neither approval nor technical evidence and does not accept or resolve the impact."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 134485fda818afc863b82332e0d98285e37ae4540cecf385a3f01c7ac1601d7f | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 6452 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 134485fda818afc863b82332e0d98285e37ae4540cecf385a3f01c7ac1601d7f | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\"]."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 134485fda818afc863b82332e0d98285e37ae4540cecf385a3f01c7ac1601d7f | pre-decision |",
+    "rationale": "SHA-256 over the exact 6452 predecessor bytes is 134485fda818afc863b82332e0d98285e37ae4540cecf385a3f01c7ac1601d7f, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `inferred` | `first.final.txt` — `IMP-001`; a timeout can be followed by repeated delivery, so retrying can repeat downstream side effects if the provider processed the first attempt. The stakeholder's statement that the risk is “probably acceptable” supplies neither technical evidence nor approval. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The decision link remains pending, and the stakeholder's tentative opinion is expressly not treated as approval."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001`, `IMP-002` |",
+    "rationale": "The unsupported proposed disposition is rejected by leaving every predecessor impact unchanged; rejected is the adjudicated outcome, not a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `inferred` | `first.final.txt` — `IMP-001`; a timeout can be followed by repeated delivery, so retrying can repeat downstream side effects if the provider processed the first attempt. The stakeholder's statement that the risk is “probably acceptable” supplies neither technical evidence nor approval. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The quoted ledger keeps the risk active and explicitly says the stakeholder statement supplies no approval or idempotency evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 134485fda818afc863b82332e0d98285e37ae4540cecf385a3f01c7ac1601d7f | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `inferred` | `first.final.txt` — `IMP-001`; a timeout can be followed by repeated delivery, so retrying can repeat downstream side effects if the provider processed the first attempt. The stakeholder's statement that the risk is “probably acceptable” supplies neither technical evidence nor approval. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The impact remains in its prior active lifecycle state and cites the unresolved timeout/idempotency evidence gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `inferred` | `first.final.txt` — `IMP-001`; a timeout can be followed by repeated delivery, so retrying can repeat downstream side effects if the provider processed the first attempt. The stakeholder's statement that the risk is “probably acceptable” supplies neither technical evidence nor approval. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The report treats the stakeholder's tentative acceptability statement as neither approval nor technical evidence and does not accept or resolve the impact."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 2998affbb82c30ddebf35b96497fd52dad8f32d6989b54b1085393358f57e484 | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 7315 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 2998affbb82c30ddebf35b96497fd52dad8f32d6989b54b1085393358f57e484 | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\",\"IMP-003\"]."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 2998affbb82c30ddebf35b96497fd52dad8f32d6989b54b1085393358f57e484 | pre-decision |",
+    "rationale": "SHA-256 over the exact 7315 predecessor bytes is 2998affbb82c30ddebf35b96497fd52dad8f32d6989b54b1085393358f57e484, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `verified` | `first.final.txt` — `IMP-001` records the unresolved duplicate-delivery risk. The stakeholder’s “probably acceptable” statement has no approval record and therefore does not establish acceptance. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The decision link remains pending, and the stakeholder's tentative opinion is expressly not treated as approval."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001`, `IMP-002`, `IMP-003` |",
+    "rationale": "The unsupported proposed disposition is rejected by leaving every predecessor impact unchanged; rejected is the adjudicated outcome, not a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `verified` | `first.final.txt` — `IMP-001` records the unresolved duplicate-delivery risk. The stakeholder’s “probably acceptable” statement has no approval record and therefore does not establish acceptance. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The quoted ledger keeps the risk active and explicitly says the stakeholder statement supplies no approval or idempotency evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 2998affbb82c30ddebf35b96497fd52dad8f32d6989b54b1085393358f57e484 | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\",\"IMP-003\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `verified` | `first.final.txt` — `IMP-001` records the unresolved duplicate-delivery risk. The stakeholder’s “probably acceptable” statement has no approval record and therefore does not establish acceptance. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The impact remains in its prior active lifecycle state and cites the unresolved timeout/idempotency evidence gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `state/concurrency` | `high` | `detected` | `verified` | `first.final.txt` — `IMP-001` records the unresolved duplicate-delivery risk. The stakeholder’s “probably acceptable” statement has no approval record and therefore does not establish acceptance. | `INV-001`, `INV-002` | the pending decision | `AC-001` |",
+    "rationale": "The report treats the stakeholder's tentative acceptability statement as neither approval nor technical evidence and does not accept or resolve the impact."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | dc86c130eae5ce435a7c0d65e9444456c1016112a2b2f69c9300a8c8e64939c3 | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 6166 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | dc86c130eae5ce435a7c0d65e9444456c1016112a2b2f69c9300a8c8e64939c3 | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\"]."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | dc86c130eae5ce435a7c0d65e9444456c1016112a2b2f69c9300a8c8e64939c3 | pre-decision |",
+    "rationale": "SHA-256 over the exact 6166 predecessor bytes is dc86c130eae5ce435a7c0d65e9444456c1016112a2b2f69c9300a8c8e64939c3, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | state/concurrency | high | `refining` | `verified` | `first.final.txt` records the unresolved duplicate-delivery risk when a retry follows provider timeout. The stakeholder's statement that the risk is probably acceptable supplies neither an approved decision nor repository evidence. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The decision link remains pending, and the stakeholder's tentative opinion is expressly not treated as approval."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001`, `IMP-002` |",
+    "rationale": "The unsupported proposed disposition is rejected by leaving every predecessor impact unchanged; rejected is the adjudicated outcome, not a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | state/concurrency | high | `refining` | `verified` | `first.final.txt` records the unresolved duplicate-delivery risk when a retry follows provider timeout. The stakeholder's statement that the risk is probably acceptable supplies neither an approved decision nor repository evidence. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The quoted ledger keeps the risk active and explicitly says the stakeholder statement supplies no approval or idempotency evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | dc86c130eae5ce435a7c0d65e9444456c1016112a2b2f69c9300a8c8e64939c3 | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\",\"IMP-002\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | state/concurrency | high | `refining` | `verified` | `first.final.txt` records the unresolved duplicate-delivery risk when a retry follows provider timeout. The stakeholder's statement that the risk is probably acceptable supplies neither an approved decision nor repository evidence. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The impact remains in its prior active lifecycle state and cites the unresolved timeout/idempotency evidence gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | state/concurrency | high | `refining` | `verified` | `first.final.txt` records the unresolved duplicate-delivery risk when a retry follows provider timeout. The stakeholder's statement that the risk is probably acceptable supplies neither an approved decision nor repository evidence. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The report treats the stakeholder's tentative acceptability statement as neither approval nor technical evidence and does not accept or resolve the impact."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 21b6beab2715da6e212304c0faf7a1027cf6fea9e87c8ca9813cc95271e00450 | post-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 4256 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The predecessor IMP-001 was resolved, while the current impact is active; the quoted canonical Delta records the permitted terminal-to-active transition as reopened."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 21b6beab2715da6e212304c0faf7a1027cf6fea9e87c8ca9813cc95271e00450 | post-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 21b6beab2715da6e212304c0faf7a1027cf6fea9e87c8ca9813cc95271e00450 | post-decision |",
+    "rationale": "SHA-256 over the exact 4256 predecessor bytes is 21b6beab2715da6e212304c0faf7a1027cf6fea9e87c8ca9813cc95271e00450, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "| `DEC-001` | Preserve `profile.displayName` for one release, then remove it. | `REQ-001` | none | The approved migration still provides a temporary compatibility window, but the new desktop serialization evidence means that this decision alone no longer proves the client compatibility impact is eliminated. |",
+    "rationale": "Exact decision-ID comparison found no new ID ([\"DEC-001\"] remained [\"DEC-001\"]); the quoted DEC-001 is the predecessor's one-release migration and explicitly remains insufficient for desktop compatibility."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `compatibility` | `critical` | `blocked` | `unknown` | `desktop/ProfileCache.swift` establishes a second direct client dependency. The approved one-release preservation prevents immediate removal but does not show that the desktop serializer or cached-profile readback is migrated before later removal; no desktop migration or compatibility-test evidence was supplied. | `INV-001`, `INV-002` | `DEC-001` | `AC-001` |",
+    "rationale": "The selected report cites desktop/ProfileCache.swift as a second direct serializer and explains why persisted-cache compatibility is newly in scope."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `compatibility` | `critical` | `blocked` | `unknown` | `desktop/ProfileCache.swift` establishes a second direct client dependency. The approved one-release preservation prevents immediate removal but does not show that the desktop serializer or cached-profile readback is migrated before later removal; no desktop migration or compatibility-test evidence was supplied. | `INV-001`, `INV-002` | `DEC-001` | `AC-001` |",
+    "rationale": "The report explicitly reassesses the prior resolution against the new desktop serializer evidence and returns IMP-001 to an active state."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "reopened Impact Delta transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The Delta explicitly classifies preserved IMP-001 as reopened, rather than renumbering it or treating the evidence as a separate impact."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 21b6beab2715da6e212304c0faf7a1027cf6fea9e87c8ca9813cc95271e00450 | post-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 4abea2e6ee8ec4be5b9cc0ff7497423f8de9b8c4d73c8c01ac94485f74a24139 | post-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 4138 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The predecessor IMP-001 was resolved, while the current impact is active; the quoted canonical Delta records the permitted terminal-to-active transition as reopened."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 4abea2e6ee8ec4be5b9cc0ff7497423f8de9b8c4d73c8c01ac94485f74a24139 | post-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 4abea2e6ee8ec4be5b9cc0ff7497423f8de9b8c4d73c8c01ac94485f74a24139 | post-decision |",
+    "rationale": "SHA-256 over the exact 4138 predecessor bytes is 4abea2e6ee8ec4be5b9cc0ff7497423f8de9b8c4d73c8c01ac94485f74a24139, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "| `DEC-001` | Preserve `profile.displayName` for one release before removing it. | `REQ-001` | none | The approved window still prevents immediate response breakage, but the new desktop serialization evidence shows that this decision alone does not resolve persisted-cache compatibility after removal. |",
+    "rationale": "Exact decision-ID comparison found no new ID ([\"DEC-001\"] remained [\"DEC-001\"]); the quoted DEC-001 is the predecessor's one-release migration and explicitly remains insufficient for desktop compatibility."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `compatibility` | `high` | `blocked` | `unknown` | The one-release preservation resolves immediate response compatibility for known consumers, but `desktop/ProfileCache.swift` directly serializes the field and no cache reader, persisted-format migration, expiry, or downgrade evidence was supplied to establish compatibility after removal. | `INV-001`, `INV-002` | `DEC-001` | `AC-001`, `AC-002` |",
+    "rationale": "The selected report cites desktop/ProfileCache.swift as a second direct serializer and explains why persisted-cache compatibility is newly in scope."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `compatibility` | `high` | `blocked` | `unknown` | The one-release preservation resolves immediate response compatibility for known consumers, but `desktop/ProfileCache.swift` directly serializes the field and no cache reader, persisted-format migration, expiry, or downgrade evidence was supplied to establish compatibility after removal. | `INV-001`, `INV-002` | `DEC-001` | `AC-001`, `AC-002` |",
+    "rationale": "The report explicitly reassesses the prior resolution against the new desktop serializer evidence and returns IMP-001 to an active state."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "reopened Impact Delta transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The Delta explicitly classifies preserved IMP-001 as reopened, rather than renumbering it or treating the evidence as a separate impact."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 4abea2e6ee8ec4be5b9cc0ff7497423f8de9b8c4d73c8c01ac94485f74a24139 | post-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 69d9d34be6b16b243f3cbbfcbbb227cb1aa4dd15ec8d9934318bdc51853ae573 | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 4323 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The predecessor IMP-001 was resolved, while the current impact is active; the quoted canonical Delta records the permitted terminal-to-active transition as reopened."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 69d9d34be6b16b243f3cbbfcbbb227cb1aa4dd15ec8d9934318bdc51853ae573 | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 69d9d34be6b16b243f3cbbfcbbb227cb1aa4dd15ec8d9934318bdc51853ae573 | pre-decision |",
+    "rationale": "SHA-256 over the exact 4323 predecessor bytes is 69d9d34be6b16b243f3cbbfcbbb227cb1aa4dd15ec8d9934318bdc51853ae573, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | compatibility | high | `refining` | `verified` | The approved migration preserves the field for one release and covers the known mobile consumer, but `desktop/ProfileCache.swift` directly serializes `profile.displayName`; the prior evidence therefore does not establish that desktop persisted profiles remain compatible after removal. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |",
+    "rationale": "No new concrete decision ID is allocated; the quoted impact keeps the desktop transition pending for later selection."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | compatibility | high | `refining` | `verified` | The approved migration preserves the field for one release and covers the known mobile consumer, but `desktop/ProfileCache.swift` directly serializes `profile.displayName`; the prior evidence therefore does not establish that desktop persisted profiles remain compatible after removal. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |",
+    "rationale": "The selected report cites desktop/ProfileCache.swift as a second direct serializer and explains why persisted-cache compatibility is newly in scope."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | compatibility | high | `refining` | `verified` | The approved migration preserves the field for one release and covers the known mobile consumer, but `desktop/ProfileCache.swift` directly serializes `profile.displayName`; the prior evidence therefore does not establish that desktop persisted profiles remain compatible after removal. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |",
+    "rationale": "The report explicitly reassesses the prior resolution against the new desktop serializer evidence and returns IMP-001 to an active state."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "reopened Impact Delta transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The Delta explicitly classifies preserved IMP-001 as reopened, rather than renumbering it or treating the evidence as a separate impact."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 69d9d34be6b16b243f3cbbfcbbb227cb1aa4dd15ec8d9934318bdc51853ae573 | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | d64f797e5b639474c21c8f6d0416af662e18e4146aa9db605b5875f52799ee79 | post-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 4037 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The predecessor IMP-001 was resolved, while the current impact is active; the quoted canonical Delta records the permitted terminal-to-active transition as reopened."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | d64f797e5b639474c21c8f6d0416af662e18e4146aa9db605b5875f52799ee79 | post-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | d64f797e5b639474c21c8f6d0416af662e18e4146aa9db605b5875f52799ee79 | post-decision |",
+    "rationale": "SHA-256 over the exact 4037 predecessor bytes is d64f797e5b639474c21c8f6d0416af662e18e4146aa9db605b5875f52799ee79, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "| `DEC-001` | Preserve `profile.displayName` for one release before removing it. | `REQ-001` | none | The approved migration continues to protect mobile clients during the one-release window, but new desktop serialization evidence means it is insufficient by itself to resolve compatibility for persisted cache data. |",
+    "rationale": "Exact decision-ID comparison found no new ID ([\"DEC-001\"] remained [\"DEC-001\"]); the quoted DEC-001 is the predecessor's one-release migration and explicitly remains insufficient for desktop compatibility."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | compatibility | high | blocked | `inferred` | `DEC-001` preserves payload availability for one release, but new verified evidence from `desktop/ProfileCache.swift` shows a second client directly serializes the field. No cache reader, versioning, migration, expiry, or invalidation evidence was supplied, so the prior resolution no longer covers all client compatibility paths. | `INV-001`, `INV-002` | `DEC-001` | `AC-001`, `AC-002` |",
+    "rationale": "The selected report cites desktop/ProfileCache.swift as a second direct serializer and explains why persisted-cache compatibility is newly in scope."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | compatibility | high | blocked | `inferred` | `DEC-001` preserves payload availability for one release, but new verified evidence from `desktop/ProfileCache.swift` shows a second client directly serializes the field. No cache reader, versioning, migration, expiry, or invalidation evidence was supplied, so the prior resolution no longer covers all client compatibility paths. | `INV-001`, `INV-002` | `DEC-001` | `AC-001`, `AC-002` |",
+    "rationale": "The report explicitly reassesses the prior resolution against the new desktop serializer evidence and returns IMP-001 to an active state."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "reopened Impact Delta transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The Delta explicitly classifies preserved IMP-001 as reopened, rather than renumbering it or treating the evidence as a separate impact."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | d64f797e5b639474c21c8f6d0416af662e18e4146aa9db605b5875f52799ee79 | post-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | `574ebe253ceb2b11f8da90d57cf4725c2784604564fa7c1e7226e7cc7fc6a100` | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 4222 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The predecessor IMP-001 was resolved, while the current impact is active; the quoted canonical Delta records the permitted terminal-to-active transition as reopened."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | `574ebe253ceb2b11f8da90d57cf4725c2784604564fa7c1e7226e7cc7fc6a100` | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | `574ebe253ceb2b11f8da90d57cf4725c2784604564fa7c1e7226e7cc7fc6a100` | pre-decision |",
+    "rationale": "SHA-256 over the exact 4222 predecessor bytes is 574ebe253ceb2b11f8da90d57cf4725c2784604564fa7c1e7226e7cc7fc6a100, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `compatibility` | `high` | `refining` | `verified` | The predecessor resolved compatibility based on mobile consumption and a one-release preservation window. New supplied evidence from `desktop/ProfileCache.swift` shows a second client directly serializes the field; the existing window does not establish persisted-cache read, write, upgrade, or downgrade compatibility after removal. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |",
+    "rationale": "No new concrete decision ID is allocated; the quoted impact keeps the desktop transition pending for later selection."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `compatibility` | `high` | `refining` | `verified` | The predecessor resolved compatibility based on mobile consumption and a one-release preservation window. New supplied evidence from `desktop/ProfileCache.swift` shows a second client directly serializes the field; the existing window does not establish persisted-cache read, write, upgrade, or downgrade compatibility after removal. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |",
+    "rationale": "The selected report cites desktop/ProfileCache.swift as a second direct serializer and explains why persisted-cache compatibility is newly in scope."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `compatibility` | `high` | `refining` | `verified` | The predecessor resolved compatibility based on mobile consumption and a one-release preservation window. New supplied evidence from `desktop/ProfileCache.swift` shows a second client directly serializes the field; the existing window does not establish persisted-cache read, write, upgrade, or downgrade compatibility after removal. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |",
+    "rationale": "The report explicitly reassesses the prior resolution against the new desktop serializer evidence and returns IMP-001 to an active state."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "reopened Impact Delta transition",
+    "passed": true,
+    "quote": "| reopened | `IMP-001` |",
+    "rationale": "The Delta explicitly classifies preserved IMP-001 as reopened, rather than renumbering it or treating the evidence as a separate impact."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | `574ebe253ceb2b11f8da90d57cf4725c2784604564fa7c1e7226e7cc7fc6a100` | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | eb84675b6119559fa2234f7e447e7db9c61d49337d158b62f944142557a52515 | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 5645 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership is not documented, and no owner-confirmed retention policy for tenant-archive export files was supplied. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The existing impact remains blocked and cites the still-missing owner-confirmed retention policy, so no terminal state is claimed."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | eb84675b6119559fa2234f7e447e7db9c61d49337d158b62f944142557a52515 | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | eb84675b6119559fa2234f7e447e7db9c61d49337d158b62f944142557a52515 | pre-decision |",
+    "rationale": "SHA-256 over the exact 5645 predecessor bytes is eb84675b6119559fa2234f7e447e7db9c61d49337d158b62f944142557a52515, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership is not documented, and no owner-confirmed retention policy for tenant-archive export files was supplied. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The impact's decision remains explicitly pending; the report offers choices but does not record an owner selection."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership is not documented, and no owner-confirmed retention policy for tenant-archive export files was supplied. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The report keeps the impact blocked because retention ownership and policy confirmation remain absent; it does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | eb84675b6119559fa2234f7e447e7db9c61d49337d158b62f944142557a52515 | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001` |",
+    "rationale": "The predecessor and current ledger both keep the same impact blocked; the quoted Delta correctly records the stable transition as unchanged."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | facc1a8f49a63e863f49603499fcc2f41e4024db9644187b7e7bd3b2cec340aa | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 5241 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `high` | `blocked` | `unknown` | Retention ownership is not documented in the supplied repository evidence, and no retention owner confirmation has been supplied, so the authoritative retention duration, start event, deletion behavior, and exceptions for export files in the tenant archive cannot be assessed. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The existing impact remains blocked and cites the still-missing owner-confirmed retention policy, so no terminal state is claimed."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | facc1a8f49a63e863f49603499fcc2f41e4024db9644187b7e7bd3b2cec340aa | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | facc1a8f49a63e863f49603499fcc2f41e4024db9644187b7e7bd3b2cec340aa | pre-decision |",
+    "rationale": "SHA-256 over the exact 5241 predecessor bytes is facc1a8f49a63e863f49603499fcc2f41e4024db9644187b7e7bd3b2cec340aa, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `high` | `blocked` | `unknown` | Retention ownership is not documented in the supplied repository evidence, and no retention owner confirmation has been supplied, so the authoritative retention duration, start event, deletion behavior, and exceptions for export files in the tenant archive cannot be assessed. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The impact's decision remains explicitly pending; the report offers choices but does not record an owner selection."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `high` | `blocked` | `unknown` | Retention ownership is not documented in the supplied repository evidence, and no retention owner confirmation has been supplied, so the authoritative retention duration, start event, deletion behavior, and exceptions for export files in the tenant archive cannot be assessed. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The report keeps the impact blocked because retention ownership and policy confirmation remain absent; it does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | facc1a8f49a63e863f49603499fcc2f41e4024db9644187b7e7bd3b2cec340aa | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001` |",
+    "rationale": "The predecessor and current ledger both keep the same impact blocked; the quoted Delta correctly records the stable transition as unchanged."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 9e62f6cf7849d2692b40c4f4bfab3afa00435710ba8f54ed27f9f1296a9b1c1b | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 5285 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership is not documented, and no authoritative retention duration, deletion trigger, exception handling, or accountable approver was supplied. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The existing impact remains blocked and cites the still-missing owner-confirmed retention policy, so no terminal state is claimed."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 9e62f6cf7849d2692b40c4f4bfab3afa00435710ba8f54ed27f9f1296a9b1c1b | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 9e62f6cf7849d2692b40c4f4bfab3afa00435710ba8f54ed27f9f1296a9b1c1b | pre-decision |",
+    "rationale": "SHA-256 over the exact 5285 predecessor bytes is 9e62f6cf7849d2692b40c4f4bfab3afa00435710ba8f54ed27f9f1296a9b1c1b, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership is not documented, and no authoritative retention duration, deletion trigger, exception handling, or accountable approver was supplied. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The impact's decision remains explicitly pending; the report offers choices but does not record an owner selection."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership is not documented, and no authoritative retention duration, deletion trigger, exception handling, or accountable approver was supplied. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The report keeps the impact blocked because retention ownership and policy confirmation remain absent; it does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 9e62f6cf7849d2692b40c4f4bfab3afa00435710ba8f54ed27f9f1296a9b1c1b | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001` |",
+    "rationale": "The predecessor and current ledger both keep the same impact blocked; the quoted Delta correctly records the stable transition as unchanged."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 294684ed6ba942636a4eed9614bbbf03091da80590607721431fe4ec53979cff | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 5080 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership and the governing retention duration, expiry trigger, and deletion requirements are not documented in the supplied evidence; no retention owner confirmation exists. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The existing impact remains blocked and cites the still-missing owner-confirmed retention policy, so no terminal state is claimed."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 294684ed6ba942636a4eed9614bbbf03091da80590607721431fe4ec53979cff | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 294684ed6ba942636a4eed9614bbbf03091da80590607721431fe4ec53979cff | pre-decision |",
+    "rationale": "SHA-256 over the exact 5080 predecessor bytes is 294684ed6ba942636a4eed9614bbbf03091da80590607721431fe4ec53979cff, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership and the governing retention duration, expiry trigger, and deletion requirements are not documented in the supplied evidence; no retention owner confirmation exists. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The impact's decision remains explicitly pending; the report offers choices but does not record an owner selection."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `critical` | `blocked` | `unknown` | Retention ownership and the governing retention duration, expiry trigger, and deletion requirements are not documented in the supplied evidence; no retention owner confirmation exists. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The report keeps the impact blocked because retention ownership and policy confirmation remain absent; it does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 294684ed6ba942636a4eed9614bbbf03091da80590607721431fe4ec53979cff | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001` |",
+    "rationale": "The predecessor and current ledger both keep the same impact blocked; the quoted Delta correctly records the stable transition as unchanged."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 55952e98ed5682680b3a7943aec792d2ad880334b55c034296ecddd44897ab90 | pre-decision |",
+    "rationale": "No altered or reconstructed predecessor is claimed: the recorded digest matches the independently hashed exact 5617 raw bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `high` | `blocked` | `unknown` | Retention ownership is not documented in the supplied repository evidence, so the governing retention duration, deletion trigger, and exceptions cannot be assessed. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The existing impact remains blocked and cites the still-missing owner-confirmed retention policy, so no terminal state is claimed."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 55952e98ed5682680b3a7943aec792d2ad880334b55c034296ecddd44897ab90 | pre-decision |",
+    "rationale": "No forbidden identifier change occurred: exact predecessor/current comparison found identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 55952e98ed5682680b3a7943aec792d2ad880334b55c034296ecddd44897ab90 | pre-decision |",
+    "rationale": "SHA-256 over the exact 5617 predecessor bytes is 55952e98ed5682680b3a7943aec792d2ad880334b55c034296ecddd44897ab90, exactly matching the quoted Previous SHA-256 value."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `high` | `blocked` | `unknown` | Retention ownership is not documented in the supplied repository evidence, so the governing retention duration, deletion trigger, and exceptions cannot be assessed. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The impact's decision remains explicitly pending; the report offers choices but does not record an owner selection."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | `legal/policy` | `high` | `blocked` | `unknown` | Retention ownership is not documented in the supplied repository evidence, so the governing retention duration, deletion trigger, and exceptions cannot be assessed. | `INV-001` | the pending decision | `AC-001` |",
+    "rationale": "The report keeps the impact blocked because retention ownership and policy confirmation remain absent; it does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 2 | 55952e98ed5682680b3a7943aec792d2ad880334b55c034296ecddd44897ab90 | pre-decision |",
+    "rationale": "Exact predecessor/current byte inspection shows identical report IDs [\"RPT-001\"] and impact IDs [\"IMP-001\"]; the quoted report-state row anchors that preserved lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": true,
+    "quote": "| unchanged | `IMP-001` |",
+    "rationale": "The predecessor and current ledger both keep the same impact blocked; the quoted Delta correctly records the stable transition as unchanged."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "Since no repository evidence was provided, I’d treat this as greenfield product ideation.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 1,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "Since no repository evidence was provided, I’d treat this as greenfield product ideation.",
+    "rationale": "The output explicitly states that repository evidence is absent and does not fabricate any."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’ll treat this as greenfield product ideation.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 2,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’ll treat this as greenfield product ideation.",
+    "rationale": "The output explicitly states that repository evidence is absent and does not fabricate any."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’ll treat this as greenfield ideation.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 3,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’ll treat this as greenfield ideation.",
+    "rationale": "The output explicitly states that repository evidence is absent and does not fabricate any."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "With no repository evidence attached, these are product-level concepts rather than extensions of an existing app.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 4,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "With no repository evidence attached, these are product-level concepts rather than extensions of an existing app.",
+    "rationale": "The output explicitly states that repository evidence is absent and does not fabricate any."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’ll keep this at the product-concept level.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 5,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’ll keep this at the product-concept level.",
+    "rationale": "The output explicitly states that repository evidence is absent and does not fabricate any."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review the PR yet: no diff or repository files are accessible in this session—the workspace is empty and not a Git repository.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 1,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "Please paste or reattach the complete diff, or provide the PR URL/repository and PR number.",
+    "rationale": "The output remains a code-review handoff contingent on receiving the missing diff."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review the PR yet because the promised diff is not present.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 2,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "Please paste/attach the complete diff, or provide the GitHub repository and PR number.",
+    "rationale": "The output remains a code-review handoff contingent on receiving the missing diff."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review correctness because no diff or repository files are available: the workspace is empty and not a Git checkout.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 3,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "Please paste or attach the complete diff, and I’ll return prioritized findings with file and line references.",
+    "rationale": "The output remains a code-review handoff contingent on receiving the missing diff."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t perform the review because the supplied evidence is missing: the workspace is empty, isn’t a Git repository, and contains no diff.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 4,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "Please paste or reattach the complete diff, and I’ll return prioritized correctness findings with file and line references.",
+    "rationale": "The output remains a code-review handoff contingent on receiving the missing diff."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review the PR yet: the supplied message contains no diff, PR URL, or repository files, and the workspace is empty.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 5,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "Please attach/paste the diff or provide the PR URL and repository name.",
+    "rationale": "The output remains a code-review handoff contingent on receiving the missing diff."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t determine the cause from the available evidence: the workspace is empty and is not a Git repository.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 1,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "With those, I can trace the intermittent failure to a concrete cause.",
+    "rationale": "The output asks for debugging evidence and does not restate or alter a requirement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t diagnose it yet because the provided workspace is empty—there’s no repository, test, CI configuration, or failure log to inspect.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 2,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "The CI-only detail suggests timing, concurrency, environment, timezone/locale, resource limits, or test-order dependence, but there isn’t enough evidence to identify which one.",
+    "rationale": "The output asks for debugging evidence and does not restate or alter a requirement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t determine the cause yet because the provided workspace is empty—there’s no repository, test, or CI log to inspect.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 3,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "With only “fails intermittently in CI,” likely causes include timing races, shared mutable state, nondeterministic ordering, timezone/locale differences, or resource contention—but there isn’t enough evidence to identify which one.",
+    "rationale": "The output asks for debugging evidence and does not restate or alter a requirement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t determine the cause yet: the workspace is empty, and “only fails in CI” is insufficient to distinguish timing, ordering, resource, timezone, dependency, or environment issues.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 4,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "A passing local log or CI rerun history would also help identify the intermittent condition.",
+    "rationale": "The output asks for debugging evidence and does not restate or alter a requirement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t identify the cause yet because the provided workspace is empty—there’s no repository, test code, CI configuration, or failure log to inspect.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 5,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "“Only fails in CI” narrows the suspects—timing/races, test-order leakage, timezone/locale, resource limits, or environment differences—but isn’t enough to determine which one.",
+    "rationale": "The output asks for debugging evidence and does not restate or alter a requirement."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I’m missing the product idea needed to write the PRD.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 1,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "The “Repository evidence” section is blank, and the repository contains no files.",
+    "rationale": "The output explicitly disclaims repository evidence and makes no repository-backed finding."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I’m missing the product idea: nothing follows “Repository evidence,” and the workspace is empty with no repository.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 2,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "Please paste the product idea or repository evidence.",
+    "rationale": "The output explicitly disclaims repository evidence and makes no repository-backed finding."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I’m missing the product idea and repository evidence—the workspace is empty, and no evidence followed the heading.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 3,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "I’m missing the product idea and repository evidence—the workspace is empty, and no evidence followed the heading.",
+    "rationale": "The output explicitly disclaims repository evidence and makes no repository-backed finding."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "The workspace is currently empty, so there’s no repository evidence I can inspect.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 4,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "The workspace is currently empty, so there’s no repository evidence I can inspect.",
+    "rationale": "The output explicitly disclaims repository evidence and makes no repository-backed finding."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I’m missing the product idea: the “Repository evidence” section is blank, and the repository is empty.",
+    "rationale": "The output stays in the requested activity and does not enter impact refinement."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 5,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "I’m missing the product idea: the “Repository evidence” section is blank, and the repository is empty.",
+    "rationale": "The output explicitly disclaims repository evidence and makes no repository-backed finding."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 1,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "I’ll preserve its decisions and produce ordered, implementation-ready tasks with affected files, acceptance criteria, dependencies, and verification steps.",
+    "rationale": "The output preserves the approved specification/report as input and proceeds directly toward task decomposition without re-refining it."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 1,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "I’ll preserve its decisions and produce ordered, implementation-ready tasks with affected files, acceptance criteria, dependencies, and verification steps.",
+    "rationale": "The output remains within the requested coding-task planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 2,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "I’ll convert it directly into ordered, implementation-ready coding tasks without repeating impact refinement.",
+    "rationale": "The output preserves the approved specification/report as input and proceeds directly toward task decomposition without re-refining it."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 2,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "I’ll convert it directly into ordered, implementation-ready coding tasks without repeating impact refinement.",
+    "rationale": "The output remains within the requested coding-task planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 3,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "I won’t reconstruct a missing approved specification from assumptions.",
+    "rationale": "The output preserves the approved specification/report as input and proceeds directly toward task decomposition without re-refining it."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 3,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "I can turn it into coding tasks, but the workspace is empty and the approved impact report/specification isn’t present.",
+    "rationale": "The output remains within the requested coding-task planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 4,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "Please paste or attach it (or provide its repository path), and I’ll turn it into ordered, implementation-ready coding tasks with file targets, dependencies, acceptance criteria, and tests.",
+    "rationale": "The output preserves the approved specification/report as input and proceeds directly toward task decomposition without re-refining it."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 4,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "Please paste or attach it (or provide its repository path), and I’ll turn it into ordered, implementation-ready coding tasks with file targets, dependencies, acceptance criteria, and tests.",
+    "rationale": "The output remains within the requested coding-task planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 5,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "Please paste or attach the approved report; I’ll convert it into ordered, implementation-ready coding tasks with affected files, dependencies, acceptance criteria, and tests.",
+    "rationale": "The output preserves the approved specification/report as input and proceeds directly toward task decomposition without re-refining it."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 5,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "Please paste or attach the approved report; I’ll convert it into ordered, implementation-ready coding tasks with affected files, dependencies, acceptance criteria, and tests.",
+    "rationale": "The output remains within the requested coding-task planning workflow."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "| `INV-003` | The public API promises a one-version deprecation before removal. | `verified` | User-supplied repository evidence: public API changelog commitment; the changelog file was unavailable in the workspace. |",
+    "rationale": "Connects the rename to the promised one-version deprecation window."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "| `INV-001` | The iOS user DTO decodes the `displayName` key. | `verified` | User-supplied repository evidence: `ios/UserDTO.swift` decodes `displayName`; workspace contents were unavailable for direct symbol inspection. |",
+    "rationale": "Identifies the iOS DTO as a legacy consumer of the old field."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `INV-001` | The iOS user DTO decodes the `displayName` key. | `verified` | User-supplied repository evidence: `ios/UserDTO.swift` decodes `displayName`; workspace contents were unavailable for direct symbol inspection. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "| `INV-002` | Cached profile JSON persists the `displayName` key. | `verified` | User-supplied repository evidence: cached profile JSON persists `displayName`; no cache path or schema was available in the workspace. |",
+    "rationale": "Identifies persisted cached profile JSON as migration and compatibility state."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending compatibility policy is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Cache downgrade behavior is undecided; repository and tests are unavailable. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "| `INV-003` | The public API promises one version of deprecation for this field. | `verified` | Supplied repository evidence; the changelog file is unavailable for inspection. |",
+    "rationale": "Connects the rename to the promised one-version deprecation window."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "| `INV-001` | The iOS user DTO currently decodes `displayName`. | `verified` | Supplied repository evidence: `ios/UserDTO.swift` decodes `displayName`; the file is unavailable for symbol-level inspection. |",
+    "rationale": "Identifies the iOS DTO as a legacy consumer of the old field."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-006` | `REQ-001` | regression | medium | blocked | unknown | The workspace is empty, so other serializers, clients, fixtures, documentation, and tests cannot be inspected. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-006` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "| `INV-002` | Cached profile JSON currently persists `displayName`. | `verified` | Supplied repository evidence; the cache implementation is unavailable for inspection. |",
+    "rationale": "Identifies persisted cached profile JSON as migration and compatibility state."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the compatibility policy is selected and the repository is available. | `RPT-001`, `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006` | The pending transition policy and blocked repository inspection in `IMP-006`. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "| `INV-003` | Public compatibility policy requires a one-version deprecation period. | `verified` | User-supplied repository evidence: the public API changelog promises one-version deprecation; the changelog file itself is unavailable. |",
+    "rationale": "Connects the rename to the promised one-version deprecation window."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "| `INV-001` | The iOS user DTO decodes the JSON key `displayName`. | `verified` | User-supplied repository evidence: `ios/UserDTO.swift` decodes `displayName`; the workspace copy is unavailable for symbol-level inspection. |",
+    "rationale": "Identifies the iOS DTO as a legacy consumer of the old field."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `INV-001` | The iOS user DTO decodes the JSON key `displayName`. | `verified` | User-supplied repository evidence: `ios/UserDTO.swift` decodes `displayName`; the workspace copy is unavailable for symbol-level inspection. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "| `INV-002` | Persisted cached profile JSON uses the key `displayName`. | `verified` | User-supplied repository evidence: cached profile JSON persists `displayName`; the cache implementation and fixtures are unavailable. |",
+    "rationale": "Identifies persisted cached profile JSON as migration and compatibility state."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the transitional JSON/cache write policy is selected and repository access is available. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | The pending decision affects `IMP-001` through `IMP-004`; `IMP-005` is blocked by the empty workspace. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "| `INV-003` | The public API promises one version of deprecation before removal. | `inferred` | User-supplied changelog evidence; changelog unavailable for direct inspection. |",
+    "rationale": "Connects the rename to the promised one-version deprecation window."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "| `INV-001` | The iOS user DTO decoder reads `displayName`. | `inferred` | User-supplied repository evidence: `ios/UserDTO.swift` decoder behavior; file unavailable for direct inspection. |",
+    "rationale": "Identifies the iOS DTO as a legacy consumer of the old field."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-005` | `REQ-001` | `regression` | `medium` | `blocked` | `unknown` | The workspace contains no repository files, so related producers, consumers, schemas, fixtures, and tests cannot be inspected. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-005` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "| `INV-002` | Cached profile JSON persists the `displayName` key. | `inferred` | User-supplied repository evidence; cache implementation unavailable for direct inspection. |",
+    "rationale": "Identifies persisted cached profile JSON as migration and compatibility state."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending compatibility policy is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | Select the one-version source, wire, and cache policy; repository inspection remains blocked. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "| INV-003 | The public API changelog promises one version of deprecation for the old name. | verified | User-supplied repository evidence: public API changelog. |",
+    "rationale": "Connects the rename to the promised one-version deprecation window."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "| INV-001 | The iOS UserDTO decoder reads the JSON key displayName. | verified | User-supplied repository evidence: ios/UserDTO.swift decoder. |",
+    "rationale": "Identifies the iOS DTO as a legacy consumer of the old field."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| IMP-006 | REQ-001 | regression | medium | blocked | unknown | The workspace contains no repository or tests, so current rename, decoding, encoding, cache, and API-compatibility coverage cannot be inspected. | INV-001, INV-002, INV-003 | the pending decision | AC-006 |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "| INV-002 | Cached profile JSON persists the key displayName. | verified | User-supplied repository evidence: cached profile JSON. |",
+    "rationale": "Identifies persisted cached profile JSON as migration and compatibility state."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the cache and JSON writer policy is selected and the repository is available. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, IMP-006 | The pending writer-policy decision and blocked repository/test inspection. | AC-001, AC-002, AC-003, AC-004, AC-005, AC-006 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "| `INV-003` | A project edit emits an audit event that records the actor role. | `verified` | Supplied repository evidence — project-edit audit event. |",
+    "rationale": "Preserves the supplied project-edit audit event and the actor's actual role."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "| `INV-002` | Workspace invitations default the invited user to role `member`. | `verified` | Supplied repository evidence — workspace invitation default. |",
+    "rationale": "Links default member invitations to the resulting workspace-scoped edit entitlement."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-003` | `REQ-001` | authorization/privacy | critical | blocked | `unknown` | The repository workspace is empty, so workspace-boundary and non-member denial paths around `authorizeProjectEdit` cannot be inspected. | `INV-001` | `DEC-001` | `AC-003` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "| `INV-001` | Project editing is currently authorized for workspace roles `owner` and `admin`. | `verified` | Supplied repository evidence — `authorizeProjectEdit`. |",
+    "rationale": "Substantively connects the existing owner/admin authorization baseline to the requested member-role expansion."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| `REQ-001` | `RPT-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `DEC-001` | Accepted authorization expansion: `IMP-001`, `IMP-002`; blocked verification: `IMP-003`, `IMP-004`. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "| `INV-003` | A project edit emits an audit event containing the actor's role. | `verified` | User-supplied repository evidence — project edits emit an actor-role audit event. |",
+    "rationale": "Preserves the supplied project-edit audit event and the actor's actual role."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "| `INV-002` | Workspace invitations assign the `member` role by default. | `verified` | User-supplied repository evidence — workspace invitations default to member. |",
+    "rationale": "Links default member invitations to the resulting workspace-scoped edit entitlement."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | authorization/privacy | critical | blocked | `unknown` | The named `authorizeProjectEdit` implementation is unavailable in the empty workspace, so the precise role-check change and workspace-boundary enforcement cannot be verified. | `INV-001` | `DEC-001` | `AC-001` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "| `INV-001` | Project editing is currently authorized for workspace `owner` and `admin` roles. | `verified` | User-supplied repository evidence — `authorizeProjectEdit` currently permits owner and admin roles. |",
+    "rationale": "Substantively connects the existing owner/admin authorization baseline to the requested member-role expansion."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| `REQ-001` is behaviorally refined but implementation is blocked until the repository is available. | `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `DEC-001` | `IMP-001`, `IMP-002`, `IMP-003`, and `IMP-004` are blocked by the missing repository. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "| INV-003 | A project edit emits an audit event containing the actor role. | verified | User-supplied repository evidence — project edits emit an actor-role audit event. |",
+    "rationale": "Preserves the supplied project-edit audit event and the actor's actual role."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "| INV-002 | Workspace invitations assign the member role by default. | verified | User-supplied repository evidence — workspace invitations default to member. |",
+    "rationale": "Links default member invitations to the resulting workspace-scoped edit entitlement."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| IMP-005 | REQ-001 | authorization/privacy | critical | blocked | unknown | The workspace contains no repository files, so membership scoping, cross-workspace project checks, and authorization call sites cannot be inspected. | INV-001 | DEC-001 | AC-005 |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "| INV-001 | Project editing is currently authorized for project owners and workspace admins. | verified | User-supplied repository evidence — `authorizeProjectEdit` currently permits owner and admin roles. |",
+    "rationale": "Substantively connects the existing owner/admin authorization baseline to the requested member-role expansion."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| REQ-001 permits member, owner, and admin users to edit every project in the same workspace and preserves actual actor-role auditing. | RPT-001, REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, DEC-001 | IMP-002 is accepted; IMP-005 is blocked until repository source and tests are available. | AC-001, AC-002, AC-003, AC-004, AC-005 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "| `INV-003` | Project edits emit an audit event containing the actor role. | `verified` | Supplied repository evidence — project-edit audit behavior. |",
+    "rationale": "Preserves the supplied project-edit audit event and the actor's actual role."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "| `INV-002` | Workspace invitations default to the member role. | `verified` | Supplied repository evidence — workspace invitation default. |",
+    "rationale": "Links default member invitations to the resulting workspace-scoped edit entitlement."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-004` | `REQ-001` | regression | medium | blocked | unknown | The workspace is empty, so call sites, workspace relationship checks, event consumers, and tests cannot be inspected. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-005` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "| `INV-001` | Project-edit authorization permits owner and admin roles. | `verified` | Supplied repository evidence — `authorizeProjectEdit`. |",
+    "rationale": "Substantively connects the existing owner/admin authorization baseline to the requested member-role expansion."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending authorization-scope decision is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Workspace versus global scope is undecided; `IMP-004` is blocked by the unavailable repository. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "| `INV-003` | Project edits emit an audit event containing the actor role. | `verified` | User-supplied repository evidence — project edits emit an actor-role audit event. |",
+    "rationale": "Preserves the supplied project-edit audit event and the actor's actual role."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "| `INV-002` | Accepted workspace invitations default the invitee to the member role. | `verified` | User-supplied repository evidence — workspace invitations default to member. |",
+    "rationale": "Links default member invitations to the resulting workspace-scoped edit entitlement."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | authorization/privacy | critical | blocked | unknown | The workspace is empty, so `authorizeProjectEdit`, its callers, and its tests cannot be inspected or changed. | `INV-001` | `DEC-001` | `AC-001` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "| `INV-001` | Project editing is currently authorized for owner and admin roles. | `verified` | User-supplied repository evidence — `authorizeProjectEdit` permits owner and admin roles. |",
+    "rationale": "Substantively connects the existing owner/admin authorization baseline to the requested member-role expansion."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| `REQ-001` | `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `DEC-001` | `IMP-001`, `IMP-002`, `IMP-003`, and `IMP-004` remain blocked until repository source and tests are available. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "Supplied evidence ties alerts to dead_letter events; removing terminal exhaustion therefore changes or removes the event that alerts currently consume, but producer timing and schema are unavailable.",
+    "rationale": "The report explicitly analyzes how removing terminal exhaustion affects dead-letter-driven alerting."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "every retry targets the same deterministic object key, avoiding creation of attempt-specific keys.",
+    "rationale": "The report recognizes that a deterministic key limits duplicate paths but does not prove all export side effects idempotent."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending decision is selected and the repository implementation is available for the blocked inspections.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "the current worker has a five-attempt stopping condition that conflicts with unbounded retry.",
+    "rationale": "The report explicitly identifies the five-attempt ceiling and the required unbounded-retry state change."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending decision is selected and the repository implementation is available for the blocked inspections.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "A job that never terminally dead-letters needs a nonterminal alert lifecycle or a deliberate redefinition of `dead_letter`.",
+    "rationale": "The report explicitly analyzes how removing terminal exhaustion affects dead-letter-driven alerting."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "A deterministic key supports stable object identity, but code is unavailable to verify overwrite atomicity or other non-idempotent side effects.",
+    "rationale": "The report recognizes that a deterministic key limits duplicate paths but does not prove all export side effects idempotent."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending alert-signal decision is selected and the repository is available.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "The current five-attempt limit conflicts directly with unlimited retry eligibility.",
+    "rationale": "The report explicitly identifies the five-attempt ceiling and the required unbounded-retry state change."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending alert-signal decision is selected and the repository is available.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "Removing terminal exhaustion changes whether or when `dead_letter` is emitted, while alerts consume that event.",
+    "rationale": "The report explicitly analyzes how removing terminal exhaustion affects dead-letter-driven alerting."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "A deterministic object key limits duplicate object paths, but the supplied evidence does not establish that repeated writes or other export side effects are idempotent.",
+    "rationale": "The report recognizes that a deterministic key limits duplicate paths but does not prove all export side effects idempotent."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending alert-signal decision is selected and blocked repository evidence is supplied.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "Remove the five-attempt terminal retry limit so failed export jobs continue retrying without an attempt cap",
+    "rationale": "The report explicitly identifies the five-attempt ceiling and the required unbounded-retry state change."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending alert-signal decision is selected and blocked repository evidence is supplied.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "Changing the terminal fifth-attempt transition could suppress existing alerts or make `dead_letter` represent a nonterminal job.",
+    "rationale": "The report explicitly analyzes how removing terminal exhaustion affects dead-letter-driven alerting."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "A deterministic key limits duplicate object paths, but overlapping attempts, write atomicity, and non-object side effects cannot be assessed without implementation evidence.",
+    "rationale": "The report recognizes that a deterministic key limits duplicate paths but does not prove all export side effects idempotent."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the fifth-failure event and alert policy is selected and blocked repository evidence is inspected.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "The current five-attempt stop must change so scheduling and job state permit attempt six and later.",
+    "rationale": "The report explicitly identifies the five-attempt ceiling and the required unbounded-retry state change."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the fifth-failure event and alert policy is selected and blocked repository evidence is inspected.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "Alerts consume `dead_letter`; removing the terminal path can remove their input, while retaining the event changes its meaning.",
+    "rationale": "The report explicitly analyzes how removing terminal exhaustion affects dead-letter-driven alerting."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "A deterministic object key limits duplicate object keys, but does not establish that multipart writes, metadata updates, notifications, billing, or other export side effects are idempotent.",
+    "rationale": "The report recognizes that a deterministic key limits duplicate paths but does not prove all export side effects idempotent."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the post-five-attempt operator signal is selected and blocked repository evidence is supplied.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "The requested unlimited retry eligibility conflicts with the supplied five-attempt terminal behavior; the state transition at attempt five needs explicit semantics.",
+    "rationale": "The report explicitly identifies the five-attempt ceiling and the required unbounded-retry state change."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the post-five-attempt operator signal is selected and blocked repository evidence is supplied.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "| IMP-003 | REQ-001 | functionality | high | refining | inferred | Because writes publish `dashboard.updated`, event-driven invalidation is available; without consuming it, writes can remain invisible for up to one hour. | INV-003 | the pending decision | AC-003 |",
+    "rationale": "Connects dashboard.updated to eviction or post-write freshness behavior."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| IMP-004 | REQ-001 | state/concurrency | medium | blocked | unknown | Event ordering, delivery guarantees, subscriber topology, and cache deletion semantics cannot be inspected because the repository workspace is empty. | INV-003 | the pending decision | AC-004 |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "| AC-002 | REQ-001 | IMP-002 | INV-002 | After a role change and permission-cache invalidation, the user cannot receive dashboard content disallowed by the new role. | Future authorization regression test; exact assertion depends on dashboard filtering behavior. |",
+    "rationale": "Requires role changes not to reuse dashboard data authorized under the prior role."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "| AC-001 | REQ-001 | IMP-001 | INV-001 | Requests for different tenant IDs never read or overwrite one another’s cached dashboard response. | Future integration test with two tenant fixtures and distinct expected responses. |",
+    "rationale": "Defines a tenant-partitioned cache acceptance boundary rather than a keyword-only mention."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until option A, B, or C is selected and repository evidence is available. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004 | Pending decision; blocked IMP-002 and IMP-004; unresolved IMP-001 and IMP-003. | AC-001, AC-002, AC-003, AC-004 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "| Which invalidation policy should accompany the one-hour tenant-specific dashboard cache? | Invalidate the affected tenant’s entry on `dashboard.updated`; keep role changes limited to `permission_cache` unless code inspection proves dashboard responses are permission-filtered. | `IMP-001`, `IMP-002`, `IMP-003` | Recommended: uses the existing update signal and preserves the supplied role-change boundary. |",
+    "rationale": "Connects dashboard.updated to eviction or post-write freshness behavior."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `INV-001` | Dashboard results depend on `tenant_id`. | `verified` | Supplied repository evidence; repository files are unavailable in the workspace. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | A role change cannot expose unauthorized data from a cached dashboard response. | Future authorization regression test after inspecting dashboard permission dependencies. |",
+    "rationale": "Requires role changes not to reuse dashboard data authorized under the prior role."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Different tenants cannot read or evict one another’s cached responses; entries expire within one hour absent earlier invalidation. | Future cache-key and cross-tenant isolation tests. |",
+    "rationale": "Defines a tenant-partitioned cache acceptance boundary rather than a keyword-only mention."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until an invalidation option is selected and the repository checkout is available. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Pending invalidation decision; unavailable implementation and test evidence. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "| `AC-003` | `REQ-001` | `IMP-003` | `INV-003` | After `dashboard.updated`, the next affected read returns updated data rather than the prior cached response. | Future event-to-cache invalidation integration test. |",
+    "rationale": "Connects dashboard.updated to eviction or post-write freshness behavior."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-004` | `REQ-001` | `regression` | `medium` | `blocked` | `unknown` | The available workspace contains no repository files, so cache abstractions, event ordering, and tests cannot be inspected. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-004` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | After a role change, the next affected read cannot reuse a response authorized under the prior role state. | Future role-change cache regression test. |",
+    "rationale": "Requires role changes not to reuse dashboard data authorized under the prior role."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Different `tenant_id` values never share dashboard entries; an entry expires after 3,600 seconds. | Future two-tenant integration test and TTL assertion. |",
+    "rationale": "Defines a tenant-partitioned cache acceptance boundary rather than a keyword-only mention."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the role-change strategy is selected and repository files are available. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Pending role-change decision for `IMP-002`; blocked repository validation in `IMP-004`. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "| Which freshness and permission-invalidation policy should govern the one-hour dashboard cache? | Tenant plus write-event invalidation: key by `tenant_id`, expire after 3,600 seconds, evict the affected tenant on `dashboard.updated`, and leave role-change behavior unchanged. | `IMP-001`, `IMP-002`, `IMP-003` | Uses the supplied dependency and event with good write freshness, but is safe only if dashboard output is not permission-dependent or authorization is reapplied after lookup. |",
+    "rationale": "Connects dashboard.updated to eviction or post-write freshness behavior."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Requests for different tenants never share dashboard cache entries; same-tenant repeated reads may reuse an entry for no more than 3,600 seconds. | Future cache-key isolation and TTL tests; repository unavailable in the inspected workspace. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | After a role change, a user cannot receive dashboard data no longer permitted by the new role, and the selected cache policy is covered by a regression test. | Future authorization-order and role-change cache test; dashboard permission dependency is currently unknown. |",
+    "rationale": "Requires role changes not to reuse dashboard data authorized under the prior role."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Requests for different tenants never share dashboard cache entries; same-tenant repeated reads may reuse an entry for no more than 3,600 seconds. | Future cache-key isolation and TTL tests; repository unavailable in the inspected workspace. |",
+    "rationale": "Defines a tenant-partitioned cache acceptance boundary rather than a keyword-only mention."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending decision is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003` | Select the pending freshness and permission-invalidation policy; `IMP-003` remains blocked on the dashboard authorization flow. | `AC-001`, `AC-002`, `AC-003` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "| Which invalidation policy should the one-hour dashboard cache use? | Invalidate affected tenant entries on `dashboard.updated` and invalidate or version affected entries on role changes (recommended). | `IMP-002`, `IMP-003`, `IMP-004` | Strongest freshness and permission safety; adds role-change wiring or an authorization-versioned key. |",
+    "rationale": "Connects dashboard.updated to eviction or post-write freshness behavior."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-004` | `REQ-001` | `operations` | `medium` | `blocked` | `unknown` | The workspace is empty, so handlers, cache backend, key format, event subscribers, and tests cannot be inspected. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-004` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | After a role change, a user cannot receive dashboard data no longer authorized for that role. | Future role-downgrade cache-hit test. |",
+    "rationale": "Requires role changes not to reuse dashboard data authorized under the prior role."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Otherwise identical requests with different `tenant_id` values never share entries or responses. | Future two-tenant automated test. |",
+    "rationale": "Defines a tenant-partitioned cache acceptance boundary rather than a keyword-only mention."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the invalidation policy is selected and the repository is available. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | The pending decision; `IMP-001`, `IMP-002`, `IMP-003`, and blocked `IMP-004`. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "| `INV-003` | Account cleanup is consumed asynchronously by a background worker. | `verified` | User-supplied repository evidence — account cleanup is consumed by a background worker. |",
+    "rationale": "Accounts for the background worker and asynchronous cleanup completion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "| `INV-001` | An account row referenced by an invoice cannot currently be physically deleted. | `verified` | User-supplied repository evidence — `invoice.account_id` uses `RESTRICT`. |",
+    "rationale": "Identifies the restrictive invoice reference as a constraint on physical account deletion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `INV-004` | The current behavior of other account-linked personal-data stores, authentication paths, cleanup producers, and cleanup consumers cannot be established from the available evidence. | `unknown` | The workspace contains no inspectable repository files or account-data inventory. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "| `INV-002` | Finance data must be retained for 30 days. | `verified` | User-supplied repository evidence — `privacy.md` requires a 30-day finance-retention period. |",
+    "rationale": "Treats the supplied 30-day finance-retention rule as a binding deletion constraint."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending decision defines what “immediately” guarantees. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `INV-004`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | The deletion contract is pending, and `IMP-004` remains blocked by missing repository evidence. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "| `INV-003` | Account cleanup is consumed by a background worker. | `verified` | Supplied evidence — account cleanup is consumed by a background worker. |",
+    "rationale": "Accounts for the background worker and asynchronous cleanup completion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "| `INV-001` | An account referenced by an invoice cannot be deleted while that reference remains. | `verified` | Supplied evidence — `invoice.account_id` uses `RESTRICT`. |",
+    "rationale": "Identifies the restrictive invoice reference as a constraint on physical account deletion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-003` | `REQ-001` | `state/concurrency` | `high` | `blocked` | `unknown` | The worker’s job schema, retry, ordering, and idempotency contracts cannot be inspected because the workspace contains no repository files. | `INV-003` | the pending decision | `AC-003` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "| `INV-002` | Finance data associated with an account must be retained for 30 days. | `verified` | Supplied evidence — `privacy.md` requires a 30-day finance-retention period. |",
+    "rationale": "Treats the supplied 30-day finance-retention rule as a binding deletion constraint."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending meaning of immediate deletion is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Pending mechanics for `IMP-001`, `IMP-002`, and `IMP-004`; blocked worker-contract evidence for `IMP-003`. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "| INV-003 | Account cleanup is performed by a background-worker consumer. | verified | Account cleanup background-worker consumer, supplied repository evidence. |",
+    "rationale": "Accounts for the background worker and asynchronous cleanup completion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "| INV-001 | An account row referenced by an invoice cannot be physically deleted while the reference remains. | verified | invoice.account_id — RESTRICT, supplied repository evidence. |",
+    "rationale": "Identifies the restrictive invoice reference as a constraint on physical account deletion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| The workspace contains no repository files; analysis is limited to the three supplied evidence statements. | Empty workspace plus supplied invoice.account_id RESTRICT, privacy.md retention, and background-worker facts. | The three stated constraints are treated as verified supplied evidence; endpoint, schema, worker, authorization, and test details beyond them remain inferred or unknown. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "| INV-002 | Finance records must be retained for 30 days. | verified | privacy.md — 30-day finance retention requirement, supplied repository evidence. |",
+    "rationale": "Treats the supplied 30-day finance-retention rule as a binding deletion constraint."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending definition of “immediately” is selected. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 | The pending deletion-semantics decision plus blocked authorization and test evidence in IMP-004 and IMP-005. | AC-001, AC-002, AC-003, AC-004, AC-005 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "| `INV-003` | Account cleanup is consumed by a background worker. | `verified` | Supplied repository evidence — account cleanup consumer. |",
+    "rationale": "Accounts for the background worker and asynchronous cleanup completion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "| `INV-001` | An invoice references its account through `invoice.account_id`, and deletion of a referenced account is restricted. | `verified` | Supplied repository evidence — `invoice.account_id` uses `RESTRICT`. |",
+    "rationale": "Identifies the restrictive invoice reference as a constraint on physical account deletion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| The workspace contains no repository files. | User-supplied evidence for `invoice.account_id` `RESTRICT`, `privacy.md` 30-day retention, and background-worker consumption. | The three stated constraints are verified as supplied artifacts; implementation details and test coverage remain unknown. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "| `INV-002` | Finance data must be retained for 30 days. | `verified` | Supplied repository evidence — `privacy.md` requires a 30-day finance retention period. |",
+    "rationale": "Treats the supplied 30-day finance-retention rule as a binding deletion constraint."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending decision defines the immediate deletion guarantee. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | Pending choice of immediate semantics; `IMP-001` through `IMP-004`, including the implementation-evidence gap. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "| `INV-003` | Account cleanup is consumed by a background worker rather than completed entirely in the initiating request. | `verified` | User-supplied repository evidence — account-cleanup consumer. |",
+    "rationale": "Accounts for the background worker and asynchronous cleanup completion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "| `INV-001` | An account referenced by an invoice cannot be physically deleted while the reference remains because `invoice.account_id` uses `RESTRICT`. | `verified` | User-supplied repository evidence — `invoice.account_id` foreign-key delete behavior. |",
+    "rationale": "Identifies the restrictive invoice reference as a constraint on physical account deletion."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| The workspace contains no repository files; only the three evidence statements in the request were available. | Empty workspace plus the supplied `invoice.account_id`, `privacy.md`, and background-worker facts. | The constraint conflicts are high-confidence, but exact API, schema, queue, authorization, and test impacts remain unverified. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "| `INV-002` | Finance data must be retained for 30 days. | `verified` | User-supplied repository evidence — `privacy.md` finance-retention requirement. |",
+    "rationale": "Treats the supplied 30-day finance-retention rule as a binding deletion constraint."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending decision defines “immediately.” | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004` | The pending deletion-semantics decision and blocked worker-contract impact `IMP-003`. | `AC-001`, `AC-002`, `AC-003`, `AC-004` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "`updated_at` exists, but the supplied evidence does not define timestamp authority, comparison semantics, or the winner when both client and server changed.",
+    "rationale": "The report explicitly identifies an unresolved client/server conflict-authority decision."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "A queued update can reconnect after the 24-hour tombstone has expired; the supplied evidence names no durable deletion revision, so distinguishing a deleted record from a never-synced record is not established.",
+    "rationale": "The report explicitly analyzes tombstones, deletion precedence, and resurrection risk."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending reconciliation decision is selected.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "Local creation order defines queue order but not how dependent mutations, server conflicts, or a partially applied batch continue after failure.",
+    "rationale": "The report explicitly distinguishes local creation order from stronger causal or server ordering."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending reconciliation decision is selected.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "Because records have `updated_at`, an offline edit can race with a newer server edit; no conflict outcome is supplied.",
+    "rationale": "The report explicitly identifies an unresolved client/server conflict-authority decision."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "Replaying a queued edit against a live tombstone can recreate or mutate a record the server deleted unless deletion precedence is defined.",
+    "rationale": "The report explicitly analyzes tombstones, deletion precedence, and resurrection risk."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending conflict-authority decision is selected.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "Local creation order alone does not establish ordering against server changes or other clients, so queue order cannot by itself resolve conflicts.",
+    "rationale": "The report explicitly distinguishes local creation order from stronger causal or server ordering."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending conflict-authority decision is selected.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "`updated_at` exists, but the supplied evidence does not define the winner when an offline edit meets a newer server update.",
+    "rationale": "The report explicitly identifies an unresolved client/server conflict-authority decision."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "A deletion is observable through a tombstone for only 24 hours; an offline client reconnecting later may be unable to distinguish deletion from absence and may recreate the record.",
+    "rationale": "The report explicitly analyzes tombstones, deletion precedence, and resurrection risk."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending conflict decision is selected and blocked evidence gaps are resolved or explicitly deferred.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "Local creation order alone does not establish cross-device causality or guarantee a valid dependency order for related create, update, and delete mutations.",
+    "rationale": "The report explicitly distinguishes local creation order from stronger causal or server ordering."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending conflict decision is selected and blocked evidence gaps are resolved or explicitly deferred.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "Because offline and server edits can both occur before reconnect and only updated_at is identified, the supplied evidence does not establish which version has authority.",
+    "rationale": "The report explicitly identifies an unresolved client/server conflict-authority decision."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "A client reconnecting after the 24-hour tombstone window may no longer receive deletion evidence, so replaying an edit can unintentionally recreate a deleted record unless absence is handled explicitly.",
+    "rationale": "The report explicitly analyzes tombstones, deletion precedence, and resurrection risk."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending conflict-authority decision is selected.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "Local creation order alone does not define coalescing or dependency handling for create, update, and delete mutations on the same or related records.",
+    "rationale": "The report explicitly distinguishes local creation order from stronger causal or server ordering."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending conflict-authority decision is selected.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "A queued local mutation can target a record whose `updated_at` changed on the server while the client was offline; the supplied evidence does not define which value wins.",
+    "rationale": "The report explicitly identifies an unresolved client/server conflict-authority decision."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "An offline edit replayed against a 24-hour tombstone can conflict with deletion, and after tombstone expiry a long-offline client may be unable to distinguish deletion from absence.",
+    "rationale": "The report explicitly analyzes tombstones, deletion precedence, and resurrection risk."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Not ready until the pending conflict-policy decision is selected.",
+    "rationale": "The output remains a report-only, not-ready handoff and contains no repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "User-supplied evidence guarantees local creation order only, so sync cannot rely on server order, cross-client order, or an unstated per-record causal order.",
+    "rationale": "The report explicitly distinguishes local creation order from stronger causal or server ordering."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Not ready until the pending conflict-policy decision is selected.",
+    "rationale": "The output stops at an explicit not-ready planning handoff and does not author an implementation plan."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "| AC-001 | REQ-001 | IMP-001 | INV-001, INV-003 | When the first provider call captures and its response times out, automated recovery results in at most one captured charge for the logical payment. | Future capture-then-timeout integration test. |",
+    "rationale": "Requires timeout-after-capture recovery to converge to at most one provider capture."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "| INV-001 | Charge requests accept an idempotency key. | verified | Supplied repository evidence: charge requests accept an `idempotency_key`. |",
+    "rationale": "Records the existing idempotency-key request capability as a retry constraint."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| Repository contents are unavailable in the provided workspace. | The workspace contains no files; analysis uses the three supplied evidence statements. | Current retry behavior, concrete state transitions, tests, and provider configuration could not be inspected. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "| INV-002 | Payment status is rendered before webhook settlement. | verified | Supplied repository evidence. |",
+    "rationale": "Identifies the pre-webhook rendered status as provisional customer-visible state."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending decision defines retryable outcomes and recovery of ambiguous timeouts. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 | Duplicate capture, premature failure rendering, unbounded retries, unverified provider idempotency, and webhook ordering regressions. | AC-001, AC-002, AC-003, AC-004, AC-005 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-001`, `INV-003` | Repeated processing of one logical charge, including a timeout after capture, results in at most one provider capture. | Future provider-contract verification plus an integration test that simulates capture followed by timeout and replay. |",
+    "rationale": "Requires timeout-after-capture recovery to converge to at most one provider capture."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "| `INV-001` | Charge requests accept an `idempotency_key`. | `verified` | User-supplied repository evidence: “charge requests accept an idempotency_key.” |",
+    "rationale": "Records the existing idempotency-key request capability as a retry constraint."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| Repository workspace | The provided workspace contains no files; source, schema, configuration, and tests could not be inspected. | Exact call sites, persisted states, idempotency-key lifecycle, and regression coverage remain unknown. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "| `INV-002` | Payment status is rendered before webhook settlement. | `verified` | User-supplied repository evidence: “payment status is rendered before webhook settlement.” |",
+    "rationale": "Identifies the pre-webhook rendered status as provisional customer-visible state."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending definition of “failed charge” and its retry contract is selected. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006` | Duplicate capture after ambiguous timeout, premature status finality, retrying terminal declines, retry amplification, webhook/retry races, and missing operability; `IMP-001` and `IMP-005` are blocked by named evidence gaps. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-001`, `INV-003` | When the provider captures and then times out, automatic retry processing results in no more than one capture for the logical payment. | Future integration test with a provider stub that captures before returning a timeout. |",
+    "rationale": "Requires timeout-after-capture recovery to converge to at most one provider capture."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "| `INV-001` | Charge requests accept an idempotency key. | `verified` | User-supplied repository evidence item 1: charge requests accept an idempotency_key. |",
+    "rationale": "Records the existing idempotency-key request capability as a retry constraint."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-005` | `REQ-001` | `regression` | `high` | `blocked` | `unknown` | No repository files, state-machine definition, retry worker, webhook handler, or tests are available in the workspace; only the three supplied evidence statements can be assessed. | `INV-001`, `INV-002`, `INV-003` | the pending decision | `AC-005` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "| `INV-002` | Payment status is rendered before webhook settlement. | `verified` | User-supplied repository evidence item 2: payment status is rendered before webhook settlement. |",
+    "rationale": "Identifies the pre-webhook rendered status as provisional customer-visible state."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending failure-contract decision is selected and the provider idempotency contract plus repository implementation are available. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | The pending decision; `IMP-004` provider replay guarantees; `IMP-005` unavailable implementation and tests. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "| `AC-001` | `REQ-001` | `IMP-001` | `INV-003` | When the provider captures and then the request times out, recovery results in exactly one captured charge and no second provider charge operation. | Future integration test with a capture-then-timeout provider stub plus provider-operation assertions; currently a coverage gap. |",
+    "rationale": "Requires timeout-after-capture recovery to converge to at most one provider capture."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "| `INV-001` | Charge requests accept an `idempotency_key`. | `verified` | User-supplied repository evidence — charge requests accept an idempotency_key. |",
+    "rationale": "Records the existing idempotency-key request capability as a retry constraint."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-003` | `blocked` | Provider idempotency-key scope, retention, replay response, and timeout reuse semantics are not present in the supplied evidence or empty workspace. | none | Payment integration owner to supply provider contract or adapter tests. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "| `INV-002` | Payment status is rendered before webhook settlement. | `verified` | User-supplied repository evidence — payment status is rendered before webhook settlement. |",
+    "rationale": "Identifies the pre-webhook rendered status as provisional customer-visible state."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending decision selects which outcomes enter automatic retry and provider idempotency semantics are supplied. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | The pending decision plus blocked `IMP-003`; duplicate capture, retry storms, premature status, and out-of-order settlement remain open. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "| AC-001 | REQ-001 | IMP-001 | INV-003 | Capture followed by timeout never causes more than one successful provider charge for one logical payment. | Future integration test using a capture-then-timeout provider fixture. |",
+    "rationale": "Requires timeout-after-capture recovery to converge to at most one provider capture."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "| INV-001 | Charge requests accept an `idempotency_key`. | verified | User-supplied repository evidence—charge request contract. |",
+    "rationale": "Records the existing idempotency-key request capability as a retry constraint."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| The workspace is empty and is not a Git repository; no code, contracts, configuration, or tests could be inspected. | Three user-supplied repository-evidence statements and a read-only workspace listing. | The stated behaviors are verified as supplied artifacts; implementation details and provider guarantees remain unknown. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "| INV-002 | Payment status is rendered before webhook settlement. | verified | User-supplied repository evidence—payment-status rendering order. |",
+    "rationale": "Identifies the pre-webhook rendered status as provisional customer-visible state."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending retry-policy decision is selected and provider safety guarantees are supplied. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004 | Duplicate capture IMP-001, unknown idempotency guarantees IMP-002, premature status finality IMP-003, and unspecified retry controls IMP-004. | AC-001, AC-002, AC-003, AC-004 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| The supplied workspace is empty and is not a Git repository. | Directory listing contained no files; only the three user-supplied repository facts were available. | Current facts are treated as verified supplied evidence, but code paths, schemas, interfaces, tests, and operational controls remain unverified or blocked. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | After each permission-change class, link access matches the selected permanence option and direct access still follows current authorization rules. | Future authorization matrix test; permission-change classes are unavailable. |",
+    "rationale": "Defines or explicitly leaves pending how permission transitions affect existing links."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "| `INV-002` | Permission changes revoke active share tokens. | `verified` | User-supplied repository evidence: “permission changes revoke active tokens.” |",
+    "rationale": "Records the current active-token revocation behavior as a permanence boundary."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "| `INV-003` | Token signing keys rotate every 90 days. | `verified` | User-supplied repository evidence: “token signing keys rotate every 90 days.” |",
+    "rationale": "Requires permanent links to coexist with the supplied 90-day signing-key rotation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending invalidation decision is selected and the repository is available for blocked-impact inspection. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `INV-004`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006` | Pending permanence boundary plus blocked `IMP-003`, `IMP-004`, and `IMP-005`; inferred leakage risk `IMP-006`. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| Repository workspace contains no files. | Empty workspace and the three supplied evidence statements. | Implementation-specific impacts remain inferred or unknown. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "| AC-002 | REQ-001 | IMP-002 | INV-002 | A permission change produces the selected allow-or-deny result for every active shared link. | Future authorization integration test. |",
+    "rationale": "Defines or explicitly leaves pending how permission transitions affect existing links."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "| INV-002 | Permission changes revoke active share tokens. | verified | User-supplied repository evidence — permission-change invalidation. |",
+    "rationale": "Records the current active-token revocation behavior as a permanence boundary."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "| INV-003 | Token-signing keys rotate every 90 days. | verified | User-supplied repository evidence — signing-key rotation cadence. |",
+    "rationale": "Requires permanent links to coexist with the supplied 90-day signing-key rotation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until option A, B, or C is selected. | RPT-001, REQ-001, INV-001, INV-002, INV-003, IMP-001 through IMP-007 | Permission semantics, compromise containment, token/key architecture, existing-link migration, and missing tests. | AC-001 through AC-007 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| Only the three user-supplied repository facts were available; the workspace contains no repository files. | Seven-day token expiry, permission-change revocation, and 90-day signing-key rotation supplied in the request. | Current behavior is grounded in supplied evidence, but implementation, interface, migration, and regression details remain unknown or inferred. |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | After a permission change, link access follows the selected permanence policy and unauthorized outcomes reveal no protected content. | Future authorization integration tests for permission grants, reductions, removals, and explicit revocation. |",
+    "rationale": "Defines or explicitly leaves pending how permission transitions affect existing links."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "| `INV-002` | Permission changes revoke active share tokens. | `verified` | User-supplied repository evidence: permission-change revocation. |",
+    "rationale": "Records the current active-token revocation behavior as a permanence boundary."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "| `INV-003` | Token signing keys rotate every 90 days. | `verified` | User-supplied repository evidence: signing-key rotation interval. |",
+    "rationale": "Requires permanent links to coexist with the supplied 90-day signing-key rotation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending permission-change decision is selected and repository access resolves the blocked implementation and test impacts. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | Pending permission-change policy; blocked persistence, revocation, cleanup, migration, and regression evidence. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| IMP-006 | REQ-001 | regression | high | blocked | unknown | No repository files or tests are present in the provided workspace, so expiry, permission-revocation, rotation, and cleanup test coverage cannot be inspected. | INV-001, INV-002, INV-003 | — | AC-006 |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "| AC-003 | REQ-001 | IMP-003 | INV-002 | After each relevant permission transition, the link outcome exactly matches the selected revocation policy. | Future permission matrix integration test. |",
+    "rationale": "Defines or explicitly leaves pending how permission transitions affect existing links."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "| INV-002 | Permission changes revoke active share tokens. | verified | User-supplied repository evidence — permission-change revocation. |",
+    "rationale": "Records the current active-token revocation behavior as a permanence boundary."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "| INV-003 | Token-signing keys rotate every 90 days. | verified | User-supplied repository evidence — signing-key rotation. |",
+    "rationale": "Requires permanent links to coexist with the supplied 90-day signing-key rotation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending permission-change decision is selected. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, IMP-006 | Permission-change semantics are pending; existing-token handling and repository/test evidence are blocked. | AC-001, AC-002, AC-003, AC-004, AC-005, AC-006 | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "| `IMP-004` | `REQ-001` | data | high | blocked | `unknown` | The workspace contains no repository files, so token format, persisted share state, key identifiers, revocation storage, and cleanup behavior cannot be inspected. | `INV-003` | the pending decision | `AC-004` |",
+    "rationale": "The report explicitly records the unavailable or empty repository boundary and limits itself to analysis rather than repository mutation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "| `AC-002` | `REQ-001` | `IMP-002` | `INV-002` | Every permission-change category has an explicit effect on existing links, and security-sensitive revocation applies before another protected response is served. | Future authorization-matrix and revocation tests. |",
+    "rationale": "Defines or explicitly leaves pending how permission transitions affect existing links."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "| `INV-002` | A permission change currently revokes active share tokens. | `verified` | User-supplied repository evidence: permission changes revoke active tokens. |",
+    "rationale": "Records the current active-token revocation behavior as a permanence boundary."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "| `INV-003` | Token-signing keys currently rotate every 90 days. | `verified` | User-supplied repository evidence: token signing keys rotate every 90 days. |",
+    "rationale": "Requires permanent links to coexist with the supplied 90-day signing-key rotation."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "| Not ready until the pending lifecycle decision is selected and the repository is available. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005`, `IMP-006` | Pending lifecycle decision; blocked storage, compatibility, and regression impacts. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006` | Not ready |",
+    "rationale": "The explicit Planning Handoff marks the workflow Not ready, so the response stops before writing an implementation plan."
+  }
+]

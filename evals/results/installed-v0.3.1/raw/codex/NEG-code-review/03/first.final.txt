@@ -1,0 +1,1 @@
+I can’t review correctness because no diff or repository files are available: the workspace is empty and not a Git checkout. Please paste or attach the complete diff, and I’ll return prioritized findings with file and line references.

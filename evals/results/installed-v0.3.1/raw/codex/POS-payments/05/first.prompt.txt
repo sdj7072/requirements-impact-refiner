@@ -1,0 +1,6 @@
+Retry every failed charge automatically.
+
+Repository evidence:
+- charge requests accept an idempotency_key
+- payment status is rendered before webhook settlement
+- the provider may time out after capture

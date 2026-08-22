@@ -1,0 +1,11 @@
+[
+  {
+    "id": "requirements-impact-refiner@requirements-impact-refiner",
+    "version": "0.3.0",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "/Users/p042890/.claude/plugins/cache/requirements-impact-refiner/requirements-impact-refiner/0.3.0",
+    "installedAt": "2026-08-21T14:12:55.810Z",
+    "lastUpdated": "2026-08-21T14:12:55.810Z"
+  }
+]

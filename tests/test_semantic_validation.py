@@ -1,6 +1,13 @@
 import unittest
 
 from tests.test_validate_impact_report import PRE_DECISION_REPORT, VALIDATOR, VALID_REPORT
+from tests.test_report_lineage import report_with_state
+
+
+SUPERPOWERS_HANDOFF_MARKER = (
+    "superpowers:after-approved-brainstorming;impact-refinement;"
+    "manual-handoff-before-writing-plans"
+)
 
 
 class SemanticValidationTest(unittest.TestCase):
@@ -149,6 +156,25 @@ class SemanticValidationTest(unittest.TestCase):
 
         self.assert_rejected(
             report, "blocked impacts require Planning Handoff workflow Not ready"
+        )
+
+    def test_superpowers_marker_is_the_only_named_blocked_or_predecision_exception(self):
+        """The structured boundary marker may coexist with not-ready state elsewhere."""
+        predecision = PRE_DECISION_REPORT.replace(
+            "| Not ready |", "| %s |" % SUPERPOWERS_HANDOFF_MARKER, 1
+        )
+        blocked = report_with_state("blocked").replace(
+            "| Not ready |", "| %s |" % SUPERPOWERS_HANDOFF_MARKER, 1
+        )
+
+        self.assertEqual(VALIDATOR.validate_report(predecision), [])
+        self.assertEqual(VALIDATOR.validate_report(blocked), [])
+
+        arbitrary = PRE_DECISION_REPORT.replace(
+            "| Not ready |", "| superpowers |", 1
+        )
+        self.assert_rejected(
+            arbitrary, "pre-decision Planning Handoff workflow must be Not ready"
         )
 
     def test_accepted_and_deferred_impacts_remain_named_risks(self):

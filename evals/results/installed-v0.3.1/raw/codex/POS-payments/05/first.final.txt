@@ -1,0 +1,99 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| RPT-001 | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| REQ-001 | Retry every failed charge automatically. | User request dated 2026-08-22. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| REQ-001 | Automatically retry failed charge attempts while preserving idempotency-key request capability and correctness across provisional pre-webhook payment status and provider timeouts that may occur after capture. | the pending decision | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | Charge requests accept an `idempotency_key`. | verified | User-supplied repository evidence—charge request contract. |
+| INV-002 | Payment status is rendered before webhook settlement. | verified | User-supplied repository evidence—payment-status rendering order. |
+| INV-003 | The provider may time out after capturing a charge. | verified | User-supplied repository evidence—provider capture and timeout behavior. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | REQ-001 | IMP-001, IMP-002, IMP-004 | Existing request interface accepts an idempotency key. |
+| INV-002 | REQ-001 | IMP-003 | Status currently renders before settlement. |
+| INV-003 | REQ-001 | IMP-001, IMP-002, IMP-003 | Capture can precede a timeout response. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | REQ-001 | state/concurrency | critical | refining | inferred | A timeout may follow capture, so treating every timeout as failure makes a potentially captured charge retry-eligible. | INV-001, INV-003 | the pending decision | AC-001 |
+| IMP-002 | REQ-001 | interfaces | critical | blocked | unknown | The provider contract is unavailable, so key reuse, deduplication scope, expiry, replay, and status-lookup guarantees cannot be verified. | INV-001, INV-003 | the pending decision | AC-002 |
+| IMP-003 | REQ-001 | functionality | high | refining | inferred | Pre-webhook rendering could show definitive failure or retry while the provider outcome remains unknown. | INV-002, INV-003 | the pending decision | AC-003 |
+| IMP-004 | REQ-001 | operations | high | blocked | unknown | No configuration or tests establish retry eligibility, limits, backoff, durability, terminal handling, or observability. | INV-001 | the pending decision | AC-004 |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which retry policy should govern definitive failures and ambiguous timeout-after-capture outcomes? | **Reconcile-first, failure-classified retry (recommended):** retry definitive transient failures automatically; treat timeout-after-capture as unknown and reconcile provider state or webhook settlement before retrying, retaining the same logical payment identity. | IMP-001, IMP-002, IMP-003, IMP-004 | Lowest duplicate-charge risk and clearest status semantics, but recovery may wait for reconciliation and requires provider-status support. |
+| Which retry policy should govern definitive failures and ambiguous timeout-after-capture outcomes? | **Strict literal retry:** retry every non-success response, including timeout-after-capture, using the original idempotency key. | IMP-001, IMP-002, IMP-003, IMP-004 | Closest to the literal request, but safe only if the provider’s deduplication scope and lifetime are verified; otherwise duplicate capture remains critical. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | IMP-001, IMP-002, IMP-003, IMP-004 |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| REQ-001 | 1 | the pending decision | none | Initial refinement adds the supplied idempotency, settlement-order, and timeout-after-capture constraints without selecting retry mechanics. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| AC-001 | REQ-001 | IMP-001 | INV-003 | Capture followed by timeout never causes more than one successful provider charge for one logical payment. | Future integration test using a capture-then-timeout provider fixture. |
+| AC-002 | REQ-001 | IMP-002 | INV-001 | The retry path has a verified mechanism preventing duplicate capture throughout the complete retry and settlement window. | Provider-contract inspection and integration tests covering key reuse, deduplication scope, and expiry. |
+| AC-003 | REQ-001 | IMP-003 | INV-002 | Before settlement or reconciliation, an ambiguous provider outcome is not rendered as definitive failure or a second successful charge. | Future status-transition test covering timeout, pre-webhook rendering, and settlement. |
+| AC-004 | REQ-001 | IMP-004 | INV-001 | Retry-eligible failures recover automatically, while terminal failures stop under an explicit bounded policy and emit attempt and terminal-outcome signals. | Future queue-policy tests and metrics or alert inspection. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| IMP-002 | blocked | Need the provider idempotency and charge-status contract, including key scope, lifetime, replay semantics, and lookup behavior. | the pending decision | Payment integration owner |
+| IMP-004 | blocked | Need retry configuration, worker or queue behavior, failure taxonomy, and existing operational telemetry. | the pending decision | Payment service owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The workspace is empty and is not a Git repository; no code, contracts, configuration, or tests could be inspected. | Three user-supplied repository-evidence statements and a read-only workspace listing. | The stated behaviors are verified as supplied artifacts; implementation details and provider guarantees remain unknown. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending retry-policy decision is selected and provider safety guarantees are supplied. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004 | Duplicate capture IMP-001, unknown idempotency guarantees IMP-002, premature status finality IMP-003, and unspecified retry controls IMP-004. | AC-001, AC-002, AC-003, AC-004 | Not ready |

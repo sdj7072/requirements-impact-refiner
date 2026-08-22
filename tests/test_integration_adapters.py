@@ -37,6 +37,10 @@ OWNERSHIP_CLAUSES = (
     "The external workflow is not automatically invoked.",
     "If more than one orchestrator is active, ask the user to choose one before continuing.",
 )
+SUPERPOWERS_HANDOFF_MARKER = (
+    "superpowers:after-approved-brainstorming;impact-refinement;"
+    "manual-handoff-before-writing-plans"
+)
 
 
 def headings(text):
@@ -83,6 +87,21 @@ class IntegrationAdapterContractTest(unittest.TestCase):
             self.assertIn("canonical impact report", output)
             self.assertIn("Planning Handoff", output)
             self.assertIn("not an implementation plan", output)
+
+    def test_superpowers_adapter_requires_the_exact_structured_handoff_marker(self):
+        """Packaged guidance must emit the marker consumed by mechanical scoring."""
+        text = (REFERENCES / ADAPTERS["superpowers"]["file"]).read_text(
+            encoding="utf-8"
+        )
+        output = text.split("## Output\n", 1)[1].split("\n## Exit", 1)[0]
+
+        self.assertIn(SUPERPOWERS_HANDOFF_MARKER, output)
+        self.assertIn("exactly", output)
+        self.assertIn("readiness", output.lower())
+        self.assertEqual(
+            text.encode("utf-8"),
+            (ROOT / "references" / "integration-superpowers.md").read_bytes(),
+        )
 
     def test_skill_routes_to_exactly_one_adapter_after_selection(self):
         text = SKILL_PATH.read_text(encoding="utf-8")

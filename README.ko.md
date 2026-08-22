@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.3.0`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.3.1`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -113,21 +113,40 @@ Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다
 
 ## 6. 호환성
 
-아래 주장은 보존된 평가 근거로 한정됩니다. “동작 평가”는 스킬과 참조 파일을 제공한 fresh-context 모델 실행을 뜻하며 외부 플러그인 로더나 오케스트레이터가 실제 실행되었다는 증명이 아닙니다. 제품, 버전, 상태 열은 모든 번역본에서 동일하며 근거 설명만 번역했습니다.
+아래 주장은 보존된 평가 근거로 한정됩니다. 역사적인 Codex standalone 동작 하네스는 스킬과 참조 파일을 제공한 fresh-context 실행이며 외부 플러그인 로더나 오케스트레이터가 실제 실행되었다는 증명이 아닙니다. 반대로 봉인된 v0.3.1 Codex-with-Superpowers 배치는 정식 릴리스와 기능 payload 바이트가 일치하는 실제 설치 플러그인 캐시에서 실행되었습니다. 제품, 버전, 상태 열은 모든 번역본에서 동일하며 근거 설명만 번역했습니다.
 
 | Environment | Version | Status | Evidence note |
 | --- | --- | --- | --- |
 | Codex standalone behavioral harness | `codex-cli 0.148.0-alpha.15`; `gpt-5.6-luna`; hosted runtime unavailable | `not verified` | 사례당 1회 실행한 엄격 평가에서 **7/17**로 실패했습니다. 양성 0/8, 음성 3/5, 연동 4/4입니다. |
-| Codex with Superpowers | executed client/model/version not recorded in selected transcripts | `not verified` | 사례당 1회 실행한 엄격 평가에서 **10/17**로 실패했습니다. 양성은 1개 통과, 7개 부분 통과이며 음성 5/5와 연동 4/4는 통과했습니다. |
+| Codex with Superpowers | `codex-cli 0.148.0-alpha.21`; `gpt-5.6-sol`; `high`; RIR `0.3.1` | `not verified` | 봉인된 v0.3.1 배치에서는 재시도 없이 첫 시도 85건이 모두 런타임 통과(85/85)했지만 기계 점수는 84/85입니다. `POS-cache` 반복 2의 잘못된 ledger/알 수 없는 `IMP-002` 실패가 유일하므로 검증 차단 요인 1건이 남습니다. |
 | Codex skill quick validator | local system snapshot | `blocked` | PyYAML이 없습니다. 정적 검사에서 이 검증기의 허용 키 목록에 Agent Skills의 `compatibility` 키도 빠져 있음을 확인했으며 실행 통과로 주장하지 않습니다. |
 | Codex plugin validator | local system snapshot | `blocked` | `ModuleNotFoundError: yaml`에서 실행이 중단되었습니다. manifest 테스트를 이 검증기의 통과로 대체하지 않습니다. |
-| Claude Code standalone | version unavailable | `blocked` | `claude` 실행 파일이 없습니다. |
-| Claude Code with Superpowers | version unavailable | `blocked` | `claude` 실행 파일과 Claude 측 Superpowers 런타임을 사용할 수 없습니다. |
-| Claude Code with `feature-dev` | version unavailable | `blocked` | `claude` 실행 파일과 `feature-dev` 런타임을 사용할 수 없습니다. |
-| Claude Code with Spec Kit | version unavailable | `blocked` | `claude` 실행 파일과 Spec Kit 런타임을 사용할 수 없습니다. |
+| Claude Code standalone | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 구조 프로브만 수행했으며, 인증된 Claude 동작 평가는 실행하지 않았습니다. |
+| Claude Code with Superpowers | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 구조 프로브만 수행했으며 Claude 측 Superpowers 동작 호환성은 계속 차단됩니다. |
+| Claude Code with `feature-dev` | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 구조 프로브만 수행했으며 `feature-dev` 동작 호환성은 계속 차단됩니다. |
+| Claude Code with Spec Kit | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 구조 프로브만 수행했으며 Spec Kit 동작 호환성은 계속 차단됩니다. |
 | Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | 이름이 지정되거나 구성된 일반 하네스 실행 파일이 없습니다. |
 
-두 Codex 평가 모두 양성 표면 항목 **24/24**를 감지했고 연동 소유권 경계 **4/4**를 지켰습니다. 이는 관찰된 동작일 뿐 호환성이나 지원을 뜻하지 않습니다. 전체 17개를 5회씩 다시 실행하지 않았습니다. Task 7에서 스킬이나 어댑터 문구가 바뀌지 않았고, 1회 실행 코퍼스가 이미 엄격 지원 기준에 실패했기 때문입니다. 전체 transcript, 재실행, scorecard, checksum은 [`evals/results/with-skill.md`](evals/results/with-skill.md)에 있습니다.
+역사적인 Codex standalone 결과 **7/17**은 지원 근거가 아닙니다. 봉인된 Codex-with-Superpowers v0.3.1 증거는 오래된 1회 실행 결과를 대체합니다. 선택된 85개 런타임 출력은 모두 통과했지만, 결정적인 기계 검사 1건이 검증을 막습니다. 최종 보고서, controller, scorecard, manifest, raw transcript, 인용문이 묶인 adjudication은 [`evals/results/installed-v0.3.1/report.md`](evals/results/installed-v0.3.1/report.md)와 [`evals/results/installed-v0.3.1/adjudication.json`](evals/results/installed-v0.3.1/adjudication.json)에 보존되어 있습니다.
+
+### 봉인된 v0.3.1 평가 증거
+
+아래 표는 변경 불가능한 최종 평가 증거를 기록합니다. 이 표가 출시 상태를 verified로 승격하지는 않습니다.
+
+| Evidence key | Sealed value |
+| --- | --- |
+| release | 0.3.1 |
+| composition | Codex with Superpowers |
+| Codex client | codex-cli 0.148.0-alpha.21 |
+| RIR plugin | requirements-impact-refiner@requirements-impact-refiner-v031-eval |
+| model / reasoning | gpt-5.6-sol / high |
+| runtime outcomes | 85/85 pass; 85 attempt 1 selections; no retries |
+| mechanical score | 84/85; one failure: POS-cache repetition 2 |
+| human adjudication | 400/400 passed; every adjudication quote is bound to its selected final output |
+| release status | not verified; one mechanical verification blocker |
+| Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
+
+정확한 플러그인 식별자는 `requirements-impact-refiner@requirements-impact-refiner-v031-eval`입니다. 이는 isolated local evaluation-only marketplace 별칭이며 not a public install ID or support claim입니다. 상위 marketplace 이름이 의도적으로 다르므로 wrapper 파일만 제외했고, 모든 기능 payload 구성요소의 바이트는 봉인된 [installed payload](evals/results/installed-v0.3.1/installed-payload.json) 인벤토리에서 일치합니다. v0.3.1 manifest digest는 `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d`이며 raw transcript 인벤토리는 바이트 보존 및 비밀정보 검사를 유지합니다. 유일한 기계 실패는 `POS-cache` 반복 2에서 잘못된 Impact Ledger 행과 알 수 없는 `IMP-002` 참조를 정확히 기록합니다. 400건의 사람 adjudication은 모두 통과했고 각 인용문이 선택된 최종 출력의 부분 문자열인지 확인했습니다. Claude 증거는 structural-only이며 차단된 동작 호환성 상태를 바꾸지 않습니다.
 
 ## 7. 비교와 비목표
 
@@ -141,7 +160,7 @@ Superpowers는 아이디어 구상, 계획, 실행, 디버깅, 리뷰의 오케�
 
 핵심 평가는 25/25가 아니라 **24/25**입니다. 알려진 단일 확률적 실패 `POS-payments-5`는 사용자가 재시도 정책을 고르기 전에 reconcile-before-retry 방식을 요구사항에 포함했습니다. 최종 체크리스트가 이 패턴을 다루지만 허용된 수정 라운드를 모두 사용했으므로 한계를 그대로 공개합니다. 별도의 워크플로 연동 최종 구성은 **30/30**입니다. 이 점수는 기록된 Codex 평가 도구의 결과이며 테스트하지 않은 클라이언트로 일반화하면 안 됩니다.
 
-더 넓은 Task 7 출시 평가는 클라이언트 지원이라는 추론을 허용하지 않습니다. Codex standalone은 엄격 평가 **7/17**, Codex with Superpowers는 **10/17**로 실패했습니다. 각각 사례당 선택된 결과가 1개뿐이라 runbook의 5회 지원 기준에도 미달합니다. 따라서 이번 출시 근거로는 두 환경 모두 검증되거나 지원된다고 할 수 없습니다.
+더 넓은 출시 기록은 클라이언트 지원을 추론하지 않습니다. Codex standalone은 엄격 평가 **7/17**에 실패했습니다. Codex with Superpowers는 전체 5회 반복, 85개 최종 v0.3.1 배치를 완료했지만 85/85 런타임 및 400/400 adjudication 수치에도 불구하고 `POS-cache` 반복 2의 기계 실패가 출시 차단 요인이므로 계속 `not verified`입니다.
 
 스킬은 검사 범위 밖의 영향을 놓칠 수 있습니다. 해결되지 않거나 `deferred`, `blocked`, `accepted`된 위험을 계획 과정에서도 유지하고, 중요한 동작은 적절한 사람의 검토와 테스트로 검증해야 합니다.
 

@@ -1,0 +1,3 @@
+I can’t perform the review because the supplied evidence is missing: the workspace is empty, isn’t a Git repository, and contains no diff.
+
+Please paste or reattach the complete diff, and I’ll return prioritized correctness findings with file and line references.

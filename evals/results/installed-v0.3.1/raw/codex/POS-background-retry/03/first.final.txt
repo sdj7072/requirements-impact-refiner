@@ -1,0 +1,101 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Retry failed export jobs forever. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Remove the five-attempt terminal retry limit so failed export jobs continue retrying without an attempt cap, while preserving the deterministic object key and operational alert coverage; the alert signal after the fifth failure remains to be selected. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Each export writes to a deterministic object key. | `verified` | User-supplied repository evidence: exports write to a deterministic object key. |
+| `INV-002` | Worker retries stop after five attempts. | `verified` | User-supplied repository evidence: worker retries currently stop after five attempts. |
+| `INV-003` | Operational alerts consume `dead_letter` events. | `verified` | User-supplied repository evidence: alerts consume dead_letter events. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | User-supplied repository evidence: deterministic object key. |
+| `INV-003` | `REQ-001` | `IMP-002`, `IMP-004` | User-supplied repository evidence: alerts consume dead_letter events. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | data | high | detected | inferred | A deterministic object key limits duplicate object paths, but the supplied evidence does not establish that repeated writes or other export side effects are idempotent. | `INV-001` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | interfaces | critical | refining | verified | Removing terminal exhaustion changes whether or when `dead_letter` is emitted, while alerts consume that event. | `INV-003` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | state/concurrency | critical | blocked | unknown | Queue implementation, backoff, persistence, concurrency limits, and poison-job handling are unavailable because the repository contains no files. | `INV-002` | the pending decision | `AC-003` |
+| `IMP-004` | `REQ-001` | regression | medium | blocked | unknown | Worker and alert tests cannot be inspected because the repository contains no files. | `INV-002`, `INV-003` | the pending decision | `AC-004` |
+| `IMP-005` | `REQ-001` | functionality | high | detected | unknown | The request does not specify whether explicit operator cancellation, export deletion, or supersession may terminate an otherwise unbounded retry lifecycle. | `INV-002` | the pending decision | `AC-005` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| What should alerting consume once failed exports no longer enter a terminal dead-letter state after five attempts? | Emit a new nonterminal `export_retry_stalled` event at the fifth failure and update alerts to consume it. | `IMP-002`, `IMP-004` | Preserves job-level alerting with accurate semantics, but requires an event-contract and alert-consumer migration. |
+| What should alerting consume once failed exports no longer enter a terminal dead-letter state after five attempts? | Continue emitting `dead_letter` at the fifth failure as a notification while the job keeps retrying. | `IMP-002`, `IMP-004` | Avoids an immediate alert-consumer change, but changes `dead_letter` from terminal to nonterminal and may mislead other consumers. |
+| What should alerting consume once failed exports no longer enter a terminal dead-letter state after five attempts? | Replace the event alert with retry-age or attempt-count monitoring. | `IMP-002`, `IMP-004` | Avoids redefining an event, but requires new telemetry and may lose per-job context. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement records the unbounded retry request, deterministic object-key constraint, and alert dependency. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Repeated failures and eventual success for one export produce only the deterministic target object and no duplicate externally visible export side effects. | Future integration test with forced failures before a successful write; side-effect inventory remains a coverage gap. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-003` | On the fifth and later failures, the job remains retryable and the selected signal causes the existing operational alert outcome without incorrectly claiming terminal failure. | Future worker/event/alert integration test after the pending decision. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | A permanently failing export continues to be scheduled with bounded resource use and without starving a healthy export, under documented backoff and concurrency limits. | Future queue integration or load test; queue configuration and implementation must first be supplied. |
+| `AC-004` | `REQ-001` | `IMP-004` | `INV-003` | Regression tests demonstrate retries beyond attempt five and verify the selected alert behavior. | Future worker and alert test suites; current tests unavailable. |
+| `AC-005` | `REQ-001` | `IMP-005` | `INV-002` | Tests define and verify the permitted terminal transitions, if any, for cancellation, deletion, or supersession while ordinary failures retain no attempt cap. | Future lifecycle tests after termination semantics are clarified. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-003` | blocked | Repository queue implementation, retry schedule, persistence, and capacity controls are unavailable. | none | Repository maintainer to provide the worker and queue configuration. |
+| `IMP-004` | blocked | Repository worker and alert tests are unavailable. | none | Repository maintainer to provide the test and alert configuration paths. |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The workspace is empty, so inspection is limited to the three repository facts supplied in the request. No v0.3 predecessor report was available. | Deterministic object key, five-attempt cap, and `dead_letter` alert dependency supplied by the user; workspace file listing returned no files. | Direct impacts on those facts are verified, but queue, event-consumer, idempotency, lifecycle, and test details remain inferred or unknown. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending alert-signal decision is selected and blocked repository evidence is supplied. | `REQ-001`, `INV-001`, `INV-002`, `INV-003`, `IMP-001`, `IMP-002`, `IMP-003`, `IMP-004`, `IMP-005` | Alert contract choice, queue resource behavior, full-attempt idempotency, lifecycle termination semantics, and unavailable regression coverage. | `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005` | Not ready |

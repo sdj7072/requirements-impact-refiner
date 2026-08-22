@@ -1,0 +1,3 @@
+I’m missing the product idea: the “Repository evidence” section is blank, and the repository is empty.
+
+Please paste the product idea—even one sentence is enough. I’ll turn it into a complete PRD covering goals, users, use cases, requirements, UX flows, data/technical impacts, metrics, rollout, risks, and acceptance criteria.

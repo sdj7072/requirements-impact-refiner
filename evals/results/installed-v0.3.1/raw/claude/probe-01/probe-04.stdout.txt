@@ -1,0 +1,5 @@
+Configured marketplaces:
+
+  ❯ requirements-impact-refiner
+    Source: Directory (/Users/p042890/Documents/Codex/2026-08-12/new-chat-3/.worktrees/cross-client-eval-harness)
+

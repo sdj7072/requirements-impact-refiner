@@ -1,0 +1,103 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| RPT-001 | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| REQ-001 | Delete an account immediately. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| REQ-001 | Delete an account immediately while preserving invoices subject to the invoice.account_id RESTRICT constraint, complying with the 30-day finance retention requirement, and retaining the background-worker cleanup path. The observable meaning of “immediately” remains to be selected. | the pending decision | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | An account row referenced by an invoice cannot be physically deleted while the reference remains. | verified | invoice.account_id — RESTRICT, supplied repository evidence. |
+| INV-002 | Finance records must be retained for 30 days. | verified | privacy.md — 30-day finance retention requirement, supplied repository evidence. |
+| INV-003 | Account cleanup is performed by a background-worker consumer. | verified | Account cleanup background-worker consumer, supplied repository evidence. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | REQ-001 | IMP-001, IMP-003 | invoice.account_id — RESTRICT. |
+| INV-002 | REQ-001 | IMP-002, IMP-004 | privacy.md — 30-day finance retention requirement. |
+| INV-003 | REQ-001 | IMP-003, IMP-005 | Supplied background-worker consumption constraint. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | REQ-001 | data | critical | detected | verified | Immediate physical deletion of a referenced account conflicts with invoice.account_id RESTRICT. | INV-001 | the pending decision | AC-001 |
+| IMP-002 | REQ-001 | legal/policy | critical | detected | verified | Purging retained finance records before day 30 conflicts with privacy.md. | INV-002 | the pending decision | AC-002 |
+| IMP-003 | REQ-001 | state/concurrency | critical | refining | inferred | A background-worker cleanup path cannot by itself guarantee synchronous physical completion; the request-time state and worker handoff need an explicit contract. | INV-001, INV-003 | the pending decision | AC-003 |
+| IMP-004 | REQ-001 | authorization/privacy | high | blocked | unknown | Authentication, session revocation, and visibility paths were not provided, so immediate loss of access and exposure cannot be verified. | INV-002 | the pending decision | AC-004 |
+| IMP-005 | REQ-001 | regression | medium | blocked | unknown | No repository files or tests are available to establish deletion, retention, retry, and idempotency coverage. | INV-003 | the pending decision | AC-005 |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| What must “immediately” mean for account deletion? | Immediate logical deletion (recommended): revoke access and hide the account in the request, retain the account and finance records for 30 days, then let the worker hard-delete them. | IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 | Smallest schema impact and preserves the worker, but the account row and permitted retained data still exist during the retention window. |
+| What must “immediately” mean for account deletion? | Immediate anonymized deletion: revoke access and erase or anonymize non-finance personal data in the request, retain only the minimum account tombstone and finance records for 30 days, then let the worker purge them. | IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 | Stronger immediate privacy outcome, but requires precise data-classification and anonymization design. |
+| What must “immediately” mean for account deletion? | Immediate physical account-row deletion: first redesign invoices to reference an independent retained finance subject, then delete the account synchronously while the worker handles remaining retention cleanup. | IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 | Matches literal physical deletion, but requires a schema migration and substantially increases integrity, rollout, and rollback risk. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| REQ-001 | 1 | the pending decision | none | Initial refinement adds the supplied database, retention, and worker constraints; immediate deletion semantics remain open. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| AC-001 | REQ-001 | IMP-001 | INV-001 | A deletion request completes without a foreign-key violation while any retained invoice still references the account or its approved replacement finance subject. | Future integration test against the RESTRICT constraint. |
+| AC-002 | REQ-001 | IMP-002 | INV-002 | Required finance records remain available only to authorized finance or audit paths through the 30-day retention window and become purge-eligible when it expires. | Future retention-boundary and authorization tests derived from privacy.md. |
+| AC-003 | REQ-001 | IMP-003 | INV-003 | The request-time deletion state and worker handoff are atomic or recoverable, and duplicate or retried jobs converge on the same final state. | Future transaction, retry, and idempotency tests. |
+| AC-004 | REQ-001 | IMP-004 | INV-002 | Immediately after a successful deletion response, the former account cannot authenticate, use an existing session, or appear in user-facing surfaces; retained finance data is accessible only for the documented retention purpose. | Future authentication, session, visibility, and authorization tests; current paths unavailable. |
+| AC-005 | REQ-001 | IMP-005 | INV-003 | Tests cover request success, retained-invoice handling, the day-30 boundary, worker retries, duplicate jobs, and partial-failure recovery. | Coverage gap until repository tests are available. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| IMP-004 | blocked | Authentication, session, and user-facing visibility implementations were not provided. | the pending decision | Repository owner |
+| IMP-005 | blocked | Repository source and tests were not available in the inspected workspace. | the pending decision | Repository owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The workspace contains no repository files; analysis is limited to the three supplied evidence statements. | Empty workspace plus supplied invoice.account_id RESTRICT, privacy.md retention, and background-worker facts. | The three stated constraints are treated as verified supplied evidence; endpoint, schema, worker, authorization, and test details beyond them remain inferred or unknown. |
+| No executable tests or schema were available. | Empty workspace. | Acceptance criteria are future targets, not verified coverage. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending definition of “immediately” is selected. | REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005 | The pending deletion-semantics decision plus blocked authorization and test evidence in IMP-004 and IMP-005. | AC-001, AC-002, AC-003, AC-004, AC-005 | Not ready |

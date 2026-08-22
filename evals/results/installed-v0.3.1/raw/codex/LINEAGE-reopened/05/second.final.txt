@@ -1,0 +1,92 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 2 | `574ebe253ceb2b11f8da90d57cf4725c2784604564fa7c1e7226e7cc7fc6a100` | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Remove the `profile.displayName` field. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Revision 2: retain the approved one-release preservation constraint and require compatibility for every known direct consumer or serializer, including the desktop profile cache, before removing `profile.displayName`; the desktop migration mechanism remains unselected. | the pending decision | Revision 1 compatibility finding |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Mobile clients consume `profile.displayName`. | `verified` | Supplied repository evidence—mobile clients consume `profile.displayName`. |
+| `INV-002` | The desktop profile cache serializes `profile.displayName` directly. | `verified` | `desktop/ProfileCache.swift`—supplied repository evidence identifies direct serialization of `profile.displayName`. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Supplied approved migration evidence—the field is preserved for one release for known mobile consumers. |
+| `INV-002` | `REQ-001` | `IMP-001` | `desktop/ProfileCache.swift`—the serialized profile representation directly includes `profile.displayName`. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `compatibility` | `high` | `refining` | `verified` | The predecessor resolved compatibility based on mobile consumption and a one-release preservation window. New supplied evidence from `desktop/ProfileCache.swift` shows a second client directly serializes the field; the existing window does not establish persisted-cache read, write, upgrade, or downgrade compatibility after removal. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| How should desktop serialized-cache compatibility be handled before `profile.displayName` is removed? | Extend field preservation until both mobile migration and desktop cache migration are verified. | `IMP-001` | Strongest compatibility guarantee, but the removal date may move beyond the previously approved one-release window. |
+| How should desktop serialized-cache compatibility be handled before `profile.displayName` is removed? | Keep the one-release window and add a versioned desktop cache adapter or migration within that release. | `IMP-001` | Preserves the removal schedule, but adds migration implementation and upgrade/downgrade testing. |
+| How should desktop serialized-cache compatibility be handled before `profile.displayName` is removed? | Keep the one-release removal schedule without a desktop cache migration and explicitly accept the residual risk. | `IMP-001` | Lowest implementation effort, but older or downgraded desktop clients may fail to read or reproduce cached profiles correctly. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | `IMP-001` |
+| new | none |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1—add a one-release compatibility window before field removal. | Prior approved migration | none | Preserved `profile.displayName` for known mobile consumers during the approved migration release. |
+| `REQ-001` | 2—reassess compatibility for direct desktop serialization. | the pending decision | none | Reopened `IMP-001` because the one-release preservation evidence does not establish desktop serialized-cache compatibility. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | For the applicable compatibility window, profile responses continue to include `profile.displayName`, and existing mobile clients can consume it successfully. | Future compatibility test or release verification covering an existing mobile-client decoder against the migration-release profile response. |
+| `AC-002` | `REQ-001` | `IMP-001` | `INV-002` | Desktop cache data written before and during the field-removal transition remains readable across supported upgrade and downgrade paths, without schema failure or unintended profile-data loss. | Future desktop cache round-trip and version-transition tests exercising `desktop/ProfileCache.swift`. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Assessment covers the exact predecessor bytes and supplied repository evidence; the desktop source body and executable compatibility tests are not present in the workspace. | `first.final.txt` SHA-256 `574ebe253ceb2b11f8da90d57cf4725c2784604564fa7c1e7226e7cc7fc6a100`; supplied evidence for `desktop/ProfileCache.swift`. | Direct serialization is verified from the supplied evidence, but the compatible migration mechanics and implementation conformance remain unverified. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending desktop serialized-cache compatibility decision is selected for `REQ-001`. | `RPT-001`, `REQ-001`, `INV-001`, `INV-002`, `IMP-001` | The pending decision must resolve or explicitly accept reopened `IMP-001`. | `AC-001`, `AC-002` | Not ready |

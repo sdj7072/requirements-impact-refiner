@@ -12,15 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Run standard-library tests
         run: python3 -m unittest discover -s tests -v
-      - name: Compile report tools
+      - name: Compile report tools and evaluation harness
         run: |
           python3 -m py_compile skills/requirements-impact-refiner/scripts/impact_report.py
           python3 -m py_compile skills/requirements-impact-refiner/scripts/validate-impact-report.py
+          python3 -m compileall -q evals/harness
       - name: Check unfinished markers
         run: |
           if grep -RInE '\[([T]ODO|[T]BD):|<place''holder>' skills .codex-plugin .claude-plugin README*.md; then

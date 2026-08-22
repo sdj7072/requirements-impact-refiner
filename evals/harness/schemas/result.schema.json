@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Installed plugin evaluation result",
+  "$ref": "#/$defs/runResult",
+  "$defs": {
+    "commandResult": {
+      "type": "object",
+      "required": ["argv", "returncode", "stdout", "stderr", "elapsed_seconds", "timed_out"],
+      "additionalProperties": false,
+      "properties": {
+        "argv": { "type": "array", "items": { "type": "string" } },
+        "returncode": { "type": ["integer", "null"] },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "elapsed_seconds": { "type": "number", "minimum": 0 },
+        "timed_out": { "type": "boolean" }
+      }
+    },
+    "clientProbe": {
+      "type": "object",
+      "required": ["client", "available", "version", "authenticated", "plugin_version", "enabled_plugins", "capabilities", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "client": { "type": "string", "minLength": 1 },
+        "available": { "type": "boolean" },
+        "version": { "type": ["string", "null"] },
+        "authenticated": { "type": ["boolean", "null"] },
+        "plugin_version": { "type": ["string", "null"] },
+        "enabled_plugins": { "type": "array", "items": { "type": "string" } },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "reason": { "type": ["string", "null"] }
+      }
+    },
+    "runResult": {
+      "type": "object",
+      "required": ["case_id", "repetition", "client", "status", "reason", "command", "final_output", "session_id", "metadata", "attempt", "retry_of"],
+      "additionalProperties": false,
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "repetition": { "type": "integer", "minimum": 1 },
+        "client": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["pass", "partial", "fail", "blocked", "infra_error", "invalid_evidence"]
+        },
+        "reason": { "type": ["string", "null"] },
+        "command": { "anyOf": [{ "$ref": "#/$defs/commandResult" }, { "type": "null" }] },
+        "final_output": { "type": ["string", "null"] },
+        "session_id": { "type": ["string", "null"] },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "retry_of": { "type": ["string", "null"] },
+        "metadata": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "mechanicalScore": {
+      "type": "object",
+      "required": ["case_id", "repetition", "passed", "findings"],
+      "additionalProperties": false,
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "repetition": { "type": "integer", "minimum": 1 },
+        "passed": { "type": "boolean" },
+        "findings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "adjudication": {
+      "type": "object",
+      "required": ["case_id", "repetition", "rubric", "passed", "quote", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "repetition": { "type": "integer", "minimum": 1 },
+        "rubric": { "type": "string", "minLength": 1 },
+        "passed": { "type": "boolean" },
+        "quote": { "type": "string" },
+        "rationale": { "type": "string" }
+      }
+    }
+  }
+}

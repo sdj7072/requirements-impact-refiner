@@ -1,0 +1,86 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | post-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Remove the `profile.displayName` field. | User request. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Remove `profile.displayName` only after preserving it for one release as the approved client-compatibility window. | `DEC-001` | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Mobile clients consume `profile.displayName`. | `verified` | Repository evidence supplied in the request — mobile clients consume `profile.displayName`. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Approved migration evidence supplied in the request — the field remains available for one release. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `compatibility` | `critical` | `resolved` | `verified` | Mobile clients consume `profile.displayName`; the approved migration preserves the field for one release, eliminating immediate removal during the compatibility window. | `INV-001` | `DEC-001` | `AC-001` |
+
+## Decisions and Accepted Risks
+
+| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |
+| --- | --- | --- | --- | --- |
+| `DEC-001` | Preserve `profile.displayName` for one release, then remove it. | `REQ-001` | none | The approved migration provides a compatibility window for known mobile consumers and resolves the immediate client compatibility impact. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | Revision 1 — compatibility-window refinement. | `DEC-001` | none | The field-removal requirement now preserves `profile.displayName` for one release before removal. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | For the full approved compatibility release, profile responses consumed by supported mobile clients continue to include `displayName`; removal occurs only after that release. | Future compatibility test or release-contract inspection; no test execution evidence was supplied. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Assessment is limited to the two repository-evidence statements supplied in the request; repository files and tests were not available in the workspace. | Known mobile consumption of `profile.displayName` and the approved one-release preservation migration. | The compatibility resolution is supported by the supplied evidence, while implementation and test coverage still require verification against the repository. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Remove `profile.displayName` after one release of compatibility preservation. | `RPT-001`, `REQ-001`, `INV-001`, `IMP-001`, `DEC-001` | No accepted, deferred, or blocked impacts; repository implementation and test coverage remain to be verified. | `AC-001` | Generic planning |

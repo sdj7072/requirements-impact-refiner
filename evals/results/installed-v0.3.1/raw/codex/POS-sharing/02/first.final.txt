@@ -1,0 +1,108 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| RPT-001 | 1 | none | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| REQ-001 | Make shared links permanent. | User request, with supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| REQ-001 | Shared links must not stop working merely because seven days elapse; their behavior after permission changes and signing-key rotations must be made explicit. | — | — |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| INV-001 | Share tokens expire after seven days. | verified | User-supplied repository evidence — share-token lifetime. |
+| INV-002 | Permission changes revoke active share tokens. | verified | User-supplied repository evidence — permission-change invalidation. |
+| INV-003 | Token-signing keys rotate every 90 days. | verified | User-supplied repository evidence — signing-key rotation cadence. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| INV-002 | REQ-001, unless the pending decision explicitly changes the authorization contract. | IMP-002, IMP-004 | Current permission changes revoke active tokens. |
+| INV-003 | REQ-001 must remain compatible with regular signing-key rotation. | IMP-003, IMP-004, IMP-005 | Keys currently rotate every 90 days. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| IMP-001 | REQ-001 | functionality | high | refining | verified | The seven-day expiry is the behavior REQ-001 changes. | INV-001 | the pending decision | AC-001 |
+| IMP-002 | REQ-001 | authorization/privacy | critical | refining | verified | Permission changes currently revoke tokens; “permanent” does not specify whether this remains true. | INV-002 | the pending decision | AC-002 |
+| IMP-003 | REQ-001 | compatibility | critical | refining | inferred | Tokens lasting beyond 90 days must remain verifiable across key rotations; verification code is unavailable. | INV-003 | the pending decision | AC-003 |
+| IMP-004 | REQ-001 | authorization/privacy | high | detected | inferred | Indefinitely usable tokens or trusted historical keys increase exposure after link or key compromise. | INV-002, INV-003 | the pending decision | AC-004 |
+| IMP-005 | REQ-001 | data | high | blocked | unknown | The workspace is empty, so token format, persisted state, key identifiers, revocation records, and cleanup jobs cannot be inspected. | INV-002, INV-003 | the pending decision | AC-005 |
+| IMP-006 | REQ-001 | compatibility | medium | blocked | unknown | It is unspecified whether existing unexpired or expired links become permanent. | INV-001 | the pending decision | AC-006 |
+| IMP-007 | REQ-001 | regression | high | blocked | unknown | No tests are available for expiry, permission revocation, rotation, migration, or explicit revocation. | INV-001, INV-002, INV-003 | the pending decision | AC-007 |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which revocation contract should “permanent” shared links use? | A — Durable but revocable (recommended): time and key rotation never invalidate a link, while permission changes and explicit revocation still do. | IMP-001, IMP-002, IMP-003, IMP-004 | Preserves authorization and incident response; “permanent” means no scheduled expiry, not irrevocable. |
+| Which revocation contract should “permanent” shared links use? | B — Explicit-revocation only: time, key rotation, and permission changes do not invalidate a link; only revoking that specific link does. | IMP-001, IMP-002, IMP-003, IMP-004 | Link holders retain access after source permissions change; reliable per-link revocation and auditing become essential. |
+| Which revocation contract should “permanent” shared links use? | C — Immutable: no expiry or revocation, including after permission changes or key rotation. | IMP-001, IMP-002, IMP-003, IMP-004 | Maximizes permanence but prevents containment of leaked links and conflicts with current permission revocation. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, IMP-006, IMP-007 |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| REQ-001 | 1 | the pending decision | none | Initial refinement separates calendar lifetime from authorization revocation and key rotation. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| AC-001 | REQ-001 | IMP-001 | INV-001 | A shared link remains usable more than seven days after issuance when no selected revocation condition occurs. | Future clock-controlled integration test. |
+| AC-002 | REQ-001 | IMP-002 | INV-002 | A permission change produces the selected allow-or-deny result for every active shared link. | Future authorization integration test. |
+| AC-003 | REQ-001 | IMP-003 | INV-003 | A valid link continues working after at least one signing-key rotation unless a selected revocation condition occurs. | Future rotation integration test. |
+| AC-004 | REQ-001 | IMP-004 | INV-002, INV-003 | Link and key compromise can be contained according to documented, tested procedures with audit visibility. | Future security tests and operational review. |
+| AC-005 | REQ-001 | IMP-005 | INV-002, INV-003 | Token storage, verification, key history, revocation state, and cleanup support the selected contract. | Repository inspection required. |
+| AC-006 | REQ-001 | IMP-006 | INV-001 | Behavior is specified and tested separately for new, unexpired, and already-expired links. | Future migration specification and tests. |
+| AC-007 | REQ-001 | IMP-007 | INV-001, INV-002, INV-003 | Automated tests cover lifetime, permission semantics, rotation, explicit revocation, and migration. | Test suite unavailable. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| IMP-005 | blocked | Repository implementation is absent; token and key mechanics are unknown. | the pending decision | Repository owner |
+| IMP-006 | blocked | Existing-link migration scope is unspecified. | the pending decision | Product owner |
+| IMP-007 | blocked | Repository tests are absent. | the pending decision | Repository owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Repository workspace contains no files. | Empty workspace and the three supplied evidence statements. | Implementation-specific impacts remain inferred or unknown. |
+| External policy and incident-response requirements were not supplied. | No policy artifact available. | Compliance and recovery obligations cannot yet be assessed. |
+| Report structure and lifecycle delta were validated deterministically. | Requirements-impact-refiner v0.3 validator. | Structural confidence is high; evidence confidence is limited by the empty workspace. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until option A, B, or C is selected. | RPT-001, REQ-001, INV-001, INV-002, INV-003, IMP-001 through IMP-007 | Permission semantics, compromise containment, token/key architecture, existing-link migration, and missing tests. | AC-001 through AC-007 | Not ready |

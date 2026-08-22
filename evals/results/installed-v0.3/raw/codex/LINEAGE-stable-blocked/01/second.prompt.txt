@@ -1,0 +1,5 @@
+Continue the same export report. No new repository evidence or decision has been supplied; keep the report at its current lifecycle state.
+
+Repository evidence:
+- the prior report text is supplied verbatim
+- no retention owner confirmation exists
