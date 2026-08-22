@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 import subprocess
 import unittest
@@ -22,10 +23,10 @@ INSTALLED_CACHE_ROOT = Path(
 )
 PAYLOAD_SOURCE = "/private/tmp/rir-v031-eval-marketplace"
 PAYLOAD_ALIAS = "requirements-impact-refiner@requirements-impact-refiner-v031-eval"
-CANONICAL_RELEASE_COMMIT = "06c76bc59089f86fee38cb370628893b47082b0e"
+CANONICAL_RELEASE_COMMIT = "d92ad185ebbb722cd30fc0c720a86e411bec3462"
 
 EXPECTED_MANIFEST_SHA256 = (
-    "716fbf0f19b0c5ef30a0279cfe66c9ec2a7793bd69791b129b66be249b33d8f6"
+    "8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d"
 )
 FINAL_CASE_IDS = tuple(
     case.id for case in select_suite(load_all(), "installed-superpowers")
@@ -85,6 +86,36 @@ def functional_payload_inventory(root):
     ]
 
 
+def functional_payload_paths(root):
+    return [row["path"] for row in functional_payload_inventory(root)]
+
+
+def commit_payload_inventory(commit, paths):
+    """Read every functional payload byte from the pinned commit, not a host cache."""
+    rows = []
+    for relative in paths:
+        shown = subprocess.run(
+            ["git", "show", f"{commit}:{relative}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        )
+        rows.append(
+            {"path": relative, "sha256": hashlib.sha256(shown.stdout).hexdigest()}
+        )
+    return rows
+
+
+def optional_installed_cache_inventory(payload, verify_cache):
+    """Read the host cache only after an explicit local verification opt-in."""
+    if not verify_cache:
+        return None
+    cache_root = Path(payload["installed_cache_root"])
+    if not cache_root.is_dir():
+        raise FileNotFoundError(cache_root)
+    return functional_payload_inventory(cache_root)
+
+
 def inventory_digest(rows):
     return hashlib.sha256(
         "".join(f"{row['path']} {row['sha256']}\n" for row in rows).encode("utf-8")
@@ -120,8 +151,9 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
     def test_installed_alias_payload_is_sealed_and_matches_the_canonical_release_bytes(self):
         """Catch an alias cache that evaluates different functional bytes than v0.3.1."""
         payload = load_json(INSTALLED_PAYLOAD)
-        canonical_inventory = functional_payload_inventory(ROOT)
-        installed_inventory = functional_payload_inventory(INSTALLED_CACHE_ROOT)
+        paths = functional_payload_paths(ROOT)
+        basis_inventory = commit_payload_inventory(CANONICAL_RELEASE_COMMIT, paths)
+        current_inventory = functional_payload_inventory(ROOT)
 
         self.assertEqual(payload["source_type"], "local")
         self.assertEqual(payload["source"], PAYLOAD_SOURCE)
@@ -135,9 +167,26 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
                 "reason": "top-level marketplace name intentionally differs for isolated local evaluation",
             },
         )
-        self.assertEqual(payload["inventory"], canonical_inventory)
-        self.assertEqual(payload["inventory"], installed_inventory)
-        self.assertEqual(payload["inventory_sha256"], inventory_digest(canonical_inventory))
+        self.assertEqual(len(paths), 31)
+        self.assertEqual(payload["inventory"], basis_inventory)
+        self.assertEqual(payload["inventory"], current_inventory)
+        self.assertEqual(payload["inventory_sha256"], inventory_digest(basis_inventory))
+        self.assertEqual(
+            payload["installed_cache_comparison"],
+            {"files_compared": 31, "mismatches": []},
+        )
+        installed_inventory = optional_installed_cache_inventory(
+            payload, os.environ.get("RIR_VERIFY_INSTALLED_CACHE") == "1"
+        )
+        if installed_inventory is not None:
+            self.assertEqual(payload["inventory"], installed_inventory)
+
+    def test_installed_cache_verification_is_opt_in_and_portable_when_absent(self):
+        """Catch a default test path that reads a developer-local installed cache."""
+        payload = {"installed_cache_root": "/definitely-absent-rir-cache"}
+        self.assertIsNone(optional_installed_cache_inventory(payload, False))
+        with self.assertRaises(FileNotFoundError):
+            optional_installed_cache_inventory(payload, True)
 
     def test_manifest_and_raw_transcripts_are_sealed_safe_and_byte_preserved(self):
         """Pin all final v0.3.1 bytes, including Git's raw-transcript treatment."""

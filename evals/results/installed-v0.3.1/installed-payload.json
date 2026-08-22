@@ -5,7 +5,7 @@
   "alias_id": "requirements-impact-refiner@requirements-impact-refiner-v031-eval",
   "installed_cache_root": "/Users/p042890/.codex/plugins/cache/requirements-impact-refiner-v031-eval/requirements-impact-refiner/0.3.1",
   "canonical_release": "0.3.1",
-  "canonical_commit_basis": "06c76bc59089f86fee38cb370628893b47082b0e",
+  "canonical_commit_basis": "d92ad185ebbb722cd30fc0c720a86e411bec3462",
   "excluded_alias_wrapper": {"path": ".agents/plugins/marketplace.json", "reason": "top-level marketplace name intentionally differs for isolated local evaluation"},
   "inventory": [
     {"path": ".claude-plugin/plugin.json", "sha256": "b55af02e30a482c3c1d6a3bb4f38a678cc8a473abcd37bf353b1e1ab32e8ee56"},
@@ -40,5 +40,9 @@
     {"path": "skills/requirements-impact-refiner/scripts/validate-impact-report.py", "sha256": "d47dee7afb35c4e59546ea95759d1c38f34edd2669a63dad3aa4039480ca4958"},
     {"path": "skills/using-requirements-impact-refiner/SKILL.md", "sha256": "69235fb3bc763a7b397a44fa063fc86a1afdd7779c6b2f874b285791236a4324"}
   ],
-  "inventory_sha256": "3abbd92e09941de594a424bda0293a424dff010c5ac7e9d511fdcc2c0c23ce2b"
+  "inventory_sha256": "3abbd92e09941de594a424bda0293a424dff010c5ac7e9d511fdcc2c0c23ce2b",
+  "installed_cache_comparison": {
+    "files_compared": 31,
+    "mismatches": []
+  }
 }

@@ -146,7 +146,7 @@ Revision 1 の基準報告では両方の影響を `new` とします。次の�
 | release status | not verified; one mechanical verification blocker |
 | Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-正確なプラグイン識別子は `requirements-impact-refiner@requirements-impact-refiner-v031-eval` です。これは isolated local evaluation-only marketplace の別名であり、not a public install ID or support claim です。最上位 marketplace 名は意図的に異なるため wrapper ファイルだけを除外し、すべての機能 payload コンポーネントのバイトは封印済み [installed payload](evals/results/installed-v0.3.1/installed-payload.json) インベントリで一致しています。v0.3.1 manifest digest は `716fbf0f19b0c5ef30a0279cfe66c9ec2a7793bd69791b129b66be249b33d8f6` であり、raw transcript のインベントリはバイト保存と秘密情報スキャンを維持します。唯一の機械的失敗は `POS-cache` repetition 2 の不正な Impact Ledger 行と unknown `IMP-002` 参照を正確に記録します。400 件の人手 adjudication はすべて合格し、各引用が選択された最終出力の部分文字列であることを確認しています。Claude の証拠は structural-only であり、blocked の動作互換性状態を変更しません。
+正確なプラグイン識別子は `requirements-impact-refiner@requirements-impact-refiner-v031-eval` です。これは isolated local evaluation-only marketplace の別名であり、not a public install ID or support claim です。最上位 marketplace 名は意図的に異なるため wrapper ファイルだけを除外し、すべての機能 payload コンポーネントのバイトは封印済み [installed payload](evals/results/installed-v0.3.1/installed-payload.json) インベントリで一致しています。v0.3.1 manifest digest は `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d` であり、raw transcript のインベントリはバイト保存と秘密情報スキャンを維持します。唯一の機械的失敗は `POS-cache` repetition 2 の不正な Impact Ledger 行と unknown `IMP-002` 参照を正確に記録します。400 件の人手 adjudication はすべて合格し、各引用が選択された最終出力の部分文字列であることを確認しています。Claude の証拠は structural-only であり、blocked の動作互換性状態を変更しません。
 
 ## 7. 比較と非目標
 
