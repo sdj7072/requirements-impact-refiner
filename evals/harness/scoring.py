@@ -20,20 +20,16 @@ _REPORT_WORKFLOW = re.compile(
     r"|\b(?:begin|start|activate|perform)\s+(?:the\s+)?impact refinement\b",
     re.IGNORECASE,
 )
-_COMPLETED_BRAINSTORMING = re.compile(
-    r"\bafter\s+(?:(?:the\s+)?approved|superpowers)\s+brainstorming\b"
-    r"|\bbrainstorming\s+(?:is|was)\s+complete\b"
-    r"|\bbrainstorming\s+has\s+been\s+completed\b",
-    re.IGNORECASE,
-)
-_BEFORE_WRITING_PLANS = re.compile(r"\bbefore\s+(?:the\s+)?writing-plans\b", re.IGNORECASE)
 _AUTOMATIC_WRITING_PLANS = re.compile(
-    r"\bautomatically\s+(?:invoke|invokes|start|starts|run|runs|activate|activates)\s+writing-plans\b"
-    r"|\b(?:invoke|invokes|start|starts|run|runs|activate|activates)\s+writing-plans\s+automatically\b",
+    r"\bautomatically\s+invok(?:e|es|ed|ing)\s+writing-plans\b"
+    r"|\binvok(?:e|es|ed|ing)\s+writing-plans\s+automatically\b"
+    r"|\bwriting-plans\s+(?:is|will\s+be)\s+invoked\s+automatically\b",
     re.IGNORECASE,
 )
-_NON_AFFIRMATIVE_PREFIX = re.compile(
-    r"(?:\bfalse\s+that|\bnot|\bnever|\bif|\bunless|\bbefore)\s+$",
+_DENIED_AUTOMATIC_WRITING_PLANS = re.compile(
+    r"\bdoes\s+not\s+automatically\s+invoke\s+writing-plans\b"
+    r"|\bnever\s+automatically\s+invokes?\s+writing-plans\b"
+    r"|\bwithout\s+automatically\s+invoking\s+writing-plans\b",
     re.IGNORECASE,
 )
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
@@ -89,13 +85,21 @@ def _has_report_shape(output: str) -> bool:
     return bool(re.search(r"(?m)^#\s+Requirements Impact Report\s*$", output))
 
 
-def _has_affirmative_match(pattern: re.Pattern, output: str) -> bool:
-    """Accept a boundary only when its matched clause is not negated/conditional."""
-    for match in pattern.finditer(output):
-        prefix = output[max(0, match.start() - 64) : match.start()]
-        if not _NON_AFFIRMATIVE_PREFIX.search(prefix):
-            return True
-    return False
+def _planning_handoff_workflow(output: str) -> Optional[str]:
+    """Read the exact canonical Planning Handoff workflow cell."""
+    parsed, parse_errors = _VALIDATOR.parse_report(output)
+    if parse_errors:
+        return None
+    rows = parsed.tables.get("Planning Handoff", ())
+    if len(rows) != 1:
+        return None
+    return _REPORT_MODEL.unquote(rows[0].get("Selected planning workflow", ""))
+
+
+def _has_automatic_writing_plans_contradiction(output: str) -> bool:
+    """Reject affirmative active/passive auto-invocation while allowing exact denials."""
+    without_denials = _DENIED_AUTOMATIC_WRITING_PLANS.sub("", output)
+    return bool(_AUTOMATIC_WRITING_PLANS.search(without_denials))
 
 
 def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
@@ -161,11 +165,14 @@ def score_mechanical(
         findings.extend(_complete_report_errors(output, previous_bytes))
 
     if case.id == "INT-superpowers":
-        if not _has_affirmative_match(_COMPLETED_BRAINSTORMING, output):
-            findings.append("INT-superpowers requires entry after approved brainstorming")
-        if not _has_affirmative_match(_BEFORE_WRITING_PLANS, output):
-            findings.append("INT-superpowers requires exit before writing-plans")
-        if _has_affirmative_match(_AUTOMATIC_WRITING_PLANS, output):
+        if (
+            _planning_handoff_workflow(output)
+            != _REPORT_MODEL.SUPERPOWERS_HANDOFF_MARKER
+        ):
+            findings.append(
+                "INT-superpowers requires the exact structured Planning Handoff marker"
+            )
+        if _has_automatic_writing_plans_contradiction(output):
             findings.append("INT-superpowers forbids automatic writing-plans")
 
     if case.kind == "lineage":

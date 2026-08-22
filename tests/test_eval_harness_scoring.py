@@ -56,6 +56,15 @@ REPORT_METADATA = {
     "reasoning": "high",
     "repetitions": 5,
 }
+SUPERPOWERS_HANDOFF_MARKER = (
+    "superpowers:after-approved-brainstorming;impact-refinement;"
+    "manual-handoff-before-writing-plans"
+)
+
+
+def superpowers_report(workflow=SUPERPOWERS_HANDOFF_MARKER, statement=""):
+    report = VALID_REPORT.replace("Existing planning workflow", workflow, 1)
+    return report + ("\n" + statement if statement else "")
 
 
 def complete_matrix():
@@ -194,11 +203,14 @@ class EvalHarnessScoringTest(unittest.TestCase):
         )
 
         self.assertFalse(score.passed)
-        self.assertIn("INT-superpowers requires exit before writing-plans", score.findings)
+        self.assertIn(
+            "INT-superpowers requires the exact structured Planning Handoff marker",
+            score.findings,
+        )
         self.assertIn("INT-superpowers forbids automatic writing-plans", score.findings)
 
-    def test_superpowers_accepts_catalog_equivalent_completed_boundaries(self):
-        """Rejecting an equivalent completed-brainstorming phrase would under-score evidence."""
+    def test_superpowers_free_text_boundaries_never_replace_the_structured_marker(self):
+        """Plausible prose cannot establish the exact cross-workflow ownership contract."""
         phrases = (
             "after approved brainstorming",
             "after Superpowers brainstorming",
@@ -217,7 +229,47 @@ class EvalHarnessScoringTest(unittest.TestCase):
                         "%s; refinement exits before writing-plans." % phrase,
                     ),
                 )
-                self.assertTrue(score.passed, score.findings)
+                self.assertFalse(score.passed)
+                self.assertIn(
+                    "INT-superpowers requires the exact structured Planning Handoff marker",
+                    score.findings,
+                )
+
+    def test_superpowers_exact_structured_handoff_marker_passes(self):
+        """The exact workflow cell encodes selection, entry, exit, and manual handoff."""
+        score = score_mechanical(
+            case("INT-superpowers", "integration"),
+            result(
+                "INT-superpowers",
+                RunStatus.PASS,
+                superpowers_report(),
+            ),
+        )
+
+        self.assertTrue(score.passed, score.findings)
+
+    def test_superpowers_missing_wrong_or_negated_marker_fails(self):
+        """Only the exact cell value may satisfy the structured boundary contract."""
+        workflows = (
+            "",
+            "superpowers",
+            "not " + SUPERPOWERS_HANDOFF_MARKER,
+        )
+        for workflow in workflows:
+            with self.subTest(workflow=workflow):
+                score = score_mechanical(
+                    case("INT-superpowers", "integration"),
+                    result(
+                        "INT-superpowers",
+                        RunStatus.PASS,
+                        superpowers_report(workflow),
+                    ),
+                )
+                self.assertFalse(score.passed)
+                self.assertIn(
+                    "INT-superpowers requires the exact structured Planning Handoff marker",
+                    score.findings,
+                )
 
     def test_superpowers_rejects_future_incomplete_or_reversed_brainstorming(self):
         """A phrase about a future or incomplete gate must not count as completed entry."""
@@ -242,7 +294,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
                 )
                 self.assertFalse(score.passed)
                 self.assertIn(
-                    "INT-superpowers requires entry after approved brainstorming",
+                    "INT-superpowers requires the exact structured Planning Handoff marker",
                     score.findings,
                 )
 
@@ -259,22 +311,51 @@ class EvalHarnessScoringTest(unittest.TestCase):
 
         self.assertFalse(score.passed)
         self.assertIn(
-            "INT-superpowers requires exit before writing-plans", score.findings
+            "INT-superpowers requires the exact structured Planning Handoff marker",
+            score.findings,
         )
 
     def test_superpowers_accepts_explicit_denial_of_automatic_planning(self):
         """Saying automatic invocation will not occur is evidence of the prohibition."""
-        score = score_mechanical(
-            case("INT-superpowers", "integration"),
-            result(
-                "INT-superpowers",
-                RunStatus.PASS,
-                "Brainstorming is complete; refinement exits before writing-plans "
-                "and does not automatically invoke writing-plans.",
-            ),
+        statements = (
+            "The adapter does not automatically invoke writing-plans.",
+            "The adapter never automatically invokes writing-plans.",
+            "Exit occurs without automatically invoking writing-plans.",
         )
+        for statement in statements:
+            with self.subTest(statement=statement):
+                score = score_mechanical(
+                    case("INT-superpowers", "integration"),
+                    result(
+                        "INT-superpowers",
+                        RunStatus.PASS,
+                        superpowers_report(statement=statement),
+                    ),
+                )
+                self.assertTrue(score.passed, score.findings)
 
-        self.assertTrue(score.passed, score.findings)
+    def test_superpowers_rejects_active_and_passive_automatic_invocation(self):
+        """A correct marker cannot override a contradictory automatic handoff claim."""
+        statements = (
+            "The adapter automatically invokes writing-plans.",
+            "The adapter will automatically invoke writing-plans.",
+            "Writing-plans is invoked automatically.",
+        )
+        for statement in statements:
+            with self.subTest(statement=statement):
+                score = score_mechanical(
+                    case("INT-superpowers", "integration"),
+                    result(
+                        "INT-superpowers",
+                        RunStatus.PASS,
+                        superpowers_report(statement=statement),
+                    ),
+                )
+                self.assertFalse(score.passed)
+                self.assertIn(
+                    "INT-superpowers forbids automatic writing-plans",
+                    score.findings,
+                )
 
     def test_lineage_uses_exact_previous_bytes_for_canonical_validation(self):
         """Reconstructing predecessor bytes would break the immutable lineage digest contract."""

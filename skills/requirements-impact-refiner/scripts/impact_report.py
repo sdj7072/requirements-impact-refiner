@@ -49,6 +49,10 @@ STATE_TO_DELTA = {
     "blocked": "blocked",
     "superseded": "superseded",
 }
+SUPERPOWERS_HANDOFF_MARKER = (
+    "superpowers:after-approved-brainstorming;impact-refinement;"
+    "manual-handoff-before-writing-plans"
+)
 
 
 @dataclass(frozen=True)
@@ -338,14 +342,22 @@ def validate_handoff_semantics(report: ParsedReport) -> list[str]:
         if not present(row.get(column, "")):
             errors.append(f"Planning Handoff requires {column}")
     workflow = unquote(row.get("Selected planning workflow", "")).lower()
-    if report.metadata and report.metadata.phase == "pre-decision" and workflow != "not ready":
+    not_ready_workflows = {"not ready", SUPERPOWERS_HANDOFF_MARKER}
+    if (
+        report.metadata
+        and report.metadata.phase == "pre-decision"
+        and workflow not in not_ready_workflows
+    ):
         errors.append("pre-decision Planning Handoff workflow must be Not ready")
     impact_rows = report.tables.get("Impact Ledger", ())
     states = {
         entity_id(impact, "ID", "unknown impact"): unquote(impact.get("State", "")).lower()
         for impact in impact_rows
     }
-    if any(state == "blocked" for state in states.values()) and workflow != "not ready":
+    if (
+        any(state == "blocked" for state in states.values())
+        and workflow not in not_ready_workflows
+    ):
         errors.append("blocked impacts require Planning Handoff workflow Not ready")
     remaining = references(row.get("Remaining risks", ""), "IMP-")
     for impact_id, state in states.items():

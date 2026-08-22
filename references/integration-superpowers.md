@@ -12,6 +12,8 @@ The adapter does not repeat general clarification already completed. The impact 
 
 Return the canonical impact report, including its `Planning Handoff`; it is not an implementation plan. Preserve the approved design as the requirement baseline.
 
+In the single `Planning Handoff` row, set `Selected planning workflow` exactly to `superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans`. Do not decorate, translate, negate, or extend this marker. It records that Superpowers is selected, brainstorming approval precedes impact refinement, the report exits before `writing-plans`, and the handoff is manual rather than automatic. The marker does not claim implementation readiness: record not-ready state and its reason in `Refined requirement` and `Remaining risks`.
+
 ## Exit
 
 Exit before `writing-plans`. Hand off the report without invoking `writing-plans` or authoring its work breakdown.
