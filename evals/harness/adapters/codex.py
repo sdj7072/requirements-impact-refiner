@@ -78,13 +78,20 @@ class CodexAdapter(ClientAdapter):
         return tuple(command)
 
     def build_resume_command(
-        self, request: RunRequest, thread_id: str, turn: CaseTurn, final_path: Path
+        self,
+        request: RunRequest,
+        thread_id: str,
+        turn: CaseTurn,
+        final_path: Path,
+        rendered_prompt: Optional[str] = None,
     ) -> Tuple[str, ...]:
         """Resume the exact session emitted by the supplied persisted turn."""
         if not isinstance(thread_id, str) or not _UUID.fullmatch(thread_id):
             raise ValueError("thread_id must be a parsed UUID")
         if not isinstance(turn, CaseTurn):
             raise TypeError("turn must be a CaseTurn")
+        if rendered_prompt is not None and not isinstance(rendered_prompt, str):
+            raise TypeError("rendered_prompt must be a string")
         return (
             self.executable,
             "exec",
@@ -94,7 +101,7 @@ class CodexAdapter(ClientAdapter):
             "-o",
             str(final_path),
             thread_id,
-            self._resume_prompt(turn),
+            self._resume_prompt(turn) if rendered_prompt is None else rendered_prompt,
         )
 
     def parse_thread_id(self, jsonl: str) -> Optional[str]:
@@ -195,9 +202,15 @@ class CodexAdapter(ClientAdapter):
 
             second_turn = request.case.turns[1]
             second_final = temporary_root / "second.final.txt"
-            second_prompt = self._turn_prompt(second_turn.prompt, second_turn.repository_evidence)
+            second_prompt = self._resume_prompt(second_turn)
             second_command = run_command(
-                self.build_resume_command(request, thread_id, second_turn, second_final),
+                self.build_resume_command(
+                    request,
+                    thread_id,
+                    second_turn,
+                    second_final,
+                    rendered_prompt=second_prompt,
+                ),
                 temporary_root,
                 self.timeout_seconds,
             )

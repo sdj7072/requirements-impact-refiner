@@ -339,6 +339,9 @@ class CodexAdapterTest(unittest.TestCase):
                     os.environ["FAKE_CODEX_LOG"] = original_log
 
             commands = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+            persisted_second_prompt = (
+                request.output_root / "codex" / request.case.id / "01" / "second.prompt.txt"
+            ).read_text(encoding="utf-8")
 
         execution_commands = [command for command in commands if command[0] == "exec"]
         self.assertEqual(result.status, RunStatus.PASS)
@@ -478,6 +481,9 @@ class CodexAdapterTest(unittest.TestCase):
                     os.environ["FAKE_CODEX_LOG"] = original_log
 
             commands = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+            persisted_second_prompt = (
+                request.output_root / "codex" / request.case.id / "01" / "second.prompt.txt"
+            ).read_text(encoding="utf-8")
 
         execution_commands = [command for command in commands if command[0] == "exec"]
         self.assertEqual(result.status, RunStatus.PASS)
@@ -488,6 +494,8 @@ class CodexAdapterTest(unittest.TestCase):
             "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
             "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; do not reconstruct it from conversation text or add, remove, or normalize bytes.",
         )
+        self.assertEqual(persisted_second_prompt, execution_commands[1][-1])
+        self.assertEqual(persisted_second_prompt.count("Harness continuity evidence:"), 1)
 
     def test_execute_leaves_exact_first_final_artifact_for_resume(self):
         with tempfile.TemporaryDirectory() as temporary:
