@@ -20,16 +20,17 @@ _REPORT_WORKFLOW = re.compile(
     r"|\b(?:begin|start|activate|perform)\s+(?:the\s+)?impact refinement\b",
     re.IGNORECASE,
 )
-_AUTOMATIC_WRITING_PLANS = re.compile(
-    r"\bautomatically\s+invok(?:e|es|ed|ing)\s+writing-plans\b"
-    r"|\binvok(?:e|es|ed|ing)\s+writing-plans\s+automatically\b"
-    r"|\bwriting-plans\s+(?:is|will\s+be)\s+invoked\s+automatically\b",
+_CLAUSE_BOUNDARY = re.compile(r"[|;\n]+|(?<=[.!?])\s+")
+_AUTOMATIC_TERM = re.compile(r"\bautomatic(?:ally)?\b", re.IGNORECASE)
+_WRITING_PLANS_TERM = re.compile(r"\bwriting-plans\b", re.IGNORECASE)
+_PLANNING_ACTION = re.compile(
+    r"\b(?:invok(?:e|es|ed|ing)|invocation|start(?:s|ed|ing)?|"
+    r"trigger(?:s|ed|ing)?|run|runs|ran|running|launch(?:es|ed|ing)?|"
+    r"call(?:s|ed|ing)?)\b",
     re.IGNORECASE,
 )
-_DENIED_AUTOMATIC_WRITING_PLANS = re.compile(
-    r"\bdoes\s+not\s+automatically\s+invoke\s+writing-plans\b"
-    r"|\bnever\s+automatically\s+invokes?\s+writing-plans\b"
-    r"|\bwithout\s+automatically\s+invoking\s+writing-plans\b",
+_AUTOMATIC_DENIAL = re.compile(
+    r"\b(?:not|never|without)\b|\bmanual\s+handoff\b",
     re.IGNORECASE,
 )
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
@@ -97,9 +98,16 @@ def _planning_handoff_workflow(output: str) -> Optional[str]:
 
 
 def _has_automatic_writing_plans_contradiction(output: str) -> bool:
-    """Reject affirmative active/passive auto-invocation while allowing exact denials."""
-    without_denials = _DENIED_AUTOMATIC_WRITING_PLANS.sub("", output)
-    return bool(_AUTOMATIC_WRITING_PLANS.search(without_denials))
+    """Detect automatic planning semantically within one bounded clause."""
+    for clause in _CLAUSE_BOUNDARY.split(output):
+        if (
+            _AUTOMATIC_TERM.search(clause)
+            and _WRITING_PLANS_TERM.search(clause)
+            and _PLANNING_ACTION.search(clause)
+            and not _AUTOMATIC_DENIAL.search(clause)
+        ):
+            return True
+    return False
 
 
 def _lineage_findings(case: CaseSpec, output: str) -> List[str]:

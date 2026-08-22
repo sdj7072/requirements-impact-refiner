@@ -319,8 +319,12 @@ class EvalHarnessScoringTest(unittest.TestCase):
         """Saying automatic invocation will not occur is evidence of the prohibition."""
         statements = (
             "The adapter does not automatically invoke writing-plans.",
+            "The adapter will not automatically invoke writing-plans.",
+            "The adapter must not automatically start writing-plans.",
             "The adapter never automatically invokes writing-plans.",
             "Exit occurs without automatically invoking writing-plans.",
+            "Writing-plans is not automatically triggered.",
+            "Manual handoff calls writing-plans automatically only after user action.",
         )
         for statement in statements:
             with self.subTest(statement=statement):
@@ -340,6 +344,37 @@ class EvalHarnessScoringTest(unittest.TestCase):
             "The adapter automatically invokes writing-plans.",
             "The adapter will automatically invoke writing-plans.",
             "Writing-plans is invoked automatically.",
+            "Writing-plans is automatically invoked.",
+            "The adapter automatically starts writing-plans.",
+            "Writing-plans was automatically started.",
+            "Automatic invocation of writing-plans is enabled.",
+            "Writing-plans will be automatically triggered.",
+            "The adapter calls writing-plans automatically.",
+            "Writing-plans ran automatically.",
+            "Writing-plans is automatically launched.",
+        )
+        for statement in statements:
+            with self.subTest(statement=statement):
+                score = score_mechanical(
+                    case("INT-superpowers", "integration"),
+                    result(
+                        "INT-superpowers",
+                        RunStatus.PASS,
+                        superpowers_report(statement=statement),
+                    ),
+                )
+                self.assertFalse(score.passed)
+                self.assertIn(
+                    "INT-superpowers forbids automatic writing-plans",
+                    score.findings,
+                )
+
+    def test_superpowers_automatic_denial_must_be_in_the_same_clause(self):
+        """An unrelated negative or manual sentence cannot suppress an auto contradiction."""
+        statements = (
+            "Deployment is not blocked. The adapter automatically starts writing-plans.",
+            "Manual handoff is documented; the adapter automatically calls writing-plans.",
+            "The adapter never retries. Writing-plans is automatically invoked.",
         )
         for statement in statements:
             with self.subTest(statement=statement):
