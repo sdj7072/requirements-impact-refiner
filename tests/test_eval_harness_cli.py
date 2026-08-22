@@ -8,6 +8,7 @@ from evals.harness.catalog import load_all
 from evals.harness.evidence import record_run, verify_manifest
 from evals.harness.models import ClientProbe, CommandResult, RunResult, RunStatus
 from evals.harness.run import build_parser, build_schedule, create_adapter, run_batch, run_probe
+from tests.test_report_lineage import next_report, report_with_state
 
 
 class FakeAdapter:
@@ -24,6 +25,8 @@ class FakeAdapter:
         result_metadata=(),
         available=True,
         reason=None,
+        raw_final_output=None,
+        raw_previous_bytes=None,
     ):
         self.statuses = list(statuses)
         self.requests = []
@@ -36,6 +39,8 @@ class FakeAdapter:
         self.result_metadata = result_metadata
         self.available = available
         self.reason = reason
+        self.raw_final_output = raw_final_output
+        self.raw_previous_bytes = raw_previous_bytes
         self.probe_results = (
             CommandResult(("fake", "--version"), 0, "fake 1.0", "", 0.0, False),
         )
@@ -58,25 +63,115 @@ class FakeAdapter:
 
     def execute(self, request):
         self.requests.append(request)
+        status = self.statuses.pop(0) if self.statuses else RunStatus.PASS
+        final_output = "synthetic final output"
         if self.record_evidence:
+            raw_final = (
+                final_output
+                if self.raw_final_output is None
+                else self.raw_final_output
+            )
+            artifacts = {
+                "adapter.txt": "synthetic evidence",
+                "metadata.json": json.dumps(
+                    {
+                        "attempt": request.attempt,
+                        "client": request.client,
+                        "retry_of": request.retry_of,
+                    },
+                    sort_keys=True,
+                ),
+                ("second.final.txt" if request.case.kind == "lineage" else "first.final.txt"): raw_final,
+            }
+            if request.case.kind == "lineage":
+                artifacts["first.final.txt"] = (
+                    b"synthetic predecessor"
+                    if self.raw_previous_bytes is None
+                    else self.raw_previous_bytes
+                )
             record_run(
                 request.output_root,
                 request.client,
                 request.case.id,
                 request.repetition,
-                {"adapter.txt": "synthetic evidence"},
+                artifacts,
                 request.output_root.parent / "quarantine",
                 attempt=request.attempt,
             )
-        status = self.statuses.pop(0) if self.statuses else RunStatus.PASS
         return RunResult(
             case_id=request.case.id,
             repetition=request.repetition,
             client=request.client,
             status=status,
             reason="synthetic infrastructure issue" if status is RunStatus.INFRA_ERROR else None,
-            final_output="synthetic final output",
+            final_output=final_output,
             session_id="123e4567-e89b-12d3-a456-426614174000" if len(request.case.turns) > 1 else None,
+            attempt=request.attempt,
+            retry_of=request.retry_of,
+            metadata=self.result_metadata,
+        )
+
+
+class LineageEvidenceAdapter(FakeAdapter):
+    """Produces distinct valid lineage bytes for every case/repetition attempt."""
+
+    def __init__(self, retry_lineage_case=None):
+        super().__init__()
+        self.retry_lineage_case = retry_lineage_case
+        self.retried = False
+
+    def execute(self, request):
+        if (
+            request.case.id == self.retry_lineage_case
+            and request.attempt == 1
+            and not self.retried
+        ):
+            self.retried = True
+            self.statuses.insert(0, RunStatus.INFRA_ERROR)
+            return super().execute(request)
+        if request.case.kind != "lineage":
+            return super().execute(request)
+
+        self.requests.append(request)
+        transition = {
+            "LINEAGE-stable-blocked": ("blocked", "blocked", "unchanged"),
+            "LINEAGE-reopened": ("resolved", "refining", "reopened"),
+            "LINEAGE-no-false-resolution": ("refining", "refining", "unchanged"),
+        }[request.case.id]
+        previous_state, current_state, delta = transition
+        previous = report_with_state(previous_state) + ("\n" * request.repetition)
+        current = next_report(
+            previous,
+            report_with_state(current_state, delta),
+        )
+        record_run(
+            request.output_root,
+            request.client,
+            request.case.id,
+            request.repetition,
+            {
+                "metadata.json": json.dumps(
+                    {
+                        "attempt": request.attempt,
+                        "client": request.client,
+                        "retry_of": request.retry_of,
+                    },
+                    sort_keys=True,
+                ),
+                "first.final.txt": previous.encode("utf-8"),
+                "second.final.txt": current.encode("utf-8"),
+            },
+            request.output_root.parent / "quarantine",
+            attempt=request.attempt,
+        )
+        return RunResult(
+            case_id=request.case.id,
+            repetition=request.repetition,
+            client=request.client,
+            status=RunStatus.PASS,
+            reason=None,
+            final_output=current,
+            session_id="123e4567-e89b-12d3-a456-426614174000",
             attempt=request.attempt,
             retry_of=request.retry_of,
             metadata=self.result_metadata,
@@ -243,6 +338,141 @@ class EvalHarnessCliTest(unittest.TestCase):
 
         self.assertEqual(len(ledger["mechanical_scores"]), 6)
         self.assertIn("- status: not verified", report)
+
+    def test_selected_raw_final_must_equal_the_controller_final_output(self):
+        """A controller string detached from sealed final bytes cannot be scored."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+
+            exit_code = run_batch(
+                args, FakeAdapter(raw_final_output="different sealed bytes")
+            )
+            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(
+            any(
+                "selected final output does not match raw evidence" in finding
+                for row in ledger["mechanical_scores"]
+                for finding in row["findings"]
+            )
+        )
+
+    def test_lineage_non_utf8_predecessor_invalidates_scoring_evidence(self):
+        """Replacement decoding would sever the SHA from the exact predecessor bytes."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+
+            exit_code = run_batch(
+                args, FakeAdapter(raw_previous_bytes=b"\xff")
+            )
+            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
+
+        lineage = [
+            row for row in ledger["mechanical_scores"]
+            if row["case_id"].startswith("LINEAGE-")
+        ]
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(lineage)
+        self.assertTrue(
+            all("lineage predecessor is not valid UTF-8" in row["findings"] for row in lineage)
+        )
+
+    def test_selected_final_symlink_invalidates_scoring_evidence(self):
+        """Following a selected-output symlink could score bytes outside the attempt."""
+        class SymlinkAdapter(FakeAdapter):
+            def execute(self, request):
+                result = super().execute(request)
+                attempt_path = (
+                    request.output_root
+                    / request.client
+                    / request.case.id
+                    / ("%02d" % request.repetition)
+                )
+                if request.attempt != 1:
+                    attempt_path = attempt_path / ("attempt-%02d" % request.attempt)
+                selected = attempt_path / (
+                    "second.final.txt" if request.case.kind == "lineage" else "first.final.txt"
+                )
+                target = attempt_path / "symlink-target.txt"
+                target.write_text(result.final_output or "", encoding="utf-8")
+                selected.unlink()
+                selected.symlink_to(target.name)
+                return result
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+
+            exit_code = run_batch(args, SymlinkAdapter())
+            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(
+            all(
+                "selected final output must be a regular non-symlink file" in row["findings"]
+                for row in ledger["mechanical_scores"]
+            )
+        )
+
+    def test_lineage_scoring_uses_selected_retry_attempt_directory(self):
+        """A retry must bind both lineage turns to attempt-02, never the failed base attempt."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+
+            exit_code = run_batch(
+                args,
+                LineageEvidenceAdapter(retry_lineage_case="LINEAGE-stable-blocked"),
+            )
+            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
+
+        selected = next(
+            row for row in ledger["runs"]
+            if row["case_id"] == "LINEAGE-stable-blocked"
+        )
+        score = next(
+            row for row in ledger["mechanical_scores"]
+            if row["case_id"] == "LINEAGE-stable-blocked"
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(selected["selected_attempt"], 2)
+        self.assertTrue(score["passed"], score["findings"])
+
+    def test_smoke_to_full_lineage_scoring_isolated_by_repetition(self):
+        """Every expanded repetition must use its own first-turn predecessor bytes."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            smoke = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+            full = build_parser().parse_args(
+                [
+                    "--client", "codex", "--suite", "installed-superpowers",
+                    "--repetitions", "5", "--output", str(output),
+                ]
+            )
+
+            self.assertEqual(run_batch(smoke, LineageEvidenceAdapter()), 0)
+            self.assertEqual(run_batch(full, LineageEvidenceAdapter()), 0)
+            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
+
+        lineage = [
+            row for row in ledger["mechanical_scores"]
+            if row["case_id"].startswith("LINEAGE-")
+        ]
+        self.assertEqual(len(lineage), 15)
+        self.assertTrue(all(row["passed"] for row in lineage), lineage)
 
     def test_smoke_batch_expands_to_the_missing_full_matrix_slots(self):
         """Treating smoke finals as foreign would rerun six sealed final keys."""

@@ -12,6 +12,7 @@ from evals.harness.models import (
 )
 from evals.harness.reporting import render_report, summarize
 from evals.harness.scoring import score_mechanical, validate_adjudications
+from tests.test_report_lineage import next_report, report_with_state
 from tests.test_validate_impact_report import PRE_DECISION_REPORT, VALID_REPORT
 
 
@@ -195,6 +196,88 @@ class EvalHarnessScoringTest(unittest.TestCase):
         self.assertFalse(score.passed)
         self.assertIn("INT-superpowers requires exit before writing-plans", score.findings)
         self.assertIn("INT-superpowers forbids automatic writing-plans", score.findings)
+
+    def test_superpowers_accepts_catalog_equivalent_completed_boundaries(self):
+        """Rejecting an equivalent completed-brainstorming phrase would under-score evidence."""
+        phrases = (
+            "after approved brainstorming",
+            "after Superpowers brainstorming",
+            "brainstorming is complete",
+            "brainstorming was complete",
+            "brainstorming has been completed",
+        )
+
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                score = score_mechanical(
+                    case("INT-superpowers", "integration"),
+                    result(
+                        "INT-superpowers",
+                        RunStatus.PASS,
+                        "%s; refinement exits before writing-plans." % phrase,
+                    ),
+                )
+                self.assertTrue(score.passed, score.findings)
+
+    def test_superpowers_rejects_future_incomplete_or_reversed_brainstorming(self):
+        """A phrase about a future or incomplete gate must not count as completed entry."""
+        phrases = (
+            "brainstorming is not complete",
+            "before brainstorming is complete",
+            "we will start brainstorming",
+        )
+
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                score = score_mechanical(
+                    case("INT-superpowers", "integration"),
+                    result(
+                        "INT-superpowers",
+                        RunStatus.PASS,
+                        "%s; refinement exits before writing-plans." % phrase,
+                    ),
+                )
+                self.assertFalse(score.passed)
+                self.assertIn(
+                    "INT-superpowers requires entry after approved brainstorming",
+                    score.findings,
+                )
+
+    def test_lineage_uses_exact_previous_bytes_for_canonical_validation(self):
+        """Reconstructing predecessor bytes would break the immutable lineage digest contract."""
+        previous = report_with_state("blocked")
+        current = next_report(previous, report_with_state("blocked", "unchanged"))
+
+        exact = score_mechanical(
+            case("LINEAGE-stable-blocked", "lineage", "unchanged"),
+            result("LINEAGE-stable-blocked", RunStatus.PASS, current),
+            previous_bytes=previous.encode("utf-8"),
+        )
+        changed = score_mechanical(
+            case("LINEAGE-stable-blocked", "lineage", "unchanged"),
+            result("LINEAGE-stable-blocked", RunStatus.PASS, current),
+            previous_bytes=(previous + "\n").encode("utf-8"),
+        )
+
+        self.assertTrue(exact.passed, exact.findings)
+        self.assertFalse(changed.passed)
+        self.assertIn(
+            "Previous SHA-256 does not match predecessor bytes", changed.findings
+        )
+
+    def test_lineage_rejects_non_utf8_previous_bytes_without_replacement(self):
+        """Replacement decoding could validate bytes other than the sealed predecessor."""
+        previous = report_with_state("blocked")
+        current = next_report(previous, report_with_state("blocked", "unchanged"))
+
+        score = score_mechanical(
+            case("LINEAGE-stable-blocked", "lineage", "unchanged"),
+            result("LINEAGE-stable-blocked", RunStatus.PASS, current),
+            previous_bytes=b"\xff",
+        )
+
+        self.assertFalse(score.passed)
+        self.assertIn("lineage predecessor is not valid UTF-8", score.findings)
 
     def test_lineage_rejected_case_cannot_resolve_an_unsupported_impact(self):
         """An unsupported resolution must fail the rejection lineage contract."""

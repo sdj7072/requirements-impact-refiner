@@ -20,8 +20,18 @@ _REPORT_WORKFLOW = re.compile(
     r"|\b(?:begin|start|activate|perform)\s+(?:the\s+)?impact refinement\b",
     re.IGNORECASE,
 )
-_AFTER_BRAINSTORMING = re.compile(
-    r"\bafter\s+(?:the\s+)?approved\s+brainstorming\b", re.IGNORECASE
+_COMPLETED_BRAINSTORMING = re.compile(
+    r"\bafter\s+(?:(?:the\s+)?approved|superpowers)\s+brainstorming\b"
+    r"|\bbrainstorming\s+(?:is|was)\s+complete\b"
+    r"|\bbrainstorming\s+has\s+been\s+completed\b",
+    re.IGNORECASE,
+)
+_INCOMPLETE_BRAINSTORMING = re.compile(
+    r"\bbrainstorming\s+(?:is|was)\s+not\s+complete\b"
+    r"|\bbefore\s+(?:the\s+)?(?:superpowers\s+)?brainstorming\b"
+    r"|\b(?:will|shall)\s+(?:begin|start)\s+(?:the\s+)?brainstorming\b"
+    r"|\bbrainstorming\s+(?:will|shall)\s+(?:begin|start)\b",
+    re.IGNORECASE,
 )
 _BEFORE_WRITING_PLANS = re.compile(r"\bbefore\s+(?:the\s+)?writing-plans\b", re.IGNORECASE)
 _AUTOMATIC_WRITING_PLANS = re.compile(
@@ -62,18 +72,18 @@ if _REPORT_MODEL is None:
 
 def _complete_report_errors(
     output: str,
-    previous_output: Optional[str],
     previous_bytes: Optional[bytes],
 ) -> List[str]:
     """Delegate complete report validation to the canonical implementation."""
-    if previous_output is None:
+    if previous_bytes is None:
         return list(_VALIDATOR.validate_report(output))
-    predecessor = previous_bytes
-    if predecessor is None:
-        predecessor = previous_output.encode("utf-8")
+    try:
+        previous_output = previous_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return ["lineage predecessor is not valid UTF-8"]
     return list(
         _VALIDATOR.validate_report(
-            output, previous_text=previous_output, previous_bytes=predecessor
+            output, previous_text=previous_output, previous_bytes=previous_bytes
         )
     )
 
@@ -113,14 +123,13 @@ def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
 def score_mechanical(
     case: CaseSpec,
     result: RunResult,
-    previous_output: Optional[str] = None,
     previous_bytes: Optional[bytes] = None,
 ) -> MechanicalScore:
     """Return a deterministic score for one recorded result.
 
-    ``previous_output`` and ``previous_bytes`` are supplied for the second
-    lineage turn when available.  They are intentionally optional so a raw
-    result remains scoreable while still failing a missing lineage contract.
+    ``previous_bytes`` must be the exact immutable first-turn artifact for a
+    lineage second turn.  It remains optional so an incomplete raw result can
+    still be scored as a mechanical failure.
     """
     findings: List[str] = []
     if result.case_id != case.id:
@@ -143,10 +152,13 @@ def score_mechanical(
     if requires_report and not _has_report_shape(output):
         findings.append("missing complete Requirements Impact Report")
     elif _has_report_shape(output):
-        findings.extend(_complete_report_errors(output, previous_output, previous_bytes))
+        findings.extend(_complete_report_errors(output, previous_bytes))
 
     if case.id == "INT-superpowers":
-        if not _AFTER_BRAINSTORMING.search(output):
+        if (
+            not _COMPLETED_BRAINSTORMING.search(output)
+            or _INCOMPLETE_BRAINSTORMING.search(output)
+        ):
             findings.append("INT-superpowers requires entry after approved brainstorming")
         if not _BEFORE_WRITING_PLANS.search(output):
             findings.append("INT-superpowers requires exit before writing-plans")
