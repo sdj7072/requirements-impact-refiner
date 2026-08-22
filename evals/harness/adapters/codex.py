@@ -16,6 +16,12 @@ _UUID = re.compile(
     r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
 )
 _COMPOSITION_LABEL = "Codex with Superpowers"
+_PREDECESSOR_HANDOFF = (
+    "Harness continuity evidence:\n"
+    "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
+    "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; "
+    "do not reconstruct it from conversation text or add, remove, or normalize bytes."
+)
 
 
 class CodexAdapter(ClientAdapter):
@@ -79,8 +85,6 @@ class CodexAdapter(ClientAdapter):
             raise ValueError("thread_id must be a parsed UUID")
         if not isinstance(turn, CaseTurn):
             raise TypeError("turn must be a CaseTurn")
-        prompt = turn.prompt
-        evidence = turn.repository_evidence
         return (
             self.executable,
             "exec",
@@ -90,7 +94,7 @@ class CodexAdapter(ClientAdapter):
             "-o",
             str(final_path),
             thread_id,
-            self._turn_prompt(prompt, evidence),
+            self._resume_prompt(turn),
         )
 
     def parse_thread_id(self, jsonl: str) -> Optional[str]:
@@ -337,6 +341,14 @@ class CodexAdapter(ClientAdapter):
         return "%s\n\nRepository evidence:\n%s" % (
             prompt,
             "\n".join("- %s" % item for item in repository_evidence),
+        )
+
+    @classmethod
+    def _resume_prompt(cls, turn: CaseTurn) -> str:
+        """Append environment continuity evidence without changing the case contract."""
+        return "%s\n\n%s" % (
+            cls._turn_prompt(turn.prompt, turn.repository_evidence),
+            _PREDECESSOR_HANDOFF,
         )
 
     @staticmethod

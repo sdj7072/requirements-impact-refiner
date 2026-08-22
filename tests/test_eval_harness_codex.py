@@ -121,6 +121,10 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "        if '--skip-git-repo-check' not in args:\n"
         "            print('missing isolated-workspace execution flag', file=sys.stderr)\n"
         "            sys.exit(24)\n"
+        "    if mode == 'require-predecessor-file' and args[0:2] == ['exec', 'resume']:\n"
+        "        if not os.path.isfile('first.final.txt'):\n"
+        "            print('missing exact predecessor artifact', file=sys.stderr)\n"
+        "            sys.exit(25)\n"
         "    if mode == 'reject-readonly-approval' and '-s' in args and 'read-only' in args and '--approve-for-me' in args:\n"
         "        print('error: --sandbox and --approve-for-me cannot be used together', file=sys.stderr)\n"
         "        sys.exit(2)\n"
@@ -191,7 +195,20 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(thread_id, UUID)
         self.assertEqual(
             argv,
-            ("codex", "exec", "resume", "--json", "--skip-git-repo-check", "-o", str(Path(temporary) / "FINAL"), UUID, "second turn\n\nRepository evidence:\n- src/example.py"),
+            (
+                "codex",
+                "exec",
+                "resume",
+                "--json",
+                "--skip-git-repo-check",
+                "-o",
+                str(Path(temporary) / "FINAL"),
+                UUID,
+                "second turn\n\nRepository evidence:\n- src/example.py"
+                "\n\nHarness continuity evidence:\n"
+                "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
+                "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; do not reconstruct it from conversation text or add, remove, or normalize bytes.",
+            ),
         )
         self.assertNotIn("--last", argv)
         self.assertNotIn("-m", argv)
@@ -408,7 +425,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertIn("read-only", execution_command)
         self.assertNotIn("--approve-for-me", execution_command)
 
-    def test_resume_renders_the_actual_second_turn_when_prompts_are_identical(self):
+    def test_resume_appends_handoff_after_exact_second_turn_request_and_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:
             request = make_request(
                 temporary,
@@ -423,7 +440,18 @@ class CodexAdapterTest(unittest.TestCase):
                 Path(temporary) / "FINAL",
             )
 
-        self.assertEqual(argv[-1], "same prompt\n\nRepository evidence:\n- supplied.py")
+        self.assertEqual(
+            argv[-1],
+            "same prompt\n\nRepository evidence:\n- supplied.py"
+            "\n\nHarness continuity evidence:\n"
+            "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
+            "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; do not reconstruct it from conversation text or add, remove, or normalize bytes.",
+        )
+        self.assertNotIn("must_detect", argv[-1])
+        self.assertNotIn("must_not_do", argv[-1])
+        self.assertNotIn("expected_transition", argv[-1])
+        self.assertNotIn("relevant impact", argv[-1])
+        self.assertNotIn("write implementation", argv[-1])
 
     def test_execute_uses_the_second_turn_evidence_when_prompts_are_identical(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -455,8 +483,23 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertEqual(
             execution_commands[1][-1],
-            "same prompt\n\nRepository evidence:\n- second.py",
+            "same prompt\n\nRepository evidence:\n- second.py"
+            "\n\nHarness continuity evidence:\n"
+            "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
+            "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; do not reconstruct it from conversation text or add, remove, or normalize bytes.",
         )
+
+    def test_execute_leaves_exact_first_final_artifact_for_resume(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, exec_mode="require-predecessor-file")
+            request = make_request(temporary, ("first turn", "second turn"))
+            result = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            ).execute(request)
+
+        self.assertEqual(result.status, RunStatus.PASS)
 
     def test_execute_classifies_bad_client_output_as_preserved_infra_error(self):
         for mode, reason in (

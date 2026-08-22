@@ -197,6 +197,13 @@ class DocumentationTest(unittest.TestCase):
             int(PRE_LIVE_CONTRACT["planned-live-finals"]),
         )
 
+    def test_runbook_records_exact_predecessor_handoff_without_rubric_disclosure(self):
+        text = (ROOT / "evals/runbook.md").read_text(encoding="utf-8")
+
+        self.assertIn("`first.final.txt`", text)
+        self.assertIn("exact bytes", text)
+        self.assertIn("does not expose a hidden rubric", text)
+
     def test_license_and_contributing_exist(self):
         self.assertIn("MIT License", (ROOT / "LICENSE").read_text(encoding="utf-8"))
         contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
