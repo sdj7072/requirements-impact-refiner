@@ -115,6 +115,27 @@ def assert_safe_ci_workflow(workflow_text):
         raise AssertionError("unsafe CI run command(s): %r" % (unsafe,))
 
 
+def checkout_step_inputs(workflow_text):
+    """Parse the checkout step's explicit inputs without executing CI commands."""
+    lines = workflow_text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != "- uses: actions/checkout@v4":
+            continue
+        inputs = {}
+        in_with_block = False
+        for nested in lines[index + 1 :]:
+            if nested.startswith("      - "):
+                break
+            if nested.strip() == "with:":
+                in_with_block = True
+                continue
+            match = re.match(r"^\s{10}(?P<key>[\w-]+):\s*(?P<value>\S+)\s*$", nested)
+            if in_with_block and match:
+                inputs[match.group("key")] = match.group("value")
+        return inputs
+    raise AssertionError("CI workflow is missing actions/checkout@v4")
+
+
 class PackagingTest(unittest.TestCase):
     def load(self, relative_path):
         return json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
@@ -339,6 +360,11 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("python3 -m unittest discover -s tests -v", workflow)
         self.assertIn("python3 -m compileall -q evals/harness", workflow)
         self.assertEqual(unsafe_ci_commands(workflow), ())
+
+    def test_ci_checkout_fetches_the_pinned_payload_commit(self):
+        """A shallow checkout cannot verify the sealed d92 payload basis in CI."""
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertEqual(checkout_step_inputs(workflow), {"fetch-depth": "0"})
 
     def test_ci_safety_rejects_live_client_mutations_in_run_steps(self):
         """Adding a live mutation/auth/model command must break CI safety."""
