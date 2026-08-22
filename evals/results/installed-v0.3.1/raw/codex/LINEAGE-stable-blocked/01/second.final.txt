@@ -1,0 +1,92 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 2 | 09095be4516b044c1ba3c5ced0b649d029062faa8db5a18aa15dff02928972d7 | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Record an impact assessment for a data export change; keep the report blocked until the export retention owner confirms the governing policy. | User request and supplied repository-evidence summary. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | 2 | the pending decision | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | Export files are written to the tenant archive. | `inferred` | Supplied repository-evidence summary: `exports.py` writes files to the tenant archive; no additional repository evidence was supplied. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | The data export change must account for the existing tenant-archive destination; retention semantics for that archive are not documented. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | legal/policy | critical | `blocked` | `unknown` | Retention ownership and policy are not documented; no export retention owner confirmation exists for the applicable retention period, deletion trigger, or exception handling. | `INV-001` | the pending decision | `AC-001` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which retention policy does the export retention owner confirm for files in the tenant archive? | Apply the existing tenant-archive retention schedule, with the owner identifying its authoritative policy reference, duration, and deletion trigger. | `IMP-001` | Reuses an existing policy if applicable, but may be invalid if exports require distinct legal or operational treatment. |
+| Which retention policy does the export retention owner confirm for files in the tenant archive? | Establish an export-specific retention schedule, with the owner defining its authoritative policy reference, duration, deletion trigger, and exceptions. | `IMP-001` | Makes export handling explicit, but adds a distinct policy and operational lifecycle to maintain. |
+| Which retention policy does the export retention owner confirm for files in the tenant archive? | Confirm policy-governed indefinite retention, including the authoritative basis, deletion exceptions, and required controls. | `IMP-001` | Avoids scheduled deletion but carries the highest storage, privacy, and compliance exposure. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | `IMP-001` |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | none |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement records the archive-write behavior and undocumented retention-ownership gap. |
+| `REQ-001` | 2 | the pending decision | none | No requirement, evidence, decision, or impact-state change; exact predecessor lineage is recorded. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Before planning or implementation, the export retention owner identifies the authoritative policy, retention duration, deletion trigger, exception handling, and confirms that it applies to export files in the tenant archive. | Written owner confirmation plus the cited policy reference; not yet available. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-001` | `blocked` | The applicable export retention policy, duration, deletion trigger, exceptions, and authoritative reference remain unknown; no retention owner confirmation exists. | the pending decision | Export retention owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Supplied repository evidence remains incomplete. | The prior user-provided summary names `exports.py` and the tenant archive; no new repository evidence was supplied. | Archive writing remains inferred; retention behavior and ownership remain unknown. |
+| Retention confirmation is unavailable. | The user explicitly states that no retention owner confirmation exists. | `IMP-001` remains blocked and `AC-001` remains an unverified future target. |
+| Exact predecessor lineage was available. | `first.final.txt`, 5,763 exact bytes; SHA-256 `09095be4516b044c1ba3c5ced0b649d029062faa8db5a18aa15dff02928972d7`. | Revision 2 lineage and the unchanged lifecycle transition were validated deterministically; this does not add retention-policy evidence. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the export retention owner confirms the policy governing export files in the tenant archive. | `REQ-001`, `INV-001`, `IMP-001` | `IMP-001`: retention duration, deletion trigger, exceptions, and authoritative ownership remain unknown. | `AC-001` | Not ready |

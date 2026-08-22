@@ -6,3 +6,4 @@ evals/results/with-skill-raw/** -text -whitespace
 evals/results/integration-raw/** -text
 evals/results/compatibility-raw/** -text
 evals/results/installed-v0.3/raw/** -text -whitespace
+evals/results/installed-v0.3.1/raw/** -text -whitespace

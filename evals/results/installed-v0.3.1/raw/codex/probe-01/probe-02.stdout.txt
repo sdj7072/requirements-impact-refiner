@@ -1,0 +1,263 @@
+{
+  "installed": [
+    {
+      "pluginId": "documents@openai-primary-runtime",
+      "name": "documents",
+      "marketplaceName": "openai-primary-runtime",
+      "version": "26.819.11345",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime/plugins/documents"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    },
+    {
+      "pluginId": "pdf@openai-primary-runtime",
+      "name": "pdf",
+      "marketplaceName": "openai-primary-runtime",
+      "version": "26.819.11345",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime/plugins/pdf"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    },
+    {
+      "pluginId": "spreadsheets@openai-primary-runtime",
+      "name": "spreadsheets",
+      "marketplaceName": "openai-primary-runtime",
+      "version": "26.819.11345",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime/plugins/spreadsheets"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    },
+    {
+      "pluginId": "presentations@openai-primary-runtime",
+      "name": "presentations",
+      "marketplaceName": "openai-primary-runtime",
+      "version": "26.819.11345",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime/plugins/presentations"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    },
+    {
+      "pluginId": "template-creator@openai-primary-runtime",
+      "name": "template-creator",
+      "marketplaceName": "openai-primary-runtime",
+      "version": "26.819.11345",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime/plugins/template-creator"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    },
+    {
+      "pluginId": "codex-app-tools@openai-bundled",
+      "name": "codex-app-tools",
+      "marketplaceName": "openai-bundled",
+      "version": "0.1.0",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/codex-app-tools"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "sites@openai-bundled",
+      "name": "sites",
+      "marketplaceName": "openai-bundled",
+      "version": "0.1.40",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/sites"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "browser@openai-bundled",
+      "name": "browser",
+      "marketplaceName": "openai-bundled",
+      "version": "26.818.21641",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/browser"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "chrome@openai-bundled",
+      "name": "chrome",
+      "marketplaceName": "openai-bundled",
+      "version": "26.818.21641",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/chrome"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "computer-use@openai-bundled",
+      "name": "computer-use",
+      "marketplaceName": "openai-bundled",
+      "version": "1.0.1000790",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/computer-use"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "visualize@openai-bundled",
+      "name": "visualize",
+      "marketplaceName": "openai-bundled",
+      "version": "1.0.22",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/visualize"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/.codex/.tmp/bundled-marketplaces/openai-bundled"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "google-calendar@openai-curated",
+      "name": "google-calendar",
+      "marketplaceName": "openai-curated",
+      "version": "11c74d6b",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/plugins/plugins/google-calendar"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "slack@openai-curated",
+      "name": "slack",
+      "marketplaceName": "openai-curated",
+      "version": "11c74d6b",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/plugins/plugins/slack"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "superpowers@openai-curated",
+      "name": "superpowers",
+      "marketplaceName": "openai-curated",
+      "version": "11c74d6b",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/.codex/.tmp/plugins/plugins/superpowers"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "requirements-impact-refiner@requirements-impact-refiner",
+      "name": "requirements-impact-refiner",
+      "marketplaceName": "requirements-impact-refiner",
+      "version": "0.3.1",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "local",
+        "path": "/Users/p042890/Documents/Codex/2026-08-12/new-chat-3/.worktrees/cross-client-eval-harness"
+      },
+      "marketplaceSource": {
+        "sourceType": "local",
+        "source": "/Users/p042890/Documents/Codex/2026-08-12/new-chat-3/.worktrees/cross-client-eval-harness"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    }
+  ],
+  "available": []
+}

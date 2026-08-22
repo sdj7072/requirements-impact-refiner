@@ -1,0 +1,100 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 2 | a2f7115f32c3248151d3cd667368331f55924f2c1f46079ac32855c2acc8100e | pre-decision |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Change webhook delivery retries and record the impacts; supplied evidence identifies an unresolved duplicate-delivery risk. | User request and supplied repository evidence, preserved from `first.final.txt`. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | 2 | the pending decision | — |
+
+Change webhook delivery retry behavior and explicitly define the outcome of a retry after a provider timeout so that the unresolved duplicate-delivery risk and delivery-reliability trade-off are addressed before planning. A stakeholder's tentative view that the risk is probably acceptable does not alter the requirement without an approved decision.
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | A webhook delivery may be retried after a provider timeout, so the provider can receive the delivery more than once. | `verified` | `first.final.txt` — exact predecessor report records the supplied repository evidence that delivery retries can repeat after a provider timeout. |
+| `INV-002` | The webhook delivery contract documents no idempotency behavior. | `verified` | `first.final.txt` and current supplied repository evidence — no idempotency behavior or evidence exists. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` must continue to define provider-timeout handling rather than leave the delivery outcome unspecified. | `IMP-001`, `IMP-002` | `first.final.txt` — retry after provider timeout can repeat delivery. |
+| `INV-002` | `REQ-001` must remain compatible with receivers for which no idempotency behavior is currently documented unless the public contract is deliberately revised. | `IMP-001`, `IMP-003` | `first.final.txt` and current supplied repository evidence — no documented idempotency behavior or supporting evidence. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | `state/concurrency` | `critical` | `refining` | `verified` | `first.final.txt` records repeated delivery after provider timeout and no documented idempotency behavior. The stakeholder says the risk is probably acceptable, but current supplied evidence confirms there is no approval record; acceptance therefore remains pending. | `INV-001`, `INV-002` | the pending decision | `AC-001` |
+| `IMP-002` | `REQ-001` | `functionality` | `high` | `detected` | `inferred` | Because a timeout does not establish whether the provider processed the attempt, changing retry behavior can trade duplicate suppression against loss of an unprocessed delivery. No new repository evidence changes this inference. | `INV-001` | the pending decision | `AC-002` |
+| `IMP-003` | `REQ-001` | `interfaces` | `high` | `blocked` | `unknown` | Current supplied repository evidence confirms that no idempotency evidence exists; receiver implementations, a documented webhook idempotency contract, and conformance tests remain unavailable. | `INV-002` | the pending decision | `AC-003` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| What delivery guarantee should apply when a webhook attempt times out after the provider may already have processed it? | Keep retrying and require a stable idempotency mechanism across attempts. | `IMP-001`, `IMP-002`, `IMP-003` | Preserves retry-based reliability and reduces duplicate effects, but changes the sender-receiver contract and requires receiver compatibility and verification. |
+| What delivery guarantee should apply when a webhook attempt times out after the provider may already have processed it? | Do not automatically retry ambiguous provider timeouts. | `IMP-001`, `IMP-002` | Avoids timeout-driven duplicate attempts, but can lose deliveries when the provider did not process the timed-out attempt. |
+| What delivery guarantee should apply when a webhook attempt times out after the provider may already have processed it? | Keep the current retry behavior and explicitly accept possible duplicate delivery through an approved decision. | `IMP-001`, `IMP-002`, `IMP-003` | Aligns with the stakeholder's tentative view and avoids a compatibility change, but retains duplicate effects and requires formal approval plus a clearly documented at-least-once contract. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | `IMP-001`, `IMP-002`, `IMP-003` |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | none |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | 1 | the pending decision | none | Initial refinement records the timeout-driven duplicate risk, the delivery-reliability trade-off, and the missing receiver idempotency evidence. |
+| `REQ-001` | 2 | the pending decision | none | Records the stakeholder's tentative risk-acceptance view, but preserves pre-decision status because no approval record or new idempotency evidence was provided. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001`, `INV-002` | When a provider processes an attempt but its response times out, subsequent system behavior produces no more recipient-visible effects than the selected delivery guarantee permits. | Future integration test with a provider fixture that records processing, withholds the response, and observes later attempts and effects. |
+| `AC-002` | `REQ-001` | `IMP-002` | `INV-001` | When a provider does not process a timed-out attempt, subsequent system behavior meets the delivery guarantee selected for that case. | Future integration test with a provider fixture that drops the timed-out attempt and records later delivery. |
+| `AC-003` | `REQ-001` | `IMP-003` | `INV-002` | The webhook contract states the timeout retry and duplicate-delivery guarantee, and compatibility is verified against supported receivers. | Contract inspection plus receiver compatibility or conformance tests; no idempotency evidence is currently available. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-003` | `blocked` | Receiver implementations, a documented webhook idempotency contract, and conformance tests are needed to establish existing deduplication behavior and compatibility. | the pending decision | Webhook contract owner |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| The exact predecessor report was available, but no additional implementation or test evidence was supplied. | `first.final.txt` was read as exact bytes; current supplied evidence states that no idempotency evidence exists. | Prior findings and identifiers are preserved, while implementation paths, retry configuration, receiver behavior, and test coverage remain unverified. |
+| The stakeholder statement is tentative and unapproved. | Supplied statement that the risk is “probably acceptable”; supplied evidence confirms no approval record exists. | The statement is not recorded as an accepted risk and does not move the report to post-decision. |
+| Exact lineage was available. | SHA-256 of the 7,785 exact bytes in `first.final.txt`: `a2f7115f32c3248151d3cd667368331f55924f2c1f46079ac32855c2acc8100e`. | `RPT-001` advances from Revision 1 to Revision 2 with validated byte-level predecessor lineage. |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until an authorized stakeholder explicitly selects and approves the delivery guarantee; “probably acceptable” is not approval. | `REQ-001`, `INV-001`, `INV-002`, `IMP-001`, `IMP-002`, `IMP-003` | Duplicate delivery after ambiguous timeout (`IMP-001`), possible delivery loss from retry-policy changes (`IMP-002`), and unknown receiver deduplication compatibility (`IMP-003`). | `AC-001`, `AC-002`, `AC-003` | Not ready |

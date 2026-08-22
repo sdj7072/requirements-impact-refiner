@@ -1,0 +1,11 @@
+The workspace is empty, so I can’t inspect the failing test or CI setup. “Only fails in CI” is insufficient to identify the cause.
+
+Please provide the repository or paste:
+
+- The test and code under test
+- CI failure output/stack trace
+- CI workflow/configuration
+- Relevant package/runtime versions
+- Any retries, timing, randomness, timezone, concurrency, filesystem, or network dependencies
+
+With those, I can trace the intermittent failure without modifying the code.
