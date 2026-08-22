@@ -72,12 +72,25 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def is_functional_payload_file(path):
+    """Exclude interpreter caches created while the test suite is running."""
+    return (
+        path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix != ".pyc"
+    )
+
+
 def functional_payload_inventory(root):
     """Return the declared functional plugin payload, never its alias wrapper."""
     root = Path(root)
     paths = set()
     for directory in (".codex-plugin", "skills", "references", "assets"):
-        paths.update(path for path in (root / directory).rglob("*") if path.is_file())
+        paths.update(
+            path
+            for path in (root / directory).rglob("*")
+            if is_functional_payload_file(path)
+        )
     paths.add(root / ".claude-plugin" / "plugin.json")
     for name in ("install-agent-skill.py", "impact_report.py", "validate-impact-report.py"):
         paths.add(root / "scripts" / name)
@@ -149,6 +162,22 @@ def report_previous_sha(report):
 
 
 class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
+    def test_functional_payload_ignores_runtime_python_cache_files(self):
+        """Running tests must not mutate the declared plugin payload inventory."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "skills" / "example" / "scripts" / "tool.py"
+            cache = source.parent / "__pycache__" / "tool.cpython-311.pyc"
+            source.parent.mkdir(parents=True)
+            cache.parent.mkdir()
+            source.write_bytes(b"source")
+            cache.write_bytes(b"generated")
+
+            self.assertTrue(is_functional_payload_file(source))
+            self.assertFalse(is_functional_payload_file(cache))
+
     def test_installed_alias_payload_is_sealed_and_matches_the_canonical_release_bytes(self):
         """Catch an alias cache that evaluates different functional bytes than v0.3.1."""
         payload = load_json(INSTALLED_PAYLOAD)

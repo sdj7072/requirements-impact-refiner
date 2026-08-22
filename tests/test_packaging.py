@@ -286,12 +286,16 @@ class PackagingTest(unittest.TestCase):
                 path.relative_to(canonical_dir)
                 for path in canonical_dir.rglob("*")
                 if path.is_file()
+                and "__pycache__" not in path.parts
+                and path.suffix != ".pyc"
             }
             mirror_dir = ROOT / directory
             mirror_files = {
                 path.relative_to(mirror_dir)
                 for path in mirror_dir.rglob("*")
                 if path.is_file()
+                and "__pycache__" not in path.parts
+                and path.suffix != ".pyc"
             }
 
             self.assertEqual(mirror_files, canonical_files | root_only_files)
