@@ -5,10 +5,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from evals.harness.catalog import load_all
-from evals.harness.evidence import record_run, verify_manifest
+from evals.harness.evidence import build_manifest, record_run, verify_manifest
 from evals.harness.models import ClientProbe, CommandResult, RunResult, RunStatus
 from evals.harness.run import build_parser, build_schedule, create_adapter, run_batch, run_probe
 from tests.test_report_lineage import next_report, report_with_state
+
+
+_USE_REQUEST_RETRY = object()
 
 
 class FakeAdapter:
@@ -27,6 +30,7 @@ class FakeAdapter:
         reason=None,
         raw_final_output=None,
         raw_previous_bytes=None,
+        retry_of_override=_USE_REQUEST_RETRY,
     ):
         self.statuses = list(statuses)
         self.requests = []
@@ -41,6 +45,7 @@ class FakeAdapter:
         self.reason = reason
         self.raw_final_output = raw_final_output
         self.raw_previous_bytes = raw_previous_bytes
+        self.retry_of_override = retry_of_override
         self.probe_results = (
             CommandResult(("fake", "--version"), 0, "fake 1.0", "", 0.0, False),
         )
@@ -65,6 +70,11 @@ class FakeAdapter:
         self.requests.append(request)
         status = self.statuses.pop(0) if self.statuses else RunStatus.PASS
         final_output = "synthetic final output"
+        retry_of = (
+            request.retry_of
+            if self.retry_of_override is _USE_REQUEST_RETRY
+            else self.retry_of_override
+        )
         if self.record_evidence:
             raw_final = (
                 final_output
@@ -77,7 +87,7 @@ class FakeAdapter:
                     {
                         "attempt": request.attempt,
                         "client": request.client,
-                        "retry_of": request.retry_of,
+                        "retry_of": retry_of,
                     },
                     sort_keys=True,
                 ),
@@ -107,7 +117,7 @@ class FakeAdapter:
             final_output=final_output,
             session_id="123e4567-e89b-12d3-a456-426614174000" if len(request.case.turns) > 1 else None,
             attempt=request.attempt,
-            retry_of=request.retry_of,
+            retry_of=retry_of,
             metadata=self.result_metadata,
         )
 
@@ -295,6 +305,102 @@ class EvalHarnessCliTest(unittest.TestCase):
             manifest = (output / "manifest.sha256").read_text(encoding="utf-8")
             self.assertEqual(verify_manifest(output, manifest), [])
 
+    def test_attempt_one_with_retry_lineage_is_rejected_before_finalization(self):
+        """An initial attempt cannot claim lineage to a foreign or prior run."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+
+            exit_code = run_batch(
+                args,
+                FakeAdapter(retry_of_override="foreign-case/99"),
+            )
+
+            self.assertEqual(exit_code, 1)
+            self.assertFalse((output / "controller.json").exists())
+            self.assertFalse((output / "report.md").exists())
+            self.assertFalse((output / "manifest.sha256").exists())
+
+    def test_noncanonical_raw_retry_metadata_is_rejected_before_finalization(self):
+        """Raw retry metadata cannot inherit validity from a canonical controller result."""
+        class MetadataRetryAdapter(FakeAdapter):
+            def execute(self, request):
+                result = super().execute(request)
+                attempt_path = (
+                    request.output_root
+                    / request.client
+                    / request.case.id
+                    / ("%02d" % request.repetition)
+                )
+                (attempt_path / "metadata.json").write_text(
+                    json.dumps(
+                        {
+                            "attempt": request.attempt,
+                            "client": request.client,
+                            "retry_of": "foreign-case/99",
+                        },
+                        sort_keys=True,
+                    ),
+                    encoding="utf-8",
+                )
+                return result
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+
+            exit_code = run_batch(args, MetadataRetryAdapter())
+
+            self.assertEqual(exit_code, 1)
+            self.assertFalse((output / "controller.json").exists())
+            self.assertFalse((output / "report.md").exists())
+            self.assertFalse((output / "manifest.sha256").exists())
+
+    def test_retry_rejects_noncanonical_attempt_one_raw_metadata(self):
+        """Selecting attempt 2 must not hide malformed metadata in its attempt-1 backing."""
+        class FirstAttemptMetadataAdapter(FakeAdapter):
+            def execute(self, request):
+                result = super().execute(request)
+                if request.attempt == 1 and request.case.id == "POS-authorization":
+                    attempt_path = (
+                        request.output_root
+                        / request.client
+                        / request.case.id
+                        / ("%02d" % request.repetition)
+                    )
+                    (attempt_path / "metadata.json").write_text(
+                        json.dumps(
+                            {
+                                "attempt": 1,
+                                "client": request.client,
+                                "retry_of": "foreign-case/99",
+                            },
+                            sort_keys=True,
+                        ),
+                        encoding="utf-8",
+                    )
+                return result
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
+            )
+
+            exit_code = run_batch(
+                args,
+                FirstAttemptMetadataAdapter([RunStatus.INFRA_ERROR]),
+            )
+
+            self.assertEqual(exit_code, 1)
+            self.assertFalse((output / "controller.json").exists())
+            self.assertFalse((output / "report.md").exists())
+            self.assertFalse((output / "manifest.sha256").exists())
+
     def test_non_infrastructure_outcomes_are_not_retried(self):
         """Retrying a scored outcome would bias the batch toward a later answer."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -350,16 +456,11 @@ class EvalHarnessCliTest(unittest.TestCase):
             exit_code = run_batch(
                 args, FakeAdapter(raw_final_output="different sealed bytes")
             )
-            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 1)
-        self.assertTrue(
-            any(
-                "selected final output does not match raw evidence" in finding
-                for row in ledger["mechanical_scores"]
-                for finding in row["findings"]
-            )
-        )
+        self.assertFalse((output / "controller.json").exists())
+        self.assertFalse((output / "report.md").exists())
+        self.assertFalse((output / "manifest.sha256").exists())
 
     def test_lineage_non_utf8_predecessor_invalidates_scoring_evidence(self):
         """Replacement decoding would sever the SHA from the exact predecessor bytes."""
@@ -372,17 +473,11 @@ class EvalHarnessCliTest(unittest.TestCase):
             exit_code = run_batch(
                 args, FakeAdapter(raw_previous_bytes=b"\xff")
             )
-            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
 
-        lineage = [
-            row for row in ledger["mechanical_scores"]
-            if row["case_id"].startswith("LINEAGE-")
-        ]
         self.assertEqual(exit_code, 1)
-        self.assertTrue(lineage)
-        self.assertTrue(
-            all("lineage predecessor is not valid UTF-8" in row["findings"] for row in lineage)
-        )
+        self.assertFalse((output / "controller.json").exists())
+        self.assertFalse((output / "report.md").exists())
+        self.assertFalse((output / "manifest.sha256").exists())
 
     def test_selected_final_symlink_invalidates_scoring_evidence(self):
         """Following a selected-output symlink could score bytes outside the attempt."""
@@ -413,15 +508,49 @@ class EvalHarnessCliTest(unittest.TestCase):
             )
 
             exit_code = run_batch(args, SymlinkAdapter())
-            ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 1)
-        self.assertTrue(
-            all(
-                "selected final output must be a regular non-symlink file" in row["findings"]
-                for row in ledger["mechanical_scores"]
+        self.assertFalse((output / "controller.json").exists())
+        self.assertFalse((output / "report.md").exists())
+        self.assertFalse((output / "manifest.sha256").exists())
+
+    def test_raw_mutation_after_scoring_cannot_receive_a_successful_final_seal(self):
+        """A manifest must not bless bytes different from those mechanically scored."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                ["--client", "codex", "--suite", "smoke", "--output", str(output)]
             )
-        )
+            mutated = False
+
+            def mutate_before_manifest(root):
+                nonlocal mutated
+                if not mutated:
+                    mutated = True
+                    target = (
+                        output / "raw" / "codex" / "POS-authorization" / "01"
+                        / "first.final.txt"
+                    )
+                    target.write_text("changed after scoring", encoding="utf-8")
+                return build_manifest(root)
+
+            with patch(
+                "evals.harness.run.build_manifest",
+                side_effect=mutate_before_manifest,
+            ):
+                exit_code = run_batch(args, FakeAdapter())
+
+            manifest_path = output / "manifest.sha256"
+            manifest_valid = (
+                manifest_path.is_file()
+                and not verify_manifest(
+                    output, manifest_path.read_text(encoding="utf-8")
+                )
+            )
+
+        self.assertTrue(mutated)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(manifest_valid)
 
     def test_lineage_scoring_uses_selected_retry_attempt_directory(self):
         """A retry must bind both lineage turns to attempt-02, never the failed base attempt."""

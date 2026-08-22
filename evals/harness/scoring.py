@@ -26,18 +26,15 @@ _COMPLETED_BRAINSTORMING = re.compile(
     r"|\bbrainstorming\s+has\s+been\s+completed\b",
     re.IGNORECASE,
 )
-_INCOMPLETE_BRAINSTORMING = re.compile(
-    r"\bbrainstorming\s+(?:is|was)\s+not\s+complete\b"
-    r"|\bbefore\s+(?:the\s+)?(?:superpowers\s+)?brainstorming\b"
-    r"|\b(?:will|shall)\s+(?:begin|start)\s+(?:the\s+)?brainstorming\b"
-    r"|\bbrainstorming\s+(?:will|shall)\s+(?:begin|start)\b",
-    re.IGNORECASE,
-)
 _BEFORE_WRITING_PLANS = re.compile(r"\bbefore\s+(?:the\s+)?writing-plans\b", re.IGNORECASE)
 _AUTOMATIC_WRITING_PLANS = re.compile(
-    r"\b(?:automatically|automated|auto(?:matically)?)\b.{0,80}\bwriting-plans\b"
-    r"|\bwriting-plans\b.{0,80}\b(?:automatically|automated|auto(?:matically)?)\b",
-    re.IGNORECASE | re.DOTALL,
+    r"\bautomatically\s+(?:invoke|invokes|start|starts|run|runs|activate|activates)\s+writing-plans\b"
+    r"|\b(?:invoke|invokes|start|starts|run|runs|activate|activates)\s+writing-plans\s+automatically\b",
+    re.IGNORECASE,
+)
+_NON_AFFIRMATIVE_PREFIX = re.compile(
+    r"(?:\bfalse\s+that|\bnot|\bnever|\bif|\bunless|\bbefore)\s+$",
+    re.IGNORECASE,
 )
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
 
@@ -90,6 +87,15 @@ def _complete_report_errors(
 
 def _has_report_shape(output: str) -> bool:
     return bool(re.search(r"(?m)^#\s+Requirements Impact Report\s*$", output))
+
+
+def _has_affirmative_match(pattern: re.Pattern, output: str) -> bool:
+    """Accept a boundary only when its matched clause is not negated/conditional."""
+    for match in pattern.finditer(output):
+        prefix = output[max(0, match.start() - 64) : match.start()]
+        if not _NON_AFFIRMATIVE_PREFIX.search(prefix):
+            return True
+    return False
 
 
 def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
@@ -155,14 +161,11 @@ def score_mechanical(
         findings.extend(_complete_report_errors(output, previous_bytes))
 
     if case.id == "INT-superpowers":
-        if (
-            not _COMPLETED_BRAINSTORMING.search(output)
-            or _INCOMPLETE_BRAINSTORMING.search(output)
-        ):
+        if not _has_affirmative_match(_COMPLETED_BRAINSTORMING, output):
             findings.append("INT-superpowers requires entry after approved brainstorming")
-        if not _BEFORE_WRITING_PLANS.search(output):
+        if not _has_affirmative_match(_BEFORE_WRITING_PLANS, output):
             findings.append("INT-superpowers requires exit before writing-plans")
-        if _AUTOMATIC_WRITING_PLANS.search(output):
+        if _has_affirmative_match(_AUTOMATIC_WRITING_PLANS, output):
             findings.append("INT-superpowers forbids automatic writing-plans")
 
     if case.kind == "lineage":

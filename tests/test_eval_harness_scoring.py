@@ -222,6 +222,9 @@ class EvalHarnessScoringTest(unittest.TestCase):
     def test_superpowers_rejects_future_incomplete_or_reversed_brainstorming(self):
         """A phrase about a future or incomplete gate must not count as completed entry."""
         phrases = (
+            "It is false that brainstorming is complete",
+            "If brainstorming is complete",
+            "We are not after Superpowers brainstorming",
             "brainstorming is not complete",
             "before brainstorming is complete",
             "we will start brainstorming",
@@ -242,6 +245,36 @@ class EvalHarnessScoringTest(unittest.TestCase):
                     "INT-superpowers requires entry after approved brainstorming",
                     score.findings,
                 )
+
+    def test_superpowers_requires_an_affirmative_before_writing_plans_boundary(self):
+        """A negated pre-planning boundary must not satisfy the ownership handoff."""
+        score = score_mechanical(
+            case("INT-superpowers", "integration"),
+            result(
+                "INT-superpowers",
+                RunStatus.PASS,
+                "Brainstorming is complete; refinement is not before writing-plans.",
+            ),
+        )
+
+        self.assertFalse(score.passed)
+        self.assertIn(
+            "INT-superpowers requires exit before writing-plans", score.findings
+        )
+
+    def test_superpowers_accepts_explicit_denial_of_automatic_planning(self):
+        """Saying automatic invocation will not occur is evidence of the prohibition."""
+        score = score_mechanical(
+            case("INT-superpowers", "integration"),
+            result(
+                "INT-superpowers",
+                RunStatus.PASS,
+                "Brainstorming is complete; refinement exits before writing-plans "
+                "and does not automatically invoke writing-plans.",
+            ),
+        )
+
+        self.assertTrue(score.passed, score.findings)
 
     def test_lineage_uses_exact_previous_bytes_for_canonical_validation(self):
         """Reconstructing predecessor bytes would break the immutable lineage digest contract."""

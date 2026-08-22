@@ -3,6 +3,8 @@
 import argparse
 import hashlib
 import json
+import os
+import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,21 +240,48 @@ def _write_derived(path: Path, content: str) -> None:
     temporary.replace(path)
 
 
-def _finalize(output_root: Path, ledger: dict[str, object], report: str) -> bool:
+def _finalize(
+    output_root: Path,
+    ledger: dict[str, object],
+    report: str,
+    scored_digests: Optional[dict[str, str]] = None,
+) -> bool:
     """Replace only derived batch views after raw evidence is append-only recorded."""
     try:
         _write_derived(output_root / "report.md", report)
         _write_derived(output_root / "controller.json", json.dumps(ledger, sort_keys=True, indent=2) + "\n")
-        return _refresh_manifest(output_root)
+        return _refresh_manifest(output_root, scored_digests)
     except (OSError, ValueError):
         return False
 
 
-def _refresh_manifest(output_root: Path) -> bool:
+def _manifest_contains_digests(
+    manifest: str, expected: Optional[dict[str, str]]
+) -> bool:
+    if not expected:
+        return True
+    rows = {}
+    for line in manifest.splitlines():
+        try:
+            relative, digest = line.rsplit(" ", 1)
+        except ValueError:
+            return False
+        rows[relative] = digest
+    return all(rows.get(relative) == digest for relative, digest in expected.items())
+
+
+def _refresh_manifest(
+    output_root: Path, scored_digests: Optional[dict[str, str]] = None
+) -> bool:
     try:
         manifest = build_manifest(output_root)
+        if not _manifest_contains_digests(manifest, scored_digests):
+            return False
         _write_derived(output_root / "manifest.sha256", manifest)
-        return not verify_manifest(output_root, manifest)
+        return (
+            _manifest_contains_digests(manifest, scored_digests)
+            and not verify_manifest(output_root, manifest)
+        )
     except (OSError, ValueError):
         return False
 
@@ -359,31 +388,79 @@ def _score_row(score: MechanicalScore) -> dict[str, object]:
 
 def _scoring_evidence_failure(
     slot: ScheduledRun, result: RunResult, finding: str
-) -> tuple[MechanicalScore, bool]:
+) -> tuple[MechanicalScore, bool, tuple[tuple[str, str], ...]]:
     return (
         MechanicalScore(slot.case.id, slot.repetition, False, (finding,)),
         False,
+        (),
     )
 
 
-def _read_selected_file(raw_root: Path, path: Path) -> bytes:
-    """Read one exact attempt artifact without following directory/file symlinks."""
+def _read_selected_file(
+    raw_root: Path, path: Path, label: str
+) -> tuple[bytes, str, str]:
+    """Read exact bytes through descriptor-relative no-follow traversal."""
     raw_root = Path(raw_root)
     path = Path(path)
     try:
         relative = path.relative_to(raw_root)
     except ValueError as error:
         raise ValueError("selected scoring evidence is outside raw root") from error
-    if raw_root.is_symlink() or not raw_root.is_dir():
-        raise ValueError("raw evidence root must be a regular directory")
-    current = raw_root
-    for component in relative.parts[:-1]:
-        current = current / component
-        if current.is_symlink() or not current.is_dir():
-            raise ValueError("selected attempt path must contain regular directories")
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("selected final output must be a regular non-symlink file")
-    return path.read_bytes()
+    if any(component in ("", ".", "..") for component in relative.parts):
+        raise ValueError("selected scoring evidence contains an unsafe path component")
+
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW
+    directory_fd = None
+    try:
+        directory_fd = os.open(raw_root, directory_flags)
+        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+            raise ValueError("raw evidence root must be a regular directory")
+        for component in relative.parts[:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            if not stat.S_ISDIR(os.fstat(next_fd).st_mode):
+                os.close(next_fd)
+                raise ValueError("selected attempt path must contain regular directories")
+            os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(relative.parts[-1], file_flags, dir_fd=directory_fd)
+        try:
+            before = os.fstat(file_fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError(
+                    "%s must be a regular non-symlink file" % label
+                )
+            chunks = []
+            while True:
+                chunk = os.read(file_fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            after = os.fstat(file_fd)
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            ) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            ):
+                raise ValueError("%s changed while being read" % label)
+            payload = b"".join(chunks)
+        finally:
+            os.close(file_fd)
+    except OSError as error:
+        raise ValueError(
+            "%s must be a regular non-symlink file" % label
+        ) from error
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+    relative_manifest = "raw/%s" % relative.as_posix()
+    return payload, hashlib.sha256(payload).hexdigest(), relative_manifest
 
 
 def _score_selected_attempt(
@@ -391,20 +468,33 @@ def _score_selected_attempt(
     expected_client: str,
     slot: ScheduledRun,
     result: RunResult,
-) -> tuple[MechanicalScore, bool]:
+) -> tuple[MechanicalScore, bool, tuple[tuple[str, str], ...]]:
     """Bind mechanical scoring to the immutable bytes of one selected attempt."""
     expected = (slot.case.id, slot.repetition, expected_client)
     observed = (result.case_id, result.repetition, result.client)
-    if observed != expected or result.attempt not in (1, 2):
+    expected_retry = (
+        None
+        if result.attempt == 1
+        else "%s/%02d" % (slot.case.id, slot.repetition)
+    )
+    if (
+        observed != expected
+        or result.attempt not in (1, 2)
+        or result.retry_of != expected_retry
+    ):
         return _scoring_evidence_failure(
             slot, result, "selected scoring result has wrong case, repetition, client, or attempt"
         )
     if result.status is not RunStatus.PASS:
-        return score_mechanical(slot.case, result), True
+        return score_mechanical(slot.case, result), True, ()
 
     attempt_path = _attempt_path(raw_root, expected_client, slot, result.attempt)
+    digests = []
     try:
-        metadata_bytes = _read_selected_file(raw_root, attempt_path / "metadata.json")
+        metadata_bytes, metadata_digest, metadata_path = _read_selected_file(
+            raw_root, attempt_path / "metadata.json", "selected attempt metadata"
+        )
+        digests.append((metadata_path, metadata_digest))
         metadata = json.loads(metadata_bytes.decode("utf-8", errors="strict"))
     except UnicodeDecodeError:
         return _scoring_evidence_failure(
@@ -414,14 +504,17 @@ def _score_selected_attempt(
         return _scoring_evidence_failure(slot, result, str(error))
     if not isinstance(metadata, dict) or (
         metadata.get("attempt"), metadata.get("client"), metadata.get("retry_of")
-    ) != (result.attempt, result.client, result.retry_of):
+    ) != (result.attempt, expected_client, expected_retry):
         return _scoring_evidence_failure(
             slot, result, "selected attempt metadata does not match result"
         )
 
     selected_name = "second.final.txt" if slot.case.kind == "lineage" else "first.final.txt"
     try:
-        selected_bytes = _read_selected_file(raw_root, attempt_path / selected_name)
+        selected_bytes, selected_digest, selected_path = _read_selected_file(
+            raw_root, attempt_path / selected_name, "selected final output"
+        )
+        digests.append((selected_path, selected_digest))
         selected_output = selected_bytes.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         return _scoring_evidence_failure(
@@ -437,9 +530,12 @@ def _score_selected_attempt(
     previous_bytes = None
     if slot.case.kind == "lineage":
         try:
-            previous_bytes = _read_selected_file(
-                raw_root, attempt_path / "first.final.txt"
+            previous_bytes, previous_digest, previous_path = _read_selected_file(
+                raw_root,
+                attempt_path / "first.final.txt",
+                "lineage predecessor",
             )
+            digests.append((previous_path, previous_digest))
             previous_bytes.decode("utf-8", errors="strict")
         except UnicodeDecodeError:
             return _scoring_evidence_failure(
@@ -447,7 +543,74 @@ def _score_selected_attempt(
             )
         except (OSError, ValueError) as error:
             return _scoring_evidence_failure(slot, result, str(error))
-    return score_mechanical(slot.case, result, previous_bytes=previous_bytes), True
+    return (
+        score_mechanical(slot.case, result, previous_bytes=previous_bytes),
+        True,
+        tuple(digests),
+    )
+
+
+def _validate_attempt_evidence(
+    raw_root: Path,
+    expected_client: str,
+    slots: dict[tuple[str, int], ScheduledRun],
+    attempts: Sequence[dict[str, object]],
+) -> tuple[bool, tuple[tuple[str, str], ...]]:
+    """Validate every retry-history result and its raw canonical metadata."""
+    history = {}
+    digests = []
+    for row in attempts:
+        if not isinstance(row, dict):
+            return False, ()
+        result = _result_from_payload(row.get("result"))
+        if result is None:
+            return False, ()
+        key = (result.case_id, result.repetition)
+        slot = slots.get(key)
+        expected_retry = (
+            None
+            if result.attempt == 1
+            else "%s/%02d" % (result.case_id, result.repetition)
+        )
+        if (
+            slot is None
+            or result.client != expected_client
+            or result.attempt not in (1, 2)
+            or result.retry_of != expected_retry
+            or (row.get("case_id"), row.get("repetition"), row.get("attempt"))
+            != (result.case_id, result.repetition, result.attempt)
+        ):
+            return False, ()
+        attempts_for_key = history.setdefault(key, {})
+        if result.attempt in attempts_for_key:
+            return False, ()
+        attempts_for_key[result.attempt] = result
+        attempt_path = _attempt_path(raw_root, expected_client, slot, result.attempt)
+        try:
+            payload, digest, relative = _read_selected_file(
+                raw_root,
+                attempt_path / "metadata.json",
+                "attempt metadata",
+            )
+            metadata = json.loads(payload.decode("utf-8", errors="strict"))
+        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            return False, ()
+        if not isinstance(metadata, dict) or (
+            metadata.get("attempt"),
+            metadata.get("client"),
+            metadata.get("retry_of"),
+        ) != (result.attempt, expected_client, expected_retry):
+            return False, ()
+        digests.append((relative, digest))
+
+    for attempts_for_key in history.values():
+        second = attempts_for_key.get(2)
+        if second is not None and (
+            attempts_for_key.get(1) is None
+            or attempts_for_key[1].status is not RunStatus.INFRA_ERROR
+        ):
+            return False, ()
+    return True, tuple(digests)
 
 
 def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[CaseSpec]] = None) -> int:
@@ -483,7 +646,13 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
             first = adapter.execute(request)
         except (OSError, ValueError, AttributeError):
             return 1
-        if not _complete_result(first) or (first.case_id, first.repetition, first.client, first.attempt) != (slot.case.id, slot.repetition, args.client, 1):
+        if not _complete_result(first) or (
+            first.case_id,
+            first.repetition,
+            first.client,
+            first.attempt,
+            first.retry_of,
+        ) != (slot.case.id, slot.repetition, args.client, 1, None):
             return 1
         if not _safe_evidence_exists(raw_root, request, first):
             return 1
@@ -511,6 +680,11 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
     index = {(slot.case.id, slot.repetition): position for position, slot in enumerate(schedule)}
     results.sort(key=lambda result: index[(result.case_id, result.repetition)])
     finals.sort(key=lambda row: index[(row["case_id"], row["repetition"])])
+    attempt_evidence_valid, attempt_digests = _validate_attempt_evidence(
+        raw_root, args.client, slots, attempts
+    )
+    if not attempt_evidence_valid:
+        return 1
     scored = [
         _score_selected_attempt(
             raw_root,
@@ -520,8 +694,15 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
         )
         for result in results
     ]
-    scores = [score for score, _ in scored]
-    scoring_evidence_valid = all(valid for _, valid in scored)
+    scores = [score for score, _, _ in scored]
+    scoring_evidence_valid = all(valid for _, valid, _ in scored)
+    scored_digests = {
+        relative: digest
+        for rows in (attempt_digests,) + tuple(rows for _, _, rows in scored)
+        for relative, digest in rows
+    }
+    if not scoring_evidence_valid:
+        return 1
     ledger = {
         "identity": identity, "suite": args.suite, "repetitions": args.repetitions,
         "attempts": attempts, "runs": finals,
@@ -531,11 +712,10 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
         report = render_report(results, _report_metadata(args, probe, results), scores)
     except (TypeError, ValueError):
         return 1
-    if not _finalize(output_root, ledger, report):
+    if not _finalize(output_root, ledger, report, scored_digests):
         return 1
-    return 1 if (
-        not scoring_evidence_valid
-        or any(result.status is RunStatus.INVALID_EVIDENCE for result in results)
+    return 1 if any(
+        result.status is RunStatus.INVALID_EVIDENCE for result in results
     ) else 0
 
 
