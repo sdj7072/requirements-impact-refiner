@@ -495,7 +495,7 @@ Require 85 finals, five repetitions per applicable case, complete artifacts, no 
 
 - [ ] **Step 5: Adjudicate every substantive item**
 
-Record case, repetition, rubric, boolean, exact quotation, and rationale. Reject missing fields and checksum-invalid citations.
+Record case, repetition, rubric, boolean, exact quotation, and rationale for all `must_detect` and `must_not_do` entries. The fixed inventory is 80 rubrics across 17 cases, repeated five times, so verified promotion requires exactly 400 complete rows. Reject missing fields and checksum-invalid citations.
 
 - [ ] **Step 6: Write RED final evidence/docs tests**
 

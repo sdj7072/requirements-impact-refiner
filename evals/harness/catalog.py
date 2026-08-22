@@ -104,12 +104,21 @@ def _case_from_raw(raw: Any, lineage: bool) -> CaseSpec:
         turns = (CaseTurn(prompt=prompt, repository_evidence=evidence),)
         expected_transition = None
 
+    must_detect = _rubric_array(raw.get("must_detect"), "must_detect", case_id)
+    must_not_do = _rubric_array(raw.get("must_not_do"), "must_not_do", case_id)
+    duplicated_rubrics = set(must_detect).intersection(must_not_do)
+    if duplicated_rubrics:
+        raise CatalogError(
+            "%s repeats rubrics across must_detect and must_not_do: %s"
+            % (case_id, ", ".join(sorted(duplicated_rubrics)))
+        )
+
     return CaseSpec(
         id=case_id,
         kind=kind,
         turns=turns,
-        must_detect=_rubric_array(raw.get("must_detect"), "must_detect", case_id),
-        must_not_do=_rubric_array(raw.get("must_not_do"), "must_not_do", case_id),
+        must_detect=must_detect,
+        must_not_do=must_not_do,
         modes=_modes(raw.get("modes"), case_id),
         expected_transition=expected_transition,
     )

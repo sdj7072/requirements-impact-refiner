@@ -73,9 +73,10 @@ def complete_matrix():
     adjudications = []
     for specification in CANONICAL_CASES:
         for repetition in range(1, 6):
+            rubrics = specification.must_detect + specification.must_not_do
             quotes = [
                 "[%s/%02d %s]" % (specification.id, repetition, rubric)
-                for rubric in specification.must_detect
+                for rubric in rubrics
             ]
             runs.append(
                 result(
@@ -95,7 +96,7 @@ def complete_matrix():
                     quote,
                     "The quote directly supports the required rubric.",
                 )
-                for rubric, quote in zip(specification.must_detect, quotes)
+                for rubric, quote in zip(rubrics, quotes)
             )
     return tuple(runs), tuple(scores), tuple(adjudications)
 
@@ -323,18 +324,27 @@ class EvalHarnessScoringTest(unittest.TestCase):
             score.findings,
         )
 
-    def test_no_automatic_planning_remains_a_complete_quoted_human_judgment(self):
-        """Free-text contradiction is adjudicated, not inferred by the mechanical scorer."""
-        rubric = "no automatic planning"
-        specification = replace(
-            case("INT-superpowers", "integration"), must_detect=(rubric,)
+    def test_canonical_superpowers_forbidden_workflow_requires_quoted_adjudication(self):
+        """The exact marker is mechanical; every canonical forbidden action remains human-scored."""
+        specification = next(
+            case for case in CANONICAL_CASES if case.id == "INT-superpowers"
         )
+        rubric = "invoke writing-plans automatically"
         quote = "The adapter automatically invokes writing-plans."
+        rubrics = specification.must_detect + specification.must_not_do
         runs = tuple(
             result(
                 "INT-superpowers",
                 RunStatus.PASS,
-                superpowers_report(statement=quote),
+                superpowers_report(
+                    statement="\n".join(
+                        [
+                            "[INT-superpowers/%02d %s]" % (repetition, item)
+                            for item in rubrics
+                        ]
+                        + [quote]
+                    )
+                ),
                 repetition,
             )
             for repetition in range(1, 6)
@@ -343,22 +353,48 @@ class EvalHarnessScoringTest(unittest.TestCase):
             Adjudication(
                 "INT-superpowers",
                 repetition,
-                rubric,
-                False,
-                quote,
-                "The quoted response contradicts the manual-handoff contract.",
+                item,
+                item != rubric,
+                quote
+                if item == rubric
+                else "[INT-superpowers/%02d %s]" % (repetition, item),
+                "The quoted response contradicts the manual-handoff contract."
+                if item == rubric
+                else "The quote directly supports the required rubric.",
             )
             for repetition in range(1, 6)
+            for item in rubrics
         )
 
         self.assertTrue(
             all(score_mechanical(specification, run).passed for run in runs)
         )
         self.assertEqual(validate_adjudications(rows, (specification,), runs), [])
-        self.assertIn(
-            "missing adjudication INT-superpowers/05 no automatic planning",
-            validate_adjudications(rows[:-1], (specification,), runs),
+        missing_forbidden = tuple(
+            row for row in rows if row.rubric not in specification.must_not_do
         )
+        missing_errors = validate_adjudications(
+            missing_forbidden, (specification,), runs
+        )
+        self.assertEqual(
+            sum("missing adjudication" in error for error in missing_errors),
+            len(specification.must_not_do) * 5,
+        )
+
+        matrix_runs, matrix_scores, matrix_rows = complete_matrix()
+        integration_keys = {(run.case_id, run.repetition) for run in runs}
+        matrix_runs = tuple(
+            run
+            for run in matrix_runs
+            if (run.case_id, run.repetition) not in integration_keys
+        ) + runs
+        matrix_rows = tuple(
+            row for row in matrix_rows if row.case_id != "INT-superpowers"
+        ) + rows
+        rendered = render_report(
+            matrix_runs, REPORT_METADATA, matrix_scores, matrix_rows
+        )
+        self.assertIn("status: not verified", rendered)
 
     def test_lineage_uses_exact_previous_bytes_for_canonical_validation(self):
         """Reconstructing predecessor bytes would break the immutable lineage digest contract."""

@@ -125,6 +125,10 @@ class EvalHarnessContractTest(unittest.TestCase):
             "blank prompt": ([dict(valid_case, request="   ")], [valid_lineage]),
             "non-list evidence": ([dict(valid_case, repository_evidence="roles.py")], [valid_lineage]),
             "missing rubric": ([{key: value for key, value in valid_case.items() if key != "must_not_do"}], [valid_lineage]),
+            "duplicate rubric across fields": (
+                [dict(valid_case, must_not_do=["role boundary"])],
+                [valid_lineage],
+            ),
             "incomplete lineage": ([valid_case], [dict(valid_lineage, turns=valid_lineage["turns"][:1])]),
         }
 

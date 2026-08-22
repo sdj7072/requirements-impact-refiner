@@ -199,7 +199,7 @@ def validate_adjudications(
         (case.id, repetition, rubric)
         for case in cases
         for repetition in range(1, 6)
-        for rubric in case.must_detect
+        for rubric in case.must_detect + case.must_not_do
     }
     run_index = {}
     for run in runs:

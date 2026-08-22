@@ -125,7 +125,7 @@ The raw subtree is marked `-text -whitespace` in `.gitattributes`. A determinist
 
 Mechanical scoring covers report structure, activation, forbidden sections, known IDs, evidence levels, decision links, lifecycle states, Delta categories, lineage hashes, CLI exit codes, and exact repeated-case inventory. For `INT-superpowers`, the only mechanically scored workflow boundary is the exact structured `Planning Handoff` marker; free-text claims or contradictions about automatic planning are not parsed mechanically.
 
-Substantive requirements such as whether the response found an important repository impact or avoided automatic planning require human adjudication. The adjudicator records the rubric item, result, exact transcript quotation, and rationale. Mechanical scores and adjudicated scores remain separate. `partial` is never counted as `pass`.
+Substantive requirements such as whether the response found an important repository impact or avoided automatic planning require human adjudication. Every `must_detect` and `must_not_do` rubric is adjudicated for every repetition: the fixed 17-case matrix contains 80 rubrics and therefore requires 400 unique, transcript-bound rows. The adjudicator records the rubric item, result, exact transcript quotation, and rationale. Mechanical scores and adjudicated scores remain separate. `partial` is never counted as `pass`.
 
 ## Execution Protocol
 
