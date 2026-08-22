@@ -147,6 +147,46 @@ class EvalHarnessEvidenceTest(unittest.TestCase):
                 ["codex/manifest.sha256"],
             )
 
+    def test_manifest_verification_requires_the_exact_canonical_serialization(self):
+        """Equivalent rows with reordered or anomalous newlines are not the seal bytes."""
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_root = Path(temporary) / "raw"
+            raw_root.mkdir()
+            (raw_root / "a.txt").write_bytes(b"a")
+            (raw_root / "z.txt").write_bytes(b"z")
+            canonical = build_manifest(raw_root)
+            rows = canonical.splitlines()
+            mutations = (
+                "\n".join(reversed(rows)) + "\n",
+                canonical[:-1],
+                canonical + "\n",
+                canonical.replace("\n", "\r\n"),
+            )
+
+            for manifest in mutations:
+                with self.subTest(manifest=repr(manifest)):
+                    self.assertIn(
+                        "manifest is not the canonical sorted POSIX representation",
+                        verify_manifest(raw_root, manifest),
+                    )
+
+    def test_noncanonical_manifest_still_reports_checksum_and_inventory_errors(self):
+        """Formatting rejection must not hide which evidence rows are also wrong."""
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_root = Path(temporary) / "raw"
+            raw_root.mkdir()
+            (raw_root / "a.txt").write_bytes(b"a")
+            wrong = "missing.txt %s" % ("0" * 64)
+
+            self.assertEqual(
+                verify_manifest(raw_root, wrong),
+                [
+                    "manifest is not the canonical sorted POSIX representation",
+                    "missing: missing.txt",
+                    "unexpected: a.txt",
+                ],
+            )
+
     def test_concurrent_recorders_claim_one_run_before_publication(self):
         """Two recorders reaching publication together must not overwrite a run."""
         with tempfile.TemporaryDirectory() as temporary:

@@ -205,7 +205,7 @@ class DocumentationTest(unittest.TestCase):
     def test_runbook_commands_are_parseable_and_cover_the_approved_batch(self):
         commands = harness_commands(ROOT / "evals/runbook.md")
         parsed = [build_parser().parse_args(command) for command in commands]
-        self.assertEqual(len(parsed), 3)
+        self.assertEqual(len(parsed), 4)
         self.assertTrue(parsed[0].probe_only)
         self.assertEqual(parsed[1].suite, "smoke")
         self.assertEqual(parsed[1].repetitions, 1)
@@ -217,6 +217,13 @@ class DocumentationTest(unittest.TestCase):
             len(select_suite(load_all(), parsed[2].suite)) * parsed[2].repetitions,
             85,
         )
+        self.assertEqual(parsed[3].suite, "smoke")
+        self.assertEqual(parsed[3].expected_plugin_version, "0.3.1")
+        self.assertEqual(
+            parsed[3].expected_rir_plugin_id,
+            "requirements-impact-refiner@requirements-impact-refiner-v031-eval",
+        )
+        self.assertEqual(parsed[3].output.as_posix(), "evals/results/installed-v0.3.1")
 
     def test_runbook_records_exact_predecessor_handoff_without_rubric_disclosure(self):
         text = (ROOT / "evals/runbook.md").read_text(encoding="utf-8")

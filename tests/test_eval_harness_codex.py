@@ -12,7 +12,7 @@ UUID = "123e4567-e89b-12d3-a456-426614174000"
 INSTALLED_PLUGIN_LIST = {
     "installed": [
         {
-            "pluginId": "requirements-impact-refiner",
+            "pluginId": "requirements-impact-refiner@requirements-impact-refiner",
             "name": "Requirements Impact Refiner",
             "marketplaceName": "personal-marketplace",
             "version": "0.3.0",
@@ -23,7 +23,7 @@ INSTALLED_PLUGIN_LIST = {
             "authPolicy": "none",
         },
         {
-            "pluginId": "superpowers",
+            "pluginId": "superpowers@openai-curated",
             "name": "Superpowers",
             "marketplaceName": "openai-curated-remote",
             "version": "6.3.0",
@@ -86,12 +86,12 @@ def make_request(root, turns, model=None, reasoning=None, evidence=None):
 def write_fake_codex(directory, plugins=None, exec_mode="success"):
     plugins = plugins or [
         {
-            "id": "requirements-impact-refiner",
+            "id": "requirements-impact-refiner@requirements-impact-refiner",
             "name": "Requirements Impact Refiner",
             "version": "0.3.0",
             "enabled": True,
         },
-        {"id": "superpowers", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+        {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
         {"id": "other-enabled", "name": "Other", "version": "1.0.0", "enabled": True},
         {"id": "disabled", "name": "Disabled", "version": "1.0.0", "enabled": False},
     ]
@@ -241,7 +241,11 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(probe.plugin_version, "0.3.0")
         self.assertEqual(
             probe.enabled_plugins,
-            ("requirements-impact-refiner", "superpowers", "other-enabled"),
+            (
+                "requirements-impact-refiner@requirements-impact-refiner",
+                "superpowers@openai-curated",
+                "other-enabled",
+            ),
         )
         self.assertIn("Codex with Superpowers", probe.capabilities)
         self.assertIsNone(probe.authenticated)
@@ -255,7 +259,11 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(probe.plugin_version, "0.3.0")
         self.assertEqual(
             probe.enabled_plugins,
-            ("requirements-impact-refiner", "superpowers", "other-enabled"),
+            (
+                "requirements-impact-refiner@requirements-impact-refiner",
+                "superpowers@openai-curated",
+                "other-enabled",
+            ),
         )
 
     def test_probe_accepts_an_explicit_expected_v031_plugin_version(self):
@@ -283,10 +291,52 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(probe.plugin_version, "0.3.0")
         self.assertIn("0.3.1", probe.reason)
 
+    def test_probe_rejects_required_display_names_with_wrong_plugin_ids(self):
+        """A display name must not impersonate either required plugin identity."""
+        mutations = (
+            (
+                {"id": "wrong-rir@market", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
+                {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+            ),
+            (
+                {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
+                {"id": "wrong-superpowers@market", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+            ),
+        )
+        for plugins in mutations:
+            with self.subTest(ids=[entry["id"] for entry in plugins]), tempfile.TemporaryDirectory() as temporary:
+                executable = write_fake_codex(temporary, list(plugins))
+                probe = CodexAdapter(
+                    executable=str(executable), cwd=Path(temporary)
+                ).probe()
+                self.assertFalse(probe.available)
+
+    def test_probe_accepts_an_alias_only_when_its_exact_id_is_explicitly_expected(self):
+        """An evaluation alias must be opt-in and remain visible in inventory."""
+        alias_id = "requirements-impact-refiner@requirements-impact-refiner-v031-eval"
+        plugins = [dict(entry) for entry in INSTALLED_PLUGIN_LIST["installed"]]
+        plugins[0]["pluginId"] = alias_id
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(
+                temporary, {"installed": plugins, "available": []}
+            )
+            default_probe = CodexAdapter(
+                executable=str(executable), cwd=Path(temporary)
+            ).probe()
+            explicit_probe = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                expected_rir_plugin_id=alias_id,
+            ).probe()
+
+        self.assertFalse(default_probe.available)
+        self.assertTrue(explicit_probe.available)
+        self.assertIn(alias_id, explicit_probe.enabled_plugins)
+
     def test_prepare_rejects_disabled_required_plugin(self):
         plugins = [
-            {"id": "requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
-            {"id": "superpowers", "name": "Superpowers", "version": "6.3.0", "enabled": False},
+            {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
+            {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": False},
         ]
         with tempfile.TemporaryDirectory() as temporary:
             executable = write_fake_codex(temporary, plugins)
@@ -317,6 +367,67 @@ class CodexAdapterTest(unittest.TestCase):
             )
             metadata = json.loads((evidence / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["environment"], "Codex with Superpowers")
+
+    def test_execute_returns_exact_structured_provenance_from_probe_and_argv(self):
+        """A future sealed final must carry all provenance used for promotion."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary)
+            request = make_request(
+                temporary, ("first turn",), "gpt-5.6-sol", "high"
+            )
+            result = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            ).execute(request)
+
+        self.assertEqual(
+            dict(result.metadata),
+            {
+                "environment": "Codex with Superpowers",
+                "client_version": "codex-cli 0.148.0-test",
+                "plugin_version": "0.3.0",
+                "enabled_composition": (
+                    "codex codex-cli 0.148.0-test plugins="
+                    "other-enabled,requirements-impact-refiner@requirements-impact-refiner,"
+                    "superpowers@openai-curated"
+                ),
+                "enabled_plugins": (
+                    "other-enabled,requirements-impact-refiner@requirements-impact-refiner,"
+                    "superpowers@openai-curated"
+                ),
+                "model": "gpt-5.6-sol",
+                "reasoning": "high",
+            },
+        )
+
+    def test_execute_rejects_model_or_reasoning_not_present_in_actual_argv(self):
+        """Request fields alone cannot prove which model options the client executed."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary)
+            request = make_request(
+                temporary, ("first turn",), "gpt-5.6-sol", "high"
+            )
+            adapter = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            )
+            original = adapter.build_first_turn_command
+
+            def omit_run_options(run_request, final_path):
+                argv = list(original(run_request, final_path))
+                model_index = argv.index("-m")
+                del argv[model_index : model_index + 2]
+                reasoning_index = argv.index("-c")
+                del argv[reasoning_index : reasoning_index + 2]
+                return tuple(argv)
+
+            adapter.build_first_turn_command = omit_run_options
+            result = adapter.execute(request)
+
+        self.assertEqual(result.status, RunStatus.INVALID_EVIDENCE)
+        self.assertIn("run options disagree with execution argv", result.reason)
 
     def test_execute_resumes_only_the_first_turn_uuid(self):
         with tempfile.TemporaryDirectory() as temporary:

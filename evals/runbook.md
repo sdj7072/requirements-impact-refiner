@@ -67,8 +67,14 @@ attempt and retry link, and start a new named batch if skill wording changes.
 
 For a separately approved evaluation of a newer installed plugin, use a new,
 empty named output directory and state the observed release explicitly. For
-example, a future 0.3.1 smoke would add
-`--expected-plugin-version 0.3.1`; it must not append to or reinterpret the
-sealed `installed-v0.3` evidence. This option controls only the Codex
+example, an approved smoke of the isolated 0.3.1 evaluation alias would use:
+
+```sh
+python3 -m evals.harness.run --client codex --suite smoke --repetitions 1 --model gpt-5.6-sol --reasoning high --expected-plugin-version 0.3.1 --expected-rir-plugin-id requirements-impact-refiner@requirements-impact-refiner-v031-eval --output evals/results/installed-v0.3.1
+```
+
+The canonical RIR ID remains the default; an alias is accepted only when its
+exact ID is supplied explicitly. A newer run must not append to or reinterpret
+the sealed `installed-v0.3` evidence. These options control only the Codex
 composition gate. Claude remains structural-only and does not accept model or
 reasoning options.

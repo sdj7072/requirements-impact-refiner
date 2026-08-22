@@ -9,7 +9,8 @@ from pathlib import Path
 
 from evals.harness.catalog import load_all, select_suite
 from evals.harness.evidence import find_potential_secrets, verify_manifest
-from evals.harness.models import Adjudication, RunResult, RunStatus
+from evals.harness.models import Adjudication, MechanicalScore, RunResult, RunStatus
+from evals.harness.reporting import render_report
 from evals.harness.scoring import _planning_handoff_workflow, validate_adjudications
 
 
@@ -197,6 +198,17 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         )
         self.assertEqual(verify_manifest(RESULT_ROOT, manifest), [])
 
+        rows = manifest.splitlines()
+        for name, mutated in (
+            ("reversed", "\n".join(reversed(rows)) + "\n"),
+            ("missing-final-newline", manifest[:-1]),
+        ):
+            with self.subTest(manifest_mutation=name):
+                self.assertIn(
+                    "manifest is not the canonical sorted POSIX representation",
+                    verify_manifest(RESULT_ROOT, mutated),
+                )
+
         findings = {}
         for path in RESULT_ROOT.rglob("*"):
             if path.is_file():
@@ -310,6 +322,7 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
     def test_mechanical_score_human_adjudication_and_report_preserve_the_one_blocker(self):
         """Catch a false verified claim or a changed sole mechanical failure."""
         controller = load_json(RESULT_ROOT / "controller.json")
+        identity = controller["identity"]
         scores = load_json(RESULT_ROOT / "scores.json")
         self.assertEqual(len(scores), 85)
         self.assertEqual(
@@ -366,6 +379,7 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
                 reason=row["result"]["reason"],
                 final_output=row["result"]["final_output"],
                 session_id=row["result"]["session_id"],
+                metadata=tuple(tuple(pair) for pair in row["result"]["metadata"]),
                 attempt=row["result"]["attempt"],
                 retry_of=row["result"]["retry_of"],
             )
@@ -379,6 +393,27 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
             ),
             [],
         )
+
+        all_pass_scores = tuple(
+            MechanicalScore(row["case_id"], row["repetition"], True, ())
+            for row in scores
+        )
+        legacy_render = render_report(
+            typed_runs,
+            {
+                "client": identity["client"],
+                "version": identity["version"],
+                "plugin_version": identity["plugin_version"],
+                "enabled_composition": identity["enabled_composition"],
+                "enabled_plugins": tuple(identity["enabled_plugins"]),
+                "model": identity["model"],
+                "reasoning": identity["reasoning"],
+                "repetitions": controller["repetitions"],
+            },
+            all_pass_scores,
+            typed_adjudications,
+        )
+        self.assertIn("- status: not verified", legacy_render)
 
         report = (RESULT_ROOT / "report.md").read_text(encoding="utf-8")
         for line in (

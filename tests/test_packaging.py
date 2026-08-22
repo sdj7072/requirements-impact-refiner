@@ -77,6 +77,13 @@ def unsafe_ci_argv(argv):
         return False
 
     command, *arguments = argv
+    python_name = Path(command).name
+    if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", python_name):
+        if any(
+            argument == "-m" and arguments[index + 1] == "evals.harness.run"
+            for index, argument in enumerate(arguments[:-1])
+        ):
+            return True
     if command == "codex" and arguments[:1] == ["exec"]:
         return True
     if command == "codex" and arguments[:3] == ["plugin", "marketplace", "upgrade"]:
@@ -383,6 +390,11 @@ class PackagingTest(unittest.TestCase):
             "claude -p 'evaluate this'",
             "claude --print 'evaluate this'",
             "claude",
+            "python -m evals.harness.run --client codex --probe-only --output out",
+            "python3 -m evals.harness.run --client codex --suite smoke --output out",
+            "python3.11 -m evals.harness.run --client claude --probe-only --output out",
+            "/usr/bin/python3 -m evals.harness.run --client codex --suite installed-superpowers --output out",
+            "PYTHONPYCACHEPREFIX=/tmp/ci python3 -m evals.harness.run --client codex --probe-only --output out",
         )
         for command in unsafe_steps:
             with self.subTest(command=command), tempfile.TemporaryDirectory() as temporary:
@@ -408,6 +420,16 @@ class PackagingTest(unittest.TestCase):
             ),
             (),
         )
+
+    def test_ci_safety_allows_python_test_and_compile_modules(self):
+        """The live harness ban must not disable deterministic fake tests or compilation."""
+        workflow = (
+            "jobs:\n  test:\n    steps:\n      - run: |\n"
+            "          python3 -m unittest discover -s tests -v\n"
+            "          python3 -m py_compile evals/harness/run.py\n"
+            "          python3 -m compileall -q evals/harness\n"
+        )
+        self.assertEqual(unsafe_ci_commands(workflow), ())
 
 
 if __name__ == "__main__":

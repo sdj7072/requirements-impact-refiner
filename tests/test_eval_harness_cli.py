@@ -24,8 +24,11 @@ class FakeAdapter:
         client="codex",
         version="fake 1.0",
         plugin_version="0.3.0",
-        enabled_plugins=("requirements-impact-refiner", "superpowers"),
-        result_metadata=(),
+        enabled_plugins=(
+            "requirements-impact-refiner@requirements-impact-refiner",
+            "superpowers@openai-curated",
+        ),
+        result_metadata=None,
         available=True,
         reason=None,
         raw_final_output=None,
@@ -48,6 +51,25 @@ class FakeAdapter:
         self.retry_of_override = retry_of_override
         self.probe_results = (
             CommandResult(("fake", "--version"), 0, "fake 1.0", "", 0.0, False),
+        )
+
+    def run_metadata(self, request):
+        if self.result_metadata is not None:
+            return self.result_metadata
+        plugins = tuple(sorted(self.enabled_plugins))
+        composition = "%s %s plugins=%s" % (
+            self.client,
+            self.version,
+            ",".join(plugins),
+        )
+        return (
+            ("environment", "Codex with Superpowers"),
+            ("client_version", self.version),
+            ("plugin_version", self.plugin_version),
+            ("enabled_composition", composition),
+            ("enabled_plugins", ",".join(plugins)),
+            ("model", request.model or "omitted"),
+            ("reasoning", request.reasoning or "omitted"),
         )
 
     def prepare(self):
@@ -118,7 +140,7 @@ class FakeAdapter:
             session_id="123e4567-e89b-12d3-a456-426614174000" if len(request.case.turns) > 1 else None,
             attempt=request.attempt,
             retry_of=retry_of,
-            metadata=self.result_metadata,
+            metadata=self.run_metadata(request),
         )
 
 
@@ -184,7 +206,7 @@ class LineageEvidenceAdapter(FakeAdapter):
             session_id="123e4567-e89b-12d3-a456-426614174000",
             attempt=request.attempt,
             retry_of=request.retry_of,
-            metadata=self.result_metadata,
+            metadata=self.run_metadata(request),
         )
 
 
@@ -206,6 +228,17 @@ class EvalHarnessCliTest(unittest.TestCase):
 
         self.assertEqual(args.expected_plugin_version, "0.3.0")
 
+    def test_expected_rir_plugin_id_defaults_to_the_canonical_identity(self):
+        """A display name or evaluation alias must never be an implicit gate."""
+        args = build_parser().parse_args(
+            ["--client", "codex", "--suite", "smoke", "--output", "out"]
+        )
+
+        self.assertEqual(
+            getattr(args, "expected_rir_plugin_id", None),
+            "requirements-impact-refiner@requirements-impact-refiner",
+        )
+
     def test_codex_adapter_receives_the_explicit_expected_plugin_version(self):
         """Dropping the requested version at the CLI boundary would probe the wrong release."""
         args = build_parser().parse_args(
@@ -219,7 +252,30 @@ class EvalHarnessCliTest(unittest.TestCase):
             create_adapter(args)
 
         adapter_class.assert_called_once_with(
-            timeout_seconds=300.0, expected_plugin_version="0.3.1"
+            timeout_seconds=300.0,
+            expected_plugin_version="0.3.1",
+            expected_rir_plugin_id=(
+                "requirements-impact-refiner@requirements-impact-refiner"
+            ),
+        )
+
+    def test_codex_adapter_receives_an_explicit_evaluation_alias_id(self):
+        """The CLI must pass an approved alias without normalizing its identity."""
+        alias_id = "requirements-impact-refiner@requirements-impact-refiner-v031-eval"
+        args = build_parser().parse_args(
+            [
+                "--client", "codex", "--probe-only", "--output", "out",
+                "--expected-rir-plugin-id", alias_id,
+            ]
+        )
+
+        with patch("evals.harness.run.CodexAdapter") as adapter_class:
+            create_adapter(args)
+
+        adapter_class.assert_called_once_with(
+            timeout_seconds=300.0,
+            expected_plugin_version="0.3.0",
+            expected_rir_plugin_id=alias_id,
         )
 
     def test_probe_only_allows_omitting_suite_but_batches_do_not(self):

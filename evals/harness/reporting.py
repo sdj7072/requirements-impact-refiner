@@ -11,10 +11,20 @@ _STATUS_KEYS = tuple(status.value for status in RunStatus)
 _REQUIRED_METADATA = (
     "client",
     "version",
+    "plugin_version",
     "enabled_composition",
+    "enabled_plugins",
     "model",
     "reasoning",
     "repetitions",
+)
+_RUN_PROVENANCE_KEYS = (
+    "client_version",
+    "plugin_version",
+    "enabled_composition",
+    "enabled_plugins",
+    "model",
+    "reasoning",
 )
 
 
@@ -67,11 +77,37 @@ def _require_metadata(metadata: Mapping[str, object]) -> Dict[str, object]:
     repetitions = values["repetitions"]
     if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
         raise ValueError("report metadata repetitions must be a positive integer")
+    plugins = values["enabled_plugins"]
+    if (
+        not isinstance(plugins, (list, tuple))
+        or not plugins
+        or any(not isinstance(plugin, str) or not plugin for plugin in plugins)
+        or len(set(plugins)) != len(plugins)
+    ):
+        raise ValueError("report metadata enabled_plugins must be unique plugin IDs")
+    values["enabled_plugins"] = tuple(plugins)
     return values
 
 
 def _environment_values(run: RunResult) -> tuple[str, ...]:
     return tuple(value for key, value in run.metadata if key == "environment")
+
+
+def _run_provenance(run: RunResult) -> Optional[Dict[str, str]]:
+    """Return one unambiguous structured provenance row from a sealed final."""
+    values: Dict[str, str] = {}
+    for key, value in run.metadata:
+        if key not in _RUN_PROVENANCE_KEYS:
+            continue
+        if key in values or not value:
+            return None
+        values[key] = value
+    if set(values) != set(_RUN_PROVENANCE_KEYS):
+        return None
+    plugins = values["enabled_plugins"].split(",")
+    if any(not plugin for plugin in plugins) or len(set(plugins)) != len(plugins):
+        return None
+    return values
 
 
 def _derived_repetitions(results: Sequence[RunResult]) -> int:
@@ -83,7 +119,7 @@ def _verification_errors(
     results: Sequence[RunResult],
     scores: Optional[Sequence[MechanicalScore]],
     adjudications: Sequence[Adjudication],
-    declared_repetitions: int,
+    required: Mapping[str, object],
 ) -> list[str]:
     """Require the sealed canonical matrix, never a caller-supplied summary."""
     cases = select_suite(load_all(), "installed-superpowers")
@@ -98,7 +134,7 @@ def _verification_errors(
         errors.append("runs are not the canonical 17-case by 5-repetition matrix")
     if actual_repetitions != {1, 2, 3, 4, 5}:
         errors.append("sealed runs do not contain exactly repetitions 1 through 5")
-    if declared_repetitions != derived_repetitions:
+    if required["repetitions"] != derived_repetitions:
         errors.append("metadata repetitions disagree with sealed runs")
     if len(set(actual_runs)) != len(actual_runs):
         errors.append("runs contain duplicate case/repetition finals")
@@ -108,6 +144,21 @@ def _verification_errors(
         errors.append("runs are not all Codex finals")
     if any(_environment_values(run) != ("Codex with Superpowers",) for run in results):
         errors.append("runs are not all Codex with Superpowers finals")
+    expected_provenance = {
+        "client_version": str(required["version"]),
+        "plugin_version": str(required["plugin_version"]),
+        "enabled_composition": str(required["enabled_composition"]),
+        "enabled_plugins": ",".join(required["enabled_plugins"]),
+        "model": str(required["model"]),
+        "reasoning": str(required["reasoning"]),
+    }
+    provenance = [_run_provenance(run) for run in results]
+    if any(row is None for row in provenance):
+        errors.append("every sealed final requires unambiguous structured provenance")
+    elif any(row != expected_provenance for row in provenance):
+        errors.append("sealed final provenance disagrees with report metadata")
+    if required["client"] != "codex":
+        errors.append("report metadata does not describe Codex finals")
 
     if scores is None:
         errors.append("mechanical scores are required")
@@ -143,7 +194,7 @@ def render_report(
     summary = summarize(results, scores)
     derived_repetitions = _derived_repetitions(results)
     verification_errors = _verification_errors(
-        results, scores, adjudications, required["repetitions"]
+        results, scores, adjudications, required
     )
     status = "verified" if not verification_errors else "not verified"
     rendered_client = required["client"]
@@ -154,7 +205,9 @@ def render_report(
         "- status: %s" % status,
         "- client: %s" % rendered_client,
         "- version: %s" % required["version"],
+        "- plugin version: %s" % required["plugin_version"],
         "- enabled composition: %s" % rendered_composition,
+        "- enabled plugins: %s" % ",".join(required["enabled_plugins"]),
         "- model: %s" % required["model"],
         "- reasoning: %s" % required["reasoning"],
         "- repetitions: %s" % derived_repetitions,

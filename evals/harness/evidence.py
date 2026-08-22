@@ -311,6 +311,15 @@ def _parse_manifest(manifest: str) -> tuple[dict[str, str], list[str]]:
 def verify_manifest(raw_root: Path, manifest: str) -> list[str]:
     """Return deterministic integrity failures for a manifest and raw tree."""
     expected, problems = _parse_manifest(manifest)
+    canonical = "\n".join(
+        "%s %s" % (relative, expected[relative]) for relative in sorted(expected)
+    )
+    if expected:
+        canonical += "\n"
+    if manifest != canonical:
+        problems.insert(
+            0, "manifest is not the canonical sorted POSIX representation"
+        )
     actual = {}
     root = Path(raw_root)
     for path in _evidence_files(root):

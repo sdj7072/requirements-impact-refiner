@@ -16,6 +16,10 @@ _UUID = re.compile(
     r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
 )
 _COMPOSITION_LABEL = "Codex with Superpowers"
+_CANONICAL_RIR_PLUGIN_ID = (
+    "requirements-impact-refiner@requirements-impact-refiner"
+)
+_SUPERPOWERS_PLUGIN_ID = "superpowers@openai-curated"
 _PREDECESSOR_HANDOFF = (
     "Harness continuity evidence:\n"
     "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
@@ -34,11 +38,13 @@ class CodexAdapter(ClientAdapter):
         timeout_seconds: float = 300.0,
         quarantine_root: Optional[Path] = None,
         expected_plugin_version: str = "0.3.0",
+        expected_rir_plugin_id: str = _CANONICAL_RIR_PLUGIN_ID,
     ) -> None:
         self.executable = executable
         self.cwd = Path.cwd() if cwd is None else Path(cwd)
         self.timeout_seconds = timeout_seconds
         self.expected_plugin_version = expected_plugin_version
+        self.expected_rir_plugin_id = expected_rir_plugin_id
         self.quarantine_root = (
             Path(tempfile.gettempdir()) / "codex-eval-quarantine"
             if quarantine_root is None
@@ -134,6 +140,7 @@ class CodexAdapter(ClientAdapter):
                 None,
                 None,
                 probe,
+                None,
             )
 
         with tempfile.TemporaryDirectory(prefix="codex-eval-") as temporary:
@@ -161,6 +168,7 @@ class CodexAdapter(ClientAdapter):
                     None,
                     None,
                     probe,
+                    first_command,
                 )
 
             if len(request.case.turns) == 1:
@@ -173,6 +181,7 @@ class CodexAdapter(ClientAdapter):
                     first_output,
                     None,
                     probe,
+                    first_command,
                 )
 
             thread_id = self.parse_thread_id(first_command.stdout)
@@ -186,6 +195,7 @@ class CodexAdapter(ClientAdapter):
                     None,
                     None,
                     probe,
+                    first_command,
                 )
 
             if len(request.case.turns) != 2:
@@ -198,6 +208,7 @@ class CodexAdapter(ClientAdapter):
                     None,
                     thread_id,
                     probe,
+                    first_command,
                 )
 
             second_turn = request.case.turns[1]
@@ -228,6 +239,7 @@ class CodexAdapter(ClientAdapter):
                     None,
                     thread_id,
                     probe,
+                    first_command,
                 )
             return self._record_result(
                 request,
@@ -238,6 +250,7 @@ class CodexAdapter(ClientAdapter):
                 second_output,
                 thread_id,
                 probe,
+                first_command,
             )
 
     def _probe_with_commands(self) -> tuple[ClientProbe, Tuple[CommandResult, ...]]:
@@ -325,8 +338,8 @@ class CodexAdapter(ClientAdapter):
 
     @staticmethod
     def _plugin_id(entry: dict[str, Any]) -> str:
-        value = entry.get("pluginId") or entry.get("id") or entry.get("name")
-        return str(value)
+        value = entry.get("pluginId") or entry.get("id")
+        return value if isinstance(value, str) else ""
 
     @staticmethod
     def _plugin_version(entry: dict[str, Any]) -> Optional[str]:
@@ -335,19 +348,11 @@ class CodexAdapter(ClientAdapter):
             value = entry["manifest"].get("version")
         return str(value) if value is not None else None
 
-    @staticmethod
-    def _plugin_name(entry: dict[str, Any]) -> str:
-        value = entry.get("name") or entry.get("pluginId") or entry.get("id") or ""
-        return str(value).strip().lower().replace("_", "-")
-
     def _is_rir(self, entry: dict[str, Any]) -> bool:
-        return self._plugin_name(entry) in {
-            "requirements impact refiner",
-            "requirements-impact-refiner",
-        }
+        return self._plugin_id(entry) == self.expected_rir_plugin_id
 
     def _is_superpowers(self, entry: dict[str, Any]) -> bool:
-        return self._plugin_name(entry) == "superpowers"
+        return self._plugin_id(entry) == _SUPERPOWERS_PLUGIN_ID
 
     @staticmethod
     def _turn_prompt(prompt: str, repository_evidence: Sequence[str]) -> str:
@@ -428,7 +433,19 @@ class CodexAdapter(ClientAdapter):
         final_output: Optional[str],
         session_id: Optional[str],
         probe: ClientProbe,
+        provenance_command: Optional[CommandResult],
     ) -> RunResult:
+        options_valid, observed_model, observed_reasoning = self._argv_run_options(
+            provenance_command.argv if provenance_command is not None else ()
+        )
+        if provenance_command is not None and (
+            not options_valid
+            or observed_model != request.model
+            or observed_reasoning != request.reasoning
+        ):
+            status = RunStatus.INVALID_EVIDENCE
+            reason = "run options disagree with execution argv"
+            final_output = None
         try:
             record_run(
                 request.output_root,
@@ -447,6 +464,12 @@ class CodexAdapter(ClientAdapter):
             status = RunStatus.INFRA_ERROR
             reason = "evidence recording failed: %s" % error
             final_output = None
+        plugins = tuple(sorted(probe.enabled_plugins))
+        client_version = probe.version or ""
+        model = observed_model if provenance_command is not None else request.model
+        reasoning = (
+            observed_reasoning if provenance_command is not None else request.reasoning
+        )
         return RunResult(
             case_id=request.case.id,
             repetition=request.repetition,
@@ -458,11 +481,52 @@ class CodexAdapter(ClientAdapter):
             session_id=session_id,
             metadata=(
                 ("environment", _COMPOSITION_LABEL),
+                ("client_version", client_version),
                 ("plugin_version", probe.plugin_version or ""),
-                ("enabled_plugins", ",".join(probe.enabled_plugins)),
+                (
+                    "enabled_composition",
+                    "codex %s plugins=%s"
+                    % (client_version or "unavailable", ",".join(plugins) or "none"),
+                ),
+                ("enabled_plugins", ",".join(plugins)),
+                ("model", model or "omitted"),
+                ("reasoning", reasoning or "omitted"),
             ),
             attempt=request.attempt,
             retry_of=request.retry_of,
+        )
+
+    @staticmethod
+    def _argv_run_options(
+        argv: Sequence[str],
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """Derive the selected model and reasoning from the executed first turn."""
+        models = []
+        reasonings = []
+        for index, argument in enumerate(argv):
+            if argument == "-m":
+                if index + 1 >= len(argv):
+                    return False, None, None
+                models.append(argv[index + 1])
+            if argument != "-c" or index + 1 >= len(argv):
+                continue
+            configuration = argv[index + 1]
+            prefix = "model_reasoning_effort="
+            if not configuration.startswith(prefix):
+                continue
+            try:
+                value = json.loads(configuration[len(prefix) :])
+            except json.JSONDecodeError:
+                return False, None, None
+            if not isinstance(value, str):
+                return False, None, None
+            reasonings.append(value)
+        if len(models) > 1 or len(reasonings) > 1:
+            return False, None, None
+        return (
+            True,
+            models[0] if models else None,
+            reasonings[0] if reasonings else None,
         )
 
     @staticmethod

@@ -57,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model")
     parser.add_argument("--reasoning")
     parser.add_argument("--expected-plugin-version", default="0.3.0")
+    parser.add_argument(
+        "--expected-rir-plugin-id",
+        default="requirements-impact-refiner@requirements-impact-refiner",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--probe-only", action="store_true")
@@ -80,6 +84,7 @@ def create_adapter(args: argparse.Namespace):
         return CodexAdapter(
             timeout_seconds=args.timeout,
             expected_plugin_version=args.expected_plugin_version,
+            expected_rir_plugin_id=args.expected_rir_plugin_id,
         )
     return ClaudeAdapter(executable="claude", timeout_seconds=args.timeout)
 
@@ -375,6 +380,7 @@ def _load_existing(output_root: Path, raw_root: Path, identity: dict[str, object
 def _report_metadata(args: argparse.Namespace, probe: ClientProbe, results: Sequence[RunResult]) -> dict[str, object]:
     return {
         "client": probe.client, "version": probe.version or "unavailable",
+        "plugin_version": probe.plugin_version or "unavailable",
         "enabled_composition": _composition(probe),
         "enabled_plugins": sorted(probe.enabled_plugins),
         "model": args.model or "omitted", "reasoning": args.reasoning or "omitted",

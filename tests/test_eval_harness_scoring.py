@@ -35,15 +35,36 @@ def result(
     repetition=1,
     client="codex",
     composition="Codex with Superpowers",
+    client_version="0.148.0",
+    plugin_version="0.3.0",
+    enabled_composition=None,
+    enabled_plugins=(
+        "requirements-impact-refiner@requirements-impact-refiner",
+        "superpowers@openai-curated",
+    ),
+    model="gpt-5.6-sol",
+    reasoning="high",
 ):
+    enabled_composition = enabled_composition or (
+        "%s %s plugins=%s"
+        % (client, client_version, ",".join(enabled_plugins))
+    )
     return RunResult(
         case_id=case_id,
         repetition=repetition,
-        client="codex",
+        client=client,
         status=status,
         reason=None,
         final_output=output,
-        metadata=(("environment", composition),),
+        metadata=(
+            ("environment", composition),
+            ("client_version", client_version),
+            ("plugin_version", plugin_version),
+            ("enabled_composition", enabled_composition),
+            ("enabled_plugins", ",".join(enabled_plugins)),
+            ("model", model),
+            ("reasoning", reasoning),
+        ),
     )
 
 
@@ -51,7 +72,16 @@ CANONICAL_CASES = select_suite(load_all(), "installed-superpowers")
 REPORT_METADATA = {
     "client": "codex",
     "version": "0.148.0",
-    "enabled_composition": "Codex with Superpowers",
+    "plugin_version": "0.3.0",
+    "enabled_composition": (
+        "codex 0.148.0 plugins="
+        "requirements-impact-refiner@requirements-impact-refiner,"
+        "superpowers@openai-curated"
+    ),
+    "enabled_plugins": (
+        "requirements-impact-refiner@requirements-impact-refiner",
+        "superpowers@openai-curated",
+    ),
     "model": "gpt-5.6-sol",
     "reasoning": "high",
     "repetitions": 5,
@@ -486,7 +516,15 @@ class EvalHarnessScoringTest(unittest.TestCase):
             "empty adjudications": (runs, scores, ()),
             "duplicate repetition": (runs[:-1] + (replace(runs[-1], repetition=1),), scores, adjudications),
             "wrong client": (replace(runs[0], client="claude"),) + runs[1:],
-            "wrong composition": (replace(runs[0], metadata=(("environment", "Codex standalone"),)),) + runs[1:],
+            "wrong composition": (
+                replace(
+                    runs[0],
+                    metadata=tuple(
+                        (key, "Codex standalone" if key == "environment" else value)
+                        for key, value in runs[0].metadata
+                    ),
+                ),
+            ) + runs[1:],
             "missing run": (runs[:-1], scores[:-1], adjudications),
             "partial result": (replace(runs[0], status=RunStatus.PARTIAL),) + runs[1:],
             "failed mechanical score": (runs, (replace(scores[0], passed=False),) + scores[1:], adjudications),
@@ -500,7 +538,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
                     mutated_runs, mutated_scores, mutated_adjudications = mutation
                 rendered = render_report(
                     mutated_runs,
-                    dict(REPORT_METADATA, client="codex", enabled_composition="Codex with Superpowers"),
+                    REPORT_METADATA,
                     mutated_scores,
                     mutated_adjudications,
                 )
@@ -508,6 +546,76 @@ class EvalHarnessScoringTest(unittest.TestCase):
 
         self.assertIn("model: gpt-5.6-sol", verified)
         self.assertIn("reasoning: high", verified)
+
+    def test_verified_promotion_requires_every_run_and_caller_to_match_exact_provenance(self):
+        """Changing any sealed or displayed provenance field must block promotion."""
+        runs, scores, adjudications = complete_matrix()
+
+        run_mutations = {
+            "client version": ("client_version", "0.149.0"),
+            "plugin version": ("plugin_version", "0.3.1"),
+            "plugin inventory": (
+                "enabled_plugins",
+                "requirements-impact-refiner@requirements-impact-refiner,"
+                "superpowers@openai-curated,other@marketplace",
+            ),
+            "enabled composition": (
+                "enabled_composition",
+                "codex 0.148.0 plugins=superpowers@openai-curated",
+            ),
+            "model": ("model", "other-model"),
+            "reasoning": ("reasoning", "medium"),
+        }
+        for name, (field, value) in run_mutations.items():
+            with self.subTest(source="run", field=name):
+                mutated = replace(
+                    runs[0],
+                    metadata=tuple(
+                        (key, value if key == field else current)
+                        for key, current in runs[0].metadata
+                    ),
+                )
+                rendered = render_report(
+                    (mutated,) + runs[1:], REPORT_METADATA, scores, adjudications
+                )
+                self.assertIn("status: not verified", rendered)
+
+        caller_mutations = {
+            "client": "claude",
+            "version": "0.149.0",
+            "plugin_version": "0.3.1",
+            "enabled_composition": "Codex standalone",
+            "enabled_plugins": ("superpowers@openai-curated",),
+            "model": "other-model",
+            "reasoning": "medium",
+        }
+        for field, value in caller_mutations.items():
+            with self.subTest(source="caller", field=field):
+                rendered = render_report(
+                    runs,
+                    dict(REPORT_METADATA, **{field: value}),
+                    scores,
+                    adjudications,
+                )
+                self.assertIn("status: not verified", rendered)
+
+    def test_verified_promotion_rejects_missing_or_duplicate_run_provenance(self):
+        """Legacy or ambiguous RunResult metadata must remain not verified."""
+        runs, scores, adjudications = complete_matrix()
+        missing = replace(
+            runs[0],
+            metadata=tuple(pair for pair in runs[0].metadata if pair[0] != "model"),
+        )
+        duplicate = replace(
+            runs[0], metadata=runs[0].metadata + (("model", "gpt-5.6-sol"),)
+        )
+
+        for name, mutated in (("missing", missing), ("duplicate", duplicate)):
+            with self.subTest(name=name):
+                rendered = render_report(
+                    (mutated,) + runs[1:], REPORT_METADATA, scores, adjudications
+                )
+                self.assertIn("status: not verified", rendered)
 
     def test_rendering_requires_all_environment_metadata(self):
         """Omitting run-local provenance makes the result unreportable."""
@@ -517,7 +625,9 @@ class EvalHarnessScoringTest(unittest.TestCase):
                 {
                     "client": "codex",
                     "version": "0.148.0",
-                    "enabled_composition": "Codex with Superpowers",
+                    "plugin_version": "0.3.0",
+                    "enabled_composition": REPORT_METADATA["enabled_composition"],
+                    "enabled_plugins": REPORT_METADATA["enabled_plugins"],
                     "model": "gpt-5.6-sol",
                     "repetitions": 1,
                 },
