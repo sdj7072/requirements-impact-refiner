@@ -3,11 +3,11 @@
   "projectRoot": "<PROJECT_ROOT>",
   "sourceFingerprint": "<SOURCE_FINGERPRINT>",
   "nodes": [
-    {"id": "profile-field", "kind": "api_field", "label": "profile.displayName", "path": "api/profile.py", "range": [0, 0, 0, 19]},
-    {"id": "desktop-cache", "kind": "cache", "label": "CachedProfileDTO", "path": "desktop/profile_cache.ts", "range": [1, 0, 1, 44]}
+    {"id": "profile-field", "kind": "api_field", "label": "profile.displayName", "path": "api/profile.py", "range": [0, 17, 0, 36], "excerpt": "profile.displayName"},
+    {"id": "desktop-cache", "kind": "cache", "label": "CachedProfileDTO", "path": "desktop/profile_cache.ts", "range": [0, 25, 0, 44], "excerpt": "profile.displayName"}
   ],
   "edges": [
-    {"source": "profile-field", "target": "desktop-cache", "kind": "references", "path": "desktop/profile_cache.ts", "range": [1, 25, 1, 44]},
-    {"source": "profile-field", "target": "desktop-cache", "kind": "references", "path": "desktop/profile_cache.ts", "range": [1, 25, 1, 44]}
+    {"source": "profile-field", "target": "desktop-cache", "kind": "references", "path": "desktop/profile_cache.ts", "range": [0, 25, 0, 44], "excerpt": "profile.displayName"},
+    {"source": "profile-field", "target": "desktop-cache", "kind": "references", "path": "desktop/profile_cache.ts", "range": [0, 25, 0, 44], "excerpt": "profile.displayName"}
   ]
 }

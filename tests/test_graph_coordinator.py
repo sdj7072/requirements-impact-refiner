@@ -360,6 +360,25 @@ class GraphCoordinatorTest(unittest.TestCase):
         names = [item[0] for item in events]
         self.assertLess(names.index("query"), names.index("builtin"))
 
+    def test_explicit_joern_discovery_receives_exact_deep_setting(self):
+        seen = []
+        def discover(root, requested, deadline, **kwargs):
+            seen.append((requested, kwargs.get("deep")))
+            return (COORDINATOR.ProviderProbe(
+                "joern", "unsupported", detail="Joern requires deep mode",
+                repo_root=root,
+            ),)
+        for deep in (False, True):
+            settings = COORDINATOR.GraphSettings(
+                providers=("joern",), max_seconds=30, target_seconds=10, deep=deep,
+            )
+            with mock.patch.object(COORDINATOR, "discover_providers", side_effect=discover):
+                COORDINATOR.trace_impact(
+                    self.root, {"draft_id": ("2" if deep else "3") * 32},
+                    self.seeds, settings, clock=self.clock, runner=self.runner,
+                )
+        self.assertEqual(seen, [(("joern",), False), (("joern",), True)])
+
     def test_provider_disagreement_preserves_both_observations_and_unknown_frontier(self):
         calls = []
         probes = (

@@ -3,10 +3,10 @@
   "projectRoot": "<PROJECT_ROOT>",
   "sourceFingerprint": "<SOURCE_FINGERPRINT>",
   "nodes": [
-    {"id": "serializer", "kind": "operation", "label": "serialize_profile", "path": "api/profile.py", "range": [4, 0, 5, 70]},
-    {"id": "publisher", "kind": "event", "label": "publish_profile_changed", "path": "events/profile_changed.py", "range": [4, 0, 5, 60]}
+    {"id": "serializer", "kind": "operation", "label": "serialize_profile", "path": "api/profile.py", "range": [1, 4, 1, 21], "excerpt": "serialize_profile"},
+    {"id": "publisher", "kind": "event", "label": "publish_profile_changed", "path": "events/profile_changed.py", "range": [1, 4, 1, 27], "excerpt": "publish_profile_changed"}
   ],
   "edges": [
-    {"source": "serializer", "target": "publisher", "kind": "calls", "path": "events/profile_changed.py", "range": [4, 0, 4, 31]}
+    {"source": "serializer", "target": "publisher", "kind": "calls", "path": "events/profile_changed.py", "range": [1, 4, 1, 27], "excerpt": "publish_profile_changed"}
   ]
 }

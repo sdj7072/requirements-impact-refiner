@@ -812,6 +812,12 @@ def discover_providers(
     specs, unsafe = _configured_specs(requested, search_path, deep)
     probes = []
     for spec in specs:
+        if spec.name == "joern" and not deep:
+            probes.append(ProviderProbe(
+                "joern", "unsupported", detail="Joern requires explicit deep mode",
+                executable=spec.executable, repo_root=root,
+            ))
+            continue
         if spec.executable is None:
             probes.append(ProviderProbe(
                 spec.name, "missing", detail="executable not found", repo_root=root,

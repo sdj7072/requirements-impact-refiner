@@ -34,7 +34,8 @@ ProviderProbe = PROVIDERS.ProviderProbe
 ProviderResult = PROVIDERS.ProviderResult
 ProviderSpec = PROVIDERS.ProviderSpec
 
-_VERSION = re.compile(r"(?i)^joern\s+4\.\d+\.\d+(?:[-+][^\s]+)?$")
+_VERSION = re.compile(r"(?i)^joern\s+(?P<version>4\.\d+\.\d+(?:[-+][^\s]+)?)$")
+_CREATOR_VERSION = re.compile(r"4\.\d+\.\d+(?:[-+][^\s]+)?")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _MAX_GRAPH_BYTES = 512 * 1024 * 1024
 _MAX_METADATA_BYTES = 64 * 1024
@@ -110,7 +111,11 @@ def _metadata(root):
     created = value["createdBy"]
     if not isinstance(created, dict) or set(created) != {"name", "version"}:
         raise ValueError("Joern graph creator metadata shape is unsupported")
-    if created.get("name") != "joern" or not isinstance(created.get("version"), str):
+    if (
+        created.get("name") != "joern"
+        or not isinstance(created.get("version"), str)
+        or _CREATOR_VERSION.fullmatch(created["version"]) is None
+    ):
         raise ValueError("Joern graph creator is unsupported")
     if not isinstance(value["sourceFingerprint"], str) or _HEX64.fullmatch(value["sourceFingerprint"]) is None:
         raise ValueError("Joern source fingerprint is invalid")
@@ -140,9 +145,10 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
     if version_result.status != "ready":
         return ProviderProbe("joern", version_result.status, "verified-provider", spec.executable, executable_sha256=version_result.executable_sha256, detail=version_result.detail, repo_root=resolved)
     version = next((line.strip() for line in version_result.stdout.splitlines() if line.strip()), "")
-    if _VERSION.fullmatch(version) is None:
+    version_match = _VERSION.fullmatch(version)
+    if version_match is None:
         return ProviderProbe("joern", "unsupported", "verified-provider", spec.executable, version[:256] or None, version_result.executable_sha256, detail="Joern 4.x JSON query CLI is required", repo_root=resolved)
-    if metadata["createdBy"]["version"] not in version:
+    if metadata["createdBy"]["version"] != version_match.group("version"):
         return ProviderProbe("joern", "unsupported", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="Joern graph creator version does not match installed reader", repo_root=resolved)
     for arguments in (("--help",), ("query", "--help")):
         help_result = PROVIDERS.run_provider(spec, arguments, resolved, deadline, runner=runner)
@@ -151,7 +157,10 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
             return ProviderProbe("joern", status, "verified-provider", spec.executable, version, version_result.executable_sha256, detail=help_result.detail or "Joern query help unavailable", repo_root=resolved)
         if help_result.executable_sha256 != version_result.executable_sha256:
             return ProviderProbe("joern", "unsafe", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="provider executable changed between probes", repo_root=resolved)
-        if not all(token in help_result.stdout for token in ("query", "--json", "--graph", "--seed")):
+        if re.fullmatch(
+            r"Usage:\s+joern query --json --graph <GRAPH> --seed <TEXT>\s*",
+            help_result.stdout,
+        ) is None:
             return ProviderProbe("joern", "unsupported", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="Joern help does not confirm non-interactive JSON graph queries", repo_root=resolved)
     return ProviderProbe(
         "joern", "ready", "verified-provider", spec.executable, version,

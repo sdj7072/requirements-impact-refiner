@@ -9,8 +9,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import sys
+import tempfile
 
 
 def _load(filename, name):
@@ -58,6 +60,68 @@ def _regular_index(root):
     if metadata.st_size <= 0 or metadata.st_size > _MAX_INDEX_BYTES:
         return "unsafe", "index.scip size is outside the supported bound"
     return "ready", None
+
+
+def _index_observation(root):
+    path = root / "index.scip"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(path), flags)
+    except OSError as error:
+        raise ValueError("index.scip is unavailable or unsafe") from error
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > _MAX_INDEX_BYTES:
+            raise ValueError("index.scip must be a bounded regular file")
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        return {
+            "sha256": digest.hexdigest(), "device": info.st_dev, "inode": info.st_ino,
+            "size": info.st_size, "modified_ns": info.st_mtime_ns,
+        }
+    finally:
+        os.close(descriptor)
+
+
+def _same_index(left, right):
+    return left == right
+
+
+def _snapshot_observation(path):
+    try:
+        info = path.lstat()
+    except OSError:
+        return None
+    if (
+        stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o400
+        or info.st_size <= 0 or info.st_size > _MAX_INDEX_BYTES
+    ):
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(path), flags)
+    except OSError:
+        return None
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) != (
+            info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+        ):
+            return None
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        return digest.hexdigest()
+    finally:
+        os.close(descriptor)
 
 
 def _range(value):
@@ -111,7 +175,7 @@ def _parse(value, root, fingerprint):
             count += 1
             if count > _MAX_OCCURRENCES:
                 raise ValueError("SCIP occurrence collection exceeds bound")
-            if not isinstance(row, dict) or set(row) != {"range", "symbol", "symbolRoles"}:
+            if not isinstance(row, dict) or set(row) != {"range", "symbol", "symbolRoles", "excerpt"}:
                 raise ValueError("SCIP occurrence shape is unsupported")
             symbol, roles = row["symbol"], row["symbolRoles"]
             if not isinstance(symbol, str) or not symbol or len(symbol) > _MAX_SYMBOL:
@@ -119,18 +183,99 @@ def _parse(value, root, fingerprint):
             if not isinstance(roles, int) or isinstance(roles, bool) or roles < 0 or roles > 127:
                 raise ValueError("SCIP symbol roles are invalid")
             source_range = _range(row["range"])
+            proof = COMMON._source_proof(root, path, source_range)
+            if not isinstance(row["excerpt"], str) or row["excerpt"] != proof["excerpt"]:
+                raise ValueError("SCIP occurrence excerpt does not match declared source range")
             signature = (path, source_range, roles)
             occurrences.setdefault(symbol, {})[signature] = (
-                path, source_range, roles, hashlib.sha256(payload).hexdigest(),
+                path, source_range, roles, proof["sha256"], proof["excerpt"],
             )
     return metadata, occurrences
 
 
-def _print(spec, root, deadline, runner):
-    return PROVIDERS.run_provider(
-        spec, ("print", "--json", "index.scip"), root, deadline,
-        runner=runner, expect_json=True,
-    )
+def _print(spec, root, deadline, runner, expected_identity=None):
+    try:
+        before = _index_observation(root)
+    except ValueError as error:
+        return None, "unsafe", str(error), None
+    if expected_identity is not None and not _same_index(before, expected_identity):
+        return None, "stale", "index.scip changed after probe", before
+    directory = Path(tempfile.mkdtemp(prefix="rir-scip-index-"))
+    os.chmod(directory, 0o700)
+    snapshot = directory / "index.scip"
+    source = destination = -1
+    cleaned = False
+
+    def finish(value):
+        nonlocal cleaned
+        if cleaned:
+            return value
+        try:
+            if directory.is_symlink():
+                directory.unlink()
+                cleaned = True
+                return (None, "unsafe", "private SCIP snapshot directory was replaced", before)
+            def repair(function, path, error):
+                info = os.lstat(path)
+                if stat.S_ISLNK(info.st_mode):
+                    os.unlink(path)
+                    return
+                os.chmod(path, 0o700)
+                function(path)
+            shutil.rmtree(directory, onerror=repair)
+            cleaned = not directory.exists() and not directory.is_symlink()
+        except OSError:
+            cleaned = False
+        if not cleaned:
+            return (None, "unsafe", "private SCIP snapshot cleanup failed", before)
+        return value
+
+    try:
+        source = os.open(str(root / "index.scip"), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        destination = os.open(
+            str(snapshot), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o400,
+        )
+        copied = hashlib.sha256()
+        while True:
+            chunk = os.read(source, 64 * 1024)
+            if not chunk:
+                break
+            copied.update(chunk)
+            offset = 0
+            while offset < len(chunk):
+                written = os.write(destination, chunk[offset:])
+                if written <= 0:
+                    raise OSError("SCIP snapshot write made no progress")
+                offset += written
+        os.fsync(destination)
+        os.close(destination)
+        destination = -1
+        os.chmod(snapshot, 0o400)
+        if copied.hexdigest() != before["sha256"]:
+            return finish((None, "stale", "index.scip changed while snapshotting", before))
+        during = _index_observation(root)
+        if not _same_index(before, during):
+            return finish((None, "stale", "index.scip changed while snapshotting", during))
+        result = PROVIDERS.run_provider(
+            spec, ("print", "--json", str(snapshot)), root, deadline,
+            runner=runner, expect_json=True,
+        )
+        snapshot_digest = _snapshot_observation(snapshot)
+        if snapshot_digest != before["sha256"]:
+            return finish((None, "unsafe", "private SCIP snapshot changed during print", before))
+        after = _index_observation(root)
+        if not _same_index(before, after):
+            return finish((None, "stale", "index.scip changed during print", after))
+        return finish((result, result.status, result.detail, before))
+    except (OSError, ValueError) as error:
+        return finish((None, "unsafe", str(error), before))
+    finally:
+        if source >= 0:
+            os.close(source)
+        if destination >= 0:
+            os.close(destination)
+        if not cleaned:
+            finish((None, "unsafe", "private SCIP snapshot cleanup failed", before))
 
 
 def probe(spec, root, deadline, runner) -> ProviderProbe:
@@ -150,9 +295,9 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
     version = next((line.strip() for line in version_result.stdout.splitlines() if line.strip()), "")
     if _VERSION.fullmatch(version) is None:
         return ProviderProbe("scip", "unsupported", "verified-provider", spec.executable, version[:256] or None, version_result.executable_sha256, detail="SCIP reader 0.6.x is required", repo_root=resolved)
-    for arguments, tokens in (
-        (("--help",), ("print",)),
-        (("print", "--help"), ("--json", "<index>")),
+    for arguments, patterns in (
+        (("--help",), (r"(?m)^\s{2,}print\s*$",)),
+        (("print", "--help"), (r"(?m)^Usage:\s+scip print --json <index>\s*$",)),
     ):
         help_result = PROVIDERS.run_provider(spec, arguments, resolved, deadline, runner=runner)
         if help_result.status != "ready":
@@ -160,11 +305,11 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
             return ProviderProbe("scip", status, "verified-provider", spec.executable, version, version_result.executable_sha256, detail=help_result.detail or "SCIP print help unavailable", repo_root=resolved)
         if help_result.executable_sha256 != version_result.executable_sha256:
             return ProviderProbe("scip", "unsafe", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="provider executable changed between probes", repo_root=resolved)
-        if not all(token in help_result.stdout for token in tokens):
+        if not all(re.search(pattern, help_result.stdout) for pattern in patterns):
             return ProviderProbe("scip", "unsupported", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="SCIP help does not confirm read-only JSON print", repo_root=resolved)
-    printed = _print(spec, resolved, deadline, runner)
-    if printed.status != "ready":
-        return ProviderProbe("scip", printed.status, "verified-provider", spec.executable, version, version_result.executable_sha256, detail=printed.detail or "SCIP print failed", repo_root=resolved)
+    printed, print_status, print_detail, index_identity = _print(spec, resolved, deadline, runner)
+    if print_status != "ready" or printed is None:
+        return ProviderProbe("scip", print_status, "verified-provider", spec.executable, version, version_result.executable_sha256, detail=print_detail or "SCIP print failed", repo_root=resolved)
     if printed.executable_sha256 != version_result.executable_sha256:
         return ProviderProbe("scip", "unsafe", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="provider executable changed before SCIP print", repo_root=resolved)
     try:
@@ -180,6 +325,7 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
         metadata={
             "index": "index.scip", "source_fingerprint": fingerprint,
             "indexer": "%s %s" % (indexer["name"], indexer["version"]),
+            "index_sha256": index_identity["sha256"], "index_identity": index_identity,
         },
     )
 
@@ -201,9 +347,14 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
     if fingerprint is None or fingerprint != probe.metadata.get("source_fingerprint"):
         return _failure("stale", "repository changed after SCIP probe")
     spec = ProviderSpec("scip", probe.executable)
-    printed = _print(spec, root, deadline, runner)
-    if printed.status != "ready":
-        return _failure(printed.status, printed.detail or "SCIP print failed")
+    expected_identity = dict(probe.metadata.get("index_identity", {}))
+    if not expected_identity or probe.metadata.get("index_sha256") != expected_identity.get("sha256"):
+        return _failure("unsafe", "SCIP index identity is missing or invalid")
+    printed, print_status, print_detail, _ = _print(
+        spec, root, deadline, runner, expected_identity,
+    )
+    if print_status != "ready" or printed is None:
+        return _failure(print_status, print_detail or "SCIP print failed")
     if probe.executable_sha256 is not None and printed.executable_sha256 != probe.executable_sha256:
         return _failure("unsafe", "SCIP executable changed after probe")
     digest = hashlib.sha256(printed.stdout.encode("utf-8")).hexdigest()
@@ -229,7 +380,7 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
         definitions = [item for item in occurrences.values() if item[2] & 1]
         references = [item for item in occurrences.values() if not item[2] & 1]
         for definition_index, definition in enumerate(definitions):
-            source_path, source_range, _, source_digest = definition
+            source_path, source_range, _, source_digest, source_excerpt = definition
             source_key = "definition:%s:%d" % (hashlib.sha256(symbol.encode("utf-8")).hexdigest()[:16], definition_index)
             nodes[source_key] = {
                 "key": source_key, "kind": _node_kind(source_path, symbol),
@@ -238,7 +389,7 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                 "risk_domains": COMMON._risk_domains(source_path, symbol),
             }
             for reference_index, reference in enumerate(references):
-                target_path, target_range, roles, target_digest = reference
+                target_path, target_range, roles, target_digest, target_excerpt = reference
                 target_key = "reference:%s:%d:%d" % (
                     hashlib.sha256(symbol.encode("utf-8")).hexdigest()[:16],
                     definition_index, reference_index,
@@ -257,7 +408,7 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                     "location": target_path,
                     "evidence": "SCIP %s at %d:%d-%d:%d" % (
                         kind, start_line + 1, start_col + 1, end_line + 1, end_col + 1,
-                    ),
+                    ) + ": " + target_excerpt[:128],
                     "confidence": "verified-provider", "source_sha256": target_digest,
                 }
     if COMMON.source_fingerprint(root) != fingerprint:

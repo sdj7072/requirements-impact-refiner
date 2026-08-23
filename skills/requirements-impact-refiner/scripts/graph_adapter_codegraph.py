@@ -121,9 +121,9 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
     if _VERSION.fullmatch(version) is None:
         return ProviderProbe("codegraph", "unsupported", "verified-provider", spec.executable, version[:256] or None, version_result.executable_sha256, detail="CodeGraph 1.x is required", repo_root=resolved)
     checks = (
-        (("--help",), ("status", "explore")),
-        (("status", "--help"), ("--json",)),
-        (("explore", "--help"), ("--json", "--seed")),
+        (("--help",), (r"(?m)^\s{2,}status\s*$", r"(?m)^\s{2,}explore\s*$")),
+        (("status", "--help"), (r"(?m)^Usage:\s+codegraph status --json\s*$",)),
+        (("explore", "--help"), (r"(?m)^Usage:\s+codegraph explore --json --seed <TEXT>\s*$",)),
     )
     capabilities = []
     for arguments, tokens in checks:
@@ -133,9 +133,9 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
             return ProviderProbe("codegraph", status, "verified-provider", spec.executable, version, version_result.executable_sha256, detail=help_result.detail or "CodeGraph help unavailable", repo_root=resolved)
         if help_result.executable_sha256 != version_result.executable_sha256:
             return ProviderProbe("codegraph", "unsafe", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="provider executable changed between probes", repo_root=resolved)
-        if not all(token in help_result.stdout for token in tokens):
+        if not all(re.search(pattern, help_result.stdout) for pattern in tokens):
             return ProviderProbe("codegraph", "unsupported", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="CodeGraph help does not confirm required read-only JSON capabilities", repo_root=resolved)
-        capabilities.extend(tokens)
+        capabilities.append(" ".join(arguments))
     status_result = PROVIDERS.run_provider(spec, ("status", "--json"), resolved, deadline, runner=runner, expect_json=True)
     if status_result.status != "ready":
         return ProviderProbe("codegraph", status_result.status, "verified-provider", spec.executable, version, version_result.executable_sha256, detail=status_result.detail or "CodeGraph status failed", repo_root=resolved)
@@ -166,7 +166,7 @@ def _parse_explore(value, root, fingerprint):
         raise ValueError("CodeGraph edge collection exceeds supported shape")
     nodes = {}
     for row in raw_nodes:
-        if not isinstance(row, dict) or set(row) != {"id", "kind", "label", "path", "range"}:
+        if not isinstance(row, dict) or set(row) != {"id", "kind", "label", "path", "range", "excerpt"}:
             raise ValueError("CodeGraph node shape is unsupported")
         identifier, kind, label = row["id"], row["kind"], row["label"]
         path = COMMON._safe_relative(row["path"])
@@ -174,30 +174,37 @@ def _parse_explore(value, root, fingerprint):
             raise ValueError("CodeGraph node id is invalid or duplicated")
         if kind not in _NODE_KINDS or not isinstance(label, str) or not label.strip() or len(label) > 256:
             raise ValueError("CodeGraph node kind or label is invalid")
-        _source_range(row["range"])
-        payload = COMMON._regular_bytes(root, path) if path is not None else None
-        if path is None or payload is None:
+        source_range = _source_range(row["range"])
+        proof = COMMON._source_proof(root, path, source_range) if path is not None else None
+        if (
+            path is None or proof is None or not isinstance(row["excerpt"], str)
+            or row["excerpt"] != proof["excerpt"]
+        ):
             raise ValueError("CodeGraph node path is outside regular repository source")
         nodes[identifier] = {
             "key": identifier, "kind": kind, "label": label, "location": path,
-            "confidence": "verified-provider", "source_sha256": hashlib.sha256(payload).hexdigest(),
+            "confidence": "verified-provider", "source_sha256": proof["sha256"],
             "risk_domains": COMMON._risk_domains(path, label),
         }
     edges = {}
     for row in raw_edges:
-        if not isinstance(row, dict) or set(row) != {"source", "target", "kind", "path", "range"}:
+        if not isinstance(row, dict) or set(row) != {"source", "target", "kind", "path", "range", "excerpt"}:
             raise ValueError("CodeGraph edge shape is unsupported")
         source, target, kind = row["source"], row["target"], row["kind"]
         path = COMMON._safe_relative(row["path"])
-        payload = COMMON._regular_bytes(root, path) if path is not None else None
-        if source not in nodes or target not in nodes or kind not in _EDGE_KINDS or payload is None:
-            raise ValueError("CodeGraph edge references invalid graph evidence")
         source_range = _source_range(row["range"])
+        proof = COMMON._source_proof(root, path, source_range) if path is not None else None
+        if (
+            source not in nodes or target not in nodes or kind not in _EDGE_KINDS
+            or proof is None or not isinstance(row["excerpt"], str)
+            or row["excerpt"] != proof["excerpt"]
+        ):
+            raise ValueError("CodeGraph edge references invalid graph evidence")
         signature = (source, target, kind, path, source_range)
         edges[signature] = {
             "source": source, "target": target, "kind": kind, "location": path,
-            "evidence": _evidence("CodeGraph %s" % kind, source_range),
-            "confidence": "verified-provider", "source_sha256": hashlib.sha256(payload).hexdigest(),
+            "evidence": _evidence("CodeGraph %s" % kind, source_range) + ": " + proof["excerpt"][:128],
+            "confidence": "verified-provider", "source_sha256": proof["sha256"],
         }
     return tuple(nodes.values()), tuple(edges.values())
 

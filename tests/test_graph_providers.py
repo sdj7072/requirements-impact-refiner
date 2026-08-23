@@ -589,6 +589,30 @@ class ProviderDiscoveryTest(unittest.TestCase):
             ["codegraph", "scip", "joern", "ast-grep"],
         )
 
+    def test_explicit_joern_is_never_detected_without_deep_mode(self):
+        for requested in ("joern", str(self.bin / "joern")):
+            with self.subTest(requested=requested):
+                runner = RecordingRunner()
+                probes = PROVIDERS.discover_providers(
+                    self.repo, (requested,), PROVIDERS.Deadline(self.clock, 30),
+                    runner=runner, search_path=str(self.bin), deep=False,
+                )
+                self.assertEqual(len(probes), 1)
+                self.assertEqual(probes[0].name, "joern")
+                self.assertEqual(probes[0].status, "unsupported")
+                self.assertEqual(runner.calls, [])
+
+        runner = RecordingRunner((
+            Completed(stdout=b"joern 4.0.12\n"),
+            Completed(stdout=b"Usage: joern query --json --graph <GRAPH> --seed <TEXT>\n"),
+        ))
+        probes = PROVIDERS.discover_providers(
+            self.repo, ("joern",), PROVIDERS.Deadline(self.clock, 30),
+            runner=runner, search_path=str(self.bin), deep=True,
+        )
+        self.assertEqual(probes[0].status, "ready")
+        self.assertEqual([call[0][1:] for call in runner.calls], [("--version",), ("--help",)])
+
     def test_explicit_absolute_path_and_sg_alias_are_normalized(self):
         runner = RecordingRunner((
             Completed(stdout=b"ast-grep 0.45.0\n"), Completed(stdout=b"json stream\n"),
