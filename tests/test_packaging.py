@@ -354,7 +354,7 @@ class PackagingTest(unittest.TestCase):
             core,
         )
         self.assertIn("scripts/resource_route.py", core)
-        self.assertIn("read only the returned paths", core)
+        self.assertIn("read only returned paths", core)
         self.assertIn("not the plugin root or workspace root", core)
         self.assertIn(
             "Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`",
@@ -369,7 +369,15 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("publish-impact-report.py", core)
         self.assertIn("render-impact-report.py", core)
         self.assertIn("full-inline", core)
-        self.assertIn("do not omit an impact", core.lower())
+        self.assertIn("without omitting impacts", core.lower())
+
+    def test_core_skill_runs_routing_before_workspace_availability_checks(self):
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Before inspecting workspace availability", core)
+        self.assertIn("supplied `repository evidence` remains inspectable", core.lower())
+        self.assertIn("Never offer implementation or scaffolding", core)
 
     def test_manifest_identity_is_consistent(self):
         codex = self.load(".codex-plugin/plugin.json")

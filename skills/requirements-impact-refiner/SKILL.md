@@ -15,9 +15,9 @@ Use for concrete pre-planning changes; not ideation, debugging, code review, or 
 
 Resolve every `references/`, `assets/`, `schemas/`, and `scripts/` path from the directory that contains this `SKILL.md`. Set `SKILL_DIR` to it, not the plugin root or workspace root. Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`.
 
-1. Run `scripts/resolve-settings.py` with the repository root and explicit request overrides. Invalid configuration is disclosed; use `balanced` and `compact`.
-2. Select the phase and one workflow adapter. Determine whether a predecessor exists, evidence is ambiguous, or multiple impact domains apply. Run `scripts/resource_route.py` with those flags and read only the returned paths.
-3. Inspect repository evidence. Author one complete state JSON using the compact contract. Do not omit an impact to shorten output. Preserve current behavior as `INV-###`; future `AC-###` entries are not current evidence.
+1. Before inspecting workspace availability, run `scripts/resolve-settings.py` with the repository root and request overrides. Invalid configuration uses disclosed `balanced` and `compact` defaults.
+2. Select the phase and one adapter. Determine predecessor, evidence-ambiguity, and multi-domain flags. Run `scripts/resource_route.py`; read only returned paths.
+3. Supplied `Repository evidence` remains inspectable when the workspace is empty. Never offer implementation or scaffolding; refine it or state the missing entry input. Author complete state JSON without omitting impacts. Preserve behavior as `INV-###`; future `AC-###` is not current evidence.
 4. Run `scripts/publish-impact-report.py`. Correct exit-1 validation errors. On exit 2 with `full-inline`, render Markdown and disclose that persistence/fast revisions are unavailable.
 5. For published `compact`, return only `render-impact-report.py --format compact`. For `full`, return canonical Markdown inline. Never rewrite the renderer's facts or begin planning.
 
