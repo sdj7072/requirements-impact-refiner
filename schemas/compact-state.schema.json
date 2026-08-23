@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sdj7072/requirements-impact-refiner/schemas/compact-state.schema.json",
+  "title": "Requirements Impact Refiner compact state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "report", "settings", "original_requirement",
+    "refined_requirement", "current_behavior", "preserved_invariants",
+    "impacts", "decision_needed", "decisions", "delta", "history",
+    "criteria", "unresolved", "scope", "handoff", "summary"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "report": {"$ref": "#/$defs/report"},
+    "settings": {"$ref": "#/$defs/settings"},
+    "original_requirement": {"$ref": "#/$defs/originalRequirement"},
+    "refined_requirement": {"$ref": "#/$defs/refinedRequirement"},
+    "current_behavior": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/currentBehavior"}},
+    "preserved_invariants": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/preservedInvariant"}},
+    "impacts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/impact"}},
+    "decision_needed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/decisionNeeded"}]},
+    "decisions": {"type": "array", "items": {"$ref": "#/$defs/decision"}},
+    "delta": {"$ref": "#/$defs/delta"},
+    "history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/history"}},
+    "criteria": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/criterion"}},
+    "unresolved": {"type": "array", "items": {"$ref": "#/$defs/unresolved"}},
+    "scope": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scope"}},
+    "handoff": {"$ref": "#/$defs/handoff"},
+    "summary": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/summary"}}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "req": {"type": "string", "pattern": "^REQ-[0-9]{3}$"},
+    "inv": {"type": "string", "pattern": "^INV-[0-9]{3}$"},
+    "imp": {"type": "string", "pattern": "^IMP-[0-9]{3}$"},
+    "dec": {"type": "string", "pattern": "^DEC-[0-9]{3}$"},
+    "ac": {"type": "string", "pattern": "^AC-[0-9]{3}$"},
+    "reqList": {"type": "array", "items": {"$ref": "#/$defs/req"}},
+    "invList": {"type": "array", "items": {"$ref": "#/$defs/inv"}},
+    "impList": {"type": "array", "items": {"$ref": "#/$defs/imp"}},
+    "decList": {"type": "array", "items": {"$ref": "#/$defs/dec"}},
+    "acList": {"type": "array", "items": {"$ref": "#/$defs/ac"}},
+    "report": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "revision", "previous_sha256", "phase"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^RPT-[0-9]{3}$"},
+        "revision": {"type": "integer", "minimum": 1},
+        "previous_sha256": {"type": "string"},
+        "phase": {"enum": ["pre-decision", "post-decision"]}
+      }
+    },
+    "settings": {
+      "type": "object", "additionalProperties": false,
+      "required": ["audience", "audience_source", "delivery", "delivery_source"],
+      "properties": {
+        "audience": {"enum": ["simple", "balanced", "technical"]},
+        "audience_source": {"enum": ["request", "repository", "default"]},
+        "delivery": {"enum": ["compact", "full"]},
+        "delivery_source": {"enum": ["request", "repository", "default"]}
+      }
+    },
+    "originalRequirement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "request", "source"],
+      "properties": {"id": {"$ref": "#/$defs/req"}, "request": {"$ref": "#/$defs/text"}, "source": {"$ref": "#/$defs/text"}}
+    },
+    "refinedRequirement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "revision", "decision", "supersedes"],
+      "properties": {"id": {"$ref": "#/$defs/req"}, "revision": {"$ref": "#/$defs/text"}, "decision": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/dec"}]}, "supersedes": {"$ref": "#/$defs/reqList"}}
+    },
+    "currentBehavior": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "behavior", "evidence_level", "evidence"],
+      "properties": {"id": {"$ref": "#/$defs/inv"}, "behavior": {"$ref": "#/$defs/text"}, "evidence_level": {"enum": ["verified", "inferred", "unknown"]}, "evidence": {"$ref": "#/$defs/text"}}
+    },
+    "preservedInvariant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "requirement", "impacts", "evidence"],
+      "properties": {"id": {"$ref": "#/$defs/inv"}, "requirement": {"$ref": "#/$defs/req"}, "impacts": {"$ref": "#/$defs/impList"}, "evidence": {"$ref": "#/$defs/text"}}
+    },
+    "impact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "requirement", "category", "severity", "state", "evidence_level", "evidence", "invariants", "decisions", "criteria"],
+      "properties": {
+        "id": {"$ref": "#/$defs/imp"}, "requirement": {"$ref": "#/$defs/req"},
+        "category": {"enum": ["functionality", "data", "interfaces", "authorization/privacy", "state/concurrency", "operations", "compatibility", "legal/policy", "regression"]},
+        "severity": {"enum": ["critical", "high", "medium", "low"]},
+        "state": {"enum": ["detected", "refining", "mitigated", "resolved", "accepted", "deferred", "blocked", "superseded"]},
+        "evidence_level": {"enum": ["verified", "inferred", "unknown"]},
+        "evidence": {"$ref": "#/$defs/text"}, "invariants": {"$ref": "#/$defs/invList"},
+        "decisions": {"$ref": "#/$defs/decList"}, "criteria": {"$ref": "#/$defs/acList"}
+      }
+    },
+    "decisionOption": {
+      "type": "object", "additionalProperties": false,
+      "required": ["option", "impacts", "tradeoff"],
+      "properties": {"option": {"$ref": "#/$defs/text"}, "impacts": {"$ref": "#/$defs/impList"}, "tradeoff": {"$ref": "#/$defs/text"}}
+    },
+    "decisionNeeded": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question", "options"],
+      "properties": {"question": {"$ref": "#/$defs/text"}, "options": {"type": "array", "minItems": 2, "maxItems": 3, "items": {"$ref": "#/$defs/decisionOption"}}}
+    },
+    "decision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "choice", "requirement", "accepted_impacts", "rationale"],
+      "properties": {"id": {"$ref": "#/$defs/dec"}, "choice": {"$ref": "#/$defs/text"}, "requirement": {"$ref": "#/$defs/req"}, "accepted_impacts": {"$ref": "#/$defs/impList"}, "rationale": {"$ref": "#/$defs/text"}}
+    },
+    "delta": {
+      "type": "object", "additionalProperties": false,
+      "required": ["resolved", "mitigated", "unchanged", "accepted", "deferred", "blocked", "superseded", "reopened", "new"],
+      "properties": {"resolved": {"$ref": "#/$defs/impList"}, "mitigated": {"$ref": "#/$defs/impList"}, "unchanged": {"$ref": "#/$defs/impList"}, "accepted": {"$ref": "#/$defs/impList"}, "deferred": {"$ref": "#/$defs/impList"}, "blocked": {"$ref": "#/$defs/impList"}, "superseded": {"$ref": "#/$defs/impList"}, "reopened": {"$ref": "#/$defs/impList"}, "new": {"$ref": "#/$defs/impList"}}
+    },
+    "history": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requirement", "revision", "decision", "superseded_impacts", "summary"],
+      "properties": {"requirement": {"$ref": "#/$defs/req"}, "revision": {"$ref": "#/$defs/text"}, "decision": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/dec"}]}, "superseded_impacts": {"$ref": "#/$defs/impList"}, "summary": {"$ref": "#/$defs/text"}}
+    },
+    "criterion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "requirement", "impact", "invariant", "criterion", "evidence"],
+      "properties": {"id": {"$ref": "#/$defs/ac"}, "requirement": {"$ref": "#/$defs/req"}, "impact": {"$ref": "#/$defs/imp"}, "invariant": {"$ref": "#/$defs/inv"}, "criterion": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"}}
+    },
+    "unresolved": {
+      "type": "object", "additionalProperties": false,
+      "required": ["impact", "state", "rationale", "decision", "owner"],
+      "properties": {"impact": {"$ref": "#/$defs/imp"}, "state": {"enum": ["deferred", "blocked"]}, "rationale": {"$ref": "#/$defs/text"}, "decision": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/dec"}]}, "owner": {"$ref": "#/$defs/text"}}
+    },
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["boundary", "evidence", "confidence"],
+      "properties": {"boundary": {"$ref": "#/$defs/text"}, "evidence": {"$ref": "#/$defs/text"}, "confidence": {"$ref": "#/$defs/text"}}
+    },
+    "handoff": {
+      "type": "object", "additionalProperties": false,
+      "required": ["refined_requirement", "report_ids", "remaining_risks", "criteria", "workflow"],
+      "properties": {"refined_requirement": {"$ref": "#/$defs/text"}, "report_ids": {"type": "array", "items": {"$ref": "#/$defs/text"}}, "remaining_risks": {"$ref": "#/$defs/impList"}, "criteria": {"$ref": "#/$defs/acList"}, "workflow": {"$ref": "#/$defs/text"}}
+    },
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["impact_id", "changed_feature", "possible_issue", "affected", "trigger", "severity", "prevention", "status"],
+      "properties": {"impact_id": {"$ref": "#/$defs/imp"}, "changed_feature": {"$ref": "#/$defs/text"}, "possible_issue": {"$ref": "#/$defs/text"}, "affected": {"$ref": "#/$defs/text"}, "trigger": {"$ref": "#/$defs/text"}, "severity": {"enum": ["critical", "high", "medium", "low"]}, "prevention": {"$ref": "#/$defs/text"}, "status": {"enum": ["detected", "refining", "mitigated", "resolved", "accepted", "deferred", "blocked", "superseded"]}}
+    }
+  }
+}

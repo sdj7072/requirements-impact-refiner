@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "report": {"id": "RPT-001", "revision": 1, "previous_sha256": "none", "phase": "pre-decision"},
+  "settings": {"audience": "balanced", "audience_source": "default", "delivery": "compact", "delivery_source": "default"},
+  "original_requirement": {"id": "REQ-001", "request": "Add public sharing without changing private exports.", "source": "User request"},
+  "refined_requirement": {"id": "REQ-001", "revision": "Preserve private exports while selecting sharing mechanics.", "decision": null, "supersedes": []},
+  "current_behavior": [
+    {"id": "INV-001", "behavior": "Existing exports require authentication.", "evidence_level": "verified", "evidence": "tests/test_exports.py"}
+  ],
+  "preserved_invariants": [
+    {"id": "INV-001", "requirement": "REQ-001", "impacts": ["IMP-001"], "evidence": "tests/test_exports.py"}
+  ],
+  "impacts": [
+    {"id": "IMP-001", "requirement": "REQ-001", "category": "interfaces", "severity": "critical", "state": "refining", "evidence_level": "verified", "evidence": "tests/test_exports.py", "invariants": ["INV-001"], "decisions": [], "criteria": ["AC-001"]}
+  ],
+  "decision_needed": {"question": "Which sharing mechanism should be used?", "options": [
+    {"option": "Expiring signed URLs", "impacts": ["IMP-001"], "tradeoff": "Simple expiry but limited revocation."},
+    {"option": "Revocable opaque links", "impacts": ["IMP-001"], "tradeoff": "Explicit revocation with stored state."}
+  ]},
+  "decisions": [],
+  "delta": {"resolved": [], "mitigated": [], "unchanged": [], "accepted": [], "deferred": [], "blocked": [], "superseded": [], "reopened": [], "new": ["IMP-001"]},
+  "history": [
+    {"requirement": "REQ-001", "revision": "Preserve private exports while selecting sharing mechanics.", "decision": null, "superseded_impacts": [], "summary": "Initial refinement."}
+  ],
+  "criteria": [
+    {"id": "AC-001", "requirement": "REQ-001", "impact": "IMP-001", "invariant": "INV-001", "criterion": "Existing authenticated exports remain private.", "evidence": "Future regression test."}
+  ],
+  "unresolved": [],
+  "scope": [
+    {"boundary": "Export paths only.", "evidence": "tests/test_exports.py", "confidence": "Sharing implementation remains unknown."}
+  ],
+  "handoff": {"refined_requirement": "Not ready until the pending decision is selected.", "report_ids": ["REQ-001", "INV-001", "IMP-001"], "remaining_risks": ["IMP-001"], "criteria": ["AC-001"], "workflow": "Not ready"},
+  "summary": [
+    {"impact_id": "IMP-001", "changed_feature": "Public sharing", "possible_issue": "Private exports could become public.", "affected": "People using private exports", "trigger": "Opening a sharing link", "severity": "critical", "prevention": "Preserve private defaults and run AC-001.", "status": "refining"}
+  ]
+}

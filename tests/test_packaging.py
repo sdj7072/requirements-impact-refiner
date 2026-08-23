@@ -279,6 +279,7 @@ class PackagingTest(unittest.TestCase):
             "references": set(),
             "assets": {Path("logo.png")},
             "scripts": {Path("install-agent-skill.py")},
+            "schemas": set(),
         }
 
         for directory, root_only_files in mirror_contract.items():

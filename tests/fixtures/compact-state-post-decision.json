@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "report": {"id": "RPT-001", "revision": 1, "previous_sha256": "none", "phase": "post-decision"},
+  "settings": {"audience": "balanced", "audience_source": "default", "delivery": "compact", "delivery_source": "default"},
+  "original_requirement": {"id": "REQ-001", "request": "Add public sharing without changing private exports.", "source": "User request"},
+  "refined_requirement": {"id": "REQ-001", "revision": "Add revocable sharing and preserve private exports.", "decision": "DEC-001", "supersedes": []},
+  "current_behavior": [
+    {"id": "INV-001", "behavior": "Existing exports require authentication.", "evidence_level": "verified", "evidence": "tests/test_exports.py"}
+  ],
+  "preserved_invariants": [
+    {"id": "INV-001", "requirement": "REQ-001", "impacts": ["IMP-001"], "evidence": "tests/test_exports.py"}
+  ],
+  "impacts": [
+    {"id": "IMP-001", "requirement": "REQ-001", "category": "interfaces", "severity": "critical", "state": "accepted", "evidence_level": "verified", "evidence": "tests/test_exports.py", "invariants": ["INV-001"], "decisions": ["DEC-001"], "criteria": ["AC-001"]}
+  ],
+  "decision_needed": null,
+  "decisions": [
+    {"id": "DEC-001", "choice": "Use revocable opaque links.", "requirement": "REQ-001", "accepted_impacts": ["IMP-001"], "rationale": "Explicit revocation is required."}
+  ],
+  "delta": {"resolved": [], "mitigated": [], "unchanged": [], "accepted": [], "deferred": [], "blocked": [], "superseded": [], "reopened": [], "new": ["IMP-001"]},
+  "history": [
+    {"requirement": "REQ-001", "revision": "Add revocable sharing and preserve private exports.", "decision": "DEC-001", "superseded_impacts": [], "summary": "Applied the selected sharing mechanism."}
+  ],
+  "criteria": [
+    {"id": "AC-001", "requirement": "REQ-001", "impact": "IMP-001", "invariant": "INV-001", "criterion": "Existing authenticated exports remain private.", "evidence": "Future regression test."}
+  ],
+  "unresolved": [],
+  "scope": [
+    {"boundary": "Export and sharing paths only.", "evidence": "tests/test_exports.py", "confidence": "Other paths remain unknown."}
+  ],
+  "handoff": {"refined_requirement": "REQ-001", "report_ids": ["INV-001", "IMP-001", "DEC-001"], "remaining_risks": ["IMP-001"], "criteria": ["AC-001"], "workflow": "generic"},
+  "summary": [
+    {"impact_id": "IMP-001", "changed_feature": "Public sharing", "possible_issue": "Private exports could become public.", "affected": "People using private exports", "trigger": "Opening a sharing link", "severity": "critical", "prevention": "Preserve private defaults and run AC-001.", "status": "accepted"}
+  ]
+}
