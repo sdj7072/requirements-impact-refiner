@@ -180,6 +180,51 @@ def _begin(arguments):
         identifier: key
         for key, identifier in prior_key_map.get("impacts", {}).items()
     }
+    invariant_keys = {
+        identifier: key
+        for key, identifier in prior_key_map.get("invariants", {}).items()
+    }
+    criterion_keys = {
+        identifier: key
+        for key, identifier in prior_key_map.get("criteria", {}).items()
+    }
+    summaries = {
+        row.get("impact_id"): row
+        for row in prior_state.get("summary", [])
+        if isinstance(row, dict)
+    }
+    carry_forward_impacts = []
+    for row in prior_state.get("impacts", []):
+        if not isinstance(row, dict) or row.get("id") not in impact_keys:
+            continue
+        identifiers = (
+            list(row.get("invariants", []))
+            + list(row.get("decisions", []))
+            + list(row.get("criteria", []))
+        )
+        if not all(
+            identifier in {**invariant_keys, **decision_keys, **criterion_keys}
+            for identifier in identifiers
+        ):
+            continue
+        summary = summaries.get(row["id"])
+        if not isinstance(summary, dict):
+            continue
+        carry_forward_impacts.append({
+            "key": impact_keys[row["id"]],
+            "category": row["category"],
+            "severity": row["severity"],
+            "state": row["state"],
+            "evidence_level": row["evidence_level"],
+            "evidence": row["evidence"],
+            "invariant_keys": [invariant_keys[value] for value in row.get("invariants", [])],
+            "decision_keys": [decision_keys[value] for value in row.get("decisions", [])],
+            "criterion_keys": [criterion_keys[value] for value in row.get("criteria", [])],
+            "summary": {
+                key: summary[key]
+                for key in ("changed_feature", "possible_issue", "affected", "trigger", "prevention")
+            },
+        })
     carry_forward_decisions = []
     for row in prior_state.get("decisions", []):
         if not isinstance(row, dict) or row.get("id") not in decision_keys:
@@ -207,6 +252,7 @@ def _begin(arguments):
                 "post-decision" if carry_forward_decisions else None
             ),
             "carry_forward_decisions": carry_forward_decisions,
+            "carry_forward_impacts": carry_forward_impacts,
         },
         "repository_evidence": list(arguments["repository_evidence"]),
         "allowed_enums": {
@@ -224,6 +270,7 @@ def _begin(arguments):
             "accepted impacts require a linked decision and resolved impacts require current evidence",
             "the Superpowers handoff marker is controller-owned and must not be authored or decorated",
             "when analysis_guidance supplies prior decisions, copy those normalized rows unchanged into a post-decision revision unless the user explicitly selected a new choice",
+            "reassess every carry_forward_impacts row; when new evidence changes the same risk, reuse its key and change its state so terminal-to-active Delta is reopened; create a new key only for a distinct risk",
         ],
         "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
     }

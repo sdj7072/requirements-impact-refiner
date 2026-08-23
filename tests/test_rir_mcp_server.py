@@ -180,6 +180,12 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertEqual(guidance["recommended_phase"], "post-decision")
         self.assertEqual(guidance["carry_forward_decisions"][0]["key"], "own-workspace")
         self.assertEqual(guidance["carry_forward_decisions"][0]["accepted_impact_keys"], ["member-scope"])
+        prior_impact = guidance["carry_forward_impacts"][0]
+        self.assertEqual(prior_impact["key"], "member-scope")
+        self.assertEqual(prior_impact["state"], "accepted")
+        self.assertIn("summary", prior_impact)
+        self.assertIn("reopened", " ".join(second["semantic_rules"]))
+        self.assertIn("reuse its key", " ".join(second["semantic_rules"]))
 
     def test_line_larger_than_limit_is_rejected_even_when_newline_is_buffered(self):
         payload = b" " * (2 * 1024 * 1024) + b"\n"
