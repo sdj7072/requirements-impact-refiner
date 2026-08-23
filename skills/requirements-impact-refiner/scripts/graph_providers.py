@@ -14,6 +14,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import tempfile
 import time
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
@@ -224,7 +225,18 @@ class _ProcessOutcome:
 
 
 class UnsafeExecutableError(ValueError):
-    """The checked executable cannot be launched through its open descriptor."""
+    """The checked executable cannot be launched through its private snapshot."""
+
+
+@dataclass(frozen=True)
+class _ExecutableSnapshot:
+    directory: Path
+    path: Path
+    sha256: str
+    device: int
+    inode: int
+    size: int
+    modified_ns: int
 
 
 def _bounded_detail(value: object) -> str:
@@ -291,21 +303,6 @@ def _open_executable(path: Path):
         raise
 
 
-def _same_executable(path: Path, opened, digest: str) -> bool:
-    try:
-        descriptor, current, current_digest = _open_executable(path)
-    except (OSError, ValueError):
-        return False
-    try:
-        return (
-            (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
-            == (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
-            and current_digest == digest
-        )
-    finally:
-        os.close(descriptor)
-
-
 def _append_bounded(target: bytearray, chunk: bytes, limit: int) -> bool:
     room = max(0, limit - len(target))
     target.extend(chunk[:room])
@@ -325,43 +322,146 @@ def _terminate_process_group(process, process_group_id=None) -> None:
             pass
 
 
-def _descriptor_executable_path(executable_fd: int):
-    """Return an executable descriptor path only when it resolves to the open file."""
+def _write_all(descriptor: int, payload: bytes) -> None:
+    offset = 0
+    while offset < len(payload):
+        written = os.write(descriptor, payload[offset:])
+        if written <= 0:
+            raise OSError("snapshot write made no progress")
+        offset += written
+
+
+def _snapshot_matches(snapshot: _ExecutableSnapshot) -> bool:
     try:
-        opened = os.fstat(executable_fd)
+        metadata = snapshot.path.lstat()
     except OSError:
-        return None
-    for base in ("/proc/self/fd", "/dev/fd"):
-        candidate = base + "/" + str(executable_fd)
-        if not os.path.exists(candidate) or not os.access(candidate, os.X_OK):
-            continue
-        try:
-            pointed = os.stat(candidate)
-        except OSError:
-            continue
+        return False
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or metadata.st_size != snapshot.size
+        or metadata.st_size > MAX_EXECUTABLE_BYTES
+        or (metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns)
+        != (snapshot.device, snapshot.inode, snapshot.modified_ns)
+    ):
+        return False
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(snapshot.path), flags)
+    except OSError:
+        return False
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        opened = os.fstat(descriptor)
         if (
-            stat.S_ISREG(pointed.st_mode)
-            and (pointed.st_dev, pointed.st_ino) == (opened.st_dev, opened.st_ino)
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (snapshot.device, snapshot.inode)
         ):
-            return candidate
-    return None
+            return False
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_EXECUTABLE_BYTES:
+                return False
+            digest.update(chunk)
+    finally:
+        os.close(descriptor)
+    return total == snapshot.size and digest.hexdigest() == snapshot.sha256
+
+
+def _create_executable_snapshot(
+    executable_fd: int, opened, expected_sha256: str,
+) -> _ExecutableSnapshot:
+    directory = Path(tempfile.mkdtemp(prefix="rir-provider-"))
+    snapshot = None
+    try:
+        os.chmod(directory, 0o700)
+        directory_metadata = directory.lstat()
+        if (
+            stat.S_ISLNK(directory_metadata.st_mode)
+            or not stat.S_ISDIR(directory_metadata.st_mode)
+            or stat.S_IMODE(directory_metadata.st_mode) != 0o700
+        ):
+            raise UnsafeExecutableError("provider snapshot directory is unsafe")
+        path = directory / "provider-executable"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(str(path), flags, 0o700)
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            os.fchmod(descriptor, 0o700)
+            os.lseek(executable_fd, 0, os.SEEK_SET)
+            while True:
+                chunk = os.read(executable_fd, 64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_EXECUTABLE_BYTES:
+                    raise UnsafeExecutableError(
+                        "provider executable exceeds maximum byte size"
+                    )
+                _write_all(descriptor, chunk)
+                digest.update(chunk)
+            os.fsync(descriptor)
+            metadata = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        if (
+            total != opened.st_size
+            or digest.hexdigest() != expected_sha256
+            or not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise UnsafeExecutableError(
+                "provider snapshot does not match validated executable identity"
+            )
+        directory_fd = os.open(
+            str(directory), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        snapshot = _ExecutableSnapshot(
+            directory, path, expected_sha256, metadata.st_dev, metadata.st_ino,
+            total, metadata.st_mtime_ns,
+        )
+        if not _snapshot_matches(snapshot):
+            raise UnsafeExecutableError("provider snapshot failed identity verification")
+        return snapshot
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+
+
+def _cleanup_snapshot(snapshot: _ExecutableSnapshot) -> None:
+    shutil.rmtree(snapshot.directory, ignore_errors=True)
 
 
 def _bounded_subprocess(
     argv, *, cwd, env, timeout, shell, start_new_session, stdout_limit, stderr_limit,
-    executable_fd,
+    executable_snapshot, snapshot_sha256, snapshot_identity,
 ):
     if shell or not start_new_session:
         raise ValueError("provider subprocess security options are mandatory")
-    executable = _descriptor_executable_path(executable_fd)
-    if executable is None:
+    snapshot = _ExecutableSnapshot(
+        Path(executable_snapshot).parent, Path(executable_snapshot), snapshot_sha256,
+        *snapshot_identity,
+    )
+    if not _snapshot_matches(snapshot):
         raise UnsafeExecutableError(
-            "host cannot execute the provider through its validated descriptor"
+            "provider snapshot changed before process spawn"
         )
+    execution_argv = (str(snapshot.path),) + tuple(argv[1:])
     process = subprocess.Popen(
-        argv, executable=executable, cwd=cwd, env=env, shell=False,
+        execution_argv, executable=str(snapshot.path), cwd=cwd, env=env, shell=False,
         start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        close_fds=True, pass_fds=(executable_fd,),
+        close_fds=True,
     )
     process_group_id = process.pid
     selector = selectors.DefaultSelector()
@@ -401,6 +501,8 @@ def _bounded_subprocess(
         selector.close()
         process.stdout.close()
         process.stderr.close()
+    if not _snapshot_matches(snapshot):
+        raise UnsafeExecutableError("provider snapshot changed during execution")
     return _ProcessOutcome(
         returncode, bytes(buffers[process.stdout]), bytes(buffers[process.stderr]),
         timed_out, truncated[process.stdout], truncated[process.stderr],
@@ -447,13 +549,30 @@ def run_provider(
         descriptor, opened, digest = _open_executable(executable)
     except (OSError, ValueError) as error:
         return _empty_query(spec, "unsafe", argv, environment, error)
+    try:
+        snapshot = _create_executable_snapshot(descriptor, opened, digest)
+    except (OSError, ValueError) as error:
+        return _empty_query(spec, "unsafe", argv, environment, error, digest)
+    finally:
+        os.close(descriptor)
     execute = runner or _bounded_subprocess
     try:
+        if not _snapshot_matches(snapshot):
+            return _empty_query(
+                spec, "unsafe", argv, environment,
+                "provider snapshot changed before runner invocation", digest,
+            )
         try:
             outcome = execute(
                 argv, cwd=str(root), env=dict(environment), timeout=remaining,
                 shell=False, start_new_session=True, stdout_limit=STDOUT_LIMIT,
-                stderr_limit=STDERR_LIMIT, executable_fd=descriptor,
+                stderr_limit=STDERR_LIMIT,
+                executable_snapshot=str(snapshot.path),
+                snapshot_sha256=snapshot.sha256,
+                snapshot_identity=(
+                    snapshot.device, snapshot.inode, snapshot.size,
+                    snapshot.modified_ns,
+                ),
             )
         except subprocess.TimeoutExpired as error:
             return _empty_query(spec, "timed_out", argv, environment, error, digest)
@@ -461,13 +580,13 @@ def run_provider(
             return _empty_query(spec, "unsafe", argv, environment, error, digest)
         except (OSError, ValueError) as error:
             return _empty_query(spec, "failed", argv, environment, error, digest)
-        if not _same_executable(executable, opened, digest):
+        if not _snapshot_matches(snapshot):
             return _empty_query(
                 spec, "unsafe", argv, environment,
-                "executable identity changed", digest,
+                "provider snapshot changed after runner completion", digest,
             )
     finally:
-        os.close(descriptor)
+        _cleanup_snapshot(snapshot)
 
     stdout_raw = getattr(outcome, "stdout", b"")
     stderr_raw = getattr(outcome, "stderr", b"")

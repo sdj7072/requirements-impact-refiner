@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -135,46 +136,42 @@ class ProviderRunnerTest(unittest.TestCase):
                 self.assertEqual(result.status, "unsafe")
         self.assertEqual(runner.calls, [])
 
-    def test_open_executable_identity_detects_change_race_and_records_digest(self):
-        original_digest = __import__("hashlib").sha256(self.fake_binary.read_bytes()).hexdigest()
+    def test_snapshot_is_private_fsynced_identity_and_removed_after_runner_returns(self):
+        captured = {}
 
-        def changing_runner(argv, **kwargs):
-            self.fake_binary.write_bytes(b"#!/bin/sh\nexit 1\n")
-            self.fake_binary.chmod(0o700)
+        def inspecting_runner(argv, **kwargs):
+            snapshot = Path(kwargs["executable_snapshot"])
+            captured["snapshot"] = snapshot
+            captured["directory"] = snapshot.parent
+            self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(snapshot.parent.stat().st_mode), 0o700)
+            self.assertEqual(
+                __import__("hashlib").sha256(snapshot.read_bytes()).hexdigest(),
+                kwargs["snapshot_sha256"],
+            )
             return Completed(stdout=b"ast-grep 0.45.0\n")
 
-        changed = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary), ("--version",),
-            self.repo, PROVIDERS.Deadline(self.clock, 30), runner=changing_runner,
+        result = PROVIDERS.run_provider(
+            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
+            ("--version",), self.repo, PROVIDERS.Deadline(self.clock, 30),
+            runner=inspecting_runner,
         )
-        self.assertEqual(changed.status, "unsafe")
-        self.assertEqual(changed.executable_sha256, original_digest)
-
-    def test_executable_descriptor_remains_open_through_post_spawn_identity_check(self):
-        captured = {}
-        runner = RecordingRunner((Completed(stdout=b"ast-grep 0.45.0\n"),))
-
-        def recording_runner(argv, **kwargs):
-            captured["descriptor"] = kwargs["executable_fd"]
-            return runner(argv, **kwargs)
-
-        real_same = PROVIDERS._same_executable
-
-        def checked_while_open(path, opened, digest):
-            os.fstat(captured["descriptor"])
-            return real_same(path, opened, digest)
-
-        with mock.patch.object(
-            PROVIDERS, "_same_executable", side_effect=checked_while_open,
-        ):
-            result = PROVIDERS.run_provider(
-                PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-                ("--version",), self.repo, PROVIDERS.Deadline(self.clock, 30),
-                runner=recording_runner,
-            )
         self.assertEqual(result.status, "ready")
-        with self.assertRaises(OSError):
-            os.fstat(captured["descriptor"])
+        self.assertFalse(captured["snapshot"].exists())
+        self.assertFalse(captured["directory"].exists())
+
+    def test_executable_size_cap_rejects_before_snapshot_or_runner(self):
+        oversized = self.bin / "oversized-provider"
+        with oversized.open("wb") as handle:
+            handle.truncate(PROVIDERS.MAX_EXECUTABLE_BYTES + 1)
+        oversized.chmod(0o700)
+        runner = RecordingRunner()
+        result = PROVIDERS.run_provider(
+            PROVIDERS.ProviderSpec("ast-grep", oversized), ("--version",),
+            self.repo, PROVIDERS.Deadline(self.clock, 30), runner=runner,
+        )
+        self.assertEqual(result.status, "unsafe")
+        self.assertEqual(runner.calls, [])
 
     def test_output_caps_non_utf8_malformed_json_and_nonzero_are_fail_closed(self):
         cases = (
@@ -209,8 +206,6 @@ class ProviderRunnerTest(unittest.TestCase):
         sleeper.chmod(0o700)
         started = time.monotonic()
         with mock.patch.object(
-            PROVIDERS, "_descriptor_executable_path", return_value=str(sleeper),
-        ), mock.patch.object(
             PROVIDERS, "_terminate_process_group",
             wraps=PROVIDERS._terminate_process_group,
         ) as terminate:
@@ -241,13 +236,10 @@ class ProviderRunnerTest(unittest.TestCase):
         started = time.monotonic()
         child_pid = None
         try:
-            with mock.patch.object(
-                PROVIDERS, "_descriptor_executable_path", return_value=str(sleeper),
-            ):
-                result = PROVIDERS.run_provider(
-                    PROVIDERS.ProviderSpec("ast-grep", sleeper), ("--help",),
-                    self.repo, PROVIDERS.Deadline(FakeClock(), 2.0),
-                )
+            result = PROVIDERS.run_provider(
+                PROVIDERS.ProviderSpec("ast-grep", sleeper), ("--help",),
+                self.repo, PROVIDERS.Deadline(FakeClock(), 2.0),
+            )
             self.assertEqual(result.status, "timed_out")
             self.assertLess(time.monotonic() - started, 3.5)
             child_pid = int(child_pid_path.read_text(encoding="ascii").strip())
@@ -266,65 +258,91 @@ class ProviderRunnerTest(unittest.TestCase):
                 except (PermissionError, ProcessLookupError):
                     pass
 
-    def test_descriptor_path_selection_prefers_proc_then_dev_and_can_fail_closed(self):
-        def selection(exists, executable):
-            metadata = self.fake_binary.stat()
-            with mock.patch.object(PROVIDERS.os.path, "exists", side_effect=exists), \
-                 mock.patch.object(PROVIDERS.os, "access", side_effect=executable), \
-                 mock.patch.object(PROVIDERS.os, "fstat", return_value=metadata), \
-                 mock.patch.object(PROVIDERS.os, "stat", return_value=metadata):
-                return PROVIDERS._descriptor_executable_path(17)
-
-        self.assertEqual(
-            selection(lambda path: True, lambda path, mode: True),
-            "/proc/self/fd/17",
-        )
-        self.assertEqual(
-            selection(
-                lambda path: path.startswith("/dev/"),
-                lambda path, mode: path.startswith("/dev/"),
-            ),
-            "/dev/fd/17",
-        )
-        self.assertIsNone(selection(lambda path: False, lambda path, mode: False))
-
-    def test_platform_descriptor_launch_executes_bound_file_or_fails_closed(self):
-        descriptor = os.open(str(self.fake_binary), os.O_RDONLY)
-        try:
-            supported = PROVIDERS._descriptor_executable_path(descriptor) is not None
-        finally:
-            os.close(descriptor)
-
-        result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-            ("--version",), self.repo, PROVIDERS.Deadline(time, 1),
-        )
-        self.assertEqual(result.status, "ready" if supported else "unsafe")
-
-    def test_path_replacement_before_spawn_never_executes_replacement(self):
-        replacement_marker = self.repo / "replacement-ran"
-        original_marker = self.repo / "original-ran"
-        binary = self.bin / "race-provider"
-        binary.write_text(
-            f"#!/bin/sh\n/bin/echo original > \"{original_marker}\"\n",
+    def test_current_platform_executes_compiled_and_script_providers_from_snapshot(self):
+        compiled = self.bin / "codegraph"
+        source = self.bin / "provider.c"
+        source.write_text(
+            '#include <stdio.h>\nint main(void) { puts("snapshot-compiled"); return 0; }\n',
             encoding="utf-8",
         )
+        subprocess.run(
+            ("/usr/bin/clang", str(source), "-o", str(compiled)),
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        script = self.bin / "sg-self-contained"
+        script.write_text("#!/bin/sh\nprintf 'snapshot-script\\n'\n", encoding="utf-8")
+        script.chmod(0o700)
+
+        compiled_result = PROVIDERS.run_provider(
+            PROVIDERS.ProviderSpec("codegraph", compiled), ("--version",),
+            self.repo, PROVIDERS.Deadline(time, 2),
+        )
+        script_result = PROVIDERS.run_provider(
+            PROVIDERS.ProviderSpec("ast-grep", script), ("--version",),
+            self.repo, PROVIDERS.Deadline(time, 2),
+        )
+        self.assertEqual(compiled_result.status, "ready")
+        self.assertEqual(compiled_result.stdout.strip(), "snapshot-compiled")
+        self.assertEqual(script_result.status, "ready")
+        self.assertEqual(script_result.stdout.strip(), "snapshot-script")
+
+    def test_original_path_replacement_and_same_inode_overwrite_cannot_affect_snapshot(self):
+        for mutation in ("replace", "overwrite"):
+            with self.subTest(mutation=mutation):
+                attacker_marker = self.repo / (mutation + "-attacker-ran")
+                binary = self.bin / (mutation + "-provider")
+                binary.write_text("#!/bin/sh\nprintf 'snapshot-safe\\n'\n", encoding="utf-8")
+                binary.chmod(0o700)
+
+                def mutating_runner(argv, **kwargs):
+                    attacker = (
+                        "#!/bin/sh\n"
+                        f"/bin/echo attacker > \"{attacker_marker}\"\n"
+                        "printf 'attacker\\n'\n"
+                    ).encode("utf-8")
+                    if mutation == "replace":
+                        replacement = binary.with_suffix(".replacement")
+                        replacement.write_bytes(attacker)
+                        replacement.chmod(0o700)
+                        os.replace(replacement, binary)
+                    else:
+                        descriptor = os.open(str(binary), os.O_WRONLY | os.O_TRUNC)
+                        try:
+                            os.write(descriptor, attacker)
+                            os.fsync(descriptor)
+                        finally:
+                            os.close(descriptor)
+                    return PROVIDERS._bounded_subprocess(argv, **kwargs)
+
+                result = PROVIDERS.run_provider(
+                    PROVIDERS.ProviderSpec("ast-grep", binary), ("--version",),
+                    self.repo, PROVIDERS.Deadline(time, 2), runner=mutating_runner,
+                )
+                self.assertEqual(result.status, "ready")
+                self.assertEqual(result.stdout.strip(), "snapshot-safe")
+                self.assertFalse(attacker_marker.exists())
+
+    def test_snapshot_mutation_hook_fails_closed_before_execution(self):
+        attacker_marker = self.repo / "snapshot-attacker-ran"
+        binary = self.bin / "snapshot-mutation-provider"
+        binary.write_text("#!/bin/sh\nprintf 'safe\\n'\n", encoding="utf-8")
         binary.chmod(0o700)
 
-        def replacing_runner(argv, **kwargs):
-            binary.write_text(
-                f"#!/bin/sh\n/bin/echo replacement > \"{replacement_marker}\"\n",
+        def mutate_snapshot(argv, **kwargs):
+            snapshot = Path(kwargs["executable_snapshot"])
+            snapshot.write_text(
+                f"#!/bin/sh\n/bin/echo attacker > \"{attacker_marker}\"\n",
                 encoding="utf-8",
             )
-            binary.chmod(0o700)
+            snapshot.chmod(0o700)
             return PROVIDERS._bounded_subprocess(argv, **kwargs)
 
         result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", binary), ("--help",), self.repo,
-            PROVIDERS.Deadline(time, 1), runner=replacing_runner,
+            PROVIDERS.ProviderSpec("ast-grep", binary), ("--version",),
+            self.repo, PROVIDERS.Deadline(time, 2), runner=mutate_snapshot,
         )
         self.assertEqual(result.status, "unsafe")
-        self.assertFalse(replacement_marker.exists())
+        self.assertFalse(attacker_marker.exists())
 
     def test_forbidden_discovery_and_mutating_commands_never_run(self):
         runner = RecordingRunner()
