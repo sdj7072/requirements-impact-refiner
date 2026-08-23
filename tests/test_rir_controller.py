@@ -29,6 +29,21 @@ class RirControllerTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(
+                {
+                    "impact_graph": {
+                        "enabled": False,
+                        "max_seconds": 30,
+                        "target_seconds": 10,
+                        "providers": ["builtin"],
+                        "install_policy": "never",
+                        "deep": False,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -46,15 +61,601 @@ class RirControllerTest(unittest.TestCase):
         values.update(changes)
         return CONTROLLER.BeginRequest(**values)
 
-    def finalize(self, draft, analysis):
+    def finalize(self, draft, analysis, receipt=None):
         return CONTROLLER.FinalizeRequest(
             repo_root=self.root,
             draft_id=draft.draft_id,
             analysis=analysis,
+            graph_receipt_id=(None if receipt is None else receipt.receipt_id),
         )
 
     def fixture(self, name):
         return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+    def enable_builtin_graph(self):
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(
+                {
+                    "impact_graph": {
+                        "enabled": True,
+                        "max_seconds": 30,
+                        "target_seconds": 10,
+                        "providers": ["builtin"],
+                        "install_policy": "never",
+                        "deep": False,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (self.root / "api").mkdir(exist_ok=True)
+        (self.root / "desktop").mkdir(exist_ok=True)
+        (self.root / "api/profile.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+        (self.root / "desktop/profile_cache.ts").write_text(
+            'const key = "profile.displayName";\n', encoding="utf-8"
+        )
+
+    def test_trace_persists_private_receipt_bound_to_draft(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+
+        traced = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+
+        self.assertRegex(traced.receipt_id, r"^[0-9a-f]{32}$")
+        self.assertEqual(traced.receipt_path.stat().st_mode & 0o777, 0o600)
+        self.assertRegex(traced.receipt_sha256, r"^[0-9a-f]{64}$")
+        self.assertEqual(traced.budget_status, "closed")
+        self.assertTrue(traced.compact_graph["paths"])
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        self.assertEqual(
+            stored["graph_receipt"]["receipt_id"], traced.receipt_id
+        )
+        self.assertEqual(
+            stored["graph_receipt"]["sha256"], traced.receipt_sha256
+        )
+
+    def test_trace_uses_coordinator_normalized_seed_identity(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+
+        traced = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (
+                    CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),
+                    CONTROLLER.TraceSeed("authorization.profile", "api/profile.py"),
+                ),
+            )
+        )
+
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        self.assertEqual(
+            [row["term"] for row in stored["graph_receipt"]["seeds"]],
+            ["authorization.profile", "profile.displayName"],
+        )
+        self.assertRegex(traced.receipt_id, r"^[0-9a-f]{32}$")
+
+    def test_trace_rejects_wrong_root_unknown_and_consumed_drafts(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+        other = self.root / "other"
+        other.mkdir()
+        with self.assertRaisesRegex(ValueError, "draft"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    other,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "draft"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    "0" * 32,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        stored["consumed"] = True
+        CONTROLLER._replace_private_draft(self.root, draft.draft_id, stored)
+        with self.assertRaisesRegex(ValueError, "consumed"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+
+    def test_trace_rejects_duplicate_or_preexisting_receipt(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        CONTROLLER.trace_impact(request)
+
+        with self.assertRaisesRegex(ValueError, "already has a graph receipt"):
+            CONTROLLER.trace_impact(request)
+
+        second = CONTROLLER.begin_refinement(self.request(request="Another request"))
+        graph_dir = self.root / ".requirements-impact-refiner" / "graph"
+        graph_dir.mkdir(parents=True, exist_ok=True)
+        (graph_dir / f"{second.draft_id}.json").write_text("replacement", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "already has a graph receipt"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    second.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+
+    def test_trace_rejects_disabled_graph_unsafe_root_and_unsafe_seed(self):
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(
+                {
+                    "impact_graph": {
+                        "enabled": False,
+                        "max_seconds": 30,
+                        "target_seconds": 10,
+                        "providers": ["builtin"],
+                        "install_policy": "never",
+                        "deep": False,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        draft = CONTROLLER.begin_refinement(self.request())
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", None),),
+                )
+            )
+
+        linked = self.root.parent / (self.root.name + "-link")
+        os.symlink(self.root, linked)
+        self.addCleanup(linked.unlink)
+        with self.assertRaisesRegex(ValueError, "symlink is unsafe"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    linked,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", None),),
+                )
+            )
+
+        self.enable_builtin_graph()
+        safe_draft = CONTROLLER.begin_refinement(self.request(request="Safe draft"))
+        with self.assertRaisesRegex(ValueError, "safe repository-relative path"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    safe_draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "../outside.py"),),
+                )
+            )
+
+    def test_trace_rejects_oversized_or_excessive_seeds_before_scanning(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "trace_impact",
+            side_effect=AssertionError("scanner must not run"),
+        ):
+            with self.assertRaisesRegex(ValueError, "256 KiB"):
+                CONTROLLER.trace_impact(
+                    CONTROLLER.TraceRequest(
+                        self.root,
+                        draft.draft_id,
+                        tuple(
+                            CONTROLLER.TraceSeed(
+                                f"{index:03d}-" + "x" * (4096 - 4), None
+                            )
+                            for index in range(128)
+                        ),
+                    )
+                )
+            with self.assertRaisesRegex(ValueError, "between 1 and 128"):
+                CONTROLLER.trace_impact(
+                    CONTROLLER.TraceRequest(
+                        self.root,
+                        draft.draft_id,
+                        tuple(
+                            CONTROLLER.TraceSeed(f"seed-{index}", None)
+                            for index in range(129)
+                        ),
+                    )
+                )
+
+    def test_trace_publication_failure_does_not_bind_draft_and_retry_succeeds(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "_persist_receipt",
+            side_effect=ValueError("injected receipt publication failure"),
+        ):
+            with self.assertRaisesRegex(ValueError, "publication failure"):
+                CONTROLLER.trace_impact(request)
+
+        self.assertIsNone(
+            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
+        )
+        traced = CONTROLLER.trace_impact(request)
+        self.assertTrue(traced.receipt_path.is_file())
+
+    def test_trace_preserves_deadline_and_provider_failure_statuses(self):
+        self.enable_builtin_graph()
+        deadline_draft = CONTROLLER.begin_refinement(self.request())
+
+        class FakeClock:
+            def monotonic(self):
+                return 30.0
+
+        expired = CONTROLLER.GRAPH_COORDINATOR.Deadline(FakeClock(), 0)
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR, "Deadline", return_value=expired
+        ):
+            deadline = CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    deadline_draft.draft_id,
+                    (CONTROLLER.TraceSeed("authorization.profile", "api/profile.py"),),
+                )
+            )
+        self.assertEqual(deadline.budget_status, "budget_exhausted")
+        self.assertTrue(deadline.compact_graph["frontier"])
+
+        config = json.loads(
+            (self.root / ".requirements-impact-refiner.json").read_text(encoding="utf-8")
+        )
+        config["impact_graph"]["providers"] = ["scip"]
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(config), encoding="utf-8"
+        )
+        provider_draft = CONTROLLER.begin_refinement(
+            self.request(request="Provider fallback")
+        )
+        probe = CONTROLLER.GRAPH_COORDINATOR.ProviderProbe(
+            "scip", "ready", "verified-provider", Path("/bin/scip")
+        )
+
+        class FailingAdapter:
+            def probe(self, *args, **kwargs):
+                raise ValueError("injected provider failure")
+
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "discover_providers",
+            return_value=(probe,),
+        ), mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR, "ADAPTERS", {"scip": FailingAdapter()}
+        ):
+            provider = CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    provider_draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+        statuses = {
+            row["name"]: row["status"]
+            for row in provider.compact_graph["providers"]
+        }
+        self.assertEqual(statuses["scip"], "failed")
+        self.assertIn("builtin", statuses)
+
+    def test_finalize_rejects_uncovered_high_risk_graph_node(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = []
+        analysis["impacts"][0]["coverage_rationale"] = (
+            "Unknown supplied evidence does not cover repository graph nodes."
+        )
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+
+        with self.assertRaisesRegex(ValueError, "uncovered high-risk graph node"):
+            CONTROLLER.finalize_refinement(
+                CONTROLLER.FinalizeRequest(
+                    repo_root=self.root,
+                    draft_id=draft.draft_id,
+                    analysis=analysis,
+                    graph_receipt_id=receipt.receipt_id,
+                )
+            )
+
+    def test_finalize_accepts_valid_paths_and_injects_receipt_bound_scope(self):
+        self.enable_builtin_graph()
+        fixture_root = FIXTURES / "graph-project"
+        for source in fixture_root.rglob("*"):
+            if source.is_file():
+                destination = self.root / source.relative_to(fixture_root)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(source.read_bytes())
+        draft = CONTROLLER.begin_refinement(self.request())
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in receipt.compact_graph["paths"]
+        ]
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        self.assertTrue(any(
+            row["distance"] >= 3 for row in receipt.compact_graph["paths"]
+        ))
+
+        result = CONTROLLER.finalize_refinement(
+            self.finalize(draft, analysis, receipt)
+        )
+
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+        path_scope = next(
+            row for row in state["scope"]
+            if row["boundary"] == "Graph paths for IMP-001"
+        )
+        coverage = next(
+            row for row in state["scope"]
+            if row["boundary"] == "Impact graph coverage"
+        )
+        self.assertIn("PATH-", path_scope["evidence"])
+        self.assertIn("profile.displayName", path_scope["evidence"])
+        self.assertIn("Impact scan:", coverage["evidence"])
+        self.assertIn("builtin", coverage["evidence"])
+        self.assertIn("nodes /", coverage["evidence"])
+        self.assertIn(receipt.receipt_id, coverage["confidence"])
+        self.assertIn(receipt.receipt_sha256, coverage["confidence"])
+        metadata = json.loads(
+            result.state_path.with_name("revision-0001.controller.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            metadata["graph_receipt"],
+            {"receipt_id": receipt.receipt_id, "sha256": receipt.receipt_sha256},
+        )
+
+    def test_finalize_accepts_supplied_only_unknown_with_rationale_and_frontier(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(
+            self.request(request="Honor remote.contract supplied by the user.")
+        )
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("remote.contract", None),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = []
+        analysis["impacts"][0]["coverage_rationale"] = (
+            "Supplied-only contract evidence remains unknown until a repository source is mounted."
+        )
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+
+        result = CONTROLLER.finalize_refinement(
+            self.finalize(draft, analysis, receipt)
+        )
+
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+        path_scope = next(
+            row for row in state["scope"]
+            if row["boundary"] == "Graph paths for IMP-001"
+        )
+        coverage = next(
+            row for row in state["scope"]
+            if row["boundary"] == "Impact graph coverage"
+        )
+        self.assertIn("Supplied-only", path_scope["evidence"])
+        self.assertIn("unknown frontiers", coverage["evidence"])
+        self.assertIn("FRONTIER-", coverage["confidence"])
+
+    def test_finalize_rejects_invalid_and_unknown_graph_path_keys(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        for key, message in (("../PATH-001", "invalid"), ("PATH-999", "unknown")):
+            with self.subTest(key=key):
+                analysis["impacts"][0]["graph_path_keys"] = [key]
+                with self.assertRaisesRegex(ValueError, f"{message} graph path key"):
+                    CONTROLLER.finalize_refinement(
+                        self.finalize(draft, analysis, receipt)
+                    )
+
+    def test_finalize_rejects_confidence_upgrade_and_lexical_only_resolution(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request())
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in receipt.compact_graph["paths"]
+        ]
+        analysis["impacts"][0]["evidence_level"] = "verified"
+        with self.assertRaisesRegex(ValueError, "upgrades graph path evidence"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(draft, analysis, receipt)
+            )
+
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        analysis["impacts"][0]["state"] = "resolved"
+        with self.assertRaisesRegex(ValueError, "solely on lexical"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(draft, analysis, receipt)
+            )
+
+    def test_finalize_rejects_missing_mismatched_tampered_and_stale_receipts(self):
+        self.enable_builtin_graph()
+        missing = CONTROLLER.begin_refinement(self.request(request="Missing receipt"))
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = []
+        analysis["impacts"][0]["coverage_rationale"] = "Unknown until traced."
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "graph receipt is required"):
+            CONTROLLER.finalize_refinement(self.finalize(missing, analysis))
+
+        mismatch = CONTROLLER.begin_refinement(self.request(request="Mismatch"))
+        mismatch_receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                mismatch.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "does not match selected"):
+            CONTROLLER.finalize_refinement(
+                CONTROLLER.FinalizeRequest(
+                    self.root, mismatch.draft_id, analysis, "0" * 32
+                )
+            )
+
+        tampered = CONTROLLER.begin_refinement(self.request(request="Tampered"))
+        tampered_receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                tampered.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        tampered_receipt.receipt_path.write_bytes(
+            tampered_receipt.receipt_path.read_bytes() + b"\n"
+        )
+        with self.assertRaisesRegex(ValueError, "canonical|tampered"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(tampered, analysis, tampered_receipt)
+            )
+
+        stale = CONTROLLER.begin_refinement(self.request(request="Stale"))
+        stale_receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                stale.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        (self.root / "api/profile.py").write_text(
+            'FIELD = "profile.renamed"\n', encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "stale"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(stale, analysis, stale_receipt)
+            )
+
+    def test_finalize_recomputes_exact_draft_request_and_receipt_identities(self):
+        self.enable_builtin_graph()
+        request_draft = CONTROLLER.begin_refinement(self.request(request="Exact request"))
+        request_receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                request_draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in request_receipt.compact_graph["paths"]
+        ]
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        stored = CONTROLLER.load_draft(self.root, request_draft.draft_id)
+        stored["request"] = "Replaced request"
+        CONTROLLER._replace_private_draft(self.root, request_draft.draft_id, stored)
+        with self.assertRaisesRegex(ValueError, "identity"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(request_draft, analysis, request_receipt)
+            )
+
+        forged_draft = CONTROLLER.begin_refinement(self.request(request="Forged ID"))
+        forged_receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                forged_draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        receipt_value = json.loads(
+            forged_receipt.receipt_path.read_text(encoding="utf-8")
+        )
+        receipt_value["receipt_id"] = "0" * 32
+        forged_payload = CONTROLLER.GRAPH.canonical_receipt_bytes(receipt_value)
+        forged_receipt.receipt_path.write_bytes(forged_payload)
+        forged_binding = CONTROLLER.load_draft(self.root, forged_draft.draft_id)
+        forged_binding["graph_receipt"]["receipt_id"] = "0" * 32
+        forged_binding["graph_receipt"]["sha256"] = (
+            CONTROLLER.hashlib.sha256(forged_payload).hexdigest()
+        )
+        CONTROLLER._replace_private_draft(
+            self.root, forged_draft.draft_id, forged_binding
+        )
+        with self.assertRaisesRegex(ValueError, "identity"):
+            CONTROLLER.finalize_refinement(
+                CONTROLLER.FinalizeRequest(
+                    self.root, forged_draft.draft_id, analysis, "0" * 32
+                )
+            )
+
+    def test_graph_disabled_finalize_remains_backward_compatible(self):
+        draft = CONTROLLER.begin_refinement(self.request())
+
+        result = CONTROLLER.finalize_refinement(
+            self.finalize(
+                draft, self.fixture("controller-analysis-pre-decision.json")
+            )
+        )
+
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+        self.assertFalse(state["settings"]["impact_graph"]["enabled"])
+        self.assertFalse(any(
+            row["boundary"] == "Impact graph coverage" for row in state["scope"]
+        ))
 
     def test_begin_creates_repository_bound_private_draft(self):
         result = CONTROLLER.begin_refinement(self.request())
@@ -101,9 +702,32 @@ class RirControllerTest(unittest.TestCase):
         (self.root / ".requirements-impact-refiner.json").write_text(
             '{"impact_graph":{"max_seconds":31}}\n', encoding="utf-8"
         )
+        (self.root / "api").mkdir()
+        (self.root / "desktop").mkdir()
+        (self.root / "api/profile.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+        (self.root / "desktop/profile_cache.ts").write_text(
+            'const key = "profile.displayName";\n', encoding="utf-8"
+        )
         draft = CONTROLLER.begin_refinement(self.request())
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR, "discover_providers", return_value=()
+        ):
+            receipt = CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in receipt.compact_graph["paths"]
+        ]
+        analysis["impacts"][0]["evidence_level"] = "unknown"
         result = CONTROLLER.finalize_refinement(
-            self.finalize(draft, self.fixture("controller-analysis-pre-decision.json"))
+            self.finalize(draft, analysis, receipt)
         )
 
         state = json.loads(result.state_path.read_text(encoding="utf-8"))

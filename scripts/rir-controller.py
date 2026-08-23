@@ -24,6 +24,8 @@ BEGIN_KEYS = {
     "audience_override",
     "delivery_override",
 }
+TRACE_KEYS = {"seeds"}
+TRACE_SEED_KEYS = {"term", "location"}
 
 
 def build_parser():
@@ -32,9 +34,14 @@ def build_parser():
     begin = subparsers.add_parser("begin")
     begin.add_argument("--repo-root", type=Path, required=True)
     begin.add_argument("--input", type=Path, required=True)
+    trace = subparsers.add_parser("trace")
+    trace.add_argument("--repo-root", type=Path, required=True)
+    trace.add_argument("--draft-id", required=True)
+    trace.add_argument("--input", type=Path, required=True)
     finalize = subparsers.add_parser("finalize")
     finalize.add_argument("--repo-root", type=Path, required=True)
     finalize.add_argument("--draft-id", required=True)
+    finalize.add_argument("--graph-receipt-id")
     finalize.add_argument("--input", type=Path, required=True)
     return parser
 
@@ -118,16 +125,57 @@ def _finalize(args) -> int:
             repo_root=args.repo_root,
             draft_id=args.draft_id,
             analysis=analysis,
+            graph_receipt_id=args.graph_receipt_id,
         )
     )
     print(result.display_text, end="" if result.display_text.endswith("\n") else "\n")
     return 0
 
 
+def _trace(args) -> int:
+    value = _read_object(args.input, rir_controller.MAX_TRACE_BYTES, "trace input")
+    unknown = sorted(set(value) - TRACE_KEYS)
+    if unknown:
+        raise ValueError(f"unknown trace key {unknown[0]}")
+    if "seeds" not in value:
+        raise ValueError("missing trace key seeds")
+    rows = value["seeds"]
+    if not isinstance(rows, list):
+        raise ValueError("trace seeds must be an array")
+    seeds = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("trace seed must be an object")
+        missing = sorted(TRACE_SEED_KEYS - set(row))
+        extra = sorted(set(row) - TRACE_SEED_KEYS)
+        if missing:
+            raise ValueError(f"missing trace seed key {missing[0]}")
+        if extra:
+            raise ValueError(f"unknown trace seed key {extra[0]}")
+        seeds.append(rir_controller.TraceSeed(row["term"], row["location"]))
+    result = rir_controller.trace_impact(
+        rir_controller.TraceRequest(args.repo_root, args.draft_id, tuple(seeds))
+    )
+    root = args.repo_root.resolve()
+    payload = {
+        "receipt_id": result.receipt_id,
+        "receipt_path": result.receipt_path.relative_to(root).as_posix(),
+        "receipt_sha256": result.receipt_sha256,
+        "compact_graph": result.compact_graph,
+        "budget_status": result.budget_status,
+    }
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return _begin(args) if args.command == "begin" else _finalize(args)
+        if args.command == "begin":
+            return _begin(args)
+        if args.command == "trace":
+            return _trace(args)
+        return _finalize(args)
     except OSError as error:
         print(str(error), file=sys.stderr)
         return 2

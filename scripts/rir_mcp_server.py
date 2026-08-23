@@ -60,6 +60,32 @@ BEGIN_SCHEMA = {
         "delivery_override": {"type": ["string", "null"], "enum": ["compact", "full", None]},
     },
 }
+TRACE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["repo_root", "draft_id", "seeds"],
+    "properties": {
+        "repo_root": {"type": "string", "minLength": 1},
+        "draft_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "seeds": {
+            "type": "array", "minItems": 1, "maxItems": 128,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["term", "location"],
+                "properties": {
+                    "term": {"type": "string", "minLength": 1, "maxLength": 4096},
+                    "location": {
+                        "type": ["string", "null"],
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+$",
+                    },
+                },
+            },
+        },
+    },
+}
 FINALIZE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -67,6 +93,7 @@ FINALIZE_SCHEMA = {
     "properties": {
         "repo_root": {"type": "string", "minLength": 1},
         "draft_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "graph_receipt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
         "analysis": EXPANDED_ANALYSIS_SCHEMA,
     },
 }
@@ -75,6 +102,11 @@ TOOLS = [
         "name": "rir_begin",
         "description": "Create a local, network-free, repository-bound impact-refinement draft before analysis; data stays in the isolated workspace.",
         "inputSchema": BEGIN_SCHEMA,
+    },
+    {
+        "name": "rir_trace_impact",
+        "description": "Trace bounded local, network-free repository impact evidence for one unconsumed controller draft inside the isolated workspace.",
+        "inputSchema": TRACE_SCHEMA,
     },
     {
         "name": "rir_finalize",
@@ -263,6 +295,8 @@ def _begin(arguments):
         },
         "analysis_contract": EXPANDED_ANALYSIS_SCHEMA,
         "semantic_rules": [
+            "when settings.impact_graph.enabled is true, call rir_trace_impact exactly once before finalize and return its graph_receipt_id unchanged",
+            "every graph-enabled impact requires receipt-local graph_path_keys or supplied-only unknown coverage_rationale without upgrading evidence confidence",
             "pre-decision requires decision_needed with two or three options and decisions must be empty",
             "post-decision requires decision_needed null and at least one explicit decision",
             "blocked impacts require workflow Not ready",
@@ -288,6 +322,7 @@ def _finalize(arguments):
             repo_root=Path(arguments["repo_root"]),
             draft_id=arguments["draft_id"],
             analysis=arguments["analysis"],
+            graph_receipt_id=arguments.get("graph_receipt_id"),
         )
     )
     root = Path(arguments["repo_root"]).resolve()
@@ -303,6 +338,36 @@ def _finalize(arguments):
     }
     return {
         "content": [{"type": "text", "text": result.display_text}],
+        "structuredContent": structured,
+        "isError": False,
+    }
+
+
+def _trace(arguments):
+    _validate_arguments(arguments, TRACE_SCHEMA, "rir_trace_impact")
+    result = rir_controller.trace_impact(
+        rir_controller.TraceRequest(
+            repo_root=Path(arguments["repo_root"]),
+            draft_id=arguments["draft_id"],
+            seeds=tuple(
+                rir_controller.TraceSeed(row["term"], row["location"])
+                for row in arguments["seeds"]
+            ),
+        )
+    )
+    root = Path(arguments["repo_root"]).resolve()
+    structured = {
+        "receipt_id": result.receipt_id,
+        "receipt_path": result.receipt_path.relative_to(root).as_posix(),
+        "receipt_sha256": result.receipt_sha256,
+        "compact_graph": result.compact_graph,
+        "budget_status": result.budget_status,
+    }
+    return {
+        "content": [{
+            "type": "text",
+            "text": json.dumps(structured, ensure_ascii=False, sort_keys=True),
+        }],
         "structuredContent": structured,
         "isError": False,
     }
@@ -331,6 +396,8 @@ def handle(message):
     try:
         if name == "rir_begin":
             result = _begin(arguments)
+        elif name == "rir_trace_impact":
+            result = _trace(arguments)
         elif name == "rir_finalize":
             result = _finalize(arguments)
         else:

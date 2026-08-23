@@ -16,6 +16,23 @@ def request(identifier, method, params):
 
 
 class RirMcpServerTest(unittest.TestCase):
+    def write_graph_config(self, root, enabled):
+        (root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(
+                {
+                    "impact_graph": {
+                        "enabled": enabled,
+                        "max_seconds": 30,
+                        "target_seconds": 10,
+                        "providers": ["builtin"],
+                        "install_policy": "never",
+                        "deep": False,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
     def exchange(self, messages):
         payload = "".join(json.dumps(message) + "\n" for message in messages)
         result = subprocess.run(
@@ -39,21 +56,31 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual(
             [tool["name"] for tool in replies[1]["result"]["tools"]],
-            ["rir_begin", "rir_finalize"],
+            ["rir_begin", "rir_trace_impact", "rir_finalize"],
         )
         for tool in replies[1]["result"]["tools"]:
             self.assertEqual(tool["inputSchema"]["additionalProperties"], False)
             self.assertIn("local", tool["description"].lower())
             self.assertIn("network", tool["description"].lower())
-        finalize_schema = replies[1]["result"]["tools"][1]["inputSchema"]
+        trace_schema = replies[1]["result"]["tools"][1]["inputSchema"]
+        self.assertEqual(trace_schema["properties"]["seeds"]["items"]["additionalProperties"], False)
+        self.assertEqual(
+            trace_schema["properties"]["seeds"]["items"]["required"],
+            ["term", "location"],
+        )
+        finalize_schema = replies[1]["result"]["tools"][2]["inputSchema"]
         analysis = finalize_schema["properties"]["analysis"]
         self.assertEqual(analysis["additionalProperties"], False)
         self.assertIn("impacts", analysis["required"])
         self.assertEqual(analysis["properties"]["impacts"]["items"]["additionalProperties"], False)
+        impact_properties = analysis["properties"]["impacts"]["items"]["properties"]
+        self.assertIn("graph_path_keys", impact_properties)
+        self.assertIn("coverage_rationale", impact_properties)
 
     def test_begin_and_finalize_tools_share_controller_state(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            self.write_graph_config(root, False)
             process = subprocess.Popen(
                 [sys.executable, str(SERVER)],
                 stdin=subprocess.PIPE,
@@ -125,6 +152,7 @@ class RirMcpServerTest(unittest.TestCase):
     def test_stale_finalize_returns_bounded_error_and_server_continues(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            self.write_graph_config(root, False)
             process = subprocess.Popen(
                 [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
@@ -159,6 +187,7 @@ class RirMcpServerTest(unittest.TestCase):
     def test_revision_begin_returns_normalized_prior_decision_guidance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            self.write_graph_config(root, False)
             process = subprocess.Popen(
                 [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
@@ -220,6 +249,83 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(replies[0]["error"]["code"], -32700)
         self.assertIn("tools", replies[1]["result"])
+
+    def test_begin_trace_finalize_share_controller_and_compact_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_graph_config(root, True)
+            (root / "api").mkdir()
+            (root / "desktop").mkdir()
+            (root / "api/profile.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            (root / "desktop/profile_cache.ts").write_text(
+                'const key = "profile.displayName";\n', encoding="utf-8"
+            )
+            process = subprocess.Popen(
+                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+            )
+            try:
+                def call(identifier, name, arguments):
+                    process.stdin.write(json.dumps(request(
+                        identifier, "tools/call", {"name": name, "arguments": arguments}
+                    )) + "\n")
+                    process.stdin.flush()
+                    return json.loads(process.stdout.readline())
+
+                begun = call(1, "rir_begin", {
+                    "repo_root": str(root), "request": "Change profile display name.",
+                    "repository_evidence": ["profile.displayName exists"],
+                    "adapter": "generic",
+                })["result"]["structuredContent"]
+                trace_reply = call(2, "rir_trace_impact", {
+                    "repo_root": str(root), "draft_id": begun["draft_id"],
+                    "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
+                })
+                traced = trace_reply["result"]["structuredContent"]
+                self.assertEqual(
+                    json.loads(trace_reply["result"]["content"][0]["text"]), traced
+                )
+                self.assertTrue(traced["compact_graph"]["paths"])
+                analysis = json.loads(
+                    (FIXTURES / "controller-analysis-pre-decision.json").read_text()
+                )
+                analysis["impacts"][0]["graph_path_keys"] = [
+                    row["key"] for row in traced["compact_graph"]["paths"]
+                ]
+                analysis["impacts"][0]["evidence_level"] = "unknown"
+                finalized = call(3, "rir_finalize", {
+                    "repo_root": str(root), "draft_id": begun["draft_id"],
+                    "graph_receipt_id": traced["receipt_id"], "analysis": analysis,
+                })
+            finally:
+                process.stdin.close(); process.wait(timeout=5)
+                process.stdout.close(); process.stderr.close()
+
+        self.assertEqual(
+            finalized["result"]["content"][0]["text"],
+            finalized["result"]["structuredContent"]["display_text"],
+        )
+
+    def test_malformed_trace_error_is_bounded_and_following_request_survives(self):
+        replies = self.exchange([
+            request(1, "tools/call", {
+                "name": "rir_trace_impact",
+                "arguments": {
+                    "repo_root": "/tmp", "draft_id": "0" * 32,
+                    "seeds": [{"term": "x", "location": "../escape"}],
+                },
+            }),
+            request(2, "tools/list", {}),
+        ])
+
+        self.assertEqual(replies[0]["error"]["code"], -32602)
+        self.assertLess(len(json.dumps(replies[0])), 2048)
+        self.assertEqual(
+            [tool["name"] for tool in replies[1]["result"]["tools"]],
+            ["rir_begin", "rir_trace_impact", "rir_finalize"],
+        )
 
 
 if __name__ == "__main__":
