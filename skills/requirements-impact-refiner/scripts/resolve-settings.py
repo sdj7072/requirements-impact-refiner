@@ -22,6 +22,18 @@ GRAPH_DEFAULTS = {
 GRAPH_FIELDS = frozenset(GRAPH_DEFAULTS)
 
 
+def graph_defaults() -> dict[str, object]:
+    """Return fresh nested graph defaults for each resolution."""
+    return {
+        "enabled": True,
+        "max_seconds": 30,
+        "target_seconds": 10,
+        "providers": ["auto"],
+        "install_policy": "never",
+        "deep": False,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Resolve impact-summary settings")
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
@@ -67,9 +79,9 @@ def resolve_graph_settings(config: dict[str, object]) -> tuple[dict[str, object]
     """Normalize only the explicitly supported local graph configuration."""
     configured = config.get("impact_graph")
     if configured is None:
-        return dict(GRAPH_DEFAULTS), None
+        return graph_defaults(), None
     if not isinstance(configured, dict):
-        return dict(GRAPH_DEFAULTS), "impact_graph must be an object"
+        return graph_defaults(), "impact_graph must be an object"
     unknown = sorted(set(configured) - GRAPH_FIELDS)
     missing = sorted(GRAPH_FIELDS - set(configured))
     if unknown or missing:
@@ -78,20 +90,20 @@ def resolve_graph_settings(config: dict[str, object]) -> tuple[dict[str, object]
             detail.append("unsupported field(s): " + ", ".join(unknown))
         if missing:
             detail.append("missing field(s): " + ", ".join(missing))
-        return dict(GRAPH_DEFAULTS), "; ".join(detail)
+        return graph_defaults(), "; ".join(detail)
     enabled, deep = configured.get("enabled"), configured.get("deep")
     maximum, target = configured.get("max_seconds"), configured.get("target_seconds")
     providers, install_policy = configured.get("providers"), configured.get("install_policy")
     if not isinstance(enabled, bool) or not isinstance(deep, bool):
-        return dict(GRAPH_DEFAULTS), "enabled and deep must be booleans"
+        return graph_defaults(), "enabled and deep must be booleans"
     if (not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1 or maximum > 30):
-        return dict(GRAPH_DEFAULTS), "max_seconds must be a positive integer at most 30"
+        return graph_defaults(), "max_seconds must be a positive integer at most 30"
     if (not isinstance(target, int) or isinstance(target, bool) or target < 1 or target > maximum):
-        return dict(GRAPH_DEFAULTS), "target_seconds must be a positive integer no greater than max_seconds"
+        return graph_defaults(), "target_seconds must be a positive integer no greater than max_seconds"
     if (not isinstance(providers, list) or not providers or any(not isinstance(item, str) or not item for item in providers) or len(set(providers)) != len(providers)):
-        return dict(GRAPH_DEFAULTS), "providers must be a non-empty list of unique names"
+        return graph_defaults(), "providers must be a non-empty list of unique names"
     if install_policy != "never":
-        return dict(GRAPH_DEFAULTS), "install_policy must be never"
+        return graph_defaults(), "install_policy must be never"
     return {
         "enabled": enabled, "max_seconds": maximum, "target_seconds": target,
         "providers": list(providers), "install_policy": install_policy, "deep": deep,

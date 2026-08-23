@@ -87,6 +87,16 @@ class CompactStateTest(unittest.TestCase):
             COMPACT.validate_state(value),
         )
 
+    def test_settings_warnings_are_optional_and_must_be_nonempty_strings(self):
+        value = self.fixture()
+        value["settings"]["warnings"] = ["invalid impact_graph configuration"]
+        self.assertEqual(COMPACT.validate_state(value), [])
+        value["settings"]["warnings"] = [""]
+        self.assertIn(
+            "settings warnings must be an array of non-empty strings",
+            COMPACT.validate_state(value),
+        )
+
     def test_relationships_reject_unknown_ids(self):
         value = self.fixture()
         value["impacts"][0]["criteria"] = ["AC-999"]

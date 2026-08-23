@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,9 @@ SCRIPT = (
     / "scripts"
     / "resolve-settings.py"
 )
+SPEC = importlib.util.spec_from_file_location("resolve_settings", SCRIPT)
+SETTINGS = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(SETTINGS)
 
 
 class PresentationSettingsTest(unittest.TestCase):
@@ -165,6 +169,15 @@ class PresentationSettingsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(value["impact_graph"]["target_seconds"], 10)
         self.assertIn("target_seconds", value["warnings"][0])
+
+    def test_graph_default_providers_are_not_shared_between_resolutions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = SETTINGS.resolve(root, None, None)
+            first["impact_graph"]["providers"].append("mutated")
+            second = SETTINGS.resolve(root, None, None)
+
+        self.assertEqual(second["impact_graph"]["providers"], ["auto"])
 
 
 if __name__ == "__main__":

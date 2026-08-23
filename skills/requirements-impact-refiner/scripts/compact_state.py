@@ -51,6 +51,7 @@ AUDIENCES = {"simple", "balanced", "technical"}
 DELIVERIES = {"compact", "full"}
 SETTING_SOURCES = {"request", "repository", "default"}
 SETTING_FIELDS = {"audience", "audience_source", "delivery", "delivery_source"}
+OPTIONAL_SETTING_FIELDS = {"impact_graph", "warnings"}
 GRAPH_SETTING_FIELDS = {
     "enabled", "max_seconds", "target_seconds", "providers", "install_policy", "deep",
 }
@@ -138,10 +139,12 @@ def validate_structure(value: object) -> list[str]:
         )
         errors.extend(
             f"settings has unknown key {key}"
-            for key in sorted(set(settings) - SETTING_FIELDS - {"impact_graph"})
+            for key in sorted(set(settings) - SETTING_FIELDS - OPTIONAL_SETTING_FIELDS)
         )
         if "impact_graph" in settings:
             errors.extend(_validate_graph_settings(settings["impact_graph"]))
+        if "warnings" in settings and not _string_list(settings["warnings"]):
+            errors.append("settings warnings must be an array of non-empty strings")
     for name, fields in ROW_FIELDS.items():
         rows = value[name]
         if not isinstance(rows, list):

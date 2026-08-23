@@ -38,6 +38,25 @@ class ImpactGraphTest(unittest.TestCase):
 
         self.assertIn("provider builtin has invalid status installed", GRAPH.validate_receipt(value))
 
+    def test_receipt_rejects_non_object_rows_and_empty_or_duplicate_providers(self):
+        value = fixture()
+        value["providers"] = [42]
+        self.assertIn(
+            "providers row 1 must be an object", GRAPH.validate_receipt(value)
+        )
+
+        value = fixture()
+        value["settings"]["providers"] = []
+        self.assertIn(
+            "settings providers must be a non-empty list of unique names",
+            GRAPH.validate_receipt(value),
+        )
+        value["settings"]["providers"] = ["auto", "auto"]
+        self.assertIn(
+            "settings providers must be a non-empty list of unique names",
+            GRAPH.validate_receipt(value),
+        )
+
     def test_receipt_rejects_duplicate_ids_unsafe_paths_and_unknown_references(self):
         value = fixture()
         value["nodes"][1]["id"] = "NODE-001"
@@ -101,6 +120,31 @@ class ImpactGraphTest(unittest.TestCase):
         self.assertEqual(receipt.nodes, ())
         with self.assertRaises((AttributeError, TypeError)):
             settings.max_seconds = 10
+        with self.assertRaises((AttributeError, TypeError)):
+            receipt.cache["invalidated_nodes"].append("NODE-001")
+        self.assertEqual(
+            json.loads(GRAPH.canonical_receipt_bytes(receipt))["cache"]["invalidated_nodes"],
+            [],
+        )
+
+    def test_canonical_receipt_rejects_a_structurally_valid_oversized_payload(self):
+        value = fixture()
+        value["nodes"] = [
+            {
+                "id": f"NODE-{index:03d}", "kind": "symbol",
+                "label": "x" * GRAPH.MAX_STRING_LENGTH, "location": "api/profile.py",
+                "provider": "builtin", "confidence": "verified-source",
+                "source_sha256": "d" * 64, "risk_domains": ["interfaces"],
+            }
+            for index in range(GRAPH.MAX_NODES)
+        ]
+        value["edges"] = []
+        value["paths"] = []
+        value["frontier"] = []
+        value["budget_status"] = "closed"
+        self.assertEqual(GRAPH.validate_receipt(value), ())
+        with self.assertRaisesRegex(ValueError, "maximum byte size"):
+            GRAPH.canonical_receipt_bytes(value)
 
 
 if __name__ == "__main__":

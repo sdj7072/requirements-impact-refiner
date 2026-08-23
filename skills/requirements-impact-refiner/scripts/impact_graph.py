@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 from pathlib import PurePosixPath
 import re
@@ -59,7 +59,25 @@ def _tuples(values: Sequence[str]) -> tuple[str, ...]:
 
 
 def _immutable_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
-    return MappingProxyType(dict(value))
+    return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(item) for item in value)
+    return value
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _json_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list, frozenset, set)):
+        return [_json_value(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True)
@@ -236,7 +254,15 @@ def _validate_settings(value: object, errors: list[str]) -> None:
         errors.append("settings max_seconds must not exceed 30")
     if isinstance(maximum, int) and isinstance(target, int) and target > maximum:
         errors.append("settings target_seconds must not exceed max_seconds")
-    _string_list(value.get("providers"), "settings providers", errors)
+    providers = value.get("providers")
+    if (
+        not isinstance(providers, list)
+        or not providers
+        or len(providers) > MAX_COLLECTION_LENGTH
+        or any(not _string(item) for item in providers)
+        or len(set(providers)) != len(providers)
+    ):
+        errors.append("settings providers must be a non-empty list of unique names")
     if value.get("install_policy") != "never":
         errors.append(f"settings has invalid install_policy {value.get('install_policy')}")
 
@@ -247,7 +273,13 @@ def _check_limit(rows: object, label: str, maximum: int, errors: list[str]) -> l
         return []
     if len(rows) > maximum:
         errors.append(f"{label} exceeds maximum collection size")
-    return [row for row in rows if _mapping(row)]
+    result: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        if not _mapping(row):
+            errors.append(f"{label} row {index} must be an object")
+        else:
+            result.append(row)
+    return result
 
 
 def _valid_hash(value: object, length: int) -> bool:
@@ -286,8 +318,8 @@ def _receipt_mapping(value: object) -> dict[str, Any] | None:
                 "id": item.id, "node": item.node, "reason": item.reason,
                 "risk_domains": list(item.risk_domains),
             } for item in value.frontier],
-            "timings_ms": dict(value.timings_ms), "budget_status": value.budget_status,
-            "cache": dict(value.cache),
+            "timings_ms": _json_value(value.timings_ms), "budget_status": value.budget_status,
+            "cache": _json_value(value.cache),
         }
     return value if _mapping(value) else None
 
@@ -512,4 +544,9 @@ def canonical_receipt_bytes(value: Mapping[str, Any] | GraphReceipt) -> bytes:
     errors = validate_receipt(receipt)
     if errors:
         raise ValueError("invalid graph receipt: " + "; ".join(errors))
-    return json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    payload = json.dumps(
+        receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if len(payload) > MAX_RECEIPT_BYTES:
+        raise ValueError("canonical graph receipt exceeds maximum byte size")
+    return payload

@@ -97,6 +97,19 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(result.draft_path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(result.draft_path.parent.stat().st_mode & 0o777, 0o700)
 
+    def test_invalid_graph_configuration_falls_back_and_finalizes_with_warning(self):
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            '{"impact_graph":{"max_seconds":31}}\n', encoding="utf-8"
+        )
+        draft = CONTROLLER.begin_refinement(self.request())
+        result = CONTROLLER.finalize_refinement(
+            self.finalize(draft, self.fixture("controller-analysis-pre-decision.json"))
+        )
+
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["settings"]["impact_graph"]["max_seconds"], 30)
+        self.assertIn("invalid impact_graph configuration", state["settings"]["warnings"][0])
+
     def test_begin_rejects_oversized_request_and_non_directory_root(self):
         with self.assertRaisesRegex(ValueError, "256 KiB"):
             CONTROLLER.begin_refinement(
