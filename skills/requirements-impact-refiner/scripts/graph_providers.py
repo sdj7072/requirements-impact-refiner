@@ -339,7 +339,7 @@ def _snapshot_matches(snapshot: _ExecutableSnapshot) -> bool:
     if (
         stat.S_ISLNK(metadata.st_mode)
         or not stat.S_ISREG(metadata.st_mode)
-        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or stat.S_IMODE(metadata.st_mode) != 0o500
         or metadata.st_size != snapshot.size
         or metadata.st_size > MAX_EXECUTABLE_BYTES
         or (metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns)
@@ -373,11 +373,29 @@ def _snapshot_matches(snapshot: _ExecutableSnapshot) -> bool:
     return total == snapshot.size and digest.hexdigest() == snapshot.sha256
 
 
+def _remove_private_tree(path: Path, snapshot_path: Path) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        if path == snapshot_path and stat.S_ISREG(metadata.st_mode):
+            os.chmod(path, 0o600, follow_symlinks=False)
+        os.unlink(path)
+        return
+    os.chmod(path, 0o700, follow_symlinks=False)
+    with os.scandir(path) as entries:
+        children = tuple(Path(entry.path) for entry in entries)
+    for child in children:
+        _remove_private_tree(child, snapshot_path)
+    os.rmdir(path)
+
+
 def _create_executable_snapshot(
     executable_fd: int, opened, expected_sha256: str,
 ) -> _ExecutableSnapshot:
     directory = Path(tempfile.mkdtemp(prefix="rir-provider-"))
-    snapshot = None
+    path = directory / "provider-executable"
     try:
         os.chmod(directory, 0o700)
         directory_metadata = directory.lstat()
@@ -387,7 +405,6 @@ def _create_executable_snapshot(
             or stat.S_IMODE(directory_metadata.st_mode) != 0o700
         ):
             raise UnsafeExecutableError("provider snapshot directory is unsafe")
-        path = directory / "provider-executable"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(str(path), flags, 0o700)
@@ -408,6 +425,18 @@ def _create_executable_snapshot(
                 _write_all(descriptor, chunk)
                 digest.update(chunk)
             os.fsync(descriptor)
+            initial = os.fstat(descriptor)
+            if (
+                total != opened.st_size
+                or digest.hexdigest() != expected_sha256
+                or not stat.S_ISREG(initial.st_mode)
+                or stat.S_IMODE(initial.st_mode) != 0o700
+            ):
+                raise UnsafeExecutableError(
+                    "provider snapshot does not match validated executable identity"
+                )
+            os.fchmod(descriptor, 0o500)
+            os.fsync(descriptor)
             metadata = os.fstat(descriptor)
         finally:
             os.close(descriptor)
@@ -415,7 +444,7 @@ def _create_executable_snapshot(
             total != opened.st_size
             or digest.hexdigest() != expected_sha256
             or not stat.S_ISREG(metadata.st_mode)
-            or stat.S_IMODE(metadata.st_mode) != 0o700
+            or stat.S_IMODE(metadata.st_mode) != 0o500
         ):
             raise UnsafeExecutableError(
                 "provider snapshot does not match validated executable identity"
@@ -434,13 +463,28 @@ def _create_executable_snapshot(
         if not _snapshot_matches(snapshot):
             raise UnsafeExecutableError("provider snapshot failed identity verification")
         return snapshot
-    except Exception:
-        shutil.rmtree(directory, ignore_errors=True)
+    except Exception as error:
+        try:
+            _remove_private_tree(directory, path)
+        except OSError as cleanup_error:
+            raise UnsafeExecutableError(
+                _bounded_detail(
+                    "provider snapshot creation cleanup failed: " + str(cleanup_error)
+                )
+            ) from error
         raise
 
 
-def _cleanup_snapshot(snapshot: _ExecutableSnapshot) -> None:
-    shutil.rmtree(snapshot.directory, ignore_errors=True)
+def _cleanup_snapshot(snapshot: _ExecutableSnapshot):
+    try:
+        _remove_private_tree(snapshot.directory, snapshot.path)
+    except OSError as error:
+        return False, _bounded_detail(
+            "provider snapshot cleanup failed: " + str(error)
+        )
+    if os.path.lexists(snapshot.path) or os.path.lexists(snapshot.directory):
+        return False, "provider snapshot cleanup left private artifacts"
+    return True, None
 
 
 def _bounded_subprocess(
@@ -556,37 +600,54 @@ def run_provider(
     finally:
         os.close(descriptor)
     execute = runner or _bounded_subprocess
+    preliminary = None
+    outcome = None
     try:
         if not _snapshot_matches(snapshot):
-            return _empty_query(
+            preliminary = _empty_query(
                 spec, "unsafe", argv, environment,
                 "provider snapshot changed before runner invocation", digest,
             )
-        try:
-            outcome = execute(
-                argv, cwd=str(root), env=dict(environment), timeout=remaining,
-                shell=False, start_new_session=True, stdout_limit=STDOUT_LIMIT,
-                stderr_limit=STDERR_LIMIT,
-                executable_snapshot=str(snapshot.path),
-                snapshot_sha256=snapshot.sha256,
-                snapshot_identity=(
-                    snapshot.device, snapshot.inode, snapshot.size,
-                    snapshot.modified_ns,
-                ),
-            )
-        except subprocess.TimeoutExpired as error:
-            return _empty_query(spec, "timed_out", argv, environment, error, digest)
-        except UnsafeExecutableError as error:
-            return _empty_query(spec, "unsafe", argv, environment, error, digest)
-        except (OSError, ValueError) as error:
-            return _empty_query(spec, "failed", argv, environment, error, digest)
-        if not _snapshot_matches(snapshot):
-            return _empty_query(
-                spec, "unsafe", argv, environment,
-                "provider snapshot changed after runner completion", digest,
-            )
+        else:
+            try:
+                outcome = execute(
+                    argv, cwd=str(root), env=dict(environment), timeout=remaining,
+                    shell=False, start_new_session=True, stdout_limit=STDOUT_LIMIT,
+                    stderr_limit=STDERR_LIMIT,
+                    executable_snapshot=str(snapshot.path),
+                    snapshot_sha256=snapshot.sha256,
+                    snapshot_identity=(
+                        snapshot.device, snapshot.inode, snapshot.size,
+                        snapshot.modified_ns,
+                    ),
+                )
+            except subprocess.TimeoutExpired as error:
+                preliminary = _empty_query(
+                    spec, "timed_out", argv, environment, error, digest,
+                )
+            except UnsafeExecutableError as error:
+                preliminary = _empty_query(
+                    spec, "unsafe", argv, environment, error, digest,
+                )
+            except (OSError, ValueError) as error:
+                preliminary = _empty_query(
+                    spec, "failed", argv, environment, error, digest,
+                )
+            if preliminary is None and not _snapshot_matches(snapshot):
+                preliminary = _empty_query(
+                    spec, "unsafe", argv, environment,
+                    "provider snapshot changed after runner completion", digest,
+                )
     finally:
-        _cleanup_snapshot(snapshot)
+        cleanup_ok, cleanup_detail = _cleanup_snapshot(snapshot)
+
+    if not cleanup_ok:
+        return _empty_query(
+            spec, "unsafe", argv, environment, cleanup_detail, digest,
+        )
+    if preliminary is not None:
+        return preliminary
+    assert outcome is not None
 
     stdout_raw = getattr(outcome, "stdout", b"")
     stderr_raw = getattr(outcome, "stderr", b"")

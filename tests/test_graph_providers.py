@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -143,7 +144,7 @@ class ProviderRunnerTest(unittest.TestCase):
             snapshot = Path(kwargs["executable_snapshot"])
             captured["snapshot"] = snapshot
             captured["directory"] = snapshot.parent
-            self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode), 0o500)
             self.assertEqual(stat.S_IMODE(snapshot.parent.stat().st_mode), 0o700)
             self.assertEqual(
                 __import__("hashlib").sha256(snapshot.read_bytes()).hexdigest(),
@@ -205,17 +206,42 @@ class ProviderRunnerTest(unittest.TestCase):
         sleeper.write_bytes(b"#!/bin/sh\nexec /bin/sleep 10\n")
         sleeper.chmod(0o700)
         started = time.monotonic()
+        captured = {}
+
+        def capture_snapshot(argv, **kwargs):
+            captured["snapshot"] = Path(kwargs["executable_snapshot"])
+            captured["directory"] = captured["snapshot"].parent
+            return PROVIDERS._bounded_subprocess(argv, **kwargs)
+
         with mock.patch.object(
             PROVIDERS, "_terminate_process_group",
             wraps=PROVIDERS._terminate_process_group,
         ) as terminate:
             result = PROVIDERS.run_provider(
                 PROVIDERS.ProviderSpec("ast-grep", sleeper), ("--help",),
-                self.repo, PROVIDERS.Deadline(time, 0.05),
+                self.repo, PROVIDERS.Deadline(time, 0.05), runner=capture_snapshot,
             )
         self.assertEqual(result.status, "timed_out")
         self.assertTrue(terminate.called)
         self.assertLess(time.monotonic() - started, 2)
+        self.assertFalse(captured["snapshot"].exists())
+        self.assertFalse(captured["directory"].exists())
+
+    def test_runner_error_path_removes_snapshot(self):
+        captured = {}
+
+        def failing_runner(argv, **kwargs):
+            captured["snapshot"] = Path(kwargs["executable_snapshot"])
+            captured["directory"] = captured["snapshot"].parent
+            raise OSError("controlled runner failure")
+
+        result = PROVIDERS.run_provider(
+            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary), ("--help",),
+            self.repo, PROVIDERS.Deadline(self.clock, 2), runner=failing_runner,
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(captured["snapshot"].exists())
+        self.assertFalse(captured["directory"].exists())
 
     def test_leader_exit_with_child_held_pipes_times_out_and_kills_saved_group(self):
         child_pid_path = self.repo / "child.pid"
@@ -330,6 +356,7 @@ class ProviderRunnerTest(unittest.TestCase):
 
         def mutate_snapshot(argv, **kwargs):
             snapshot = Path(kwargs["executable_snapshot"])
+            snapshot.chmod(0o700)
             snapshot.write_text(
                 f"#!/bin/sh\n/bin/echo attacker > \"{attacker_marker}\"\n",
                 encoding="utf-8",
@@ -343,6 +370,72 @@ class ProviderRunnerTest(unittest.TestCase):
         )
         self.assertEqual(result.status, "unsafe")
         self.assertFalse(attacker_marker.exists())
+
+    def test_provider_chmod_and_extra_artifacts_are_cleaned_without_following_symlink(self):
+        captured = {}
+        binary = self.bin / "cleanup-hostile-provider"
+        binary.write_text(
+            "#!/bin/sh\n"
+            "snapshot=\"$0\"\n"
+            "directory=$(/usr/bin/dirname \"$snapshot\")\n"
+            "printf 'extra' > \"$directory/extra-file\"\n"
+            "/bin/ln -s /etc/passwd \"$directory/extra-link\"\n"
+            "/bin/chmod 000 \"$snapshot\"\n"
+            "/bin/chmod 000 \"$directory\"\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o700)
+
+        def capture_snapshot(argv, **kwargs):
+            captured["snapshot"] = Path(kwargs["executable_snapshot"])
+            captured["directory"] = captured["snapshot"].parent
+            captured["extra"] = captured["directory"] / "extra-file"
+            captured["link"] = captured["directory"] / "extra-link"
+            return PROVIDERS._bounded_subprocess(argv, **kwargs)
+
+        try:
+            result = PROVIDERS.run_provider(
+                PROVIDERS.ProviderSpec("ast-grep", binary), ("--version",),
+                self.repo, PROVIDERS.Deadline(time, 2), runner=capture_snapshot,
+            )
+            remnants = {
+                name: os.path.lexists(path) for name, path in captured.items()
+            }
+        finally:
+            directory = captured.get("directory")
+            if directory is not None and os.path.lexists(directory):
+                try:
+                    os.chmod(directory, 0o700)
+                except OSError:
+                    pass
+                shutil.rmtree(directory)
+        self.assertEqual(result.status, "unsafe")
+        self.assertEqual(remnants, {
+            "snapshot": False, "directory": False, "extra": False, "link": False,
+        })
+
+    def test_cleanup_failure_upgrades_ready_result_to_unsafe(self):
+        captured = {}
+        real_cleanup = PROVIDERS._cleanup_snapshot
+
+        def controlled_cleanup_failure(snapshot):
+            captured["snapshot"] = snapshot.path
+            captured["directory"] = snapshot.directory
+            real_cleanup(snapshot)
+            return False, "controlled cleanup verification failure"
+
+        with mock.patch.object(
+            PROVIDERS, "_cleanup_snapshot", side_effect=controlled_cleanup_failure,
+        ):
+            result = PROVIDERS.run_provider(
+                PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
+                ("--version",), self.repo, PROVIDERS.Deadline(self.clock, 2),
+                runner=RecordingRunner((Completed(stdout=b"ready\n"),)),
+            )
+        self.assertEqual(result.status, "unsafe")
+        self.assertIn("cleanup", result.detail)
+        self.assertFalse(os.path.lexists(captured["snapshot"]))
+        self.assertFalse(os.path.lexists(captured["directory"]))
 
     def test_forbidden_discovery_and_mutating_commands_never_run(self):
         runner = RecordingRunner()
