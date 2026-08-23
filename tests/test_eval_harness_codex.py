@@ -219,12 +219,12 @@ class CodexAdapterTest(unittest.TestCase):
             argv = adapter.build_first_turn_command(request, Path(temporary) / "FINAL")
 
         self.assertEqual(
-            argv[:10],
-            ("codex", "exec", "--ephemeral", "--json", "--skip-git-repo-check", "-s", "workspace-write", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
+            argv[:11],
+            ("codex", "exec", "--ephemeral", "--json", "--skip-git-repo-check", "-s", "workspace-write", "--approve-for-me", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
         )
         self.assertIn("-s", argv)
         self.assertIn("workspace-write", argv)
-        self.assertNotIn("--approve-for-me", argv)
+        self.assertIn("--approve-for-me", argv)
         self.assertNotIn("-m", argv)
         self.assertNotIn("model_reasoning_effort", " ".join(argv))
 
@@ -559,7 +559,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertNotIn("--ephemeral", execution_commands[0])
         self.assertIn("-s", execution_commands[0])
         self.assertIn("workspace-write", execution_commands[0])
-        self.assertNotIn("--approve-for-me", execution_commands[0])
+        self.assertIn("--approve-for-me", execution_commands[0])
         self.assertEqual(execution_commands[1][0:2], ["exec", "resume"])
         self.assertIn(UUID, execution_commands[1])
         self.assertNotIn("--last", execution_commands[1])
@@ -610,7 +610,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertFalse(first_workspace.exists())
         self.assertFalse(Path(executions[2]["cwd"]).exists())
 
-    def test_execute_uses_workspace_write_without_auto_approve(self):
+    def test_execute_uses_workspace_write_with_automatic_approval_review(self):
         with tempfile.TemporaryDirectory() as temporary:
             executable = write_fake_codex(temporary, exec_mode="reject-readonly-approval")
             log = Path(temporary) / "argv.jsonl"
@@ -636,7 +636,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertIn("-s", execution_command)
         self.assertIn("workspace-write", execution_command)
-        self.assertNotIn("--approve-for-me", execution_command)
+        self.assertIn("--approve-for-me", execution_command)
 
     def test_resume_appends_handoff_after_exact_second_turn_request_and_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:

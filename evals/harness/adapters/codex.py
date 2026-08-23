@@ -76,6 +76,7 @@ class CodexAdapter(ClientAdapter):
                 "--skip-git-repo-check",
                 "-s",
                 "workspace-write",
+                "--approve-for-me",
                 "-o",
                 str(final_path),
             )
