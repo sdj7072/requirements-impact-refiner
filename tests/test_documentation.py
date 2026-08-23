@@ -93,6 +93,19 @@ def harness_commands(path):
 
 
 class DocumentationTest(unittest.TestCase):
+    def test_core_skill_is_a_short_controller_first_positive_recipe(self):
+        core = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        body = core.split("---", 2)[2]
+        self.assertLess(len(body.split()), 320)
+        self.assertEqual(body.count("`rir_begin`"), 1)
+        self.assertEqual(body.count("`rir_finalize`"), 1)
+        self.assertLess(body.index("`rir_begin`"), body.index("`rir_finalize`"))
+        self.assertIn("return `display_text` verbatim", body)
+        self.assertIn("controller-workflow.md", body)
+        self.assertIn("CLI fallback", body)
+        self.assertIn("full-inline", body)
+        self.assertNotIn("Author complete state JSON", body)
+
     def test_top_release_descriptions_identify_the_current_patch_release(self):
         for name in READMES:
             description = (ROOT / name).read_text(encoding="utf-8").splitlines()[4]

@@ -38,6 +38,11 @@ class PerformanceObservation:
     impact_ids: Tuple[str, ...]
     state_markdown_match: bool
     workflow_boundary_passed: bool
+    controller_begin_calls: int
+    controller_finalize_calls: int
+    controller_draft_ids_match: bool
+    controller_finalize_succeeded: bool
+    controller_display_text_matches: bool
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,23 @@ def evaluate_smoke_gate(
         errors.append("state, Markdown, and compact impacts disagree")
     if any(not row.workflow_boundary_passed for row in observations):
         errors.append("workflow ownership boundary failed")
+    for row in observations:
+        expected_calls = (
+            0
+            if row.case_id == "NEG-debugging"
+            else (2 if row.case_id.startswith("LINEAGE-") else 1)
+        )
+        if (
+            row.controller_begin_calls != expected_calls
+            or row.controller_finalize_calls != expected_calls
+        ):
+            errors.append("controller call count or order failed")
+    if any(not row.controller_draft_ids_match for row in observations):
+        errors.append("controller draft IDs disagree")
+    if any(not row.controller_finalize_succeeded for row in observations):
+        errors.append("controller finalize failed")
+    if any(not row.controller_display_text_matches for row in observations):
+        errors.append("controller display text differs from final output")
     if any(
         (row.input_tokens is None) != (row.output_tokens is None)
         for row in observations

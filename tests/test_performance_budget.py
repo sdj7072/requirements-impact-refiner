@@ -43,6 +43,11 @@ class PerformanceBudgetTest(unittest.TestCase):
             impact_ids=impact_ids,
             state_markdown_match=True,
             workflow_boundary_passed=True,
+            controller_begin_calls=0 if case_id == "NEG-debugging" else (2 if case_id.startswith("LINEAGE-") else 1),
+            controller_finalize_calls=0 if case_id == "NEG-debugging" else (2 if case_id.startswith("LINEAGE-") else 1),
+            controller_draft_ids_match=True,
+            controller_finalize_succeeded=True,
+            controller_display_text_matches=True,
         )
 
     def six_valid_observations(self):
@@ -86,11 +91,17 @@ class PerformanceBudgetTest(unittest.TestCase):
         mismatch[0] = replace(mismatch[0], state_markdown_match=False)
         workflow = list(self.six_valid_observations())
         workflow[2] = replace(workflow[2], workflow_boundary_passed=False)
+        skipped_controller = list(self.six_valid_observations())
+        skipped_controller[0] = replace(skipped_controller[0], controller_begin_calls=0)
+        rewritten_output = list(self.six_valid_observations())
+        rewritten_output[2] = replace(rewritten_output[2], controller_display_text_matches=False)
 
         self.assertIn("median compact output exceeds 450 words", evaluate_smoke_gate(too_large).errors)
         self.assertIn("median routed resources do not reduce baseline by 50 percent", evaluate_smoke_gate(too_many_resources).errors)
         self.assertIn("state, Markdown, and compact impacts disagree", evaluate_smoke_gate(mismatch).errors)
         self.assertIn("workflow ownership boundary failed", evaluate_smoke_gate(workflow).errors)
+        self.assertIn("controller call count or order failed", evaluate_smoke_gate(skipped_controller).errors)
+        self.assertIn("controller display text differs from final output", evaluate_smoke_gate(rewritten_output).errors)
 
     def test_token_fields_must_be_both_client_reported_or_both_absent(self):
         partial = list(self.six_valid_observations())

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
 
 from .base import ClientAdapter
+from ..controller_evidence import analyze_controller_trace
 from ..evidence import Artifact, PotentialSecretError, record_run
 from ..models import CaseTurn, ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
 from ..process import run_command
@@ -487,6 +488,21 @@ class CodexAdapter(ClientAdapter):
             status = RunStatus.INVALID_EVIDENCE
             reason = "run options disagree with execution argv"
             final_output = None
+        if self.expected_plugin_version.startswith("0.4.") and final_output is not None:
+            streams = tuple(
+                value
+                for name, value in sorted(artifacts.items())
+                if name in ("first.jsonl", "second.jsonl") and isinstance(value, str)
+            )
+            expected_turns = 0 if request.case.kind == "negative" else len(request.case.turns)
+            controller = analyze_controller_trace(
+                streams, final_output, expected_turns=expected_turns
+            )
+            artifacts["controller-evidence.json"] = controller.to_json()
+            if not controller.valid:
+                status = RunStatus.INVALID_EVIDENCE
+                reason = "controller evidence invalid"
+                final_output = None
         try:
             record_run(
                 request.output_root,

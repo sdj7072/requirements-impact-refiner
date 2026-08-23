@@ -9,21 +9,25 @@ metadata:
 
 # Requirements Impact Refiner
 
-Use for concrete pre-planning changes; not ideation, debugging, code review, or generic PRDs.
+Use for concrete pre-planning behavior changes; not ideation, debugging, code review, or generic PRDs; exclude status requests too.
 
 ## Resource paths
 
 Resolve every `references/`, `assets/`, `schemas/`, and `scripts/` path from the directory that contains this `SKILL.md`. Set `SKILL_DIR` to it, not the plugin root or workspace root. Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`.
 
-1. Before inspecting workspace availability, run `scripts/resolve-settings.py` with the repository root and request overrides. Invalid configuration uses disclosed `balanced` and `compact` defaults.
-2. Select the phase and one adapter. Determine predecessor, evidence-ambiguity, and multi-domain flags. Run `scripts/resource_route.py`; read only returned paths.
-3. Supplied `Repository evidence` remains inspectable when the workspace is empty. Never offer implementation or scaffolding; refine it or state the missing entry input. Author complete state JSON without omitting impacts. Preserve behavior as `INV-###`; future `AC-###` is not current evidence.
-4. Run `scripts/publish-impact-report.py`. Correct exit-1 validation errors. On exit 2 with `full-inline`, render Markdown and disclose that persistence/fast revisions are unavailable.
-5. For published `compact`, return only `render-impact-report.py --format compact`. For `full`, return canonical Markdown inline. Never rewrite the renderer's facts or begin planning.
+## Normal MCP recipe
+
+Perform exactly these actions:
+
+1. Select one adapter from the table below.
+2. Call `rir_begin` with the repository root, request, supplied evidence, adapter, and any explicit presentation overrides.
+3. Inspect only the evidence needed to fill the returned analysis contract. Supplied evidence is valid input even when the workspace is empty. A needed clarification belongs in a complete pre-decision analysis; never emit a standalone question.
+4. Call `rir_finalize` with the returned draft ID and normalized analysis. Correct validation errors without changing the draft ID.
+5. On success, return `display_text` verbatim and stop before planning or implementation.
 
 ## Workflow integration
 
-Read exactly one adapter after the orchestrator is known; apply its Entry before analysis. If more than one orchestrator is active, ask the user to choose one. Never invoke their external workflow.
+Read exactly one adapter and [Controller workflow](references/controller-workflow.md); apply its Entry before analysis. If more than one orchestrator is active, ask the user to choose one. Never invoke their external workflow.
 
 | Selected mode | Read only |
 | --- | --- |
@@ -32,6 +36,6 @@ Read exactly one adapter after the orchestrator is known; apply its Entry before
 | `claude-feature-dev` | [Claude feature-dev](references/integration-claude-feature-dev.md) |
 | `spec-kit` | [Spec Kit](references/integration-spec-kit.md) |
 
-## Stop conditions
+## Fallbacks
 
-Before selection, state one question with two or three options and no `DEC-###`. `accepted` needs a decision; `resolved` needs evidence; only `blocked`/`deferred` are unresolved. Stop at the validated Planning Handoff. Compact output links the append-only JSON and Markdown; full output preserves the complete canonical report.
+CLI fallback uses the same controller via `scripts/rir-controller.py`; its successful finalize stdout is the response. Use `full-inline` only when neither MCP nor CLI is available, disclose that persistence and fast revisions are unavailable, and follow the controller workflow reference. Never rewrite renderer-owned facts.

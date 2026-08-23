@@ -86,7 +86,7 @@
     "performanceObservation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["case_id", "repetition", "status", "attempt", "retry_of", "prompt_bytes", "routed_resource_bytes", "routed_resource_words", "output_bytes", "output_words", "duration_ms", "input_tokens", "output_tokens", "impact_ids", "state_markdown_match", "workflow_boundary_passed"],
+      "required": ["case_id", "repetition", "status", "attempt", "retry_of", "prompt_bytes", "routed_resource_bytes", "routed_resource_words", "output_bytes", "output_words", "duration_ms", "input_tokens", "output_tokens", "impact_ids", "state_markdown_match", "workflow_boundary_passed", "controller_begin_calls", "controller_finalize_calls", "controller_draft_ids_match", "controller_finalize_succeeded", "controller_display_text_matches"],
       "properties": {
         "case_id": { "type": "string", "minLength": 1 },
         "repetition": { "type": "integer", "minimum": 1 },
@@ -103,7 +103,12 @@
         "output_tokens": { "type": ["integer", "null"], "minimum": 0 },
         "impact_ids": { "type": "array", "items": { "type": "string", "pattern": "^IMP-[0-9]{3}$" }, "uniqueItems": true },
         "state_markdown_match": { "type": "boolean" },
-        "workflow_boundary_passed": { "type": "boolean" }
+        "workflow_boundary_passed": { "type": "boolean" },
+        "controller_begin_calls": { "type": "integer", "minimum": 0 },
+        "controller_finalize_calls": { "type": "integer", "minimum": 0 },
+        "controller_draft_ids_match": { "type": "boolean" },
+        "controller_finalize_succeeded": { "type": "boolean" },
+        "controller_display_text_matches": { "type": "boolean" }
       }
     },
     "smokeGateResult": {

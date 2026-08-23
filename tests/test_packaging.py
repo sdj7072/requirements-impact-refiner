@@ -372,8 +372,8 @@ class PackagingTest(unittest.TestCase):
             "Resolve every `references/`, `assets/`, `schemas/`, and `scripts/` path from the directory that contains this `SKILL.md`.",
             core,
         )
-        self.assertIn("scripts/resource_route.py", core)
-        self.assertIn("read only returned paths", core)
+        self.assertIn("references/controller-workflow.md", core)
+        self.assertIn("exactly one adapter", core)
         self.assertIn("not the plugin root or workspace root", core)
         self.assertIn(
             "Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`",
@@ -384,19 +384,20 @@ class PackagingTest(unittest.TestCase):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("`compact`", core)
-        self.assertIn("publish-impact-report.py", core)
-        self.assertIn("render-impact-report.py", core)
+        workflow = (ROOT / "skills/requirements-impact-refiner/references/controller-workflow.md").read_text(encoding="utf-8")
+        self.assertIn("`balanced` + `compact`", workflow)
+        self.assertIn("scripts/rir-controller.py", core)
+        self.assertIn("renderer-owned display text", workflow)
         self.assertIn("full-inline", core)
-        self.assertIn("without omitting impacts", core.lower())
+        self.assertIn("Every affected behavior gets an impact row", workflow)
 
     def test_core_skill_runs_routing_before_workspace_availability_checks(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Before inspecting workspace availability", core)
-        self.assertIn("supplied `repository evidence` remains inspectable", core.lower())
-        self.assertIn("Never offer implementation or scaffolding", core)
+        self.assertLess(core.index("`rir_begin`"), core.index("Inspect only the evidence"))
+        self.assertIn("supplied evidence is valid input even when the workspace is empty", core.lower())
+        self.assertIn("stop before planning or implementation", core)
 
     def test_manifest_identity_is_consistent(self):
         codex = self.load(".codex-plugin/plugin.json")

@@ -45,7 +45,7 @@ class ResourceRoutingTest(unittest.TestCase):
             json.loads(result.stdout),
             {
                 "references": [
-                    "references/compact-state-contract.md",
+                    "references/controller-workflow.md",
                     "references/integration-generic.md",
                 ]
             },
@@ -65,7 +65,7 @@ class ResourceRoutingTest(unittest.TestCase):
         self.assertEqual(
             route.references,
             (
-                "references/compact-state-contract.md",
+                "references/controller-workflow.md",
                 "references/integration-generic.md",
             ),
         )
@@ -84,7 +84,7 @@ class ResourceRoutingTest(unittest.TestCase):
         self.assertEqual(
             set(route.references),
             {
-                "references/compact-state-contract.md",
+                "references/controller-workflow.md",
                 "references/integration-superpowers.md",
                 "references/refinement-loop.md",
                 "references/evidence-model.md",

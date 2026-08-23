@@ -156,6 +156,12 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "        print('{\\\"type\\\":\\\"item.completed\\\"}')\n"
         "    else:\n"
         "        print('{\\\"type\\\":\\\"thread.started\\\",\\\"thread_id\\\":\\\"" + UUID + "\\\"}')\n"
+        "        if mode == 'controller-success':\n"
+        "            draft = '0123456789abcdef0123456789abcdef'\n"
+        "            begin = {'type': 'item.completed', 'item': {'id': 'begin', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_begin', 'arguments': {'repo_root': os.getcwd()}, 'result': {'content': [], 'structured_content': {'draft_id': draft}}, 'error': None, 'status': 'completed'}}\n"
+        "            finalize = {'type': 'item.completed', 'item': {'id': 'finalize', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_finalize', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'analysis': {}}, 'result': {'content': [{'type': 'text', 'text': 'final response'}], 'structured_content': {'status': 'published', 'display_text': 'final response'}}, 'error': None, 'status': 'completed'}}\n"
+        "            print(json.dumps(begin))\n"
+        "            print(json.dumps(finalize))\n"
         "    if mode != 'missing-final':\n"
         "        output = args[args.index('-o') + 1]\n"
         "        with open(output, 'w', encoding='utf-8') as handle:\n"
@@ -170,6 +176,41 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
 
 
 class CodexAdapterTest(unittest.TestCase):
+    def test_v04_run_records_and_enforces_controller_trace(self):
+        plugins = [
+            {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.4.0", "enabled": True},
+            {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, plugins=plugins, exec_mode="controller-success")
+            request = make_request(temporary, ("first turn",))
+            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.4.0")
+
+            result = adapter.execute(request)
+            evidence_path = request.output_root / "codex" / "POS-example" / "01" / "controller-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result.status, RunStatus.PASS)
+        self.assertTrue(evidence["valid"])
+        self.assertEqual(evidence["tool_order"], ["rir_begin", "rir_finalize"])
+        self.assertTrue(evidence["display_text_matches"])
+
+    def test_v04_run_without_controller_is_invalid_evidence(self):
+        plugins = [
+            {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.4.0", "enabled": True},
+            {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, plugins=plugins)
+            request = make_request(temporary, ("first turn",))
+            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.4.0")
+
+            result = adapter.execute(request)
+
+        self.assertEqual(result.status, RunStatus.INVALID_EVIDENCE)
+        self.assertEqual(result.reason, "controller evidence invalid")
+        self.assertIsNone(result.final_output)
+
     def test_one_turn_is_ephemeral_and_omitted_model_stays_omitted(self):
         with tempfile.TemporaryDirectory() as temporary:
             request = make_request(temporary, ("first turn",))

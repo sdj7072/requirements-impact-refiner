@@ -41,7 +41,7 @@ def resolve_route(
     ):
         if value not in allowed:
             raise ValueError(f"invalid {name}: {value}")
-    references = ["references/compact-state-contract.md", ADAPTERS[adapter]]
+    references = ["references/controller-workflow.md", ADAPTERS[adapter]]
     if predecessor:
         references.append("references/refinement-loop.md")
     if evidence_ambiguity:
