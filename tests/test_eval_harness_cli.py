@@ -167,7 +167,9 @@ def controller_observation(raw_root, client, slot, result, score):
         state_markdown_match=True, workflow_boundary_passed=True,
         controller_begin_calls=expected, controller_finalize_calls=expected,
         controller_draft_ids_match=True, controller_finalize_succeeded=True,
-        controller_display_text_matches=True,
+        controller_display_text_exact_match=True,
+        controller_display_text_presentation_equivalent=True,
+        controller_display_comparison="codex-markdown-v1",
     )
 
 

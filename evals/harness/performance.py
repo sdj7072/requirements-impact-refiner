@@ -42,7 +42,9 @@ class PerformanceObservation:
     controller_finalize_calls: int
     controller_draft_ids_match: bool
     controller_finalize_succeeded: bool
-    controller_display_text_matches: bool
+    controller_display_text_exact_match: bool
+    controller_display_text_presentation_equivalent: bool
+    controller_display_comparison: str
 
 
 @dataclass(frozen=True)
@@ -90,7 +92,11 @@ def evaluate_smoke_gate(
         errors.append("controller draft IDs disagree")
     if any(not row.controller_finalize_succeeded for row in observations):
         errors.append("controller finalize failed")
-    if any(not row.controller_display_text_matches for row in observations):
+    if any(
+        not row.controller_display_text_presentation_equivalent
+        or row.controller_display_comparison != "codex-markdown-v1"
+        for row in observations
+    ):
         errors.append("controller display text differs from final output")
     if any(
         (row.input_tokens is None) != (row.output_tokens is None)

@@ -537,7 +537,9 @@ def _smoke_observation(
         controller_finalize_calls=controller_payload.get("finalize_calls", -1),
         controller_draft_ids_match=controller_payload.get("draft_ids_match") is True,
         controller_finalize_succeeded=controller_payload.get("finalize_succeeded") is True,
-        controller_display_text_matches=controller_payload.get("display_text_matches") is True,
+        controller_display_text_exact_match=controller_payload.get("display_text_exact_match") is True,
+        controller_display_text_presentation_equivalent=controller_payload.get("display_text_presentation_equivalent") is True,
+        controller_display_comparison=controller_payload.get("display_comparison", ""),
     )
 
 

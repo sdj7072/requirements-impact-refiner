@@ -184,7 +184,8 @@ The smoke gate is amended to require for every positive, integration, and lineag
 - one recorded `rir_begin` tool call;
 - one successful `rir_finalize` tool call;
 - no user-facing agent message before finalize except a short progress update;
-- compact `display_text` byte-equal to the final response;
+- raw SHA-256 for both compact `display_text` and the final response, plus an explicit exact-match boolean;
+- `codex-markdown-v1` presentation equivalence for the smoke gate: normalize CRLF to LF, remove at most one terminal newline, and ignore only trailing horizontal whitespace on each line; every other byte difference fails;
 - captured state/Markdown parity;
 - exact six-case coverage, attempt 1, no retries;
 - median compact output at most 450 words;

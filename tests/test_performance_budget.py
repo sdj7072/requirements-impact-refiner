@@ -47,7 +47,9 @@ class PerformanceBudgetTest(unittest.TestCase):
             controller_finalize_calls=0 if case_id == "NEG-debugging" else (2 if case_id.startswith("LINEAGE-") else 1),
             controller_draft_ids_match=True,
             controller_finalize_succeeded=True,
-            controller_display_text_matches=True,
+            controller_display_text_exact_match=True,
+            controller_display_text_presentation_equivalent=True,
+            controller_display_comparison="codex-markdown-v1",
         )
 
     def six_valid_observations(self):
@@ -94,7 +96,10 @@ class PerformanceBudgetTest(unittest.TestCase):
         skipped_controller = list(self.six_valid_observations())
         skipped_controller[0] = replace(skipped_controller[0], controller_begin_calls=0)
         rewritten_output = list(self.six_valid_observations())
-        rewritten_output[2] = replace(rewritten_output[2], controller_display_text_matches=False)
+        rewritten_output[2] = replace(
+            rewritten_output[2],
+            controller_display_text_presentation_equivalent=False,
+        )
 
         self.assertIn("median compact output exceeds 450 words", evaluate_smoke_gate(too_large).errors)
         self.assertIn("median routed resources do not reduce baseline by 50 percent", evaluate_smoke_gate(too_many_resources).errors)

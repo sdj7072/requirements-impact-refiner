@@ -281,7 +281,7 @@ git commit -m "feat: expose impact controller over MCP"
 
 **Interfaces:**
 - Skill recipe: `rir_begin` → evidence analysis → `rir_finalize` → return `display_text` verbatim.
-- Harness captures tool-call evidence and byte-equality between MCP `display_text` and final output.
+- Harness captures tool-call evidence, separate raw SHA/exact-match fields, and versioned `codex-markdown-v1` presentation equivalence between MCP `display_text` and final output.
 
 - [ ] **Step 1: Write RED skill/harness tests**
 
@@ -299,7 +299,7 @@ Keep core under 320 words. Normal MCP mode contains exactly five actions: select
 
 - [ ] **Step 4: Capture and gate controller evidence**
 
-Parse raw JSONL tool-call/result events without trusting prose. Record draft ID, tool order, finalize status, display-text digest, final-output digest, and state/Markdown parity. Gate skips, duplicate calls, finalize-before-begin, mismatched draft IDs, tool errors, and output mismatch.
+Parse raw JSONL tool-call/result events without trusting prose. Record draft ID, tool order, finalize status, display-text digest, final-output digest, exact match, versioned presentation equivalence, and state/Markdown parity. Gate skips, duplicate calls, finalize-before-begin, mismatched draft IDs, tool errors, and any output difference beyond the disclosed `codex-markdown-v1` normalization.
 
 - [ ] **Step 5: Full deterministic verification and independent review**
 

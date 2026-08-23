@@ -193,7 +193,9 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertTrue(evidence["valid"])
         self.assertEqual(evidence["tool_order"], ["rir_begin", "rir_finalize"])
-        self.assertTrue(evidence["display_text_matches"])
+        self.assertTrue(evidence["display_text_exact_match"])
+        self.assertTrue(evidence["display_text_presentation_equivalent"])
+        self.assertEqual(evidence["display_comparison"], "codex-markdown-v1")
 
     def test_v04_run_without_controller_is_invalid_evidence(self):
         plugins = [

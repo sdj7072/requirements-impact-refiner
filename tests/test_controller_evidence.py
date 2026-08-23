@@ -48,7 +48,9 @@ class ControllerEvidenceTest(unittest.TestCase):
         self.assertEqual(evidence.finalize_calls, 1)
         self.assertTrue(evidence.draft_ids_match)
         self.assertTrue(evidence.finalize_succeeded)
-        self.assertTrue(evidence.display_text_matches)
+        self.assertTrue(evidence.display_text_exact_match)
+        self.assertTrue(evidence.display_text_presentation_equivalent)
+        self.assertEqual(evidence.display_comparison, "codex-markdown-v1")
         self.assertEqual(evidence.installed_payload_sha256, ("a" * 64,))
         self.assertEqual(evidence.errors, ())
 
@@ -139,7 +141,7 @@ class ControllerEvidenceTest(unittest.TestCase):
         )
 
         self.assertFalse(evidence.valid)
-        self.assertFalse(evidence.display_text_matches)
+        self.assertFalse(evidence.display_text_presentation_equivalent)
 
     def test_codex_markdown_hard_break_spaces_are_presentation_equivalent(self):
         draft = "0" * 32
@@ -153,7 +155,12 @@ class ControllerEvidenceTest(unittest.TestCase):
         evidence = analyze_controller_trace((trace,), final, expected_turns=1)
 
         self.assertTrue(evidence.valid, evidence.errors)
-        self.assertTrue(evidence.display_text_matches)
+        self.assertFalse(evidence.display_text_exact_match)
+        self.assertTrue(evidence.display_text_presentation_equivalent)
+        self.assertEqual(evidence.display_comparison, "codex-markdown-v1")
+        self.assertNotEqual(
+            evidence.display_text_sha256, evidence.final_output_sha256
+        )
 
     def test_same_named_tools_from_another_server_cannot_satisfy_controller_gate(self):
         draft = "0" * 32

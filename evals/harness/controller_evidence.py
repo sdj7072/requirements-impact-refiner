@@ -21,7 +21,9 @@ class ControllerEvidence:
     finalize_calls: int
     draft_ids_match: bool
     finalize_succeeded: bool
-    display_text_matches: bool
+    display_text_exact_match: bool
+    display_text_presentation_equivalent: bool
+    display_comparison: str
     display_text_sha256: Tuple[str, ...]
     final_output_sha256: Tuple[str, ...]
     installed_payload_sha256: Tuple[str, ...]
@@ -156,13 +158,19 @@ def analyze_controller_trace(
     )
     succeeded = len(finalize_success) == expected_turns and all(finalize_success)
     if expected_turns == 0:
-        display_matches = not calls
+        exact_match = not calls
+        presentation_equivalent = not calls
         draft_match = not calls
         succeeded = not calls
         compared_displays = ()
     else:
         compared_displays = tuple(displays)
-        display_matches = (
+        exact_match = (
+            len(compared_displays) == expected_turns
+            and all(isinstance(value, str) for value in compared_displays)
+            and compared_displays == final_outputs
+        )
+        presentation_equivalent = (
             len(compared_displays) == expected_turns
             and all(isinstance(value, str) for value in compared_displays)
             and tuple(_presentation_bytes(value) for value in compared_displays)
@@ -178,8 +186,8 @@ def analyze_controller_trace(
         errors.append("installed controller payload identity is invalid")
     if not succeeded:
         errors.append("controller finalize did not succeed")
-    if not display_matches:
-        errors.append("controller display text differs from final output")
+    if not presentation_equivalent:
+        errors.append("controller display text differs from final output under codex-markdown-v1")
 
     final_digests = tuple(
         hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -199,7 +207,9 @@ def analyze_controller_trace(
         finalize_calls=len(finalizes),
         draft_ids_match=draft_match,
         finalize_succeeded=succeeded,
-        display_text_matches=display_matches,
+        display_text_exact_match=exact_match,
+        display_text_presentation_equivalent=presentation_equivalent,
+        display_comparison="codex-markdown-v1",
         display_text_sha256=display_digests,
         final_output_sha256=final_digests,
         installed_payload_sha256=tuple(

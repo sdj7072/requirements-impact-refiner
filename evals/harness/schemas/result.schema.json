@@ -86,7 +86,7 @@
     "performanceObservation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["case_id", "repetition", "status", "attempt", "retry_of", "prompt_bytes", "routed_resource_bytes", "routed_resource_words", "output_bytes", "output_words", "duration_ms", "input_tokens", "output_tokens", "impact_ids", "state_markdown_match", "workflow_boundary_passed", "controller_begin_calls", "controller_finalize_calls", "controller_draft_ids_match", "controller_finalize_succeeded", "controller_display_text_matches"],
+      "required": ["case_id", "repetition", "status", "attempt", "retry_of", "prompt_bytes", "routed_resource_bytes", "routed_resource_words", "output_bytes", "output_words", "duration_ms", "input_tokens", "output_tokens", "impact_ids", "state_markdown_match", "workflow_boundary_passed", "controller_begin_calls", "controller_finalize_calls", "controller_draft_ids_match", "controller_finalize_succeeded", "controller_display_text_exact_match", "controller_display_text_presentation_equivalent", "controller_display_comparison"],
       "properties": {
         "case_id": { "type": "string", "minLength": 1 },
         "repetition": { "type": "integer", "minimum": 1 },
@@ -108,7 +108,9 @@
         "controller_finalize_calls": { "type": "integer", "minimum": 0 },
         "controller_draft_ids_match": { "type": "boolean" },
         "controller_finalize_succeeded": { "type": "boolean" },
-        "controller_display_text_matches": { "type": "boolean" }
+        "controller_display_text_exact_match": { "type": "boolean" },
+        "controller_display_text_presentation_equivalent": { "type": "boolean" },
+        "controller_display_comparison": { "const": "codex-markdown-v1" }
       }
     },
     "smokeGateResult": {
