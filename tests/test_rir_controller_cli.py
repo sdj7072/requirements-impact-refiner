@@ -1,0 +1,125 @@
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CLI = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "rir-controller.py"
+FIXTURES = ROOT / "tests" / "fixtures"
+
+
+class RirControllerCliTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.begin_path = self.root / "begin.json"
+        self.analysis_path = self.root / "analysis.json"
+        self.begin_path.write_text(
+            json.dumps(
+                {
+                    "request": "Let workspace members edit every project.",
+                    "repository_evidence": ["authorizeProjectEdit permits owner and admin"],
+                    "adapter": "generic",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.analysis_path.write_bytes(
+            (FIXTURES / "controller-analysis-pre-decision.json").read_bytes()
+        )
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_cli(self, *arguments):
+        return subprocess.run(
+            [sys.executable, str(CLI), *map(str, arguments)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def begin(self, *extra):
+        return self.run_cli(
+            "begin", "--repo-root", self.root, "--input", self.begin_path, *extra
+        )
+
+    def test_begin_emits_structured_draft_metadata(self):
+        result = self.begin()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertRegex(payload["draft_id"], r"^[0-9a-f]{32}$")
+        self.assertEqual(payload["report_id"], "RPT-001")
+        self.assertEqual(payload["revision"], 1)
+        self.assertEqual(payload["delivery"], "compact")
+
+    def test_finalize_stdout_is_renderer_output_only(self):
+        begin = json.loads(self.begin().stdout)
+
+        result = self.run_cli(
+            "finalize",
+            "--repo-root",
+            self.root,
+            "--draft-id",
+            begin["draft_id"],
+            "--input",
+            self.analysis_path,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith("## Change Impact Summary\n"))
+        self.assertIn("`IMP-001`", result.stdout)
+        self.assertIn("**Decision needed:**", result.stdout)
+        self.assertNotIn('"status": "published"', result.stdout)
+
+    def test_invalid_finalize_has_no_display_stdout(self):
+        begin = json.loads(self.begin().stdout)
+        invalid = json.loads(self.analysis_path.read_text(encoding="utf-8"))
+        invalid["impacts"][0]["id"] = "IMP-999"
+        self.analysis_path.write_text(json.dumps(invalid), encoding="utf-8")
+
+        result = self.run_cli(
+            "finalize", "--repo-root", self.root, "--draft-id", begin["draft_id"],
+            "--input", self.analysis_path,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("unknown impact key id", result.stderr)
+
+    def test_full_delivery_returns_canonical_markdown(self):
+        begin_payload = json.loads(self.begin_path.read_text(encoding="utf-8"))
+        begin_payload["delivery_override"] = "full"
+        self.begin_path.write_text(json.dumps(begin_payload), encoding="utf-8")
+        begin = json.loads(self.begin().stdout)
+
+        result = self.run_cli(
+            "finalize", "--repo-root", self.root, "--draft-id", begin["draft_id"],
+            "--input", self.analysis_path,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith("# Requirements Impact Report\n"))
+
+    def test_io_and_invocation_errors_return_two(self):
+        missing = self.run_cli(
+            "begin", "--repo-root", self.root, "--input", self.root / "missing.json"
+        )
+        malformed = self.root / "malformed.json"
+        malformed.write_bytes(b"\xff")
+        bad = self.run_cli(
+            "begin", "--repo-root", self.root, "--input", malformed
+        )
+
+        self.assertEqual(missing.returncode, 2)
+        self.assertEqual(bad.returncode, 2)
+        self.assertEqual(missing.stdout, "")
+        self.assertEqual(bad.stdout, "")
+
+
+if __name__ == "__main__":
+    unittest.main()
