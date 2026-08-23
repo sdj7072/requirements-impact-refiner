@@ -1,0 +1,21 @@
+{
+  "phase": "pre-decision",
+  "refined_requirement": "Allow members to edit projects after selecting the workspace boundary.",
+  "invariants": [
+    {"key": "existing-roles", "behavior": "Owners and admins can edit projects.", "evidence_level": "verified", "evidence": "authorizeProjectEdit permits owner and admin"}
+  ],
+  "impacts": [
+    {"key": "member-scope", "category": "authorization/privacy", "severity": "high", "state": "refining", "evidence_level": "inferred", "evidence": "workspace invitations default to member", "invariant_keys": ["existing-roles"], "decision_keys": [], "criterion_keys": ["member-boundary"], "summary": {"changed_feature": "Project editing", "possible_issue": "Members could edit projects outside their workspace.", "affected": "Project owners and workspace members", "trigger": "A member edits a project", "prevention": "Select and test the workspace boundary."}}
+  ],
+  "decision_needed": {"question": "Which workspace boundary should apply?", "options": [
+    {"option": "Own workspace only", "impact_keys": ["member-scope"], "tradeoff": "Preserves tenant isolation."},
+    {"option": "Across workspaces", "impact_keys": ["member-scope"], "tradeoff": "Broad access with higher privacy risk."}
+  ]},
+  "decisions": [],
+  "criteria": [
+    {"key": "member-boundary", "impact_key": "member-scope", "invariant_key": "existing-roles", "criterion": "Members edit only projects in the selected scope.", "evidence": "Future authorization test."}
+  ],
+  "unresolved": [],
+  "scope": [{"boundary": "Supplied authorization evidence", "evidence": "Three repository evidence statements", "confidence": "Mounted repository remains unavailable."}],
+  "workflow": "generic"
+}
