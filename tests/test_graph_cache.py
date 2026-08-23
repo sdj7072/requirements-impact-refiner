@@ -231,6 +231,26 @@ class GraphCacheTest(unittest.TestCase):
         self.assertEqual(len(keys), 5)
         self.assertEqual(CACHE.load(other_root, baseline.key, digests()).status, "miss")
 
+    def test_identity_separates_draft_request_and_receipt_on_same_sources(self):
+        first_receipt = receipt()
+        second_receipt = receipt()
+        second_receipt["receipt_id"] = "a" * 32
+        second_receipt["draft_id"] = "b" * 32
+        second_receipt["request_sha256"] = "c" * 64
+
+        first = CACHE.publish(self.root, first_receipt, digests())
+        second = CACHE.publish(self.root, second_receipt, digests())
+
+        self.assertNotEqual(first.key, second.key)
+        self.assertEqual(
+            CACHE.load(self.root, first.key, digests()).receipt["draft_id"],
+            "1" * 32,
+        )
+        self.assertEqual(
+            CACHE.load(self.root, second.key, digests()).receipt["draft_id"],
+            "b" * 32,
+        )
+
     def test_rejects_corrupt_source_digests(self):
         invalid = {**digests(), "api/profile.py": "not-a-digest"}
         with self.assertRaisesRegex(ValueError, "source digest"):

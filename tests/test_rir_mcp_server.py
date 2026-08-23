@@ -1,9 +1,17 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -326,6 +334,82 @@ class RirMcpServerTest(unittest.TestCase):
             [tool["name"] for tool in replies[1]["result"]["tools"]],
             ["rir_begin", "rir_trace_impact", "rir_finalize"],
         )
+
+    @unittest.skipIf(fcntl is None, "requires POSIX flock")
+    def test_trace_held_lock_error_is_bounded_and_server_continues(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_graph_config(root, True)
+            config_path = root / ".requirements-impact-refiner.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["impact_graph"]["max_seconds"] = 1
+            config["impact_graph"]["target_seconds"] = 1
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            (root / "api").mkdir()
+            (root / "desktop").mkdir()
+            (root / "api/profile.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            (root / "desktop/profile_cache.ts").write_text(
+                'const key = "profile.displayName";\n', encoding="utf-8"
+            )
+            process = subprocess.Popen(
+                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+            )
+            descriptor = None
+            try:
+                def call(identifier, name, arguments):
+                    process.stdin.write(json.dumps(request(
+                        identifier, "tools/call", {"name": name, "arguments": arguments}
+                    )) + "\n")
+                    process.stdin.flush()
+                    return json.loads(process.stdout.readline())
+
+                begun = call(1, "rir_begin", {
+                    "repo_root": str(root), "request": "Bound MCP lock.",
+                    "repository_evidence": ["profile.displayName exists"],
+                    "adapter": "generic",
+                })["result"]["structuredContent"]
+                report_dir = (
+                    root / ".requirements-impact-refiner/reports" / begun["report_id"]
+                )
+                report_dir.mkdir(parents=True, exist_ok=True)
+                descriptor = os.open(
+                    report_dir / ".controller.lock", os.O_RDWR | os.O_CREAT, 0o600
+                )
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+                def release():
+                    time.sleep(1.25)
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    os.close(descriptor)
+
+                releaser = threading.Thread(target=release)
+                releaser.start()
+                started = time.monotonic()
+                reply = call(2, "rir_trace_impact", {
+                    "repo_root": str(root), "draft_id": begun["draft_id"],
+                    "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
+                })
+                elapsed = time.monotonic() - started
+                releaser.join(timeout=2)
+                descriptor = None
+                process.stdin.write(json.dumps(request(3, "tools/list", {})) + "\n")
+                process.stdin.flush()
+                after = json.loads(process.stdout.readline())
+            finally:
+                if descriptor is not None:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    os.close(descriptor)
+                process.stdin.close(); process.wait(timeout=5)
+                process.stdout.close(); process.stderr.close()
+
+        self.assertEqual(reply["error"]["code"], -32602)
+        self.assertIn("deadline exhausted waiting for controller lock", reply["error"]["message"])
+        self.assertLess(len(json.dumps(reply)), 2048)
+        self.assertLess(elapsed, 1.2)
+        self.assertIn("tools", after["result"])
 
 
 if __name__ == "__main__":

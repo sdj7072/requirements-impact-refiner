@@ -41,7 +41,7 @@ _CACHE_FIELDS = frozenset({
 })
 _IDENTITY_FIELDS = frozenset({
     "graph_schema_version", "repo_root_sha256", "settings", "providers",
-    "source_digests",
+    "source_digests", "receipt_id", "draft_id", "request_sha256",
 })
 MAX_CACHE_BYTES = GRAPH.MAX_RECEIPT_BYTES * 2
 
@@ -125,6 +125,9 @@ def _identity(root: Path, receipt: Mapping[str, Any], source_digests, schema_ver
     return {
         "graph_schema_version": schema_version,
         "repo_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
+        "receipt_id": receipt["receipt_id"],
+        "draft_id": receipt["draft_id"],
+        "request_sha256": receipt["request_sha256"],
         "settings": receipt["settings"],
         "providers": receipt["providers"],
         "source_digests": source_digests,
@@ -303,6 +306,11 @@ def load(
     if identity.get("repo_root_sha256") != expected_root:
         return _miss(key)
     if identity.get("source_digests") != cached:
+        return _miss(key)
+    if any(
+        identity.get(name) != normalized.get(name)
+        for name in ("receipt_id", "draft_id", "request_sha256")
+    ):
         return _miss(key)
     if identity.get("settings") != normalized["settings"]:
         return _miss(key)

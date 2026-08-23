@@ -117,6 +117,17 @@ class GraphCoordinatorTest(unittest.TestCase):
         self.assertLess(receipt.timings_ms["total"], 10_000)
         self.assertEqual(self.runner.calls, [])
 
+    def test_coordinator_reuses_supplied_shared_deadline(self):
+        deadline = COORDINATOR.Deadline(self.clock, 30)
+        self.clock.advance(5)
+
+        receipt = COORDINATOR.trace_impact(
+            self.root, self.draft, self.seeds, self.settings,
+            clock=self.clock, runner=self.runner, deadline=deadline,
+        )
+
+        self.assertGreaterEqual(receipt.timings_ms["total"], 5_000)
+
     def test_budget_exhaustion_preserves_high_risk_frontier_without_scheduling_work(self):
         self.clock.advance_to(30.0)
         clock = FakeClock(30.0)

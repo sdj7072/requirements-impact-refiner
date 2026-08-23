@@ -14,6 +14,7 @@ import secrets
 import stat
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from typing import Mapping, Optional, Tuple
 
@@ -568,6 +569,67 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _source_inventory_sha256(source_digests: Mapping[str, str]) -> str:
+    payload = json.dumps(
+        source_digests, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _receipt_source_inventory(
+    root: Path, receipt: Mapping[str, object]
+) -> tuple[str, str]:
+    key = receipt.get("cache", {}).get("key")
+    if (
+        not isinstance(key, str)
+        or re.fullmatch(r"[0-9a-f]{64}", key) is None
+        or key == "0" * 64
+    ):
+        raise ValueError("graph receipt has no verifiable source inventory cache")
+    cache_dir = GRAPH_COORDINATOR.CACHE._cache_directory(root, False)
+    if cache_dir is None:
+        raise ValueError("graph source inventory cache is unavailable")
+    artifact = GRAPH_COORDINATOR.CACHE._read_artifact(cache_dir / f"{key}.json")
+    if artifact is None:
+        raise ValueError("graph source inventory cache is invalid")
+    try:
+        source_digests = GRAPH_COORDINATOR.CACHE._source_digests(
+            artifact["source_digests"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("graph source inventory cache is invalid") from error
+    loaded = GRAPH_COORDINATOR.CACHE.load(root, key, source_digests)
+    cached_receipt = loaded.receipt
+    if loaded.status != "hit" or not isinstance(cached_receipt, Mapping):
+        raise ValueError("graph source inventory cache identity is invalid")
+    stable_fields = (
+        "receipt_id", "draft_id", "repo_root_sha256", "request_sha256",
+        "settings", "providers", "nodes", "edges", "paths", "frontier",
+        "budget_status",
+    )
+    if any(cached_receipt.get(name) != receipt.get(name) for name in stable_fields):
+        raise ValueError("graph source inventory cache does not match receipt")
+    return key, _source_inventory_sha256(source_digests)
+
+
+def _verify_source_inventory(
+    root: Path,
+    graph_settings: Mapping[str, object],
+    expected_sha256: object,
+) -> None:
+    if (
+        not isinstance(expected_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None
+    ):
+        raise ValueError("graph source inventory identity is invalid")
+    deadline = GRAPH_COORDINATOR.Deadline(
+        time, int(graph_settings["max_seconds"])
+    )
+    current = GRAPH_COORDINATOR._collect_source_digests(root, deadline)
+    if current is None or _source_inventory_sha256(current) != expected_sha256:
+        raise ValueError("graph receipt source inventory is stale")
+
+
 def _open_existing_directory_at(parent_fd: int, name: str) -> int:
     flags = os.O_RDONLY | os.O_DIRECTORY
     if hasattr(os, "O_NOFOLLOW"):
@@ -679,6 +741,7 @@ def _load_graph_context(
     binding = draft.get("graph_receipt")
     if not isinstance(binding, dict) or set(binding) != {
         "receipt_id", "sha256", "request_sha256", "settings", "seeds",
+        "cache_key", "source_inventory_sha256",
     }:
         raise ValueError("graph receipt is required for this draft")
     if (
@@ -735,9 +798,19 @@ def _load_graph_context(
         or receipt["request_sha256"] != expected_request
         or binding.get("request_sha256") != expected_request
         or receipt["settings"] != graph_settings
+        or receipt["cache"]["key"] != binding.get("cache_key")
     ):
         raise ValueError("graph receipt identity does not match draft request and settings")
+    cache_key, source_inventory_sha256 = _receipt_source_inventory(root, receipt)
+    if (
+        binding.get("cache_key") != cache_key
+        or binding.get("source_inventory_sha256") != source_inventory_sha256
+    ):
+        raise ValueError("graph source inventory cache does not match binding")
     _verify_receipt_sources(root, receipt)
+    _verify_source_inventory(
+        root, graph_settings, source_inventory_sha256
+    )
     return {"receipt": receipt, "sha256": digest, "binding": binding}
 
 
@@ -839,6 +912,92 @@ def _validate_graph_coverage(
     context["impact_confidences"] = impact_confidences
 
 
+def _validate_persisted_trace_receipt(
+    root: Path,
+    draft: Mapping[str, object],
+    normalized_seeds: Tuple[TraceSeed, ...],
+    graph_settings: Mapping[str, object],
+    expected_payload: Optional[bytes] = None,
+) -> tuple[dict[str, object], bytes, str, str, str]:
+    stored = _read_bound_receipt_bytes(root, str(draft["draft_id"]))
+    if expected_payload is not None and stored != expected_payload:
+        raise ValueError("persisted graph receipt does not match coordinator result")
+    receipt_value, errors = GRAPH.load_receipt_bytes(stored)
+    if receipt_value is None or errors:
+        raise ValueError("persisted graph receipt is invalid")
+    if GRAPH.canonical_receipt_bytes(receipt_value) != stored:
+        raise ValueError("persisted graph receipt is not canonical")
+    graph_draft = _graph_draft_identity(draft)
+    settings = GRAPH_COORDINATOR._settings(graph_settings)
+    expected_request_sha256 = GRAPH_COORDINATOR._request_sha256(
+        graph_draft, normalized_seeds, settings
+    )
+    expected_root_sha256 = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+    identity_providers = tuple(
+        GRAPH.ProviderStatus(
+            row["name"], row["status"], row["confidence"],
+            row["version"], row["executable_sha256"],
+        )
+        for row in receipt_value["providers"] if row["name"] != "builtin"
+    )
+    expected_receipt_id = GRAPH_COORDINATOR._trace_identity(
+        root, str(draft["draft_id"]), expected_request_sha256,
+        normalized_seeds, settings, identity_providers,
+    )
+    if (
+        receipt_value["draft_id"] != draft["draft_id"]
+        or receipt_value["receipt_id"] != expected_receipt_id
+        or receipt_value["repo_root_sha256"] != expected_root_sha256
+        or receipt_value["request_sha256"] != expected_request_sha256
+        or receipt_value["settings"] != graph_settings
+    ):
+        raise ValueError("graph receipt identity does not match draft request and settings")
+    cache_key, source_inventory_sha256 = _receipt_source_inventory(
+        root, receipt_value
+    )
+    return (
+        receipt_value, stored, expected_request_sha256,
+        cache_key, source_inventory_sha256,
+    )
+
+
+def _bind_trace_receipt(
+    root: Path,
+    draft: Mapping[str, object],
+    normalized_seeds: Tuple[TraceSeed, ...],
+    graph_settings: Mapping[str, object],
+    receipt_value: Mapping[str, object],
+    stored: bytes,
+    expected_request_sha256: str,
+    cache_key: str,
+    source_inventory_sha256: str,
+) -> TraceResult:
+    updated = dict(draft)
+    digest = hashlib.sha256(stored).hexdigest()
+    updated["graph_receipt"] = {
+        "receipt_id": receipt_value["receipt_id"],
+        "sha256": digest,
+        "request_sha256": expected_request_sha256,
+        "settings": graph_settings,
+        "cache_key": cache_key,
+        "source_inventory_sha256": source_inventory_sha256,
+        "seeds": [
+            {"term": seed.term, "location": seed.location}
+            for seed in normalized_seeds
+        ],
+    }
+    _replace_private_draft(root, str(draft["draft_id"]), updated)
+    receipt_path = (
+        root / ".requirements-impact-refiner" / "graph"
+        / f"{draft['draft_id']}.json"
+    )
+    return TraceResult(
+        receipt_id=str(receipt_value["receipt_id"]), receipt_path=receipt_path,
+        receipt_sha256=digest, compact_graph=_compact_graph(receipt_value),
+        budget_status=str(receipt_value["budget_status"]),
+    )
+
+
 def trace_impact(request: TraceRequest) -> TraceResult:
     original_root = Path(request.repo_root)
     if original_root.is_symlink():
@@ -873,69 +1032,39 @@ def trace_impact(request: TraceRequest) -> TraceResult:
         raise ValueError("draft graph settings are invalid")
     if graph_settings.get("enabled") is not True:
         raise ValueError("impact graph is disabled for this draft")
+    deadline = GRAPH_COORDINATOR.Deadline(
+        time, int(graph_settings["max_seconds"])
+    )
     receipt_path = (
         root / ".requirements-impact-refiner" / "graph" / f"{request.draft_id}.json"
     )
-    with _report_lock(root, str(draft["report_id"])):
+    with _report_lock(root, str(draft["report_id"]), deadline=deadline):
         draft = load_draft(root, request.draft_id)
         if draft.get("consumed") is True:
             raise ValueError("draft is already consumed")
-        if draft.get("graph_receipt") is not None or receipt_path.exists() or receipt_path.is_symlink():
+        if draft.get("graph_receipt") is not None:
             raise ValueError("draft already has a graph receipt")
         graph_draft = _graph_draft_identity(draft)
+        if receipt_path.exists() or receipt_path.is_symlink():
+            validated = _validate_persisted_trace_receipt(
+                root, draft, normalized_seeds, graph_settings
+            )
+            return _bind_trace_receipt(
+                root, draft, normalized_seeds, graph_settings, *validated
+            )
         receipt = GRAPH_COORDINATOR.trace_impact(
-            root, graph_draft, normalized_seeds, graph_settings
+            root, graph_draft, normalized_seeds, graph_settings,
+            clock=time, deadline=deadline,
         )
         payload = GRAPH.canonical_receipt_bytes(receipt)
         if not receipt_path.is_file() or receipt_path.is_symlink():
             raise ValueError("graph receipt publication failed")
-        stored = _read_bound_receipt_bytes(root, request.draft_id)
-        if stored != payload:
-            raise ValueError("persisted graph receipt does not match coordinator result")
-        receipt_value, errors = GRAPH.load_receipt_bytes(stored)
-        if receipt_value is None or errors:
-            raise ValueError("persisted graph receipt is invalid")
-        expected_request_sha256 = GRAPH_COORDINATOR._request_sha256(
-            graph_draft, normalized_seeds, GRAPH_COORDINATOR._settings(graph_settings)
+        validated = _validate_persisted_trace_receipt(
+            root, draft, normalized_seeds, graph_settings, payload
         )
-        expected_root_sha256 = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-        identity_providers = tuple(
-            GRAPH.ProviderStatus(
-                row["name"], row["status"], row["confidence"],
-                row["version"], row["executable_sha256"],
-            )
-            for row in receipt_value["providers"] if row["name"] != "builtin"
+        return _bind_trace_receipt(
+            root, draft, normalized_seeds, graph_settings, *validated
         )
-        expected_receipt_id = GRAPH_COORDINATOR._trace_identity(
-            root, request.draft_id, expected_request_sha256, normalized_seeds,
-            GRAPH_COORDINATOR._settings(graph_settings), identity_providers,
-        )
-        if (
-            receipt_value["draft_id"] != request.draft_id
-            or receipt_value["receipt_id"] != expected_receipt_id
-            or receipt_value["repo_root_sha256"] != expected_root_sha256
-            or receipt_value["request_sha256"] != expected_request_sha256
-            or receipt_value["settings"] != graph_settings
-        ):
-            raise ValueError("graph receipt identity does not match draft request and settings")
-        digest = hashlib.sha256(stored).hexdigest()
-        updated = dict(draft)
-        updated["graph_receipt"] = {
-            "receipt_id": receipt_value["receipt_id"],
-            "sha256": digest,
-            "request_sha256": expected_request_sha256,
-            "settings": graph_settings,
-            "seeds": [
-                {"term": seed.term, "location": seed.location}
-                for seed in normalized_seeds
-            ],
-        }
-        _replace_private_draft(root, request.draft_id, updated)
-    return TraceResult(
-        receipt_id=receipt_value["receipt_id"], receipt_path=receipt_path,
-        receipt_sha256=digest, compact_graph=_compact_graph(receipt_value),
-        budget_status=receipt_value["budget_status"],
-    )
 
 
 def _check_keys(label: str, value: object, expected: set[str]) -> None:
@@ -1292,7 +1421,7 @@ def _consume(path: Path, draft: dict[str, object], published, key_map) -> None:
 
 
 @contextmanager
-def _report_lock(root: Path, report_id: str):
+def _report_lock(root: Path, report_id: str, deadline=None):
     report_dir = report_store.report_directory(root, report_id, create=True)
     lock_path = report_dir / ".controller.lock"
     flags = os.O_RDWR | os.O_CREAT
@@ -1302,12 +1431,33 @@ def _report_lock(root: Path, report_id: str):
         descriptor = os.open(lock_path, flags, 0o600)
     except OSError as error:
         raise ValueError(f"cannot open controller lock: {error}") from error
+    locked = False
     try:
         if fcntl is not None:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            if deadline is None:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                locked = True
+            else:
+                while True:
+                    if deadline.expired():
+                        raise ValueError(
+                            "graph trace deadline exhausted waiting for controller lock"
+                        )
+                    try:
+                        fcntl.flock(
+                            descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB
+                        )
+                        locked = True
+                        break
+                    except BlockingIOError:
+                        time.sleep(min(0.01, deadline.remaining()))
+        if deadline is not None and deadline.expired():
+            raise ValueError(
+                "graph trace deadline exhausted waiting for controller lock"
+            )
         yield
     finally:
-        if fcntl is not None:
+        if fcntl is not None and locked:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
 

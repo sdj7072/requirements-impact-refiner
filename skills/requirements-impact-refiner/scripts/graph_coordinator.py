@@ -736,13 +736,20 @@ def _unavailable_frontier(nodes, probes, provider_results):
     )]
 
 
-def trace_impact(repo_root, draft, seeds, settings, clock=time, runner=None):
+def trace_impact(
+    repo_root, draft, seeds, settings, clock=time, runner=None, deadline=None,
+):
     """Return and privately persist one bounded canonical graph receipt."""
     settings = _settings(settings)
     normalized_seeds = tuple(sorted(set(seeds), key=_seed_key))
     if any(not isinstance(seed, ScanSeed) for seed in normalized_seeds):
         raise TypeError("seeds must contain ScanSeed values")
-    deadline = Deadline(clock, settings.max_seconds)
+    if deadline is None:
+        deadline = Deadline(clock, settings.max_seconds)
+    elif not isinstance(deadline, Deadline):
+        raise TypeError("deadline must be a provider Deadline")
+    elif deadline.clock is not clock or deadline.max_seconds != settings.max_seconds:
+        raise ValueError("shared deadline must match graph clock and settings")
     draft_id = _draft_id(draft)
     request_sha256 = _request_sha256(draft, normalized_seeds, settings)
     root_input = Path(repo_root)

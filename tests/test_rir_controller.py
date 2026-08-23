@@ -1,9 +1,12 @@
 import importlib.util
+import hashlib
 import json
 import os
 import re
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -194,7 +197,7 @@ class RirControllerTest(unittest.TestCase):
         graph_dir = self.root / ".requirements-impact-refiner" / "graph"
         graph_dir.mkdir(parents=True, exist_ok=True)
         (graph_dir / f"{second.draft_id}.json").write_text("replacement", encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "already has a graph receipt"):
+        with self.assertRaisesRegex(ValueError, "graph receipt"):
             CONTROLLER.trace_impact(
                 CONTROLLER.TraceRequest(
                     self.root,
@@ -202,6 +205,10 @@ class RirControllerTest(unittest.TestCase):
                     (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
                 )
             )
+        self.assertEqual(
+            (graph_dir / f"{second.draft_id}.json").read_text(encoding="utf-8"),
+            "replacement",
+        )
 
     def test_trace_rejects_disabled_graph_unsafe_root_and_unsafe_seed(self):
         (self.root / ".requirements-impact-refiner.json").write_text(
@@ -307,17 +314,66 @@ class RirControllerTest(unittest.TestCase):
         traced = CONTROLLER.trace_impact(request)
         self.assertTrue(traced.receipt_path.is_file())
 
+    def test_trace_retry_recovers_exact_receipt_after_draft_binding_failure(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Recover binding"))
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        real_replace = CONTROLLER._replace_private_draft
+        with mock.patch.object(
+            CONTROLLER,
+            "_replace_private_draft",
+            side_effect=ValueError("injected binding failure"),
+        ):
+            with self.assertRaisesRegex(ValueError, "injected binding failure"):
+                CONTROLLER.trace_impact(request)
+
+        receipt_path = (
+            self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
+        )
+        published_bytes = receipt_path.read_bytes()
+        self.assertIsNone(
+            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
+        )
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "trace_impact",
+            side_effect=AssertionError("retry must recover without republishing"),
+        ), mock.patch.object(
+            CONTROLLER, "_replace_private_draft", wraps=real_replace
+        ):
+            recovered = CONTROLLER.trace_impact(request)
+
+        self.assertEqual(receipt_path.read_bytes(), published_bytes)
+        self.assertEqual(
+            CONTROLLER.load_draft(self.root, draft.draft_id)["graph_receipt"]["receipt_id"],
+            recovered.receipt_id,
+        )
+
     def test_trace_preserves_deadline_and_provider_failure_statuses(self):
         self.enable_builtin_graph()
         deadline_draft = CONTROLLER.begin_refinement(self.request())
 
         class FakeClock:
-            def monotonic(self):
-                return 30.0
+            current = 0.0
 
-        expired = CONTROLLER.GRAPH_COORDINATOR.Deadline(FakeClock(), 0)
-        with mock.patch.object(
-            CONTROLLER.GRAPH_COORDINATOR, "Deadline", return_value=expired
+            def monotonic(self):
+                return self.current
+
+        clock = FakeClock()
+        real_lock = CONTROLLER._report_lock
+
+        @CONTROLLER.contextmanager
+        def expire_after_lock(root, report_id, deadline=None):
+            with real_lock(root, report_id, deadline=deadline):
+                clock.current = 30.0
+                yield
+
+        with mock.patch.object(CONTROLLER, "time", clock), mock.patch.object(
+            CONTROLLER, "_report_lock", side_effect=expire_after_lock
         ):
             deadline = CONTROLLER.trace_impact(
                 CONTROLLER.TraceRequest(
@@ -367,6 +423,44 @@ class RirControllerTest(unittest.TestCase):
         }
         self.assertEqual(statuses["scip"], "failed")
         self.assertIn("builtin", statuses)
+
+    @unittest.skipIf(CONTROLLER.fcntl is None, "requires POSIX flock")
+    def test_trace_lock_wait_uses_graph_deadline_and_released_lock_can_retry(self):
+        self.enable_builtin_graph()
+        config_path = self.root / ".requirements-impact-refiner.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["impact_graph"]["max_seconds"] = 1
+        config["impact_graph"]["target_seconds"] = 1
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        draft = CONTROLLER.begin_refinement(self.request(request="Bound lock wait"))
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        report_dir = (
+            self.root / ".requirements-impact-refiner/reports" / draft.report_id
+        )
+        report_dir.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(report_dir / ".controller.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        CONTROLLER.fcntl.flock(descriptor, CONTROLLER.fcntl.LOCK_EX)
+
+        def release():
+            time.sleep(1.25)
+            CONTROLLER.fcntl.flock(descriptor, CONTROLLER.fcntl.LOCK_UN)
+            os.close(descriptor)
+
+        releaser = threading.Thread(target=release)
+        releaser.start()
+        started = time.monotonic()
+        with self.assertRaisesRegex(ValueError, "deadline exhausted waiting for controller lock"):
+            CONTROLLER.trace_impact(request)
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 1.2)
+        releaser.join(timeout=2)
+
+        recovered = CONTROLLER.trace_impact(request)
+        self.assertRegex(recovered.receipt_id, r"^[0-9a-f]{32}$")
 
     def test_finalize_rejects_uncovered_high_risk_graph_node(self):
         self.enable_builtin_graph()
@@ -588,6 +682,106 @@ class RirControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale"):
             CONTROLLER.finalize_refinement(
                 self.finalize(stale, analysis, stale_receipt)
+            )
+
+    def test_finalize_rejects_new_relevant_source_outside_receipt_inventory(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Inventory drift"))
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in receipt.compact_graph["paths"]
+        ]
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        (self.root / "desktop/new_consumer.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(ValueError, "source inventory is stale"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(draft, analysis, receipt)
+            )
+
+        self.assertFalse(
+            (self.root / ".requirements-impact-refiner/reports/RPT-001/current.json").exists()
+        )
+
+    def test_finalize_rejects_inventory_digest_rebound_away_from_receipt_cache(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Rebound inventory"))
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in receipt.compact_graph["paths"]
+        ]
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        (self.root / "desktop/new_consumer.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+        current = CONTROLLER.GRAPH_COORDINATOR._collect_source_digests(
+            self.root,
+            CONTROLLER.GRAPH_COORDINATOR.Deadline(
+                CONTROLLER.time, 30
+            ),
+        )
+        rebound = hashlib.sha256(json.dumps(
+            current, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        stored["graph_receipt"]["source_inventory_sha256"] = rebound
+        CONTROLLER._replace_private_draft(self.root, draft.draft_id, stored)
+
+        with self.assertRaisesRegex(ValueError, "inventory cache does not match binding"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(draft, analysis, receipt)
+            )
+
+    def test_finalize_rejects_deleted_and_renamed_unmapped_inventory_sources(self):
+        self.enable_builtin_graph()
+        support = self.root / "desktop/support.py"
+        support.write_text("SUPPORT = True\n", encoding="utf-8")
+
+        def traced(request_text):
+            draft = CONTROLLER.begin_refinement(self.request(request=request_text))
+            receipt = CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+            analysis = self.fixture("controller-analysis-pre-decision.json")
+            analysis["impacts"][0]["graph_path_keys"] = [
+                row["key"] for row in receipt.compact_graph["paths"]
+            ]
+            analysis["impacts"][0]["evidence_level"] = "unknown"
+            return draft, receipt, analysis
+
+        deleted_draft, deleted_receipt, deleted_analysis = traced("Deleted inventory")
+        support.unlink()
+        with self.assertRaisesRegex(ValueError, "source inventory is stale"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(deleted_draft, deleted_analysis, deleted_receipt)
+            )
+
+        support.write_text("SUPPORT = True\n", encoding="utf-8")
+        renamed_draft, renamed_receipt, renamed_analysis = traced("Renamed inventory")
+        support.rename(self.root / "desktop/support_renamed.py")
+        with self.assertRaisesRegex(ValueError, "source inventory is stale"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(renamed_draft, renamed_analysis, renamed_receipt)
             )
 
     def test_finalize_recomputes_exact_draft_request_and_receipt_identities(self):

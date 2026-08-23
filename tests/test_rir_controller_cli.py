@@ -1,9 +1,17 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,11 +22,15 @@ FIXTURES = ROOT / "tests" / "fixtures"
 class RirControllerCliTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        temporary_root = Path(self.temporary.name)
+        self.root = temporary_root / "repo"
+        self.root.mkdir()
+        input_root = temporary_root / "inputs"
+        input_root.mkdir()
         self.write_graph_config(False)
-        self.begin_path = self.root / "begin.json"
-        self.analysis_path = self.root / "analysis.json"
-        self.seeds_path = self.root / "seeds.json"
+        self.begin_path = input_root / "begin.json"
+        self.analysis_path = input_root / "analysis.json"
+        self.seeds_path = input_root / "seeds.json"
         self.begin_path.write_text(
             json.dumps(
                 {
@@ -283,6 +295,42 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertEqual(deep.stdout, "")
         self.assertEqual(oversized.stdout, "")
         self.assertNotIn("Traceback", deep.stderr + oversized.stderr)
+
+    @unittest.skipIf(fcntl is None, "requires POSIX flock")
+    def test_trace_held_lock_returns_bounded_validation_error(self):
+        self.enable_graph_sources()
+        config_path = self.root / ".requirements-impact-refiner.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["impact_graph"]["max_seconds"] = 1
+        config["impact_graph"]["target_seconds"] = 1
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        begin = json.loads(self.begin().stdout)
+        report_dir = (
+            self.root / ".requirements-impact-refiner/reports" / begin["report_id"]
+        )
+        report_dir.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(report_dir / ".controller.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+        def release():
+            time.sleep(1.25)
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+        releaser = threading.Thread(target=release)
+        releaser.start()
+        started = time.monotonic()
+        result = self.run_cli(
+            "trace", "--repo-root", self.root, "--draft-id", begin["draft_id"],
+            "--input", self.seeds_path,
+        )
+        elapsed = time.monotonic() - started
+        releaser.join(timeout=2)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("deadline exhausted waiting for controller lock", result.stderr)
+        self.assertLess(elapsed, 1.2)
 
 
 if __name__ == "__main__":
