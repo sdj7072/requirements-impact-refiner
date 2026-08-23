@@ -345,6 +345,18 @@ class GraphCacheTest(unittest.TestCase):
             "credential_yaml": (
                 ".yaml", 'credential: "{value}"\nmarker: "credentialRotation"\n'
             ),
+            "token_env": (
+                ".env", "TOKEN={value}\nMARKER=credentialRotation\n"
+            ),
+            "token_yaml": (
+                ".yaml", 'token: "{value}"\nmarker: "credentialRotation"\n'
+            ),
+            "token_json": (
+                ".json", '{{"token":"{value}","marker":"credentialRotation"}}'
+            ),
+            "token_python": (
+                ".py", 'token = "{value}"\nmarker = "credentialRotation"\n'
+            ),
         }
         for index, (name, (suffix, template)) in enumerate(cases.items()):
             with self.subTest(name=name):
@@ -385,6 +397,20 @@ class GraphCacheTest(unittest.TestCase):
         )
         self.assertIn(innocent, {node.label for node in innocent_result.nodes})
         self.assertIn(innocent, {edge.evidence for edge in innocent_result.edges})
+
+        token_root = self.root / "standalone_token_identifier"
+        token_root.mkdir()
+        for stem in ("source_a.py", "source_b.py"):
+            (token_root / stem).write_text(
+                "token\n", encoding="utf-8"
+            )
+        token_result = BUILTIN.scan_repository(
+            token_root,
+            (BUILTIN.ScanSeed("token", "source_a.py"),),
+            BUILTIN.ScanLimits(), StaticClock(),
+        )
+        self.assertIn("token", {node.label for node in token_result.nodes})
+        self.assertIn("token", {edge.evidence for edge in token_result.edges})
 
     def test_rejects_symlinked_cache_components(self):
         outside = Path(self.temporary.name) / "outside"

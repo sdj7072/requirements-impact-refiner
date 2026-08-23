@@ -51,7 +51,7 @@ _IMPORT = re.compile(r"(?m)^\s*(?:from|import)\s+(?P<value>[^\r\n#]+)")
 _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)(?P<prefix>(?<![A-Za-z0-9_])(?P<keyquote>['\"]?)"
     r"(?:aws[_-]secret[_-]access[_-]key|client[_-]secret|access[_-]token|"
-    r"refresh[_-]token|password|passwd|private[_-]key|api[_-]key|secret|"
+    r"refresh[_-]token|token|password|passwd|private[_-]key|api[_-]key|secret|"
     r"credential)(?P=keyquote)\s*[:=]\s*)"
     r"(?:(?P<quote>['\"])(?P<quoted>[^'\"\r\n]+)(?P=quote)|"
     r"(?P<bare>[^\s,#}\]]+))"
