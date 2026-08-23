@@ -222,8 +222,21 @@ def render_markdown(state: Mapping[str, object]) -> str:
     return "# Requirements Impact Report\n\n" + "\n\n".join(section(state) for section in sections) + "\n"
 
 
-def validate_rendered_markdown(text: str) -> list[str]:
-    return VALIDATOR.validate_report(text, require_summary=True)
+def validate_rendered_markdown(
+    text: str, previous_bytes: bytes | None = None
+) -> list[str]:
+    if previous_bytes is None:
+        return VALIDATOR.validate_report(text, require_summary=True)
+    try:
+        previous_text = previous_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return ["predecessor Markdown must be UTF-8"]
+    return VALIDATOR.validate_report(
+        text,
+        previous_text=previous_text,
+        previous_bytes=previous_bytes,
+        require_summary=True,
+    )
 
 
 def _artifact_path(state, suffix):
