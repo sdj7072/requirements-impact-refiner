@@ -386,7 +386,7 @@ class RirControllerTest(unittest.TestCase):
         )
         with mock.patch.object(
             CONTROLLER,
-            "_replace_private_draft",
+            "_cas_replace_private_draft",
             side_effect=ValueError("injected intent write failure"),
         ), mock.patch.object(
             CONTROLLER.GRAPH_COORDINATOR,
@@ -505,6 +505,185 @@ class RirControllerTest(unittest.TestCase):
             node["location"] == "desktop/new_consumer.py"
             for node in fresh.compact_graph["nodes"]
         ))
+
+    def _trace_with_pre_bind_draft_mutation(self, request_text, mutate):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request=request_text))
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        real_bind = CONTROLLER._bind_trace_receipt
+
+        def racing_bind(*args, **kwargs):
+            current = CONTROLLER.load_draft(self.root, draft.draft_id)
+            mutate(current, request)
+            return real_bind(*args, **kwargs)
+
+        with mock.patch.object(
+            CONTROLLER, "_bind_trace_receipt", side_effect=racing_bind
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "trace transaction changed before receipt binding"
+            ):
+                CONTROLLER.trace_impact(request)
+        return draft
+
+    def test_bind_fails_cas_when_trace_intent_is_removed(self):
+        def remove(current, request):
+            current.pop("graph_trace_intent", None)
+            CONTROLLER._replace_private_draft(
+                self.root, current["draft_id"], current
+            )
+
+        draft = self._trace_with_pre_bind_draft_mutation(
+            "Removed bind intent", remove
+        )
+
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        self.assertNotIn("graph_trace_intent", stored)
+        self.assertIsNone(stored.get("graph_receipt"))
+
+    def test_bind_fails_cas_when_trace_intent_is_replaced(self):
+        def replace(current, request):
+            replacement = dict(current["graph_trace_intent"])
+            replacement["intent_id"] = "0" * 32
+            current["graph_trace_intent"] = replacement
+            CONTROLLER._replace_private_draft(
+                self.root, current["draft_id"], current
+            )
+
+        draft = self._trace_with_pre_bind_draft_mutation(
+            "Replaced bind intent", replace
+        )
+
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        self.assertEqual(stored["graph_trace_intent"]["intent_id"], "0" * 32)
+        self.assertIsNone(stored.get("graph_receipt"))
+
+    def test_bind_fails_cas_for_competing_valid_same_draft_transaction(self):
+        competing = {}
+
+        def replace_with_valid(current, request):
+            settings = current["settings"]["impact_graph"]
+            inventory = CONTROLLER.GRAPH_COORDINATOR._collect_source_digests(
+                self.root,
+                CONTROLLER.GRAPH_COORDINATOR.Deadline(CONTROLLER.time, 30),
+            )
+            replacement = CONTROLLER._new_trace_intent(
+                self.root, current, request.seeds, settings, inventory
+            )
+            competing.update(replacement)
+            current["graph_trace_intent"] = replacement
+            CONTROLLER._replace_private_draft(
+                self.root, current["draft_id"], current
+            )
+
+        draft = self._trace_with_pre_bind_draft_mutation(
+            "Competing bind intent", replace_with_valid
+        )
+
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        self.assertEqual(stored["graph_trace_intent"], competing)
+        self.assertIsNone(stored.get("graph_receipt"))
+
+    def _private_cleanup_receipt(self, draft_id, payload=b"exact-receipt"):
+        graph_dir = self.root / ".requirements-impact-refiner/graph"
+        graph_dir.mkdir(parents=True, exist_ok=True)
+        path = graph_dir / f"{draft_id}.json"
+        path.write_bytes(payload)
+        path.chmod(0o600)
+        return graph_dir, path, payload
+
+    def test_stale_cleanup_preserves_regular_replacement_after_preflight_read(self):
+        draft_id = "a" * 32
+        graph_dir, path, expected = self._private_cleanup_receipt(draft_id)
+        saved = graph_dir / "saved-exact.json"
+        foreign = b"foreign-draft-receipt"
+        real_read = CONTROLLER._read_bound_receipt_bytes
+
+        def swap_after_read(root, selected):
+            payload = real_read(root, selected)
+            path.rename(saved)
+            path.write_bytes(foreign)
+            path.chmod(0o600)
+            return payload
+
+        with mock.patch.object(
+            CONTROLLER, "_read_bound_receipt_bytes", side_effect=swap_after_read
+        ):
+            with self.assertRaisesRegex(ValueError, "cleanup.*changed|uncertain"):
+                CONTROLLER._remove_exact_trace_receipt(
+                    self.root, draft_id, expected
+                )
+
+        self.assertEqual(path.read_bytes(), foreign)
+        self.assertEqual(saved.read_bytes(), expected)
+
+    def test_stale_cleanup_preserves_symlink_and_outside_target(self):
+        draft_id = "b" * 32
+        graph_dir, path, expected = self._private_cleanup_receipt(draft_id)
+        saved = graph_dir / "saved-symlink-exact.json"
+        outside = self.root / "outside-receipt"
+        outside.write_text("outside-safe", encoding="utf-8")
+        real_read = CONTROLLER._read_bound_receipt_bytes
+
+        def swap_after_read(root, selected):
+            payload = real_read(root, selected)
+            path.rename(saved)
+            os.symlink(outside, path)
+            return payload
+
+        with mock.patch.object(
+            CONTROLLER, "_read_bound_receipt_bytes", side_effect=swap_after_read
+        ):
+            with self.assertRaisesRegex(ValueError, "cleanup.*unsafe|uncertain|changed"):
+                CONTROLLER._remove_exact_trace_receipt(
+                    self.root, draft_id, expected
+                )
+
+        self.assertTrue(path.is_symlink())
+        self.assertEqual(outside.read_text(encoding="utf-8"), "outside-safe")
+        self.assertEqual(saved.read_bytes(), expected)
+
+    def test_stale_cleanup_quarantine_revalidates_opened_inode(self):
+        draft_id = "c" * 32
+        graph_dir, path, expected = self._private_cleanup_receipt(draft_id)
+        saved = graph_dir / "saved-opened-exact.json"
+        foreign = b"foreign-after-open"
+        real_rename = CONTROLLER.os.rename
+        swapped = False
+
+        def swap_before_quarantine(source, destination, **kwargs):
+            nonlocal swapped
+            if source == f"{draft_id}.json" and not swapped:
+                swapped = True
+                real_rename(
+                    source, saved.name,
+                    src_dir_fd=kwargs["src_dir_fd"],
+                    dst_dir_fd=kwargs["dst_dir_fd"],
+                )
+                descriptor = os.open(
+                    source, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600, dir_fd=kwargs["src_dir_fd"],
+                )
+                try:
+                    os.write(descriptor, foreign)
+                finally:
+                    os.close(descriptor)
+            return real_rename(source, destination, **kwargs)
+
+        with mock.patch.object(
+            CONTROLLER.os, "rename", side_effect=swap_before_quarantine
+        ):
+            with self.assertRaisesRegex(ValueError, "cleanup.*changed|uncertain"):
+                CONTROLLER._remove_exact_trace_receipt(
+                    self.root, draft_id, expected
+                )
+
+        self.assertEqual(path.read_bytes(), foreign)
+        self.assertEqual(saved.read_bytes(), expected)
 
     def test_trace_preserves_deadline_and_provider_failure_statuses(self):
         self.enable_builtin_graph()

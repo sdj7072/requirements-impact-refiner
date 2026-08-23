@@ -510,6 +510,158 @@ def _replace_private_draft(
         os.close(directory_fd)
 
 
+def _read_bounded_descriptor(descriptor: int, maximum: int, label: str) -> bytes:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    payload = bytearray()
+    while len(payload) <= maximum:
+        chunk = os.read(
+            descriptor, min(64 * 1024, maximum + 1 - len(payload))
+        )
+        if not chunk:
+            break
+        payload.extend(chunk)
+    if len(payload) > maximum:
+        raise ValueError(f"{label} exceeds maximum byte size")
+    return bytes(payload)
+
+
+def _cas_replace_private_draft(
+    root: Path,
+    draft_id: str,
+    expected: Mapping[str, object],
+    replacement: Mapping[str, object],
+) -> None:
+    directory_fd = _private_draft_directory_fd(root)
+    token = secrets.token_hex(8)
+    filename = f"{draft_id}.json"
+    temporary_name = f".{draft_id}.{token}.new"
+    anchor_name = f".{draft_id}.{token}.anchor"
+    quarantine_name = f".{draft_id}.{token}.quarantine"
+    current_fd = temporary_fd = quarantine_fd = None
+    quarantined = False
+
+    def restore_quarantine() -> bool:
+        nonlocal quarantined
+        if not quarantined:
+            return True
+        try:
+            os.link(
+                quarantine_name, filename,
+                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            return False
+        os.unlink(quarantine_name, dir_fd=directory_fd)
+        quarantined = False
+        return True
+
+    try:
+        read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        current_fd = os.open(filename, read_flags, dir_fd=directory_fd)
+        current_info = os.fstat(current_fd)
+        if (
+            not stat.S_ISREG(current_info.st_mode)
+            or stat.S_IMODE(current_info.st_mode) != 0o600
+            or current_info.st_nlink != 1
+        ):
+            raise ValueError("trace transaction draft is not one private regular file")
+        expected_payload = _canonical_bytes(expected)
+        if _read_bounded_descriptor(
+            current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
+        ) != expected_payload:
+            raise ValueError("trace transaction changed before receipt binding")
+
+        write_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            write_flags |= os.O_NOFOLLOW
+        temporary_fd = os.open(
+            temporary_name, write_flags, 0o600, dir_fd=directory_fd
+        )
+        replacement_payload = _canonical_bytes(replacement)
+        offset = 0
+        while offset < len(replacement_payload):
+            offset += os.write(temporary_fd, replacement_payload[offset:])
+        os.fsync(temporary_fd)
+        os.close(temporary_fd)
+        temporary_fd = None
+
+        os.link(
+            filename, anchor_name,
+            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        anchor_info = os.stat(
+            anchor_name, dir_fd=directory_fd, follow_symlinks=False
+        )
+        if (
+            not stat.S_ISREG(anchor_info.st_mode)
+            or (anchor_info.st_dev, anchor_info.st_ino)
+            != (current_info.st_dev, current_info.st_ino)
+        ):
+            raise ValueError("trace transaction changed before receipt binding")
+
+        os.rename(
+            filename, quarantine_name,
+            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+        )
+        quarantined = True
+        quarantine_fd = os.open(quarantine_name, read_flags, dir_fd=directory_fd)
+        quarantine_info = os.fstat(quarantine_fd)
+        if (
+            (quarantine_info.st_dev, quarantine_info.st_ino)
+            != (current_info.st_dev, current_info.st_ino)
+            or _read_bounded_descriptor(
+                quarantine_fd, MAX_DRAFT_BYTES, "trace transaction draft"
+            ) != expected_payload
+        ):
+            if not restore_quarantine():
+                raise ValueError(
+                    "trace transaction changed and quarantine restoration is uncertain"
+                )
+            raise ValueError("trace transaction changed before receipt binding")
+
+        try:
+            os.link(
+                temporary_name, filename,
+                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError as error:
+            if not restore_quarantine():
+                raise ValueError(
+                    "competing trace transaction preserved; restoration is uncertain"
+                ) from error
+            raise ValueError("trace transaction changed before receipt binding") from error
+        os.unlink(temporary_name, dir_fd=directory_fd)
+        os.unlink(quarantine_name, dir_fd=directory_fd)
+        quarantined = False
+        os.unlink(anchor_name, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+    except ValueError:
+        if quarantined and not restore_quarantine():
+            raise ValueError(
+                "trace transaction validation failed; quarantine restoration is uncertain"
+            )
+        raise
+    except OSError as error:
+        if quarantined and not restore_quarantine():
+            raise ValueError(
+                "trace transaction mutation failed; quarantine restoration is uncertain"
+            ) from error
+        raise ValueError(f"cannot compare-and-swap trace transaction: {error}") from error
+    finally:
+        for descriptor in (quarantine_fd, temporary_fd, current_fd):
+            if descriptor is not None:
+                os.close(descriptor)
+        for name in (temporary_name, anchor_name):
+            try:
+                os.unlink(name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.close(directory_fd)
+
+
 def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
@@ -850,23 +1002,108 @@ def _remove_exact_trace_receipt(
     root: Path, draft_id: str, expected_payload: bytes
 ) -> None:
     if _read_bound_receipt_bytes(root, draft_id) != expected_payload:
-        raise ValueError("stale recovery receipt changed before cleanup")
+        raise ValueError("stale cleanup target changed before quarantine")
     flags = os.O_RDONLY | os.O_DIRECTORY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     root_fd = os.open(root, flags)
-    base_fd = graph_fd = None
+    base_fd = graph_fd = receipt_fd = quarantine_fd = None
+    filename = f"{draft_id}.json"
+    quarantine_name = f".{draft_id}.{secrets.token_hex(8)}.stale"
+    quarantined = False
+
+    def restore_quarantine() -> bool:
+        nonlocal quarantined
+        if not quarantined:
+            return True
+        try:
+            os.link(
+                quarantine_name, filename,
+                src_dir_fd=graph_fd, dst_dir_fd=graph_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            return False
+        os.unlink(quarantine_name, dir_fd=graph_fd)
+        quarantined = False
+        return True
+
     try:
         base_fd = _open_existing_directory_at(
             root_fd, ".requirements-impact-refiner"
         )
         graph_fd = _open_existing_directory_at(base_fd, "graph")
-        os.unlink(f"{draft_id}.json", dir_fd=graph_fd)
+        read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        receipt_fd = os.open(filename, read_flags, dir_fd=graph_fd)
+        receipt_info = os.fstat(receipt_fd)
+        if (
+            not stat.S_ISREG(receipt_info.st_mode)
+            or stat.S_IMODE(receipt_info.st_mode) != 0o600
+            or receipt_info.st_nlink != 1
+            or _read_bounded_descriptor(
+                receipt_fd, GRAPH.MAX_RECEIPT_BYTES, "stale cleanup receipt"
+            ) != expected_payload
+        ):
+            raise ValueError("stale cleanup target changed or is unsafe")
+
+        os.rename(
+            filename, quarantine_name,
+            src_dir_fd=graph_fd, dst_dir_fd=graph_fd,
+        )
+        quarantined = True
+        quarantine_fd = os.open(quarantine_name, read_flags, dir_fd=graph_fd)
+        quarantine_info = os.fstat(quarantine_fd)
+        if (
+            (quarantine_info.st_dev, quarantine_info.st_ino)
+            != (receipt_info.st_dev, receipt_info.st_ino)
+            or _read_bounded_descriptor(
+                quarantine_fd, GRAPH.MAX_RECEIPT_BYTES,
+                "stale cleanup quarantine",
+            ) != expected_payload
+        ):
+            if not restore_quarantine():
+                raise ValueError(
+                    "stale cleanup quarantine changed; restoration is uncertain"
+                )
+            raise ValueError("stale cleanup quarantine changed before removal")
+
+        try:
+            os.stat(filename, dir_fd=graph_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError(
+                "stale cleanup replacement preserved; removal is uncertain"
+            )
+        final_info = os.stat(
+            quarantine_name, dir_fd=graph_fd, follow_symlinks=False
+        )
+        if (
+            (final_info.st_dev, final_info.st_ino)
+            != (receipt_info.st_dev, receipt_info.st_ino)
+        ):
+            raise ValueError(
+                "stale cleanup quarantine identity is uncertain"
+            )
+        os.unlink(quarantine_name, dir_fd=graph_fd)
+        quarantined = False
         os.fsync(graph_fd)
+    except ValueError:
+        if quarantined and not restore_quarantine():
+            raise ValueError(
+                "stale cleanup failed; quarantine restoration is uncertain"
+            )
+        raise
     except OSError as error:
-        raise ValueError(f"cannot clean stale recovery receipt: {error}") from error
+        if quarantined and not restore_quarantine():
+            raise ValueError(
+                "stale cleanup failed; quarantine restoration is uncertain"
+            ) from error
+        raise ValueError(f"stale cleanup target is unsafe: {error}") from error
     finally:
-        for descriptor in (graph_fd, base_fd, root_fd):
+        for descriptor in (
+            quarantine_fd, receipt_fd, graph_fd, base_fd, root_fd
+        ):
             if descriptor is not None:
                 os.close(descriptor)
 
@@ -879,7 +1116,9 @@ def _clear_trace_intent(
         raise ValueError("trace intent changed before cleanup")
     updated = dict(current)
     updated.pop("graph_trace_intent", None)
-    _replace_private_draft(root, str(draft["draft_id"]), updated)
+    _cas_replace_private_draft(
+        root, str(draft["draft_id"]), current, updated
+    )
     return updated
 
 
@@ -1216,7 +1455,9 @@ def _bind_trace_receipt(
             for seed in normalized_seeds
         ],
     }
-    _replace_private_draft(root, str(draft["draft_id"]), updated)
+    _cas_replace_private_draft(
+        root, str(draft["draft_id"]), draft, updated
+    )
     receipt_path = (
         root / ".requirements-impact-refiner" / "graph"
         / f"{draft['draft_id']}.json"
@@ -1307,7 +1548,9 @@ def trace_impact(request: TraceRequest) -> TraceResult:
             )
             updated = dict(draft)
             updated["graph_trace_intent"] = intent
-            _replace_private_draft(root, request.draft_id, updated)
+            _cas_replace_private_draft(
+                root, request.draft_id, draft, updated
+            )
             draft = updated
         else:
             intent = _validate_trace_intent(
