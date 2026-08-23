@@ -156,6 +156,31 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertEqual(replies[1]["error"]["code"], -32602)
         self.assertIn("tools", after["result"])
 
+    def test_revision_begin_returns_normalized_prior_decision_guidance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = subprocess.Popen(
+                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+            )
+            try:
+                def call(identifier, name, arguments):
+                    process.stdin.write(json.dumps(request(identifier, "tools/call", {"name": name, "arguments": arguments})) + "\n")
+                    process.stdin.flush()
+                    return json.loads(process.stdout.readline())["result"]["structuredContent"]
+                first = call(1, "rir_begin", {"repo_root": str(root), "request": "Remove displayName.", "repository_evidence": ["mobile reads displayName"], "adapter": "generic"})
+                post = json.loads((FIXTURES / "controller-analysis-post-decision.json").read_text())
+                call(2, "rir_finalize", {"repo_root": str(root), "draft_id": first["draft_id"], "analysis": post})
+                second = call(3, "rir_begin", {"repo_root": str(root), "request": "Desktop cache evidence arrived.", "repository_evidence": ["desktop cache persists displayName"], "adapter": "generic"})
+            finally:
+                process.stdin.close(); process.wait(timeout=5)
+                process.stdout.close(); process.stderr.close()
+
+        guidance = second["analysis_guidance"]
+        self.assertEqual(guidance["recommended_phase"], "post-decision")
+        self.assertEqual(guidance["carry_forward_decisions"][0]["key"], "own-workspace")
+        self.assertEqual(guidance["carry_forward_decisions"][0]["accepted_impact_keys"], ["member-scope"])
+
     def test_line_larger_than_limit_is_rejected_even_when_newline_is_buffered(self):
         payload = b" " * (2 * 1024 * 1024) + b"\n"
         result = subprocess.run(

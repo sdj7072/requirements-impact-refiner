@@ -170,6 +170,29 @@ def _begin(arguments):
         )
     )
     root = Path(arguments["repo_root"]).resolve()
+    prior_state = result.prior_state if isinstance(result.prior_state, dict) else {}
+    prior_key_map = result.prior_key_map if isinstance(result.prior_key_map, dict) else {}
+    decision_keys = {
+        identifier: key
+        for key, identifier in prior_key_map.get("decisions", {}).items()
+    }
+    impact_keys = {
+        identifier: key
+        for key, identifier in prior_key_map.get("impacts", {}).items()
+    }
+    carry_forward_decisions = []
+    for row in prior_state.get("decisions", []):
+        if not isinstance(row, dict) or row.get("id") not in decision_keys:
+            continue
+        accepted = row.get("accepted_impacts", [])
+        if not all(identifier in impact_keys for identifier in accepted):
+            continue
+        carry_forward_decisions.append({
+            "key": decision_keys[row["id"]],
+            "choice": row["choice"],
+            "accepted_impact_keys": [impact_keys[identifier] for identifier in accepted],
+            "rationale": row["rationale"],
+        })
     structured = {
         "draft_id": result.draft_id,
         "draft_path": result.draft_path.relative_to(root).as_posix(),
@@ -179,6 +202,12 @@ def _begin(arguments):
         "settings": dict(result.settings),
         "prior_state": result.prior_state,
         "prior_key_map": result.prior_key_map,
+        "analysis_guidance": {
+            "recommended_phase": (
+                "post-decision" if carry_forward_decisions else None
+            ),
+            "carry_forward_decisions": carry_forward_decisions,
+        },
         "repository_evidence": list(arguments["repository_evidence"]),
         "allowed_enums": {
             "phase": ["pre-decision", "post-decision"],
@@ -194,6 +223,7 @@ def _begin(arguments):
             "deferred impacts may proceed only when listed as a remaining risk with an owner",
             "accepted impacts require a linked decision and resolved impacts require current evidence",
             "the Superpowers handoff marker is controller-owned and must not be authored or decorated",
+            "when analysis_guidance supplies prior decisions, copy those normalized rows unchanged into a post-decision revision unless the user explicitly selected a new choice",
         ],
         "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
     }
