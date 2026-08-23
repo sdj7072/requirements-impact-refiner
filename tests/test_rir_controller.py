@@ -311,6 +311,30 @@ class RirControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "impact key disappeared"):
             CONTROLLER.finalize_refinement(self.finalize(second_draft, analysis))
 
+    def test_predecision_revision_freezes_prior_decision_link_in_history(self):
+        first_draft = CONTROLLER.begin_refinement(self.request())
+        CONTROLLER.finalize_refinement(
+            self.finalize(
+                first_draft,
+                self.fixture("controller-analysis-post-decision.json"),
+            )
+        )
+        second_draft = CONTROLLER.begin_refinement(self.request())
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["key"] = "member-scope"
+        analysis["criteria"][0]["impact_key"] = "member-scope"
+        analysis["decision_needed"]["options"][0]["impact_keys"] = ["member-scope"]
+        analysis["decision_needed"]["options"][1]["impact_keys"] = ["member-scope"]
+
+        second = CONTROLLER.finalize_refinement(self.finalize(second_draft, analysis))
+        state = json.loads(second.state_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(state["report"]["phase"], "pre-decision")
+        self.assertEqual(state["history"][0]["decision"], None)
+        self.assertIn("prior immutable revision", state["history"][0]["summary"])
+        self.assertNotIn("DEC-001", state["history"][0]["summary"])
+        self.assertEqual(state["delta"]["reopened"], ["IMP-001"])
+
 
 if __name__ == "__main__":
     unittest.main()

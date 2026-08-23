@@ -615,7 +615,23 @@ def _build_state(draft, analysis):
             else:
                 category = state_category[impact["state"]]
             delta[category].append(impact["id"])
-    prior_history = [] if prior_state is None else list(prior_state["history"])
+    prior_history = []
+    if prior_state is not None:
+        current_decision_ids = set(decision_ids.values())
+        for prior_row in prior_state["history"]:
+            history_row = dict(prior_row)
+            historical_decision = history_row.get("decision")
+            if (
+                analysis["phase"] == "pre-decision"
+                and isinstance(historical_decision, str)
+                and historical_decision not in current_decision_ids
+            ):
+                history_row["decision"] = None
+                history_row["summary"] = (
+                    f"{history_row['summary']} The historical decision remains "
+                    "authoritative in the prior immutable revision."
+                )
+            prior_history.append(history_row)
     original_requirement = (
         {"id": requirement_id, "request": draft["request"], "source": "User request and supplied repository evidence."}
         if prior_state is None
