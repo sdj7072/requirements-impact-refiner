@@ -190,7 +190,8 @@ def _begin(arguments):
         "semantic_rules": [
             "pre-decision requires decision_needed with two or three options and decisions must be empty",
             "post-decision requires decision_needed null and at least one explicit decision",
-            "blocked or deferred impacts require workflow Not ready",
+            "blocked impacts require workflow Not ready",
+            "deferred impacts may proceed only when listed as a remaining risk with an owner",
             "accepted impacts require a linked decision and resolved impacts require current evidence",
         ],
         "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
