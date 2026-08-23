@@ -1,0 +1,1 @@
+{"text":"profile.displayName","range":{"byteOffset":{"start":17,"end":36},"start":{"line":0,"column":17},"end":{"line":0,"column":36}},"file":"events/profile_changed.py","lines":"PROFILE_FIELD = \"profile.displayName\"","charCount":{"leading":17,"trailing":1},"language":"Python","metaVariables":{"single":{},"multi":{},"transformed":{}}}

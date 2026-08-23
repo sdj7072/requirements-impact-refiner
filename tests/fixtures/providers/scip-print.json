@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "metadata": {
+    "projectRoot": "<PROJECT_ROOT>",
+    "sourceFingerprint": "<SOURCE_FINGERPRINT>",
+    "indexer": {"name": "scip-python", "version": "0.6.10"}
+  },
+  "documents": [
+    {
+      "relativePath": "api/profile.py",
+      "occurrences": [
+        {"range": [0, 0, 0, 19], "symbol": "scip-python python rir api/profile/displayName.", "symbolRoles": 1}
+      ]
+    },
+    {
+      "relativePath": "desktop/profile_cache.ts",
+      "occurrences": [
+        {"range": [1, 25, 1, 44], "symbol": "scip-python python rir api/profile/displayName.", "symbolRoles": 8},
+        {"range": [1, 25, 1, 44], "symbol": "scip-python python rir api/profile/displayName.", "symbolRoles": 8}
+      ]
+    }
+  ]
+}

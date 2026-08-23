@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "projectRoot": "<PROJECT_ROOT>",
+  "sourceFingerprint": "<SOURCE_FINGERPRINT>",
+  "nodes": [
+    {"id": "profile-field", "kind": "api_field", "label": "profile.displayName", "path": "api/profile.py", "range": [0, 0, 0, 19]},
+    {"id": "desktop-cache", "kind": "cache", "label": "CachedProfileDTO", "path": "desktop/profile_cache.ts", "range": [1, 0, 1, 44]}
+  ],
+  "edges": [
+    {"source": "profile-field", "target": "desktop-cache", "kind": "references", "path": "desktop/profile_cache.ts", "range": [1, 25, 1, 44]},
+    {"source": "profile-field", "target": "desktop-cache", "kind": "references", "path": "desktop/profile_cache.ts", "range": [1, 25, 1, 44]}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "projectRoot": "<PROJECT_ROOT>",
+  "sourceFingerprint": "<SOURCE_FINGERPRINT>",
+  "nodes": [
+    {"id": "serializer", "kind": "operation", "label": "serialize_profile", "path": "api/profile.py", "range": [4, 0, 5, 70]},
+    {"id": "publisher", "kind": "event", "label": "publish_profile_changed", "path": "events/profile_changed.py", "range": [4, 0, 5, 60]}
+  ],
+  "edges": [
+    {"source": "serializer", "target": "publisher", "kind": "calls", "path": "events/profile_changed.py", "range": [4, 0, 4, 31]}
+  ]
+}

@@ -358,6 +358,11 @@ class PackagingTest(unittest.TestCase):
         self.assertTrue((canonical / "graph_providers.py").is_file())
         self.assertTrue((canonical / "graph_coordinator.py").is_file())
 
+    def test_distribution_contains_all_detect_only_graph_adapters(self):
+        canonical = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+        for name in ("ast_grep", "codegraph", "scip", "joern"):
+            self.assertTrue((canonical / ("graph_adapter_%s.py" % name)).is_file())
+
     def test_plugin_root_resource_fallback_mirrors_are_complete_and_identical(self):
         """Plugin-root fallbacks must exactly preserve canonical skill resources."""
         canonical = ROOT / "skills" / "requirements-impact-refiner"
