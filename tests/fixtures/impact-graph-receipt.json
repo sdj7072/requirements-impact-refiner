@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "receipt_id": "0123456789abcdef0123456789abcdef",
+  "draft_id": "fedcba9876543210fedcba9876543210",
+  "repo_root_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "settings": {
+    "enabled": true,
+    "max_seconds": 30,
+    "target_seconds": 10,
+    "providers": ["auto"],
+    "install_policy": "never",
+    "deep": false
+  },
+  "providers": [
+    {
+      "name": "builtin",
+      "status": "ready",
+      "confidence": "verified-source",
+      "version": "builtin",
+      "executable_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "NODE-001",
+      "kind": "symbol",
+      "label": "profile.displayName",
+      "location": "api/profile.py",
+      "provider": "builtin",
+      "confidence": "verified-source",
+      "source_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "risk_domains": ["interfaces"]
+    },
+    {
+      "id": "NODE-002",
+      "kind": "event",
+      "label": "profile.changed",
+      "location": "events/profile_changed.py",
+      "provider": "builtin",
+      "confidence": "lexical",
+      "source_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "risk_domains": ["operations"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "EDGE-001",
+      "source": "NODE-001",
+      "target": "NODE-002",
+      "kind": "publishes",
+      "location": "api/profile.py",
+      "evidence": "profile.changed",
+      "confidence": "verified-source",
+      "provider": "builtin",
+      "source_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "paths": [
+    {
+      "id": "PATH-001",
+      "nodes": ["NODE-001", "NODE-002"],
+      "edges": ["EDGE-001"],
+      "distance": 1,
+      "risk_domains": ["interfaces", "operations"]
+    }
+  ],
+  "frontier": [
+    {
+      "id": "FRONTIER-001",
+      "node": "NODE-002",
+      "reason": "provider coverage ended",
+      "risk_domains": ["operations"]
+    }
+  ],
+  "timings_ms": {"total": 1},
+  "budget_status": "provider_limited",
+  "cache": {
+    "status": "miss",
+    "key": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "invalidated_nodes": []
+  }
+}

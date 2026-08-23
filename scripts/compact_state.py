@@ -15,7 +15,6 @@ TOP_LEVEL_KEYS = {
 }
 OBJECT_FIELDS = {
     "report": {"id", "revision", "previous_sha256", "phase"},
-    "settings": {"audience", "audience_source", "delivery", "delivery_source"},
     "original_requirement": {"id", "request", "source"},
     "refined_requirement": {"id", "revision", "decision", "supersedes"},
     "handoff": {"refined_requirement", "report_ids", "remaining_risks", "criteria", "workflow"},
@@ -51,6 +50,10 @@ EVIDENCE_LEVELS = {"verified", "inferred", "unknown"}
 AUDIENCES = {"simple", "balanced", "technical"}
 DELIVERIES = {"compact", "full"}
 SETTING_SOURCES = {"request", "repository", "default"}
+SETTING_FIELDS = {"audience", "audience_source", "delivery", "delivery_source"}
+GRAPH_SETTING_FIELDS = {
+    "enabled", "max_seconds", "target_seconds", "providers", "install_policy", "deep",
+}
 PHASES = {"pre-decision", "post-decision"}
 ID_PATTERNS = {
     "report": re.compile(r"RPT-\d{3}"),
@@ -84,6 +87,37 @@ def _check_keys(label: str, value: object, expected: set[str]) -> list[str]:
     return errors
 
 
+def _validate_graph_settings(value: object) -> list[str]:
+    if not _mapping(value):
+        return ["settings impact_graph must be an object"]
+    errors = _check_keys("settings impact_graph", value, GRAPH_SETTING_FIELDS)
+    if errors:
+        return errors
+    if not isinstance(value.get("enabled"), bool):
+        errors.append("settings impact_graph enabled must be boolean")
+    if not isinstance(value.get("deep"), bool):
+        errors.append("settings impact_graph deep must be boolean")
+    maximum = value.get("max_seconds")
+    target = value.get("target_seconds")
+    if not isinstance(maximum, int) or isinstance(maximum, bool) or not 1 <= maximum <= 30:
+        errors.append("settings impact_graph max_seconds must be an integer from 1 to 30")
+    if not isinstance(target, int) or isinstance(target, bool) or target < 1:
+        errors.append("settings impact_graph target_seconds must be a positive integer")
+    elif isinstance(maximum, int) and not isinstance(maximum, bool) and target > maximum:
+        errors.append("settings impact_graph target_seconds must not exceed max_seconds")
+    providers = value.get("providers")
+    if (
+        not isinstance(providers, list)
+        or not providers
+        or any(not isinstance(provider, str) or not provider for provider in providers)
+        or len(set(providers)) != len(providers)
+    ):
+        errors.append("settings impact_graph providers must be a non-empty list of unique names")
+    if value.get("install_policy") != "never":
+        errors.append("settings impact_graph install_policy must be never")
+    return errors
+
+
 def validate_structure(value: object) -> list[str]:
     if not _mapping(value):
         return ["state must contain a JSON object"]
@@ -95,6 +129,19 @@ def validate_structure(value: object) -> list[str]:
         errors.append("schema_version must be 1")
     for name, fields in OBJECT_FIELDS.items():
         errors.extend(_check_keys(name, value[name], fields))
+    settings = value["settings"]
+    if not _mapping(settings):
+        errors.append("settings must be an object")
+    else:
+        errors.extend(
+            f"settings missing key {key}" for key in sorted(SETTING_FIELDS - set(settings))
+        )
+        errors.extend(
+            f"settings has unknown key {key}"
+            for key in sorted(set(settings) - SETTING_FIELDS - {"impact_graph"})
+        )
+        if "impact_graph" in settings:
+            errors.extend(_validate_graph_settings(settings["impact_graph"]))
     for name, fields in ROW_FIELDS.items():
         rows = value[name]
         if not isinstance(rows, list):

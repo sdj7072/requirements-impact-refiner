@@ -343,6 +343,11 @@ class PackagingTest(unittest.TestCase):
 
         self.assertTrue((scripts / "impact_report.py").is_file())
 
+    def test_distribution_contains_graph_receipt_contract(self):
+        canonical = ROOT / "skills" / "requirements-impact-refiner"
+        self.assertTrue((canonical / "scripts" / "impact_graph.py").is_file())
+        self.assertTrue((canonical / "schemas" / "impact-graph-receipt.schema.json").is_file())
+
     def test_plugin_root_resource_fallback_mirrors_are_complete_and_identical(self):
         """Plugin-root fallbacks must exactly preserve canonical skill resources."""
         canonical = ROOT / "skills" / "requirements-impact-refiner"

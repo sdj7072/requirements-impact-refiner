@@ -37,6 +37,14 @@ class PresentationSettingsTest(unittest.TestCase):
                 "audience_source": "default",
                 "delivery": "compact",
                 "delivery_source": "default",
+                "impact_graph": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["auto"],
+                    "install_policy": "never",
+                    "deep": False,
+                },
             },
         )
 
@@ -55,6 +63,14 @@ class PresentationSettingsTest(unittest.TestCase):
                 "audience_source": "repository",
                 "delivery": "compact",
                 "delivery_source": "default",
+                "impact_graph": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["auto"],
+                    "install_policy": "never",
+                    "deep": False,
+                },
             },
         )
 
@@ -79,6 +95,14 @@ class PresentationSettingsTest(unittest.TestCase):
                 "audience_source": "request",
                 "delivery": "compact",
                 "delivery_source": "request",
+                "impact_graph": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["auto"],
+                    "install_policy": "never",
+                    "deep": False,
+                },
             },
         )
 
@@ -101,6 +125,46 @@ class PresentationSettingsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("delivery must be one of: compact, full", result.stderr)
+
+    def test_graph_settings_accept_exact_fields_and_fall_back_safely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, ".requirements-impact-refiner.json").write_text(
+                '{"impact_graph":{"enabled":false,"max_seconds":12,'
+                '"target_seconds":5,"providers":["builtin"],'
+                '"install_policy":"never","deep":true}}\n',
+                encoding="utf-8",
+            )
+            result = self.run_resolver(directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["impact_graph"], {
+                "enabled": False, "max_seconds": 12, "target_seconds": 5,
+                "providers": ["builtin"], "install_policy": "never", "deep": True,
+            })
+
+            Path(directory, ".requirements-impact-refiner.json").write_text(
+                '{"impact_graph":{"max_seconds":31}}\n', encoding="utf-8"
+            )
+            result = self.run_resolver(directory)
+
+        value = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(value["impact_graph"]["max_seconds"], 30)
+        self.assertIn("invalid impact_graph configuration", value["warnings"][0])
+
+    def test_graph_target_may_not_exceed_maximum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, ".requirements-impact-refiner.json").write_text(
+                '{"impact_graph":{"enabled":true,"max_seconds":10,'
+                '"target_seconds":11,"providers":["auto"],'
+                '"install_policy":"never","deep":false}}\n',
+                encoding="utf-8",
+            )
+            result = self.run_resolver(directory)
+
+        value = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(value["impact_graph"]["target_seconds"], 10)
+        self.assertIn("target_seconds", value["warnings"][0])
 
 
 if __name__ == "__main__":

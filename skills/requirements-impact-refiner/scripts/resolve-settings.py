@@ -11,6 +11,15 @@ from pathlib import Path
 AUDIENCES = ("simple", "balanced", "technical")
 DELIVERIES = ("compact", "full")
 CONFIG_NAME = ".requirements-impact-refiner.json"
+GRAPH_DEFAULTS = {
+    "enabled": True,
+    "max_seconds": 30,
+    "target_seconds": 10,
+    "providers": ["auto"],
+    "install_policy": "never",
+    "deep": False,
+}
+GRAPH_FIELDS = frozenset(GRAPH_DEFAULTS)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,7 +40,7 @@ def load_repository_config(project_root: Path) -> dict[str, object]:
         raise ValueError(f"cannot read {CONFIG_NAME}: {error}") from error
     if not isinstance(value, dict):
         raise ValueError(f"{CONFIG_NAME} must contain a JSON object")
-    unknown = sorted(set(value) - {"audience", "delivery"})
+    unknown = sorted(set(value) - {"audience", "delivery", "impact_graph"})
     if unknown:
         raise ValueError(f"unsupported setting(s): {', '.join(unknown)}")
     return value
@@ -54,11 +63,46 @@ def resolve_value(
     return str(configured), "repository"
 
 
+def resolve_graph_settings(config: dict[str, object]) -> tuple[dict[str, object], str | None]:
+    """Normalize only the explicitly supported local graph configuration."""
+    configured = config.get("impact_graph")
+    if configured is None:
+        return dict(GRAPH_DEFAULTS), None
+    if not isinstance(configured, dict):
+        return dict(GRAPH_DEFAULTS), "impact_graph must be an object"
+    unknown = sorted(set(configured) - GRAPH_FIELDS)
+    missing = sorted(GRAPH_FIELDS - set(configured))
+    if unknown or missing:
+        detail = []
+        if unknown:
+            detail.append("unsupported field(s): " + ", ".join(unknown))
+        if missing:
+            detail.append("missing field(s): " + ", ".join(missing))
+        return dict(GRAPH_DEFAULTS), "; ".join(detail)
+    enabled, deep = configured.get("enabled"), configured.get("deep")
+    maximum, target = configured.get("max_seconds"), configured.get("target_seconds")
+    providers, install_policy = configured.get("providers"), configured.get("install_policy")
+    if not isinstance(enabled, bool) or not isinstance(deep, bool):
+        return dict(GRAPH_DEFAULTS), "enabled and deep must be booleans"
+    if (not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1 or maximum > 30):
+        return dict(GRAPH_DEFAULTS), "max_seconds must be a positive integer at most 30"
+    if (not isinstance(target, int) or isinstance(target, bool) or target < 1 or target > maximum):
+        return dict(GRAPH_DEFAULTS), "target_seconds must be a positive integer no greater than max_seconds"
+    if (not isinstance(providers, list) or not providers or any(not isinstance(item, str) or not item for item in providers) or len(set(providers)) != len(providers)):
+        return dict(GRAPH_DEFAULTS), "providers must be a non-empty list of unique names"
+    if install_policy != "never":
+        return dict(GRAPH_DEFAULTS), "install_policy must be never"
+    return {
+        "enabled": enabled, "max_seconds": maximum, "target_seconds": target,
+        "providers": list(providers), "install_policy": install_policy, "deep": deep,
+    }, None
+
+
 def resolve(
     project_root: Path,
     audience_override: str | None,
     delivery_override: str | None,
-) -> dict[str, str]:
+) -> dict[str, object]:
     config = load_repository_config(project_root)
     audience, audience_source = resolve_value(
         "audience", audience_override, config, AUDIENCES, "balanced"
@@ -66,12 +110,17 @@ def resolve(
     delivery, delivery_source = resolve_value(
         "delivery", delivery_override, config, DELIVERIES, "compact"
     )
-    return {
+    impact_graph, warning = resolve_graph_settings(config)
+    resolved: dict[str, object] = {
         "audience": audience,
         "audience_source": audience_source,
         "delivery": delivery,
         "delivery_source": delivery_source,
+        "impact_graph": impact_graph,
     }
+    if warning is not None:
+        resolved["warnings"] = ["invalid impact_graph configuration: " + warning]
+    return resolved
 
 
 def main(argv: list[str] | None = None) -> int:

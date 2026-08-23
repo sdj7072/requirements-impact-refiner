@@ -66,6 +66,27 @@ class CompactStateTest(unittest.TestCase):
         self.assertIn("unknown top-level key surprise", errors)
         self.assertIn("missing top-level key scope", errors)
 
+    def test_optional_graph_settings_preserve_legacy_states_and_validate_contract(self):
+        legacy = self.fixture()
+        self.assertEqual(COMPACT.validate_state(legacy), [])
+
+        value = self.fixture()
+        value["settings"]["impact_graph"] = {
+            "enabled": True,
+            "max_seconds": 30,
+            "target_seconds": 10,
+            "providers": ["auto"],
+            "install_policy": "never",
+            "deep": False,
+        }
+        self.assertEqual(COMPACT.validate_state(value), [])
+
+        value["settings"]["impact_graph"]["target_seconds"] = 31
+        self.assertIn(
+            "settings impact_graph target_seconds must not exceed max_seconds",
+            COMPACT.validate_state(value),
+        )
+
     def test_relationships_reject_unknown_ids(self):
         value = self.fixture()
         value["impacts"][0]["criteria"] = ["AC-999"]
