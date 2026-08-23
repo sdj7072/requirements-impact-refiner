@@ -47,6 +47,13 @@ def _structured(result):
     return value if isinstance(value, dict) else None
 
 
+def _presentation_bytes(value: str) -> str:
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+    if normalized.endswith("\n"):
+        normalized = normalized[:-1]
+    return "\n".join(line.rstrip(" \t") for line in normalized.split("\n"))
+
+
 def _attempted_calls(streams: Sequence[str]):
     calls = {}
     order = []
@@ -158,7 +165,8 @@ def analyze_controller_trace(
         display_matches = (
             len(compared_displays) == expected_turns
             and all(isinstance(value, str) for value in compared_displays)
-            and compared_displays == final_outputs
+            and tuple(_presentation_bytes(value) for value in compared_displays)
+            == tuple(_presentation_bytes(value) for value in final_outputs)
         )
     if not draft_match:
         errors.append("controller draft IDs do not match")

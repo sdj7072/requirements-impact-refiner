@@ -141,6 +141,20 @@ class ControllerEvidenceTest(unittest.TestCase):
         self.assertFalse(evidence.valid)
         self.assertFalse(evidence.display_text_matches)
 
+    def test_codex_markdown_hard_break_spaces_are_presentation_equivalent(self):
+        draft = "0" * 32
+        display = "Summary\nState: `state.json`\nFull report: `report.md`"
+        final = "Summary\nState: `state.json`  \nFull report: `report.md`"
+        trace = "\n".join((
+            completed("rir_begin", {}, {"draft_id": draft}),
+            completed("rir_finalize", {"draft_id": draft}, {"status": "published", "display_text": display}),
+        ))
+
+        evidence = analyze_controller_trace((trace,), final, expected_turns=1)
+
+        self.assertTrue(evidence.valid, evidence.errors)
+        self.assertTrue(evidence.display_text_matches)
+
     def test_same_named_tools_from_another_server_cannot_satisfy_controller_gate(self):
         draft = "0" * 32
         begin = json.loads(completed("rir_begin", {}, {"draft_id": draft}))
