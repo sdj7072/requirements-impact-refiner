@@ -193,6 +193,7 @@ def _begin(arguments):
             "blocked impacts require workflow Not ready",
             "deferred impacts may proceed only when listed as a remaining risk with an owner",
             "accepted impacts require a linked decision and resolved impacts require current evidence",
+            "the Superpowers handoff marker is controller-owned and must not be authored or decorated",
         ],
         "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
     }

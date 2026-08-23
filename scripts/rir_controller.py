@@ -38,6 +38,10 @@ MAX_DRAFT_BYTES = 4 * 1024 * 1024
 DRAFT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 LOCAL_KEY_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 ADAPTERS = {"generic", "superpowers", "claude-feature-dev", "spec-kit"}
+SUPERPOWERS_HANDOFF_MARKER = (
+    "superpowers:after-approved-brainstorming;impact-refinement;"
+    "manual-handoff-before-writing-plans"
+)
 ANALYSIS_KEYS = {
     "phase", "refined_requirement", "invariants", "impacts",
     "decision_needed", "decisions", "criteria", "unresolved", "scope",
@@ -617,6 +621,14 @@ def _build_state(draft, analysis):
         if prior_state is None
         else prior_state["original_requirement"]
     )
+    if draft.get("adapter") == "superpowers":
+        handoff_workflow = SUPERPOWERS_HANDOFF_MARKER
+    elif analysis["phase"] == "pre-decision" or any(
+        row["state"] == "blocked" for row in impacts
+    ):
+        handoff_workflow = "Not ready"
+    else:
+        handoff_workflow = analysis["workflow"]
     state = {
         "schema_version": 1,
         "report": {"id": draft["report_id"], "revision": draft["revision"], "previous_sha256": draft["previous_sha256"], "phase": analysis["phase"]},
@@ -638,11 +650,7 @@ def _build_state(draft, analysis):
             "report_ids": all_report_ids,
             "remaining_risks": remaining,
             "criteria": list(criterion_ids.values()),
-            "workflow": (
-                analysis["workflow"]
-                if analysis["phase"] == "post-decision"
-                else "Not ready"
-            ),
+            "workflow": handoff_workflow,
         },
         "summary": summary,
     }

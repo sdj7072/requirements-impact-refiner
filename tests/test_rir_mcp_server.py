@@ -78,6 +78,8 @@ class RirMcpServerTest(unittest.TestCase):
                 self.assertIn("blocked impacts require workflow Not ready", rules)
                 self.assertIn("deferred impacts may proceed", rules)
                 self.assertIn("remaining risk with an owner", rules)
+                self.assertIn("Superpowers handoff marker", rules)
+                self.assertIn("controller-owned", rules)
                 analysis = json.loads((FIXTURES / "controller-analysis-pre-decision.json").read_text())
                 finalize = request(2, "tools/call", {"name": "rir_finalize", "arguments": {"repo_root": str(root), "draft_id": draft_id, "analysis": analysis}})
                 process.stdin.write(json.dumps(finalize) + "\n")

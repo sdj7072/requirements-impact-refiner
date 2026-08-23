@@ -125,6 +125,33 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(state["criteria"][0]["id"], "AC-001")
         self.assertEqual(state["current_behavior"][0]["id"], "INV-001")
 
+    def test_superpowers_adapter_gets_exact_controller_owned_handoff_marker(self):
+        draft = CONTROLLER.begin_refinement(
+            self.request(adapter="superpowers")
+        )
+
+        result = CONTROLLER.finalize_refinement(
+            self.finalize(
+                draft, self.fixture("controller-analysis-pre-decision.json")
+            )
+        )
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            state["handoff"]["workflow"],
+            "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+        )
+
+    def test_blocked_impact_forces_not_ready_before_validation(self):
+        draft = CONTROLLER.begin_refinement(self.request())
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["workflow"] = "Ready for planning"
+
+        result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis))
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(state["handoff"]["workflow"], "Not ready")
+
     def test_postdecision_finalize_allocates_decision_and_consumes_draft(self):
         draft = CONTROLLER.begin_refinement(self.request())
         result = CONTROLLER.finalize_refinement(
