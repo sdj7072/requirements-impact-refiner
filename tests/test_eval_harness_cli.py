@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,15 @@ from unittest.mock import patch
 from evals.harness.catalog import load_all
 from evals.harness.evidence import build_manifest, record_run, verify_manifest
 from evals.harness.models import ClientProbe, CommandResult, RunResult, RunStatus
-from evals.harness.run import build_parser, build_schedule, create_adapter, run_batch, run_probe
+from evals.harness.run import (
+    ScheduledRun,
+    _score_selected_attempt,
+    build_parser,
+    build_schedule,
+    create_adapter,
+    run_batch,
+    run_probe,
+)
 from tests.test_report_lineage import next_report, report_with_state
 
 
@@ -517,6 +526,67 @@ class EvalHarnessCliTest(unittest.TestCase):
         self.assertFalse((output / "controller.json").exists())
         self.assertFalse((output / "report.md").exists())
         self.assertFalse((output / "manifest.sha256").exists())
+
+    def test_compact_final_is_scored_against_captured_canonical_markdown(self):
+        case = next(case for case in load_all() if case.id == "POS-authorization")
+        compact = "## Change Impact Summary\n\nValidation: passed\n"
+        canonical = (
+            Path(__file__).parent / "fixtures" / "compact-state-post-decision.md"
+        ).read_text(encoding="utf-8")
+        state = (
+            Path(__file__).parent / "fixtures" / "compact-state-post-decision.json"
+        ).read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            pointer = json.dumps(
+                {
+                    "schema_version": 1,
+                    "report_id": "RPT-001",
+                    "revision": 1,
+                    "state": "revision-0001.json",
+                    "markdown": "revision-0001.md",
+                    "markdown_sha256": hashlib.sha256(
+                        canonical.encode("utf-8")
+                    ).hexdigest(),
+                },
+                sort_keys=True,
+            )
+            record_run(
+                raw,
+                "codex",
+                case.id,
+                1,
+                {
+                    "metadata.json": json.dumps(
+                        {"attempt": 1, "client": "codex", "retry_of": None},
+                        sort_keys=True,
+                    ),
+                    "first.final.txt": compact,
+                    "workspace-reports/RPT-001/current.json": pointer,
+                    "workspace-reports/RPT-001/revision-0001.json": state,
+                    "workspace-reports/RPT-001/revision-0001.md": canonical,
+                },
+                root / "quarantine",
+            )
+            result = RunResult(
+                case.id,
+                1,
+                "codex",
+                RunStatus.PASS,
+                None,
+                final_output=compact,
+            )
+
+            score, trusted, digests = _score_selected_attempt(
+                raw, "codex", ScheduledRun(case, 1), result
+            )
+
+        self.assertTrue(trusted)
+        self.assertTrue(score.passed, score.findings)
+        self.assertTrue(
+            any(path.endswith("workspace-reports/RPT-001/revision-0001.md") for path, _ in digests)
+        )
 
     def test_lineage_non_utf8_predecessor_invalidates_scoring_evidence(self):
         """Replacement decoding would sever the SHA from the exact predecessor bytes."""

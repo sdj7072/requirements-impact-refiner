@@ -246,7 +246,8 @@ class DocumentationTest(unittest.TestCase):
     def test_runbook_records_exact_predecessor_handoff_without_rubric_disclosure(self):
         text = (ROOT / "evals/runbook.md").read_text(encoding="utf-8")
 
-        self.assertIn("`first.final.txt`", text)
+        self.assertIn("`current.json`", text)
+        self.assertIn("canonical Markdown", text)
         self.assertIn("exact bytes", text)
         self.assertIn("does not expose a hidden rubric", text)
 

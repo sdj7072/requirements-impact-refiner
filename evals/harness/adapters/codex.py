@@ -22,9 +22,9 @@ _CANONICAL_RIR_PLUGIN_ID = (
 _SUPERPOWERS_PLUGIN_ID = "superpowers@openai-curated"
 _PREDECESSOR_HANDOFF = (
     "Harness continuity evidence:\n"
-    "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
-    "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; "
-    "do not reconstruct it from conversation text or add, remove, or normalize bytes."
+    "- In compact delivery, read `.requirements-impact-refiner/reports/RPT-###/current.json` and hash the exact canonical Markdown file it selects.\n"
+    "- `first.final.txt` is the chat response, not canonical lineage bytes, unless no persisted report exists and it is itself a complete canonical report.\n"
+    "- Do not reconstruct predecessor bytes from conversation text or add, remove, or normalize bytes."
 )
 
 

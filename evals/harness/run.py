@@ -4,9 +4,10 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence, Tuple
 
@@ -22,6 +23,11 @@ from .scoring import score_mechanical
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RAW_DIRECTORY = "raw"
 _DERIVED_ARTIFACTS = frozenset(("probes.json", "controller.json", "report.md", "scores.json"))
+_REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
+_POINTER_KEYS = {
+    "schema_version", "report_id", "revision", "state", "markdown",
+    "markdown_sha256",
+}
 
 
 @dataclass(frozen=True)
@@ -469,6 +475,80 @@ def _read_selected_file(
     return payload, hashlib.sha256(payload).hexdigest(), relative_manifest
 
 
+def _captured_canonical_report(
+    raw_root: Path, attempt_path: Path, lineage: bool
+) -> Optional[Tuple[bytes, Optional[bytes], Tuple[Tuple[str, str], ...]]]:
+    report_root = attempt_path / "workspace-reports"
+    if not report_root.exists():
+        return None
+    if report_root.is_symlink() or not report_root.is_dir():
+        raise ValueError("captured workspace report root must be a regular directory")
+    report_directories = [path for path in report_root.iterdir() if path.is_dir()]
+    if len(report_directories) != 1 or any(path.is_symlink() for path in report_directories):
+        raise ValueError("captured workspace reports require exactly one regular report directory")
+    report_directory = report_directories[0]
+    if _REPORT_ID_PATTERN.fullmatch(report_directory.name) is None:
+        raise ValueError("captured workspace report has an invalid report ID")
+    pointer_bytes, pointer_digest, pointer_path = _read_selected_file(
+        raw_root, report_directory / "current.json", "captured current pointer"
+    )
+    try:
+        pointer = json.loads(pointer_bytes.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("captured current pointer is not valid UTF-8 JSON") from error
+    if not isinstance(pointer, dict) or set(pointer) != _POINTER_KEYS:
+        raise ValueError("captured current pointer has an invalid schema")
+    report_id = pointer.get("report_id")
+    revision = pointer.get("revision")
+    if (
+        pointer.get("schema_version") != 1
+        or report_id != report_directory.name
+        or not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision < 1
+    ):
+        raise ValueError("captured current pointer identity is invalid")
+    expected_state = "revision-%04d.json" % revision
+    expected_markdown = "revision-%04d.md" % revision
+    if pointer.get("state") != expected_state or pointer.get("markdown") != expected_markdown:
+        raise ValueError("captured current pointer paths are not canonical")
+    state_bytes, state_digest, state_path = _read_selected_file(
+        raw_root, report_directory / expected_state, "captured compact state"
+    )
+    markdown_bytes, markdown_digest, markdown_path = _read_selected_file(
+        raw_root, report_directory / expected_markdown, "captured canonical Markdown"
+    )
+    try:
+        state = json.loads(state_bytes.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("captured compact state is not valid UTF-8 JSON") from error
+    if not isinstance(state, dict) or not isinstance(state.get("report"), dict):
+        raise ValueError("captured compact state report metadata is unavailable")
+    if (
+        state["report"].get("id"), state["report"].get("revision")
+    ) != (report_id, revision):
+        raise ValueError("captured compact state disagrees with current pointer")
+    if pointer.get("markdown_sha256") != markdown_digest:
+        raise ValueError("captured current pointer Markdown SHA-256 does not match")
+    digests = [
+        (pointer_path, pointer_digest),
+        (state_path, state_digest),
+        (markdown_path, markdown_digest),
+    ]
+    previous_bytes = None
+    if lineage and revision < 2:
+        raise ValueError("captured lineage report did not publish a new revision")
+    if revision > 1:
+        previous_name = "revision-%04d.md" % (revision - 1)
+        previous_bytes, previous_digest, previous_path = _read_selected_file(
+            raw_root,
+            report_directory / previous_name,
+            "captured canonical predecessor Markdown",
+        )
+        digests.append((previous_path, previous_digest))
+    return markdown_bytes, previous_bytes, tuple(digests)
+
+
 def _score_selected_attempt(
     raw_root: Path,
     expected_client: str,
@@ -533,8 +613,25 @@ def _score_selected_attempt(
             slot, result, "selected final output does not match raw evidence"
         )
 
+    scoring_result = result
     previous_bytes = None
-    if slot.case.kind == "lineage":
+    try:
+        captured = _captured_canonical_report(
+            raw_root, attempt_path, slot.case.kind == "lineage"
+        )
+    except (OSError, ValueError) as error:
+        return _scoring_evidence_failure(slot, result, str(error))
+    if captured is not None:
+        canonical_bytes, previous_bytes, captured_digests = captured
+        try:
+            canonical_output = canonical_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            return _scoring_evidence_failure(
+                slot, result, "captured canonical Markdown is not valid UTF-8"
+            )
+        digests.extend(captured_digests)
+        scoring_result = replace(result, final_output=canonical_output)
+    elif slot.case.kind == "lineage":
         try:
             previous_bytes, previous_digest, previous_path = _read_selected_file(
                 raw_root,
@@ -550,7 +647,7 @@ def _score_selected_attempt(
         except (OSError, ValueError) as error:
             return _scoring_evidence_failure(slot, result, str(error))
     return (
-        score_mechanical(slot.case, result, previous_bytes=previous_bytes),
+        score_mechanical(slot.case, scoring_result, previous_bytes=previous_bytes),
         True,
         tuple(digests),
     )

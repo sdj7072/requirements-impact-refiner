@@ -9,6 +9,12 @@ from evals.harness.models import CaseSpec, CaseTurn, RunRequest, RunStatus
 
 
 UUID = "123e4567-e89b-12d3-a456-426614174000"
+COMPACT_PREDECESSOR_HANDOFF = (
+    "Harness continuity evidence:\n"
+    "- In compact delivery, read `.requirements-impact-refiner/reports/RPT-###/current.json` and hash the exact canonical Markdown file it selects.\n"
+    "- `first.final.txt` is the chat response, not canonical lineage bytes, unless no persisted report exists and it is itself a complete canonical report.\n"
+    "- Do not reconstruct predecessor bytes from conversation text or add, remove, or normalize bytes."
+)
 INSTALLED_PLUGIN_LIST = {
     "installed": [
         {
@@ -216,10 +222,8 @@ class CodexAdapterTest(unittest.TestCase):
                 "-o",
                 str(Path(temporary) / "FINAL"),
                 UUID,
-                "second turn\n\nRepository evidence:\n- src/example.py"
-                "\n\nHarness continuity evidence:\n"
-                "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
-                "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; do not reconstruct it from conversation text or add, remove, or normalize bytes.",
+                "second turn\n\nRepository evidence:\n- src/example.py\n\n"
+                + COMPACT_PREDECESSOR_HANDOFF,
             ),
         )
         self.assertNotIn("--last", argv)
@@ -610,10 +614,8 @@ class CodexAdapterTest(unittest.TestCase):
 
         self.assertEqual(
             argv[-1],
-            "same prompt\n\nRepository evidence:\n- supplied.py"
-            "\n\nHarness continuity evidence:\n"
-            "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
-            "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; do not reconstruct it from conversation text or add, remove, or normalize bytes.",
+            "same prompt\n\nRepository evidence:\n- supplied.py\n\n"
+            + COMPACT_PREDECESSOR_HANDOFF,
         )
         self.assertNotIn("must_detect", argv[-1])
         self.assertNotIn("must_not_do", argv[-1])
@@ -654,10 +656,8 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertEqual(
             execution_commands[1][-1],
-            "same prompt\n\nRepository evidence:\n- second.py"
-            "\n\nHarness continuity evidence:\n"
-            "- The exact predecessor report bytes are available in `first.final.txt` in the current working directory.\n"
-            "- Read `first.final.txt` and compute or validate any predecessor SHA-256 from its exact bytes; do not reconstruct it from conversation text or add, remove, or normalize bytes.",
+            "same prompt\n\nRepository evidence:\n- second.py\n\n"
+            + COMPACT_PREDECESSOR_HANDOFF,
         )
         self.assertEqual(persisted_second_prompt, execution_commands[1][-1])
         self.assertEqual(persisted_second_prompt.count("Harness continuity evidence:"), 1)
