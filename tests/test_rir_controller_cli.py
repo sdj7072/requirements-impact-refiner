@@ -140,6 +140,16 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("256 KiB", result.stderr)
 
+    def test_deep_json_returns_bounded_error_without_traceback(self):
+        self.begin_path.write_text("[" * 1500 + "0" + "]" * 1500, encoding="utf-8")
+
+        result = self.begin()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("cannot read input", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

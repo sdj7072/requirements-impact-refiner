@@ -58,7 +58,7 @@ def _read_object(path: Path, maximum: int, label: str):
             raise ValueError(f"{label} exceeds {unit}")
         text = raw.decode("utf-8")
         value = json.loads(text)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise OSError(f"cannot read input: {error}") from error
     finally:
         if descriptor is not None:

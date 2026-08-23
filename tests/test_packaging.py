@@ -1,6 +1,8 @@
 import json
+import importlib.util
 import re
 import shlex
+import shutil
 import struct
 import tempfile
 import unittest
@@ -10,6 +12,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_COMPONENTS = {"mcpServers", "apps", "hooks", "agents", "dependencies"}
+PAYLOAD_SPEC = importlib.util.spec_from_file_location(
+    "payload_identity_test", ROOT / "scripts" / "payload_identity.py"
+)
+PAYLOAD_IDENTITY = importlib.util.module_from_spec(PAYLOAD_SPEC)
+PAYLOAD_SPEC.loader.exec_module(PAYLOAD_IDENTITY)
 
 
 def ci_run_commands(workflow_text):
@@ -152,6 +159,40 @@ def checkout_step_inputs(workflow_text):
 
 
 class PackagingTest(unittest.TestCase):
+    def test_payload_identity_covers_every_live_mcp_dependency_and_mutation(self):
+        required = {
+            ".codex-plugin/plugin.json",
+            ".mcp.json",
+            "schemas/controller-analysis.schema.json",
+            "scripts/launch-rir-mcp",
+            "scripts/payload_identity.py",
+            "scripts/rir_mcp_server.py",
+            "scripts/rir_controller.py",
+            "scripts/compact_state.py",
+            "scripts/impact_renderer.py",
+            "scripts/impact_report.py",
+            "scripts/validate-impact-report.py",
+            "scripts/report_store.py",
+            "scripts/resolve-settings.py",
+        }
+        paths = PAYLOAD_IDENTITY.functional_paths(ROOT)
+        relative = {path.relative_to(ROOT).as_posix() for path in paths}
+        self.assertTrue(required <= relative)
+        with tempfile.TemporaryDirectory() as temporary:
+            copy_root = Path(temporary) / "plugin"
+            for source in paths:
+                destination = copy_root / source.relative_to(ROOT)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+            baseline = PAYLOAD_IDENTITY.payload_sha256(copy_root)
+            for name in sorted(required):
+                target = copy_root / name
+                original = target.read_bytes()
+                target.write_bytes(original + b"\nmutation")
+                self.assertNotEqual(
+                    PAYLOAD_IDENTITY.payload_sha256(copy_root), baseline, name
+                )
+                target.write_bytes(original)
     def load(self, relative_path):
         return json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
 

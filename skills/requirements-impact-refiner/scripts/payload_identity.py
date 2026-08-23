@@ -7,10 +7,19 @@ from pathlib import Path
 
 
 ROOT_FILES = (
+    ".codex-plugin/plugin.json",
     ".mcp.json",
+    "schemas/controller-analysis.schema.json",
+    "scripts/compact_state.py",
+    "scripts/impact_renderer.py",
+    "scripts/impact_report.py",
     "scripts/launch-rir-mcp",
     "scripts/payload_identity.py",
+    "scripts/report_store.py",
+    "scripts/resolve-settings.py",
+    "scripts/rir_controller.py",
     "scripts/rir_mcp_server.py",
+    "scripts/validate-impact-report.py",
 )
 
 
