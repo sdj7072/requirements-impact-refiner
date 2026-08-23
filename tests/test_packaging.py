@@ -198,13 +198,28 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
         self.assertEqual(manifest["version"], "0.4.0")
         self.assertEqual(manifest["skills"], "./skills/")
-        self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
+        self.assertEqual(manifest["mcpServers"], "./.mcp.json")
+        self.assertTrue((FORBIDDEN_COMPONENTS - {"mcpServers"}).isdisjoint(manifest))
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
         self.assertEqual(manifest["version"], "0.4.0")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
+
+    def test_mcp_config_uses_local_relative_launcher_without_credentials(self):
+        config = self.load(".mcp.json")
+        self.assertEqual(set(config), {"mcpServers"})
+        self.assertEqual(set(config["mcpServers"]), {"requirements-impact-refiner"})
+        server = config["mcpServers"]["requirements-impact-refiner"]
+        self.assertEqual(server["command"], "./scripts/launch-rir-mcp")
+        self.assertEqual(server["args"], [])
+        self.assertEqual(server["cwd"], ".")
+        self.assertNotIn("url", server)
+        self.assertEqual(server.get("env_vars", []), [])
+        launcher = ROOT / "scripts/launch-rir-mcp"
+        self.assertTrue(launcher.is_file())
+        self.assertTrue(launcher.stat().st_mode & 0o111)
 
     def test_automatic_bootstrap_skill_is_discoverable(self):
         path = ROOT / "skills/using-requirements-impact-refiner/SKILL.md"
@@ -293,7 +308,11 @@ class PackagingTest(unittest.TestCase):
         mirror_contract = {
             "references": set(),
             "assets": {Path("logo.png"), Path("compact-delivery-demo.svg")},
-            "scripts": {Path("install-agent-skill.py")},
+            "scripts": {
+                Path("install-agent-skill.py"),
+                Path("launch-rir-mcp"),
+                Path("rir_mcp_server.py"),
+            },
             "schemas": set(),
         }
 

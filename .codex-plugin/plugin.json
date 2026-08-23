@@ -16,6 +16,7 @@
     "agent-skills"
   ],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Requirements Impact Refiner",
     "shortDescription": "Refine changes against repository impact",
