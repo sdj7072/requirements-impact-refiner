@@ -96,6 +96,47 @@ def digests():
     }
 
 
+def receipt_from_scan(result):
+    return {
+        "schema_version": 1,
+        "receipt_id": "6" * 32,
+        "draft_id": "7" * 32,
+        "repo_root_sha256": "8" * 64,
+        "request_sha256": "9" * 64,
+        "settings": {
+            "enabled": True, "max_seconds": 30, "target_seconds": 10,
+            "providers": ["auto"], "install_policy": "never", "deep": False,
+        },
+        "providers": [{
+            "name": "builtin", "status": "ready",
+            "confidence": "verified-source", "version": "builtin-v1",
+            "executable_sha256": "4" * 64,
+        }],
+        "nodes": [{
+            "id": node.id, "kind": node.kind, "label": node.label,
+            "location": node.location, "provider": node.provider,
+            "confidence": node.confidence, "source_sha256": node.source_sha256,
+            "risk_domains": list(node.risk_domains),
+        } for node in result.nodes],
+        "edges": [{
+            "id": edge.id, "source": edge.source, "target": edge.target,
+            "kind": edge.kind, "location": edge.location,
+            "evidence": edge.evidence, "confidence": edge.confidence,
+            "provider": edge.provider, "source_sha256": edge.source_sha256,
+        } for edge in result.edges],
+        "paths": [{
+            "id": path.id, "nodes": list(path.nodes), "edges": list(path.edges),
+            "distance": path.distance, "risk_domains": list(path.risk_domains),
+        } for path in result.paths],
+        "frontier": [{
+            "id": item.id, "node": item.node, "reason": item.reason,
+            "risk_domains": list(item.risk_domains),
+        } for item in result.frontier],
+        "timings_ms": {"total": 1}, "budget_status": result.budget_status,
+        "cache": {"status": "miss", "key": "5" * 64, "invalidated_nodes": []},
+    }
+
+
 class GraphCacheTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -266,47 +307,84 @@ class GraphCacheTest(unittest.TestCase):
         )
 
         self.assertNotIn(secret, repr(result))
-        graph_receipt = {
-            "schema_version": 1,
-            "receipt_id": "6" * 32,
-            "draft_id": "7" * 32,
-            "repo_root_sha256": "8" * 64,
-            "request_sha256": "9" * 64,
-            "settings": {
-                "enabled": True, "max_seconds": 30, "target_seconds": 10,
-                "providers": ["auto"], "install_policy": "never", "deep": False,
-            },
-            "providers": [{
-                "name": "builtin", "status": "ready",
-                "confidence": "verified-source", "version": "builtin-v1",
-                "executable_sha256": "4" * 64,
-            }],
-            "nodes": [{
-                "id": node.id, "kind": node.kind, "label": node.label,
-                "location": node.location, "provider": node.provider,
-                "confidence": node.confidence, "source_sha256": node.source_sha256,
-                "risk_domains": list(node.risk_domains),
-            } for node in result.nodes],
-            "edges": [{
-                "id": edge.id, "source": edge.source, "target": edge.target,
-                "kind": edge.kind, "location": edge.location,
-                "evidence": edge.evidence, "confidence": edge.confidence,
-                "provider": edge.provider, "source_sha256": edge.source_sha256,
-            } for edge in result.edges],
-            "paths": [{
-                "id": path.id, "nodes": list(path.nodes), "edges": list(path.edges),
-                "distance": path.distance, "risk_domains": list(path.risk_domains),
-            } for path in result.paths],
-            "frontier": [{
-                "id": item.id, "node": item.node, "reason": item.reason,
-                "risk_domains": list(item.risk_domains),
-            } for item in result.frontier],
-            "timings_ms": {"total": 1}, "budget_status": result.budget_status,
-            "cache": {"status": "miss", "key": "5" * 64, "invalidated_nodes": []},
-        }
-        published = CACHE.publish(self.root, graph_receipt, result.source_digests)
+        published = CACHE.publish(
+            self.root, receipt_from_scan(result), result.source_digests
+        )
 
         self.assertNotIn(secret.encode("utf-8"), published.artifact.read_bytes())
+
+    def test_secret_key_contexts_redact_ordinary_values_across_config_syntaxes(self):
+        cases = {
+            "aws_python": (
+                ".py", 'AWS_SECRET_ACCESS_KEY = "{value}"\nMARKER = "credentialRotation"\n'
+            ),
+            "client_json": (
+                ".json", '{{"client_secret":"{value}","marker":"credentialRotation"}}'
+            ),
+            "access_yaml": (
+                ".yaml", 'access-token: "{value}"\nmarker: "credentialRotation"\n'
+            ),
+            "refresh_env": (
+                ".env", "REFRESH_TOKEN={value}\nMARKER=credentialRotation\n"
+            ),
+            "password_python": (
+                ".py", 'password = "{value}"\nmarker = "credentialRotation"\n'
+            ),
+            "passwd_yaml": (
+                ".yaml", 'passwd: "{value}"\nmarker: "credentialRotation"\n'
+            ),
+            "private_json": (
+                ".json", '{{"private_key":"{value}","marker":"credentialRotation"}}'
+            ),
+            "api_env": (
+                ".env", "API_KEY={value}\nMARKER=credentialRotation\n"
+            ),
+            "secret_json": (
+                ".json", '{{"secret":"{value}","marker":"credentialRotation"}}'
+            ),
+            "credential_yaml": (
+                ".yaml", 'credential: "{value}"\nmarker: "credentialRotation"\n'
+            ),
+        }
+        for index, (name, (suffix, template)) in enumerate(cases.items()):
+            with self.subTest(name=name):
+                case_root = self.root / name
+                case_root.mkdir()
+                raw = f"ordinary{name.title().replace('_', '')}ValueForImpact"
+                for stem in ("source_a", "source_b"):
+                    (case_root / f"{stem}{suffix}").write_text(
+                        template.format(value=raw), encoding="utf-8"
+                    )
+                result = BUILTIN.scan_repository(
+                    case_root,
+                    (BUILTIN.ScanSeed("credentialRotation", f"source_a{suffix}"),),
+                    BUILTIN.ScanLimits(), StaticClock(),
+                )
+
+                self.assertIn("credentialRotation", {node.label for node in result.nodes})
+                self.assertNotIn(raw, repr(result))
+                self.assertTrue(all(raw not in node.label for node in result.nodes))
+                self.assertTrue(all(raw not in edge.evidence for edge in result.edges))
+                published = CACHE.publish(
+                    case_root, receipt_from_scan(result), result.source_digests,
+                    schema_version=index + 1,
+                )
+                self.assertNotIn(raw.encode("utf-8"), published.artifact.read_bytes())
+
+        innocent_root = self.root / "innocent_symbol"
+        innocent_root.mkdir()
+        innocent = "ordinaryLongSharedDomainSymbolWithoutCredentialContext"
+        for stem in ("source_a.py", "source_b.py"):
+            (innocent_root / stem).write_text(
+                f'MESSAGE = "{innocent}"\n', encoding="utf-8"
+            )
+        innocent_result = BUILTIN.scan_repository(
+            innocent_root,
+            (BUILTIN.ScanSeed(innocent, "source_a.py"),),
+            BUILTIN.ScanLimits(), StaticClock(),
+        )
+        self.assertIn(innocent, {node.label for node in innocent_result.nodes})
+        self.assertIn(innocent, {edge.evidence for edge in innocent_result.edges})
 
     def test_rejects_symlinked_cache_components(self):
         outside = Path(self.temporary.name) / "outside"

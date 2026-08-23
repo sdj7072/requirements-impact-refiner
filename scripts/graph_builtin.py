@@ -49,11 +49,12 @@ _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 _QUOTED = re.compile(r"(?P<quote>['\"])(?P<value>[^'\"\r\n]{2,256})(?P=quote)")
 _IMPORT = re.compile(r"(?m)^\s*(?:from|import)\s+(?P<value>[^\r\n#]+)")
 _SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)(?P<prefix>\b(?:api[_-]?key|password|token|secret|credential)\b"
-    r"\s*[:=]\s*)(?P<quote>['\"])(?P<value>[^'\"\r\n]+)(?P=quote)"
-)
-_SECRET_SHAPE = re.compile(
-    r"(?i)(?:sk|pk)[-_][A-Za-z0-9_-]{12,}|[A-Za-z0-9+/]{32,}={0,2}"
+    r"(?i)(?P<prefix>(?<![A-Za-z0-9_])(?P<keyquote>['\"]?)"
+    r"(?:aws[_-]secret[_-]access[_-]key|client[_-]secret|access[_-]token|"
+    r"refresh[_-]token|password|passwd|private[_-]key|api[_-]key|secret|"
+    r"credential)(?P=keyquote)\s*[:=]\s*)"
+    r"(?:(?P<quote>['\"])(?P<quoted>[^'\"\r\n]+)(?P=quote)|"
+    r"(?P<bare>[^\s,#}\]]+))"
 )
 _COMMON_TERMS = frozenset({
     "assert", "class", "const", "def", "export", "from", "function",
@@ -190,7 +191,7 @@ def _expanded_terms(values) -> frozenset[str]:
 
 
 def _safe_graph_text(value: str, sensitive_literals=()) -> str:
-    if value in sensitive_literals or _SECRET_SHAPE.fullmatch(value):
+    if value in sensitive_literals:
         return "sensitive-sha256-" + hashlib.sha256(value.encode("utf-8")).hexdigest()
     return value
 
@@ -199,10 +200,11 @@ def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
     sensitive = set()
 
     def replace(match):
-        value = match.group("value")
+        value = match.group("quoted") or match.group("bare")
         sensitive.add(value)
         safe = _safe_graph_text(value, (value,))
-        return match.group("prefix") + match.group("quote") + safe + match.group("quote")
+        quote = match.group("quote") or ""
+        return match.group("prefix") + quote + safe + quote
 
     return _SENSITIVE_ASSIGNMENT.sub(replace, text), frozenset(sensitive)
 
@@ -290,6 +292,7 @@ def _walk_files(
                     yield Path(entry.path), relative
             except OSError:
                 skipped[relative] = "unsafe-file"
+                traversal_errors.append(relative)
         pending[0:0] = directories
 
 
@@ -417,10 +420,7 @@ def scan_repository(
             shared = sorted(source_terms & documents[target][1], key=lambda value: (-len(value), value))
             if shared:
                 evidence = shared[0]
-                categories = frozenset(
-                    documents[source][3].get(evidence, ())
-                    | documents[target][3].get(evidence, ())
-                )
+                categories = documents[source][3].get(evidence, frozenset())
                 relationships.append((source, target, evidence, categories))
 
     reachable = set(seed_locations)
@@ -450,10 +450,23 @@ def scan_repository(
             location,
         ),
     )
-    error_locations = sorted(set(traversal_errors))[:GRAPH.MAX_FRONTIER]
-    candidates = [(location, None, True) for location in error_locations]
-    candidates.extend((location, None, False) for location in ordered_locations)
+    all_error_locations = sorted(set(traversal_errors))
+    error_limit = (
+        GRAPH.MAX_FRONTIER - 1
+        if len(all_error_locations) > GRAPH.MAX_FRONTIER
+        else GRAPH.MAX_FRONTIER
+    )
+    error_locations = all_error_locations[:error_limit]
+    matched_locations = [
+        location for location in ordered_locations if location in seed_locations
+    ]
+    remaining_locations = [
+        location for location in ordered_locations if location not in seed_locations
+    ]
+    candidates = [(location, None, False) for location in matched_locations]
     candidates.extend((None, seed, False) for seed in supplied_only)
+    candidates.extend((location, None, False) for location in remaining_locations)
+    candidates.extend((location, None, True) for location in error_locations)
     if len(candidates) > limits.max_nodes:
         exhausted = True
     candidates = candidates[:limits.max_nodes]
@@ -570,6 +583,13 @@ def scan_repository(
                 f"FRONTIER-{len(frontier_items) + 1:03d}", node_id,
                 f"unreadable directory: {display}", ("functionality",),
             ))
+    omitted_errors = len(all_error_locations) - len(error_node_ids)
+    if omitted_errors and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
+        frontier_items.append(FrontierEntry(
+            f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[0].id,
+            f"{omitted_errors} unreadable directories omitted from node capacity",
+            nodes[0].risk_domains,
+        ))
     if exhausted and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
         frontier_items.append(FrontierEntry(
             f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[-1].id,

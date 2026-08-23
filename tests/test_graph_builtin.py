@@ -111,6 +111,69 @@ class GraphBuiltinTest(unittest.TestCase):
                 for item in result.frontier
             ))
 
+    def test_directory_entry_classification_error_is_unknown_frontier(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            resolved = root.resolve()
+
+            class FailingEntry:
+                name = "classification-blocked"
+                path = str(resolved / name)
+
+                def is_symlink(self):
+                    return False
+
+                def is_dir(self, follow_symlinks=False):
+                    raise PermissionError("controlled classification failure")
+
+                def is_file(self, follow_symlinks=False):
+                    return False
+
+            with mock.patch.object(BUILTIN.os, "scandir", return_value=[FailingEntry()]):
+                result = scan(
+                    root,
+                    seeds=(BUILTIN.ScanSeed("profile.displayName", None),),
+                )
+
+            self.assertEqual(result.budget_status, "provider_limited")
+            blocked = next(
+                node for node in result.nodes
+                if node.location == "classification-blocked"
+            )
+            self.assertTrue(any(
+                item.node == blocked.id and "classification-blocked" in item.reason
+                for item in result.frontier
+            ))
+
+    def test_unknown_placeholders_never_displace_seed_under_tight_node_limit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "api").mkdir()
+            (root / "api/profile.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            for name in ("blocked-a", "blocked-b"):
+                (root / name).mkdir()
+            real_scandir = BUILTIN.os.scandir
+
+            def controlled_scandir(directory):
+                if Path(directory).name.startswith("blocked-"):
+                    raise PermissionError("controlled unreadable subtree")
+                return real_scandir(directory)
+
+            with mock.patch.object(BUILTIN.os, "scandir", side_effect=controlled_scandir):
+                result = scan(
+                    root,
+                    limits=BUILTIN.ScanLimits(max_nodes=1),
+                )
+
+            self.assertEqual(result.budget_status, "provider_limited")
+            self.assertEqual([node.location for node in result.nodes], ["api/profile.py"])
+            self.assertTrue(any(
+                "2 unreadable directories omitted" in item.reason
+                for item in result.frontier
+            ))
+
     def test_rejects_traversal_and_root_symlinks_and_skips_file_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"
@@ -253,6 +316,34 @@ class GraphBuiltinTest(unittest.TestCase):
             self.assertEqual(len(matching), 1)
             self.assertEqual(matching[0].kind, "references")
             self.assertEqual(matching[0].confidence, "lexical")
+
+    def test_import_provenance_is_directional_from_the_source_occurrence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "consumer.py").write_text(
+                "from shared_model import SharedModel\n", encoding="utf-8"
+            )
+            (root / "shared_model.py").write_text(
+                "class SharedModel:\n    pass\n", encoding="utf-8"
+            )
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("SharedModel", "consumer.py"),)
+            )
+            locations = {node.id: node.location for node in result.nodes}
+            directions = {
+                (locations[edge.source], locations[edge.target]):
+                (edge.kind, edge.confidence)
+                for edge in result.edges
+            }
+
+            self.assertEqual(
+                directions[("consumer.py", "shared_model.py")],
+                ("imports", "structural-inferred"),
+            )
+            self.assertEqual(
+                directions[("shared_model.py", "consumer.py")],
+                ("references", "lexical"),
+            )
 
     def test_deadline_stops_before_traversal_and_during_frontier_expansion(self):
         immediate = FakeClock((5.0, 5.0))
