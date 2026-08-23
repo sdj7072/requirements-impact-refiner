@@ -110,18 +110,50 @@ def _repo_identity(root: Path) -> str:
     return hashlib.sha256(str(root).encode("utf-8")).hexdigest()
 
 
+def _basic_provider_inventory(probes):
+    return tuple(sorted((
+        (probe.name, probe.version, probe.executable_sha256)
+        for probe in probes
+    )))
+
+
+def _trace_identity(root, draft_id, request_sha256, seeds, settings, probes):
+    payload = json.dumps({
+        "repo_root_sha256": _repo_identity(root),
+        "draft_id": draft_id,
+        "request_sha256": request_sha256,
+        "seeds": [
+            {"term": seed.term, "location": seed.location} for seed in seeds
+        ],
+        "settings": settings.to_mapping(),
+        "providers": _basic_provider_inventory(probes),
+        "builtin": ("builtin", "builtin-v1"),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
 def _risk_domains(seed: ScanSeed) -> tuple:
     text = (seed.term + " " + (seed.location or "")).lower()
-    domains = []
+    domains = set()
     if any(term in text for term in ("auth", "permission", "privacy", "role", "access")):
-        domains.append("authorization/privacy")
+        domains.add("authorization/privacy")
+    if any(term in text for term in ("legal", "license", "policy", "compliance", "terms")):
+        domains.add("legal/policy")
     if any(term in text for term in ("schema", "database", "cache", "persist", "profile", "data")):
-        domains.append("data")
+        domains.add("data")
     if any(term in text for term in ("api", "contract", "event", "client")):
-        domains.append("interfaces")
+        domains.add("interfaces")
     if any(term in text for term in ("deploy", "config", "worker", "health", "operation")):
-        domains.append("operations")
-    return tuple(domains or ("functionality",))
+        domains.add("operations")
+    if any(term in text for term in ("state", "concurrency", "lock", "race", "retry", "idempot")):
+        domains.add("state/concurrency")
+    if any(term in text for term in ("regression", "test", "fixture")):
+        domains.add("regression")
+    if any(term in text for term in ("compatibility", "backward", "legacy", "migration")):
+        domains.add("compatibility")
+    if not domains:
+        domains.add("functionality")
+    return tuple(sorted(domains, key=lambda item: (_RISK_RANK[item], item)))
 
 
 def _seed_key(seed: ScanSeed):
@@ -228,26 +260,41 @@ def _receipt_from_mapping(value):
 
 def _provider_inventory_matches(receipt, probes) -> bool:
     cached = {
-        item["name"]: (
-            item["status"], item["version"], item["executable_sha256"], item["confidence"],
-        )
+        item["name"]: (item["version"], item["executable_sha256"])
         for item in receipt.get("providers", ())
         if item.get("name") != "builtin"
     }
     current = {
-        item.name: (item.status, item.version, item.executable_sha256, item.confidence)
+        item.name: (item.version, item.executable_sha256)
         for item in probes
     }
     return cached == current
 
 
-def _load_cache(root, source_digests, probes):
+def _cached_trace_matches(
+    receipt, trace_identity, draft_id, root, request_sha256, settings, probes,
+):
+    return (
+        receipt.get("receipt_id") == trace_identity
+        and receipt.get("draft_id") == draft_id
+        and receipt.get("repo_root_sha256") == _repo_identity(root)
+        and receipt.get("request_sha256") == request_sha256
+        and receipt.get("settings") == settings.to_mapping()
+        and _provider_inventory_matches(receipt, probes)
+    )
+
+
+def _load_cache(
+    root, source_digests, probes, trace_identity, draft_id, request_sha256, settings,
+):
     key = _current_cache_key(root)
     if key is None:
         return CACHE.CacheResult("miss", "0" * 64, None, ())
     result = CACHE.load(root, key, source_digests)
-    if result.receipt is not None and not _provider_inventory_matches(result.receipt, probes):
-        return CACHE.CacheResult("miss", key, None, ())
+    if result.receipt is not None and not _cached_trace_matches(
+        result.receipt, trace_identity, draft_id, root, request_sha256, settings, probes,
+    ):
+        return CACHE.CacheResult("miss", "0" * 64, None, ())
     return result
 
 
@@ -560,12 +607,9 @@ def _renumber_frontier(frontier):
 
 
 def _receipt(
-    *, draft_id, root, request_sha256, settings, providers, nodes, edges, paths,
+    *, receipt_id, draft_id, root, request_sha256, settings, providers, nodes, edges, paths,
     frontier, timings, status, cache,
 ):
-    receipt_id = hashlib.sha256(
-        (draft_id + _repo_identity(root) + request_sha256).encode("ascii")
-    ).hexdigest()[:32]
     value = GRAPH.GraphReceipt(
         receipt_id, draft_id, _repo_identity(root), request_sha256, settings,
         tuple(providers), tuple(nodes), tuple(edges),
@@ -705,6 +749,9 @@ def trace_impact(repo_root, draft, seeds, settings, clock=time, runner=None):
     workspace = not root_input.is_symlink() and root_input.is_dir()
     root = root_input.resolve() if workspace else root_input.absolute()
     if not workspace:
+        trace_identity = _trace_identity(
+            root, draft_id, request_sha256, normalized_seeds, settings, (),
+        )
         nodes = [_placeholder(seed, index) for index, seed in enumerate(normalized_seeds, start=1)]
         if not nodes:
             nodes = [GRAPH.GraphNode(
@@ -716,7 +763,8 @@ def trace_impact(repo_root, draft, seeds, settings, clock=time, runner=None):
             "supplied-only evidence; workspace unavailable", node.risk_domains,
         ) for node in nodes[:GRAPH.MAX_FRONTIER]]
         return _receipt(
-            draft_id=draft_id, root=root, request_sha256=request_sha256,
+            receipt_id=trace_identity, draft_id=draft_id, root=root,
+            request_sha256=request_sha256,
             settings=settings, providers=(_builtin_status(),), nodes=nodes, edges=(),
             paths=(), frontier=frontier, timings={"total": deadline.elapsed_ms()},
             status="no_workspace", cache={
@@ -733,6 +781,35 @@ def trace_impact(repo_root, draft, seeds, settings, clock=time, runner=None):
         probes = tuple(sorted(probes, key=lambda item: (
             _PROVIDER_RANK.get(item.name, 99), item.name,
         )))
+
+    trace_identity = _trace_identity(
+        root, draft_id, request_sha256, normalized_seeds, settings, probes,
+    )
+    source_digests = (
+        _collect_source_digests(root, deadline) if not deadline.expired() else None
+    )
+    cache_result = (
+        _load_cache(
+            root, source_digests, probes, trace_identity, draft_id,
+            request_sha256, settings,
+        )
+        if source_digests is not None
+        else CACHE.CacheResult("miss", "0" * 64, None, ())
+    )
+    if cache_result.status == "hit" and cache_result.receipt is not None:
+        cached = _receipt_from_mapping(cache_result.receipt)
+        cached = replace(
+            cached,
+            timings_ms={**dict(cached.timings_ms), "total": deadline.elapsed_ms()},
+            cache={
+                "status": "hit", "key": cache_result.key,
+                "invalidated_nodes": [],
+            },
+        )
+        GRAPH.canonical_receipt_bytes(cached)
+        _persist_receipt(root, cached)
+        if cached.budget_status == "closed" or not cached.frontier:
+            return cached
 
     prepared_probes = []
     prepared_adapters = {}
@@ -759,6 +836,10 @@ def trace_impact(repo_root, draft, seeds, settings, clock=time, runner=None):
             )
             if not isinstance(specific, ProviderProbe) or specific.name != probe.name:
                 raise ValueError("provider adapter returned an invalid probe")
+            specific = replace(
+                specific, executable=probe.executable, version=probe.version,
+                executable_sha256=probe.executable_sha256, repo_root=root,
+            )
         except Exception as error:
             specific = replace(
                 probe, status="failed", confidence="lexical",
@@ -767,29 +848,6 @@ def trace_impact(repo_root, draft, seeds, settings, clock=time, runner=None):
         prepared_probes.append(specific)
         prepared_adapters[probe.name] = adapter
     probes = tuple(prepared_probes)
-
-    source_digests = (
-        _collect_source_digests(root, deadline) if not deadline.expired() else None
-    )
-    cache_result = (
-        _load_cache(root, source_digests, probes)
-        if source_digests is not None
-        else CACHE.CacheResult("miss", "0" * 64, None, ())
-    )
-    if cache_result.status == "hit" and cache_result.receipt is not None:
-        cached = _receipt_from_mapping(cache_result.receipt)
-        cached = replace(
-            cached,
-            timings_ms={**dict(cached.timings_ms), "total": deadline.elapsed_ms()},
-            cache={
-                "status": "hit", "key": cache_result.key,
-                "invalidated_nodes": [],
-            },
-        )
-        GRAPH.canonical_receipt_bytes(cached)
-        _persist_receipt(root, cached)
-        if cached.budget_status == "closed" or not cached.frontier:
-            return cached
 
     provider_results = []
     final_probes = list(probes)
@@ -876,7 +934,8 @@ def trace_impact(repo_root, draft, seeds, settings, clock=time, runner=None):
         "invalidated_nodes": list(invalidated),
     }
     receipt = _receipt(
-        draft_id=draft_id, root=root, request_sha256=request_sha256,
+        receipt_id=trace_identity, draft_id=draft_id, root=root,
+        request_sha256=request_sha256,
         settings=settings, providers=providers, nodes=nodes, edges=edges, paths=paths,
         frontier=frontier, timings={"total": deadline.elapsed_ms()}, status=status,
         cache=interim_cache,

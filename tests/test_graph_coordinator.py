@@ -178,6 +178,27 @@ class GraphCoordinatorTest(unittest.TestCase):
         self.assertEqual(third.cache["status"], "partial")
         self.assertTrue(third.cache["invalidated_nodes"])
 
+    def test_cache_never_returns_another_draft_or_different_seed_graph(self):
+        (self.root / "billing.py").write_text(
+            'FIELD = "billing.invoiceTotal"\n', encoding="utf-8"
+        )
+        first = COORDINATOR.trace_impact(
+            self.root, self.draft, self.seeds, self.settings,
+            clock=self.clock, runner=self.runner,
+        )
+        second_draft = {"draft_id": "2" * 32, "request": "rename invoice total"}
+        second = COORDINATOR.trace_impact(
+            self.root, second_draft,
+            (COORDINATOR.ScanSeed("billing.invoiceTotal", "billing.py"),),
+            self.settings, clock=self.clock, runner=self.runner,
+        )
+
+        self.assertEqual(first.cache["status"], "miss")
+        self.assertEqual(second.cache["status"], "miss")
+        self.assertEqual(second.draft_id, "2" * 32)
+        self.assertNotEqual(second.request_sha256, first.request_sha256)
+        self.assertTrue(any(node.location == "billing.py" for node in second.nodes))
+
     def test_closed_cache_hit_returns_before_builtin_graph_expansion(self):
         COORDINATOR.trace_impact(
             self.root, self.draft, self.seeds, self.settings,
@@ -219,6 +240,44 @@ class GraphCoordinatorTest(unittest.TestCase):
             [item[0] for item in calls].count("query"), 1,
         )
 
+    def test_closed_cache_returns_before_adapter_specific_probe(self):
+        calls = []
+        probe = COORDINATOR.ProviderProbe(
+            "codegraph", "ready", "verified-provider", Path("/bin/codegraph"),
+            "generic", "a" * 64,
+        )
+        settings = COORDINATOR.GraphSettings(
+            providers=("codegraph",), max_seconds=30, target_seconds=10,
+        )
+        with mock.patch.object(COORDINATOR, "discover_providers", return_value=(probe,)), \
+             mock.patch.object(
+                 COORDINATOR, "ADAPTERS",
+                 {"codegraph": FakeAdapter(candidate_result("codegraph"), calls)},
+             ):
+            first = COORDINATOR.trace_impact(
+                self.root, self.draft, self.seeds, settings,
+                clock=self.clock, runner=self.runner,
+            )
+
+        class FailingSlowProbe:
+            def probe(inner_self, spec, root, deadline, runner):
+                calls.append(("unexpected-probe", spec.name))
+                deadline.clock.advance(30)
+                raise RuntimeError("closed cache must return before this probe")
+
+        with mock.patch.object(COORDINATOR, "discover_providers", return_value=(probe,)), \
+             mock.patch.object(
+                 COORDINATOR, "ADAPTERS", {"codegraph": FailingSlowProbe()},
+             ):
+            second = COORDINATOR.trace_impact(
+                self.root, self.draft, self.seeds, settings,
+                clock=self.clock, runner=self.runner,
+            )
+
+        self.assertEqual(first.cache["status"], "miss")
+        self.assertEqual(second.cache["status"], "hit")
+        self.assertFalse(any(item[0] == "unexpected-probe" for item in calls))
+
     def test_provider_priority_is_deterministic_and_high_risk_seeds_run_first(self):
         calls = []
         probes = (
@@ -251,6 +310,30 @@ class GraphCoordinatorTest(unittest.TestCase):
             call[2][0] == "authorization.profile"
             for call in calls if call[0] == "query"
         ))
+
+    def test_all_ruled_risk_domains_are_emitted_and_legal_schedules_before_functionality(self):
+        cases = {
+            "license.policy": ("legal/policy",),
+            "state.lock.race": ("state/concurrency",),
+            "regression.test": ("regression",),
+            "backward.compatibility": ("compatibility",),
+            "cosmetic.label": ("functionality",),
+        }
+        for term, expected in cases.items():
+            with self.subTest(term=term):
+                self.assertEqual(
+                    COORDINATOR._risk_domains(COORDINATOR.ScanSeed(term, None)),
+                    expected,
+                )
+
+        ordered = sorted(
+            (
+                COORDINATOR.ScanSeed("cosmetic.label", None),
+                COORDINATOR.ScanSeed("license.policy", None),
+            ),
+            key=COORDINATOR._seed_key,
+        )
+        self.assertEqual(ordered[0].term, "license.policy")
 
     def test_precise_provider_query_precedes_builtin_structural_expansion(self):
         events = []

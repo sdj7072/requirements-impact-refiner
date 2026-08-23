@@ -223,6 +223,10 @@ class _ProcessOutcome:
     stderr_truncated: bool = False
 
 
+class UnsafeExecutableError(ValueError):
+    """The checked executable cannot be launched through its open descriptor."""
+
+
 def _bounded_detail(value: object) -> str:
     text = _CREDENTIAL_VALUE.sub("[REDACTED]", str(value).replace("\x00", ""))
     return text[:512]
@@ -308,9 +312,10 @@ def _append_bounded(target: bytearray, chunk: bytes, limit: int) -> bool:
     return len(chunk) > room
 
 
-def _terminate_process_group(process) -> None:
+def _terminate_process_group(process, process_group_id=None) -> None:
+    group_id = process.pid if process_group_id is None else process_group_id
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(group_id, signal.SIGKILL)
     except ProcessLookupError:
         return
     except OSError:
@@ -320,19 +325,45 @@ def _terminate_process_group(process) -> None:
             pass
 
 
+def _descriptor_executable_path(executable_fd: int):
+    """Return an executable descriptor path only when it resolves to the open file."""
+    try:
+        opened = os.fstat(executable_fd)
+    except OSError:
+        return None
+    for base in ("/proc/self/fd", "/dev/fd"):
+        candidate = base + "/" + str(executable_fd)
+        if not os.path.exists(candidate) or not os.access(candidate, os.X_OK):
+            continue
+        try:
+            pointed = os.stat(candidate)
+        except OSError:
+            continue
+        if (
+            stat.S_ISREG(pointed.st_mode)
+            and (pointed.st_dev, pointed.st_ino) == (opened.st_dev, opened.st_ino)
+        ):
+            return candidate
+    return None
+
+
 def _bounded_subprocess(
     argv, *, cwd, env, timeout, shell, start_new_session, stdout_limit, stderr_limit,
     executable_fd,
 ):
     if shell or not start_new_session:
         raise ValueError("provider subprocess security options are mandatory")
-    descriptor_path = Path("/proc/self/fd") / str(executable_fd)
-    executable = str(descriptor_path) if descriptor_path.exists() else argv[0]
+    executable = _descriptor_executable_path(executable_fd)
+    if executable is None:
+        raise UnsafeExecutableError(
+            "host cannot execute the provider through its validated descriptor"
+        )
     process = subprocess.Popen(
         argv, executable=executable, cwd=cwd, env=env, shell=False,
         start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         close_fds=True, pass_fds=(executable_fd,),
     )
+    process_group_id = process.pid
     selector = selectors.DefaultSelector()
     assert process.stdout is not None and process.stderr is not None
     selector.register(process.stdout, selectors.EVENT_READ, (bytearray(), stdout_limit))
@@ -341,13 +372,23 @@ def _bounded_subprocess(
     truncated = {process.stdout: False, process.stderr: False}
     expires = time.monotonic() + timeout
     timed_out = False
+    post_kill_expires = None
     try:
         while selector.get_map():
-            remaining = expires - time.monotonic()
-            if remaining <= 0 and process.poll() is None:
+            now = time.monotonic()
+            if now >= expires and not timed_out:
                 timed_out = True
-                _terminate_process_group(process)
-            events = selector.select(max(0.0, min(remaining, 0.05)))
+                post_kill_expires = now + 0.25
+                _terminate_process_group(process, process_group_id)
+            if timed_out and now >= post_kill_expires:
+                for stream in tuple(buffers):
+                    try:
+                        selector.unregister(stream)
+                    except (KeyError, ValueError):
+                        pass
+                break
+            wait_until = post_kill_expires if timed_out else expires
+            events = selector.select(max(0.0, min(wait_until - now, 0.05)))
             for key, _ in events:
                 stream = key.fileobj
                 chunk = os.read(stream.fileno(), 64 * 1024)
@@ -355,13 +396,6 @@ def _bounded_subprocess(
                     selector.unregister(stream)
                     continue
                 truncated[stream] |= _append_bounded(buffers[stream], chunk, key.data[1])
-            if timed_out and process.poll() is not None and not events:
-                for stream in tuple(buffers):
-                    try:
-                        selector.unregister(stream)
-                    except (KeyError, ValueError):
-                        pass
-                break
         returncode = process.wait(timeout=1)
     finally:
         selector.close()
@@ -423,13 +457,18 @@ def run_provider(
             )
         except subprocess.TimeoutExpired as error:
             return _empty_query(spec, "timed_out", argv, environment, error, digest)
+        except UnsafeExecutableError as error:
+            return _empty_query(spec, "unsafe", argv, environment, error, digest)
         except (OSError, ValueError) as error:
             return _empty_query(spec, "failed", argv, environment, error, digest)
+        if not _same_executable(executable, opened, digest):
+            return _empty_query(
+                spec, "unsafe", argv, environment,
+                "executable identity changed", digest,
+            )
     finally:
         os.close(descriptor)
 
-    if not _same_executable(executable, opened, digest):
-        return _empty_query(spec, "unsafe", argv, environment, "executable identity changed", digest)
     stdout_raw = getattr(outcome, "stdout", b"")
     stderr_raw = getattr(outcome, "stderr", b"")
     if not isinstance(stdout_raw, bytes) or not isinstance(stderr_raw, bytes):
@@ -473,7 +512,10 @@ def _configured_specs(requested, search_path, deep):
     if not values:
         return (), ()
     if values == ("auto",):
-        names = PROVIDER_PRIORITY if deep else PROVIDER_PRIORITY[:-1]
+        names = (
+            ("codegraph", "scip", "joern", "ast-grep")
+            if deep else ("codegraph", "scip", "ast-grep")
+        )
         specs = []
         for name in names:
             executable = None
