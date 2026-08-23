@@ -414,6 +414,80 @@ class ProviderRunnerTest(unittest.TestCase):
             "snapshot": False, "directory": False, "extra": False, "link": False,
         })
 
+    def test_cleanup_child_directory_swap_never_touches_outside_target(self):
+        captured = {}
+        outside = self.repo / "outside-cleanup-target"
+        outside.mkdir()
+        sentinel = outside / "sentinel"
+        sentinel.write_text("outside-must-survive", encoding="utf-8")
+        quarantined = self.repo / "quarantined-private-child"
+        real_open = os.open
+        real_scandir = os.scandir
+        swapped = False
+
+        def swap_child_to_outside_symlink():
+            nonlocal swapped
+            if swapped:
+                return
+            swapped = True
+            os.rename(captured["child"], quarantined)
+            os.symlink(outside, captured["child"], target_is_directory=True)
+
+        def racing_open(path, flags, mode=0o777, *, dir_fd=None):
+            if (
+                not swapped
+                and dir_fd is not None
+                and path == captured.get("child", Path()).name
+            ):
+                swap_child_to_outside_symlink()
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        def racing_scandir(path):
+            if (
+                not swapped
+                and not isinstance(path, int)
+                and Path(path) == captured.get("child")
+            ):
+                swap_child_to_outside_symlink()
+            return real_scandir(path)
+
+        def create_private_child(argv, **kwargs):
+            captured["snapshot"] = Path(kwargs["executable_snapshot"])
+            captured["directory"] = captured["snapshot"].parent
+            captured["child"] = captured["directory"] / "race-child"
+            captured["child"].mkdir()
+            (captured["child"] / "private-file").write_text(
+                "private", encoding="utf-8",
+            )
+            return Completed(stdout=b"ready\n")
+
+        try:
+            with mock.patch.object(PROVIDERS.os, "open", side_effect=racing_open), \
+                    mock.patch.object(
+                        PROVIDERS.os, "scandir", side_effect=racing_scandir,
+                    ):
+                result = PROVIDERS.run_provider(
+                    PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
+                    ("--version",), self.repo,
+                    PROVIDERS.Deadline(self.clock, 2), runner=create_private_child,
+                )
+            self.assertTrue(swapped)
+            self.assertEqual(result.status, "unsafe")
+            self.assertEqual(
+                sentinel.read_text(encoding="utf-8") if sentinel.exists() else None,
+                "outside-must-survive",
+            )
+        finally:
+            child = captured.get("child")
+            if child is not None and os.path.lexists(child):
+                os.unlink(child)
+            if quarantined.exists():
+                shutil.rmtree(quarantined)
+            directory = captured.get("directory")
+            if directory is not None and os.path.lexists(directory):
+                os.chmod(directory, 0o700)
+                shutil.rmtree(directory)
+
     def test_cleanup_failure_upgrades_ready_result_to_unsafe(self):
         captured = {}
         real_cleanup = PROVIDERS._cleanup_snapshot

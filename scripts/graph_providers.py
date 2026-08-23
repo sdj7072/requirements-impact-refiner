@@ -237,6 +237,7 @@ class _ExecutableSnapshot:
     inode: int
     size: int
     modified_ns: int
+    directory_fd: int = None
 
 
 def _bounded_detail(value: object) -> str:
@@ -373,22 +374,74 @@ def _snapshot_matches(snapshot: _ExecutableSnapshot) -> bool:
     return total == snapshot.size and digest.hexdigest() == snapshot.sha256
 
 
-def _remove_private_tree(path: Path, snapshot_path: Path) -> None:
+def _directory_open_flags() -> int:
+    directory = getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not directory or not nofollow:
+        raise OSError("descriptor-anchored snapshot cleanup is unsupported")
+    return os.O_RDONLY | directory | nofollow | getattr(os, "O_CLOEXEC", 0)
+
+
+def _same_directory_identity(first, second) -> bool:
+    return (
+        stat.S_ISDIR(first.st_mode)
+        and stat.S_ISDIR(second.st_mode)
+        and (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
+    )
+
+
+def _remove_private_tree(directory_fd: int) -> None:
+    opened_directory = os.fstat(directory_fd)
+    if not stat.S_ISDIR(opened_directory.st_mode):
+        raise OSError("private snapshot descriptor is not a directory")
+    os.fchmod(directory_fd, 0o700)
+    with os.scandir(directory_fd) as entries:
+        names = tuple(entry.name for entry in entries)
+    for name in names:
+        if not isinstance(name, str) or not name or name in {".", ".."} or "/" in name:
+            raise OSError("private snapshot entry name is unsafe")
+        metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            child_fd = os.open(name, _directory_open_flags(), dir_fd=directory_fd)
+            try:
+                child_opened = os.fstat(child_fd)
+                if not _same_directory_identity(metadata, child_opened):
+                    raise OSError("private snapshot directory changed while opening")
+                _remove_private_tree(child_fd)
+                current = os.stat(
+                    name, dir_fd=directory_fd, follow_symlinks=False,
+                )
+                if not _same_directory_identity(child_opened, current):
+                    raise OSError("private snapshot directory changed during cleanup")
+                os.rmdir(name, dir_fd=directory_fd)
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            os.unlink(name, dir_fd=directory_fd)
+        else:
+            raise OSError("private snapshot contains an unsupported entry type")
+
+
+def _remove_private_root(directory: Path, directory_fd: int) -> None:
+    parent_fd = None
     try:
-        metadata = path.lstat()
-    except FileNotFoundError:
-        return
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        if path == snapshot_path and stat.S_ISREG(metadata.st_mode):
-            os.chmod(path, 0o600, follow_symlinks=False)
-        os.unlink(path)
-        return
-    os.chmod(path, 0o700, follow_symlinks=False)
-    with os.scandir(path) as entries:
-        children = tuple(Path(entry.path) for entry in entries)
-    for child in children:
-        _remove_private_tree(child, snapshot_path)
-    os.rmdir(path)
+        root_opened = os.fstat(directory_fd)
+        if not stat.S_ISDIR(root_opened.st_mode):
+            raise OSError("private snapshot root descriptor is unsafe")
+        _remove_private_tree(directory_fd)
+        parent_fd = os.open(str(directory.parent), _directory_open_flags())
+        named_root = os.stat(
+            directory.name, dir_fd=parent_fd, follow_symlinks=False,
+        )
+        if not _same_directory_identity(root_opened, named_root):
+            raise OSError("private snapshot root changed during cleanup")
+        os.rmdir(directory.name, dir_fd=parent_fd)
+    finally:
+        if parent_fd is not None:
+            os.close(parent_fd)
+        os.close(directory_fd)
+    if os.path.lexists(directory):
+        raise OSError("private snapshot root remains after cleanup")
 
 
 def _create_executable_snapshot(
@@ -396,18 +449,21 @@ def _create_executable_snapshot(
 ) -> _ExecutableSnapshot:
     directory = Path(tempfile.mkdtemp(prefix="rir-provider-"))
     path = directory / "provider-executable"
+    directory_fd = None
     try:
-        os.chmod(directory, 0o700)
-        directory_metadata = directory.lstat()
+        directory_fd = os.open(str(directory), _directory_open_flags())
+        os.fchmod(directory_fd, 0o700)
+        directory_metadata = os.fstat(directory_fd)
+        named_directory = directory.lstat()
         if (
-            stat.S_ISLNK(directory_metadata.st_mode)
-            or not stat.S_ISDIR(directory_metadata.st_mode)
+            not stat.S_ISDIR(directory_metadata.st_mode)
             or stat.S_IMODE(directory_metadata.st_mode) != 0o700
+            or not _same_directory_identity(directory_metadata, named_directory)
         ):
             raise UnsafeExecutableError("provider snapshot directory is unsafe")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(str(path), flags, 0o700)
+        descriptor = os.open(path.name, flags, 0o700, dir_fd=directory_fd)
         digest = hashlib.sha256()
         total = 0
         try:
@@ -449,23 +505,23 @@ def _create_executable_snapshot(
             raise UnsafeExecutableError(
                 "provider snapshot does not match validated executable identity"
             )
-        directory_fd = os.open(
-            str(directory), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-        )
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        os.fsync(directory_fd)
         snapshot = _ExecutableSnapshot(
             directory, path, expected_sha256, metadata.st_dev, metadata.st_ino,
-            total, metadata.st_mtime_ns,
+            total, metadata.st_mtime_ns, directory_fd,
         )
         if not _snapshot_matches(snapshot):
             raise UnsafeExecutableError("provider snapshot failed identity verification")
         return snapshot
     except Exception as error:
         try:
-            _remove_private_tree(directory, path)
+            if directory_fd is None:
+                os.rmdir(directory)
+            else:
+                try:
+                    _remove_private_root(directory, directory_fd)
+                finally:
+                    directory_fd = None
         except OSError as cleanup_error:
             raise UnsafeExecutableError(
                 _bounded_detail(
@@ -476,8 +532,10 @@ def _create_executable_snapshot(
 
 
 def _cleanup_snapshot(snapshot: _ExecutableSnapshot):
+    if snapshot.directory_fd is None:
+        return False, "provider snapshot cleanup lacks its private root descriptor"
     try:
-        _remove_private_tree(snapshot.directory, snapshot.path)
+        _remove_private_root(snapshot.directory, snapshot.directory_fd)
     except OSError as error:
         return False, _bounded_detail(
             "provider snapshot cleanup failed: " + str(error)
