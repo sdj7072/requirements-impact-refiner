@@ -251,6 +251,24 @@ class GraphCacheTest(unittest.TestCase):
             "b" * 32,
         )
 
+    def test_incomplete_inventory_is_identity_bound_and_never_reused_as_hit(self):
+        incomplete = CACHE.publish(
+            self.root,
+            receipt(),
+            {},
+            inventory_complete=False,
+            inventory_reason="deadline",
+        )
+        complete = CACHE.publish(self.root, receipt(), {})
+
+        self.assertNotEqual(incomplete.key, complete.key)
+        self.assertEqual(CACHE.load(self.root, incomplete.key, {}).status, "miss")
+        payload = json.loads(incomplete.artifact.read_text(encoding="utf-8"))
+        self.assertFalse(payload["identity"]["source_inventory_complete"])
+        self.assertEqual(
+            payload["identity"]["source_inventory_reason"], "deadline"
+        )
+
     def test_rejects_corrupt_source_digests(self):
         invalid = {**digests(), "api/profile.py": "not-a-digest"}
         with self.assertRaisesRegex(ValueError, "source digest"):

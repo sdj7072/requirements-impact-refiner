@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import hashlib
 import importlib.util
 import json
@@ -14,6 +14,7 @@ import stat
 import sys
 import tempfile
 import time
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 
@@ -62,6 +63,27 @@ _PROVIDER_RANK = {
 }
 _CONTROL = (".requirements-impact-refiner", "graph")
 _CACHE_POINTER = (".requirements-impact-refiner", "cache", "graph", "v1", "current")
+
+
+@dataclass(frozen=True)
+class SourceInventory:
+    digests: Mapping[str, str]
+    complete: bool
+    reason: str | None = None
+
+    def __post_init__(self):
+        normalized = CACHE._source_digests(self.digests)
+        if not isinstance(self.complete, bool):
+            raise TypeError("source inventory completeness must be boolean")
+        if (
+            (self.complete and self.reason is not None)
+            or (
+                not self.complete
+                and self.reason not in {"deadline", "collection-limit", "traversal"}
+            )
+        ):
+            raise ValueError("source inventory reason is invalid")
+        object.__setattr__(self, "digests", MappingProxyType(normalized))
 
 
 def _settings(value) -> GraphSettings:
@@ -305,11 +327,13 @@ def _collect_source_digests(root: Path, deadline: Deadline):
     digests = {}
     files = 0
     total_bytes = 0
+    if deadline.expired():
+        return SourceInventory({}, False, "deadline")
     for path, relative in BUILTIN._walk_files(
         root, deadline.expired, skipped, traversal_errors,
     ):
         if deadline.expired():
-            return None
+            return SourceInventory(digests, False, "deadline")
         remaining = 8_000_000 - total_bytes
         payload, reason = BUILTIN._read_regular_file(
             path, BUILTIN.DEFAULT_MAX_FILE_BYTES, remaining,
@@ -317,7 +341,7 @@ def _collect_source_digests(root: Path, deadline: Deadline):
         )
         if reason is not None or payload is None:
             if reason in {"file-limit", "byte-limit"}:
-                return None
+                return SourceInventory(digests, False, "collection-limit")
             continue
         files += 1
         total_bytes += len(payload)
@@ -328,9 +352,11 @@ def _collect_source_digests(root: Path, deadline: Deadline):
         except UnicodeDecodeError:
             continue
         digests[relative] = hashlib.sha256(payload).hexdigest()
-    if traversal_errors or deadline.expired():
-        return None
-    return {path: digests[path] for path in sorted(digests)}
+    if deadline.expired():
+        return SourceInventory(digests, False, "deadline")
+    if traversal_errors:
+        return SourceInventory(digests, False, "traversal")
+    return SourceInventory(digests, True, None)
 
 
 def _normalize_candidate_node(row, result):
@@ -738,6 +764,7 @@ def _unavailable_frontier(nodes, probes, provider_results):
 
 def trace_impact(
     repo_root, draft, seeds, settings, clock=time, runner=None, deadline=None,
+    source_inventory=None,
 ):
     """Return and privately persist one bounded canonical graph receipt."""
     settings = _settings(settings)
@@ -750,6 +777,10 @@ def trace_impact(
         raise TypeError("deadline must be a provider Deadline")
     elif deadline.clock is not clock or deadline.max_seconds != settings.max_seconds:
         raise ValueError("shared deadline must match graph clock and settings")
+    if source_inventory is None:
+        source_inventory = _collect_source_digests(Path(repo_root), deadline)
+    elif not isinstance(source_inventory, SourceInventory):
+        raise TypeError("source_inventory must be a SourceInventory")
     draft_id = _draft_id(draft)
     request_sha256 = _request_sha256(draft, normalized_seeds, settings)
     root_input = Path(repo_root)
@@ -792,15 +823,12 @@ def trace_impact(
     trace_identity = _trace_identity(
         root, draft_id, request_sha256, normalized_seeds, settings, probes,
     )
-    source_digests = (
-        _collect_source_digests(root, deadline) if not deadline.expired() else None
-    )
     cache_result = (
         _load_cache(
-            root, source_digests, probes, trace_identity, draft_id,
+            root, source_inventory.digests, probes, trace_identity, draft_id,
             request_sha256, settings,
         )
-        if source_digests is not None
+        if source_inventory.complete and not deadline.expired()
         else CACHE.CacheResult("miss", "0" * 64, None, ())
     )
     if cache_result.status == "hit" and cache_result.receipt is not None:
@@ -896,6 +924,15 @@ def trace_impact(
         )
     nodes, edges, paths, frontier, limited = _merge_provider_results(scan, provider_results)
     frontier.extend(_unavailable_frontier(nodes, final_probes, provider_results))
+    if not source_inventory.complete:
+        if not nodes and normalized_seeds:
+            nodes = [_placeholder(normalized_seeds[0], 1)]
+        if nodes:
+            frontier.append(_frontier(
+                "FRONTIER-000", nodes[0].id,
+                "source inventory incomplete: " + str(source_inventory.reason),
+                nodes[0].risk_domains,
+            ))
     supplied_only_ids = {
         node.id for node in nodes if node.location is None and node.provider == "builtin"
     }
@@ -906,7 +943,11 @@ def trace_impact(
             "supplied-only evidence requires repository verification",
             node.risk_domains,
         ))
-    if deadline.expired() or scan.budget_status == "budget_exhausted":
+    if (
+        deadline.expired()
+        or scan.budget_status == "budget_exhausted"
+        or source_inventory.reason == "deadline"
+    ):
         status = "budget_exhausted"
         if not nodes and normalized_seeds:
             nodes = [_placeholder(normalized_seeds[0], 1)]
@@ -919,7 +960,11 @@ def trace_impact(
                 "FRONTIER-000", ranked.id, "shared graph deadline exhausted",
                 ranked.risk_domains,
             ))
-    elif scan.budget_status == "provider_limited" or frontier or limited:
+    elif (
+        scan.budget_status == "provider_limited"
+        or not source_inventory.complete
+        or frontier or limited
+    ):
         status = "provider_limited"
     else:
         status = "closed"
@@ -948,7 +993,11 @@ def trace_impact(
         cache=interim_cache,
     )
     try:
-        published = CACHE.publish(root, receipt, scan.source_digests)
+        published = CACHE.publish(
+            root, receipt, source_inventory.digests,
+            inventory_complete=source_inventory.complete,
+            inventory_reason=source_inventory.reason,
+        )
         receipt = replace(receipt, cache={
             "status": cache_result.status,
             "key": published.key,
@@ -963,6 +1012,6 @@ def trace_impact(
 
 __all__ = [
     "Deadline", "GraphSettings", "ProviderProbe", "ProviderQuery", "ProviderResult",
-    "ProviderSpec", "ScanLimits", "ScanSeed", "discover_providers", "receipt_sha256",
+    "ProviderSpec", "ScanLimits", "ScanSeed", "SourceInventory", "discover_providers", "receipt_sha256",
     "run_provider", "trace_impact",
 ]

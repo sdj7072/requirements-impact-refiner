@@ -143,6 +143,28 @@ class GraphCoordinatorTest(unittest.TestCase):
         self.assertIn("authorization/privacy", receipt.frontier[0].risk_domains)
         self.assertEqual(self.runner.calls, [])
 
+    def test_pre_scan_inventory_explicitly_reports_deadline_and_collection_limits(self):
+        expired = COORDINATOR.Deadline(self.clock, 0)
+        deadline_inventory = COORDINATOR._collect_source_digests(
+            self.root, expired
+        )
+        self.assertFalse(deadline_inventory.complete)
+        self.assertEqual(deadline_inventory.reason, "deadline")
+        self.assertEqual(dict(deadline_inventory.digests), {})
+
+        limited_root = Path(self.temporary.name) / "limited"
+        limited_root.mkdir()
+        for index in range(501):
+            (limited_root / f"source_{index:03d}.py").write_text(
+                f'VALUE = "profile.displayName-{index}"\n', encoding="utf-8"
+            )
+        limited_inventory = COORDINATOR._collect_source_digests(
+            limited_root, COORDINATOR.Deadline(self.clock, 30)
+        )
+        self.assertFalse(limited_inventory.complete)
+        self.assertEqual(limited_inventory.reason, "collection-limit")
+        self.assertEqual(len(limited_inventory.digests), 500)
+
     def test_no_workspace_preserves_supplied_only_evidence(self):
         missing = self.root / "missing"
         receipt = COORDINATOR.trace_impact(

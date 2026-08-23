@@ -42,7 +42,9 @@ _CACHE_FIELDS = frozenset({
 _IDENTITY_FIELDS = frozenset({
     "graph_schema_version", "repo_root_sha256", "settings", "providers",
     "source_digests", "receipt_id", "draft_id", "request_sha256",
+    "source_inventory_complete", "source_inventory_reason",
 })
+_INVENTORY_REASONS = frozenset({"deadline", "collection-limit", "traversal"})
 MAX_CACHE_BYTES = GRAPH.MAX_RECEIPT_BYTES * 2
 
 
@@ -119,15 +121,30 @@ def _normalize_receipt(value) -> tuple[dict[str, Any], bytes]:
     return normalized, canonical
 
 
-def _identity(root: Path, receipt: Mapping[str, Any], source_digests, schema_version: int):
+def _identity(
+    root: Path, receipt: Mapping[str, Any], source_digests, schema_version: int,
+    inventory_complete: bool, inventory_reason: str | None,
+):
     if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version < 1:
         raise ValueError("schema_version must be a positive integer")
+    if not isinstance(inventory_complete, bool):
+        raise ValueError("inventory_complete must be boolean")
+    if (
+        (inventory_complete and inventory_reason is not None)
+        or (
+            not inventory_complete
+            and inventory_reason not in _INVENTORY_REASONS
+        )
+    ):
+        raise ValueError("inventory completeness reason is invalid")
     return {
         "graph_schema_version": schema_version,
         "repo_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
         "receipt_id": receipt["receipt_id"],
         "draft_id": receipt["draft_id"],
         "request_sha256": receipt["request_sha256"],
+        "source_inventory_complete": inventory_complete,
+        "source_inventory_reason": inventory_reason,
         "settings": receipt["settings"],
         "providers": receipt["providers"],
         "source_digests": source_digests,
@@ -179,12 +196,17 @@ def publish(
     source_digests: Mapping[str, str],
     *,
     schema_version: int = 1,
+    inventory_complete: bool = True,
+    inventory_reason: str | None = None,
 ) -> CacheResult:
     """Publish normalized receipt data and atomically select its cache key."""
     root = _root(repo_root)
     normalized_digests = _source_digests(source_digests)
     normalized_receipt, _ = _normalize_receipt(receipt)
-    identity = _identity(root, normalized_receipt, normalized_digests, schema_version)
+    identity = _identity(
+        root, normalized_receipt, normalized_digests, schema_version,
+        inventory_complete, inventory_reason,
+    )
     key = hashlib.sha256(_canonical_json(identity)).hexdigest()
     payload = _canonical_json({
         "cache_schema_version": 1,
@@ -307,6 +329,14 @@ def load(
         return _miss(key)
     if identity.get("source_digests") != cached:
         return _miss(key)
+    complete = identity.get("source_inventory_complete")
+    reason = identity.get("source_inventory_reason")
+    if (
+        not isinstance(complete, bool)
+        or (complete and reason is not None)
+        or (not complete and reason not in _INVENTORY_REASONS)
+    ):
+        return _miss(key)
     if any(
         identity.get(name) != normalized.get(name)
         for name in ("receipt_id", "draft_id", "request_sha256")
@@ -320,6 +350,8 @@ def load(
     if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version < 1:
         return _miss(key)
     if hashlib.sha256(_canonical_json(identity)).hexdigest() != key:
+        return _miss(key)
+    if not complete:
         return _miss(key)
     changed_paths = {
         path for path in set(cached) | set(current)

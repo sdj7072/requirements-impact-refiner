@@ -188,10 +188,22 @@ class RirControllerTest(unittest.TestCase):
             draft.draft_id,
             (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
         )
-        CONTROLLER.trace_impact(request)
+        first = CONTROLLER.trace_impact(request)
+        first_bytes = first.receipt_path.read_bytes()
 
-        with self.assertRaisesRegex(ValueError, "already has a graph receipt"):
-            CONTROLLER.trace_impact(request)
+        repeated = CONTROLLER.trace_impact(request)
+
+        self.assertEqual(repeated.receipt_id, first.receipt_id)
+        self.assertEqual(repeated.receipt_sha256, first.receipt_sha256)
+        self.assertEqual(repeated.receipt_path.read_bytes(), first_bytes)
+        with self.assertRaisesRegex(ValueError, "different trace request"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("different.seed", None),),
+                )
+            )
 
         second = CONTROLLER.begin_refinement(self.request(request="Another request"))
         graph_dir = self.root / ".requirements-impact-refiner" / "graph"
@@ -311,8 +323,15 @@ class RirControllerTest(unittest.TestCase):
         self.assertIsNone(
             CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
         )
+        self.assertIsInstance(
+            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_trace_intent"),
+            dict,
+        )
         traced = CONTROLLER.trace_impact(request)
         self.assertTrue(traced.receipt_path.is_file())
+        self.assertNotIn(
+            "graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id)
+        )
 
     def test_trace_retry_recovers_exact_receipt_after_draft_binding_failure(self):
         self.enable_builtin_graph()
@@ -322,10 +341,9 @@ class RirControllerTest(unittest.TestCase):
             draft.draft_id,
             (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
         )
-        real_replace = CONTROLLER._replace_private_draft
         with mock.patch.object(
             CONTROLLER,
-            "_replace_private_draft",
+            "_bind_trace_receipt",
             side_effect=ValueError("injected binding failure"),
         ):
             with self.assertRaisesRegex(ValueError, "injected binding failure"):
@@ -338,12 +356,14 @@ class RirControllerTest(unittest.TestCase):
         self.assertIsNone(
             CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
         )
+        self.assertIsInstance(
+            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_trace_intent"),
+            dict,
+        )
         with mock.patch.object(
             CONTROLLER.GRAPH_COORDINATOR,
             "trace_impact",
             side_effect=AssertionError("retry must recover without republishing"),
-        ), mock.patch.object(
-            CONTROLLER, "_replace_private_draft", wraps=real_replace
         ):
             recovered = CONTROLLER.trace_impact(request)
 
@@ -352,6 +372,139 @@ class RirControllerTest(unittest.TestCase):
             CONTROLLER.load_draft(self.root, draft.draft_id)["graph_receipt"]["receipt_id"],
             recovered.receipt_id,
         )
+        self.assertNotIn(
+            "graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id)
+        )
+
+    def test_trace_intent_write_failure_cannot_publish_and_retry_is_fresh(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Intent write fault"))
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        with mock.patch.object(
+            CONTROLLER,
+            "_replace_private_draft",
+            side_effect=ValueError("injected intent write failure"),
+        ), mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "trace_impact",
+            side_effect=AssertionError("publication must not run before intent"),
+        ):
+            with self.assertRaisesRegex(ValueError, "intent write failure"):
+                CONTROLLER.trace_impact(request)
+
+        receipt_path = (
+            self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
+        )
+        self.assertFalse(receipt_path.exists())
+        self.assertNotIn(
+            "graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id)
+        )
+        self.assertRegex(
+            CONTROLLER.trace_impact(request).receipt_id, r"^[0-9a-f]{32}$"
+        )
+
+    def test_trace_rejects_cross_draft_transaction_intent(self):
+        self.enable_builtin_graph()
+        first = CONTROLLER.begin_refinement(self.request(request="First intent"))
+        first_request = CONTROLLER.TraceRequest(
+            self.root,
+            first.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "_persist_receipt",
+            side_effect=ValueError("stop after intent"),
+        ):
+            with self.assertRaisesRegex(ValueError, "stop after intent"):
+                CONTROLLER.trace_impact(first_request)
+        first_intent = CONTROLLER.load_draft(
+            self.root, first.draft_id
+        )["graph_trace_intent"]
+        second = CONTROLLER.begin_refinement(self.request(request="Second intent"))
+        second_stored = CONTROLLER.load_draft(self.root, second.draft_id)
+        second_stored["graph_trace_intent"] = first_intent
+        CONTROLLER._replace_private_draft(self.root, second.draft_id, second_stored)
+
+        with self.assertRaisesRegex(ValueError, "trace intent identity"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    second.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+
+        self.assertFalse(
+            (
+                self.root / ".requirements-impact-refiner/graph"
+                / f"{second.draft_id}.json"
+            ).exists()
+        )
+
+    def test_trace_rejects_internally_valid_receipt_without_controller_intent(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Unmarked artifact"))
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        graph_settings = stored["settings"]["impact_graph"]
+        seeds = (
+            CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),
+        )
+        CONTROLLER.GRAPH_COORDINATOR.trace_impact(
+            self.root,
+            CONTROLLER._graph_draft_identity(stored),
+            seeds,
+            graph_settings,
+        )
+
+        with self.assertRaisesRegex(ValueError, "pre-publication trace intent"):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(self.root, draft.draft_id, seeds)
+            )
+
+        self.assertIsNone(
+            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
+        )
+
+    def test_trace_stale_crash_artifact_is_cleaned_before_fresh_retry(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Stale recovery"))
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
+        with mock.patch.object(
+            CONTROLLER,
+            "_bind_trace_receipt",
+            side_effect=ValueError("injected post-persist bind failure"),
+        ):
+            with self.assertRaisesRegex(ValueError, "post-persist bind failure"):
+                CONTROLLER.trace_impact(request)
+        receipt_path = (
+            self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
+        )
+        self.assertTrue(receipt_path.is_file())
+        (self.root / "desktop/new_consumer.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(ValueError, "recovery source inventory is stale"):
+            CONTROLLER.trace_impact(request)
+
+        self.assertFalse(receipt_path.exists())
+        self.assertIsNone(
+            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
+        )
+        fresh = CONTROLLER.trace_impact(request)
+        self.assertTrue(any(
+            node["location"] == "desktop/new_consumer.py"
+            for node in fresh.compact_graph["nodes"]
+        ))
 
     def test_trace_preserves_deadline_and_provider_failure_statuses(self):
         self.enable_builtin_graph()
@@ -461,6 +614,134 @@ class RirControllerTest(unittest.TestCase):
 
         recovered = CONTROLLER.trace_impact(request)
         self.assertRegex(recovered.receipt_id, r"^[0-9a-f]{32}$")
+
+    def test_budget_exhausted_pre_scan_inventory_remains_finalizable_with_frontier(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Budget frontier"))
+
+        class FakeClock:
+            current = 0.0
+
+            def monotonic(self):
+                return self.current
+
+        clock = FakeClock()
+        real_lock = CONTROLLER._report_lock
+
+        @CONTROLLER.contextmanager
+        def expire_after_lock(root, report_id, deadline=None):
+            with real_lock(root, report_id, deadline=deadline):
+                clock.current = 30.0
+                yield
+
+        with mock.patch.object(CONTROLLER, "time", clock), mock.patch.object(
+            CONTROLLER, "_report_lock", side_effect=expire_after_lock
+        ):
+            receipt = CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("authorization.profile", "api/profile.py"),),
+                )
+            )
+        self.assertEqual(receipt.budget_status, "budget_exhausted")
+        self.assertTrue(receipt.compact_graph["frontier"])
+        self.assertTrue(any(
+            "source inventory incomplete" in row["reason"]
+            for row in receipt.compact_graph["frontier"]
+        ))
+        binding = CONTROLLER.load_draft(self.root, draft.draft_id)["graph_receipt"]
+        self.assertFalse(binding["source_inventory_complete"])
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = []
+        analysis["impacts"][0]["coverage_rationale"] = (
+            "Unknown because the shared graph deadline exhausted before scanning."
+        )
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+
+        result = CONTROLLER.finalize_refinement(
+            self.finalize(draft, analysis, receipt)
+        )
+
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+        coverage = next(
+            row for row in state["scope"]
+            if row["boundary"] == "Impact graph coverage"
+        )
+        self.assertIn("unknown frontiers", coverage["evidence"])
+        self.assertIn("budget_exhausted", coverage["confidence"])
+
+    def test_collection_limited_inventory_finalizes_with_frontier(self):
+        self.enable_builtin_graph()
+        bulk = self.root / "bulk"
+        bulk.mkdir()
+        for index in range(501):
+            (bulk / f"source_{index:03d}.py").write_text(
+                f'VALUE = "unrelated-{index}"\n', encoding="utf-8"
+            )
+        draft = CONTROLLER.begin_refinement(self.request(request="Limited inventory"))
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        binding = CONTROLLER.load_draft(self.root, draft.draft_id)["graph_receipt"]
+        self.assertFalse(binding["source_inventory_complete"])
+        self.assertEqual(binding["source_inventory_reason"], "collection-limit")
+        self.assertNotEqual(receipt.budget_status, "closed")
+        self.assertTrue(any(
+            "source inventory incomplete" in row["reason"]
+            for row in receipt.compact_graph["frontier"]
+        ))
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in receipt.compact_graph["paths"]
+        ]
+        if not analysis["impacts"][0]["graph_path_keys"]:
+            analysis["impacts"][0]["coverage_rationale"] = (
+                "Unknown because inventory collection reached its bound."
+            )
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+
+        result = CONTROLLER.finalize_refinement(
+            self.finalize(draft, analysis, receipt)
+        )
+
+        self.assertEqual(result.status, "published")
+
+    def test_collection_limited_inventory_rejects_captured_source_mutation(self):
+        self.enable_builtin_graph()
+        bulk = self.root / "bulk"
+        bulk.mkdir()
+        for index in range(501):
+            (bulk / f"source_{index:03d}.py").write_text(
+                f'VALUE = "unrelated-{index}"\n', encoding="utf-8"
+            )
+        draft = CONTROLLER.begin_refinement(self.request(request="Limited mutation"))
+        receipt = CONTROLLER.trace_impact(
+            CONTROLLER.TraceRequest(
+                self.root,
+                draft.draft_id,
+                (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+            )
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [
+            row["key"] for row in receipt.compact_graph["paths"]
+        ]
+        if not analysis["impacts"][0]["graph_path_keys"]:
+            analysis["impacts"][0]["coverage_rationale"] = "Unknown bounded inventory."
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        (self.root / "api/profile.py").write_text(
+            'FIELD = "profile.changed"\n', encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(ValueError, "stale"):
+            CONTROLLER.finalize_refinement(
+                self.finalize(draft, analysis, receipt)
+            )
 
     def test_finalize_rejects_uncovered_high_risk_graph_node(self):
         self.enable_builtin_graph()
@@ -737,13 +1018,16 @@ class RirControllerTest(unittest.TestCase):
             ),
         )
         rebound = hashlib.sha256(json.dumps(
-            current, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            dict(current.digests), ensure_ascii=False, sort_keys=True,
+            separators=(",", ":")
         ).encode("utf-8")).hexdigest()
         stored = CONTROLLER.load_draft(self.root, draft.draft_id)
         stored["graph_receipt"]["source_inventory_sha256"] = rebound
         CONTROLLER._replace_private_draft(self.root, draft.draft_id, stored)
 
-        with self.assertRaisesRegex(ValueError, "inventory cache does not match binding"):
+        with self.assertRaisesRegex(
+            ValueError, "trace intent request|inventory cache does not match binding"
+        ):
             CONTROLLER.finalize_refinement(
                 self.finalize(draft, analysis, receipt)
             )
