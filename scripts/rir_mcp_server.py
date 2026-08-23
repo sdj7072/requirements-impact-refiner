@@ -13,6 +13,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import rir_controller
+import payload_identity
 
 
 MAX_LINE_BYTES = 2 * 1024 * 1024
@@ -22,6 +23,7 @@ ANALYSIS_SCHEMA = json.loads(
         encoding="utf-8"
     )
 )
+INSTALLED_PAYLOAD_SHA256 = payload_identity.payload_sha256(SCRIPT_DIR.parent)
 
 
 def _expand_schema(schema, root):
@@ -185,6 +187,7 @@ def _begin(arguments):
             "delivery": ["compact", "full"],
         },
         "analysis_contract": EXPANDED_ANALYSIS_SCHEMA,
+        "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
     }
     return {
         "content": [{"type": "text", "text": json.dumps(structured, ensure_ascii=False, sort_keys=True)}],
@@ -268,7 +271,7 @@ def main():
         else:
             try:
                 message = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
+            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
                 response = _error(None, -32700, "parse error")
             else:
                 response = handle(message)

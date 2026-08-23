@@ -237,24 +237,6 @@ def _current_lineage(root: Path):
     if errors or prior_state is None:
         raise ValueError("current report state is invalid")
     key_map = _load_controller_metadata(current)
-    drafts = root / ".requirements-impact-refiner" / "drafts"
-    if drafts.is_dir() and not drafts.is_symlink():
-        for path in sorted(drafts.glob("*.json")):
-            if path.is_symlink():
-                continue
-            try:
-                draft = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                continue
-            published = draft.get("published") if isinstance(draft, dict) else None
-            if (
-                isinstance(published, dict)
-                and draft.get("consumed") is True
-                and published.get("report_id") == current.report_id
-                and published.get("revision") == current.revision
-                and isinstance(draft.get("key_map"), dict)
-            ):
-                key_map = draft["key_map"]
     if key_map is None:
         key_map = _legacy_key_map(prior_state)
     return current, prior_state, key_map
@@ -734,11 +716,16 @@ def _write_controller_metadata(
             "key_map": key_map,
         }
     )
+    temporary = None
     try:
-        with path.open("xb") as stream:
+        with tempfile.NamedTemporaryFile(
+            "wb", dir=path.parent, prefix=f".{path.name}-", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        os.link(temporary, path)
     except FileExistsError:
         try:
             if path.is_symlink() or path.read_bytes() != payload:
@@ -747,6 +734,12 @@ def _write_controller_metadata(
             raise ValueError(f"cannot verify controller lineage: {error}") from error
     except OSError as error:
         raise ValueError(f"cannot write controller lineage: {error}") from error
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:

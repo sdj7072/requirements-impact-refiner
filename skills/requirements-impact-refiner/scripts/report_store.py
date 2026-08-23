@@ -173,15 +173,26 @@ def load_current(repo_root: Path, report_id: str) -> CurrentRevision | None:
 
 
 def _write_exclusive(path: Path, payload: bytes) -> None:
+    temporary_path = None
     try:
-        with path.open("xb") as stream:
+        with tempfile.NamedTemporaryFile(
+            "wb", dir=path.parent, prefix=f".{path.name}-", delete=False
+        ) as stream:
+            temporary_path = Path(stream.name)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        os.link(temporary_path, path)
     except FileExistsError:
         raise
     except OSError as error:
         raise ReportStoreUnavailable(f"cannot write artifact {path.name}: {error}") from error
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _write_or_verify(path: Path, payload: bytes, *, resume_partial: bool) -> None:

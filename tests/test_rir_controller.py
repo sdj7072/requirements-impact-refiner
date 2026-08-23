@@ -166,6 +166,25 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(consume.call_count, 1)
         self.assertTrue(CONTROLLER.load_draft(self.root, draft.draft_id)["consumed"])
 
+    def test_controller_metadata_is_never_exposed_partially_and_retry_succeeds(self):
+        draft = CONTROLLER.begin_refinement(self.request())
+        request = self.finalize(
+            draft, self.fixture("controller-analysis-pre-decision.json")
+        )
+        with mock.patch.object(CONTROLLER.os, "link", side_effect=OSError("injected link failure")):
+            with self.assertRaisesRegex(ValueError, "cannot write controller lineage"):
+                CONTROLLER.finalize_refinement(request)
+        metadata = (
+            self.root / ".requirements-impact-refiner" / "reports" /
+            "RPT-001" / "revision-0001.controller.json"
+        )
+        self.assertFalse(metadata.exists())
+
+        result = CONTROLLER.finalize_refinement(request)
+
+        self.assertEqual(result.revision, 1)
+        self.assertTrue(metadata.is_file())
+
     def test_finalize_calculates_delta_and_rejects_model_ids(self):
         draft = CONTROLLER.begin_refinement(self.request())
         analysis = self.fixture("controller-analysis-post-decision.json")

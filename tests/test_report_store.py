@@ -93,6 +93,22 @@ class ReportStoreTest(unittest.TestCase):
         self.assertTrue(published.pointer_path.is_file())
         self.assertTrue(published.markdown_path.is_file())
 
+    def test_failed_atomic_claim_leaves_no_partial_final_artifact(self):
+        report_dir = (
+            self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
+        )
+        with mock.patch.object(STORE.os, "link", side_effect=OSError("fault")):
+            with self.assertRaises(STORE.ReportStoreUnavailable):
+                STORE.publish_revision(
+                    self.root, self.state_bytes(), resume_partial=True
+                )
+
+        self.assertFalse((report_dir / "revision-0001.json").exists())
+        published = STORE.publish_revision(
+            self.root, self.state_bytes(), resume_partial=True
+        )
+        self.assertTrue(published.pointer_path.is_file())
+
     def test_revision_two_hashes_exact_selected_markdown_bytes(self):
         first = STORE.publish_revision(self.root, self.state_bytes())
         second_state = self.state(revision=2)

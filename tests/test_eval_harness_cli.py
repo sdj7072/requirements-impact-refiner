@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from evals.harness.catalog import load_all
 from evals.harness.evidence import build_manifest, record_run, verify_manifest
+from evals.harness.controller_evidence import analyze_controller_trace
 from evals.harness.models import ClientProbe, CommandResult, RunResult, RunStatus
 from evals.harness.performance import PerformanceObservation, SmokeGateResult
 from evals.harness.run import (
@@ -615,14 +616,22 @@ class EvalHarnessCliTest(unittest.TestCase):
             "state": "revision-0001.json", "markdown": "revision-0001.md",
             "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
         }, sort_keys=True)
+        draft = "0" * 32
+        events = (
+            {"type": "item.completed", "item": {"id": "begin", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_begin", "arguments": {}, "result": {"structured_content": {"draft_id": draft, "installed_payload_sha256": "0" * 64}}, "error": None, "status": "completed"}},
+            {"type": "item.completed", "item": {"id": "finalize", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_finalize", "arguments": {"draft_id": draft}, "result": {"structured_content": {"status": "published", "display_text": compact}}, "error": None, "status": "completed"}},
+        )
+        jsonl = "\n".join(json.dumps(event) for event in events) + "\n"
+        controller = analyze_controller_trace((jsonl,), compact, expected_turns=1)
+        self.assertTrue(controller.valid)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             raw = root / "raw"
             record_run(raw, "codex", case.id, 1, {
                 "metadata.json": json.dumps({"attempt": 1, "client": "codex", "retry_of": None, "plugin_version": "0.4.0"}),
                 "first.final.txt": compact,
-                "first.jsonl": '{"type":"item.completed","item":{"id":"x","type":"agent_message","text":"no tools"}}\n',
-                "controller-evidence.json": json.dumps({"valid": True, "tool_order": ["rir_begin", "rir_finalize"]}),
+                "first.jsonl": jsonl,
+                "controller-evidence.json": controller.to_json(),
                 "workspace-reports/RPT-001/current.json": pointer,
                 "workspace-reports/RPT-001/revision-0001.json": state,
                 "workspace-reports/RPT-001/revision-0001.md": canonical,
@@ -632,7 +641,35 @@ class EvalHarnessCliTest(unittest.TestCase):
             score, trusted, _ = _score_selected_attempt(raw, "codex", ScheduledRun(case, 1), result)
 
         self.assertFalse(trusted)
-        self.assertIn("controller evidence", score.findings[0])
+        self.assertIn("installed controller payload", score.findings[0])
+
+    def test_tampered_compact_state_cannot_claim_markdown_parity(self):
+        case = next(case for case in load_all() if case.id == "POS-authorization")
+        compact = "## Change Impact Summary\n\n`IMP-001`\n"
+        canonical = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.md").read_text(encoding="utf-8")
+        state = json.loads((Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(encoding="utf-8"))
+        state["summary"][0]["possible_issue"] = "tampered summary"
+        pointer = json.dumps({
+            "schema_version": 1, "report_id": "RPT-001", "revision": 1,
+            "state": "revision-0001.json", "markdown": "revision-0001.md",
+            "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+        }, sort_keys=True)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            record_run(raw, "codex", case.id, 1, {
+                "metadata.json": json.dumps({"attempt": 1, "client": "codex", "retry_of": None}),
+                "first.final.txt": compact,
+                "workspace-reports/RPT-001/current.json": pointer,
+                "workspace-reports/RPT-001/revision-0001.json": json.dumps(state, sort_keys=True),
+                "workspace-reports/RPT-001/revision-0001.md": canonical,
+            }, root / "quarantine")
+            result = RunResult(case.id, 1, "codex", RunStatus.PASS, None, final_output=compact)
+
+            score, trusted, _ = _score_selected_attempt(raw, "codex", ScheduledRun(case, 1), result)
+
+        self.assertFalse(trusted)
+        self.assertIn("state and canonical Markdown disagree", score.findings[0])
 
     def test_lineage_non_utf8_predecessor_invalidates_scoring_evidence(self):
         """Replacement decoding would sever the SHA from the exact predecessor bytes."""

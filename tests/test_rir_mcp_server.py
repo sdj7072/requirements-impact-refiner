@@ -70,6 +70,7 @@ class RirMcpServerTest(unittest.TestCase):
                 self.assertEqual(begin_content["repository_evidence"], ["displayName exists"])
                 self.assertIn("impacts", begin_content["analysis_contract"]["required"])
                 self.assertIn("prior_key_map", begin_content)
+                self.assertRegex(begin_content["installed_payload_sha256"], r"^[0-9a-f]{64}$")
                 analysis = json.loads((FIXTURES / "controller-analysis-pre-decision.json").read_text())
                 finalize = request(2, "tools/call", {"name": "rir_finalize", "arguments": {"repo_root": str(root), "draft_id": draft_id, "analysis": analysis}})
                 process.stdin.write(json.dumps(finalize) + "\n")
@@ -162,6 +163,22 @@ class RirMcpServerTest(unittest.TestCase):
             request(1, "initialize", {"protocolVersion": "2099-01-01", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}),
         ])
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
+
+    def test_deeply_nested_json_is_bounded_and_following_request_survives(self):
+        nested = "[" * 1500 + "0" + "]" * 1500
+        safe = json.dumps(request(2, "tools/list", {}))
+        result = subprocess.run(
+            [sys.executable, str(SERVER)],
+            input=nested + "\n" + safe + "\n",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(replies[0]["error"]["code"], -32700)
+        self.assertIn("tools", replies[1]["result"])
 
 
 if __name__ == "__main__":

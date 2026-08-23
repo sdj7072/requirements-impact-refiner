@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import stat
 import sys
 from pathlib import Path
@@ -39,15 +40,19 @@ def build_parser():
 
 
 def _read_object(path: Path, maximum: int, label: str):
+    descriptor = None
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        metadata = path.lstat()
-        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        descriptor = os.open(path, flags)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
             raise OSError("input must be a regular non-symlink file")
         if metadata.st_size > maximum:
             unit = "256 KiB" if maximum == rir_controller.MAX_BEGIN_BYTES else "2 MiB"
             raise ValueError(f"{label} exceeds {unit}")
-        with path.open("rb") as stream:
-            raw = stream.read(maximum + 1)
+        raw = os.read(descriptor, maximum + 1)
         if len(raw) > maximum:
             unit = "256 KiB" if maximum == rir_controller.MAX_BEGIN_BYTES else "2 MiB"
             raise ValueError(f"{label} exceeds {unit}")
@@ -55,6 +60,9 @@ def _read_object(path: Path, maximum: int, label: str):
         value = json.loads(text)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise OSError(f"cannot read input: {error}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     if not isinstance(value, dict):
         raise ValueError("input must contain a JSON object")
     return value

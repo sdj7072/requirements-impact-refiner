@@ -335,7 +335,7 @@ class CodexAdapter(ClientAdapter):
     def _plugin_entries(payload: str) -> Optional[Tuple[dict[str, Any], ...]]:
         try:
             decoded = json.loads(payload)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             return None
         if isinstance(decoded, dict):
             decoded = decoded.get("installed", decoded.get("plugins"))
@@ -399,7 +399,7 @@ class CodexAdapter(ClientAdapter):
                 continue
             try:
                 event = json.loads(line)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):
                 return None
             if not isinstance(event, dict):
                 return None
@@ -581,7 +581,7 @@ class CodexAdapter(ClientAdapter):
                 continue
             try:
                 value = json.loads(configuration[len(prefix) :])
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):
                 return False, None, None
             if not isinstance(value, str):
                 return False, None, None

@@ -7,6 +7,7 @@ import os
 import re
 import stat
 import tempfile
+import sys
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence, Tuple
@@ -23,6 +24,13 @@ from .scoring import score_mechanical
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_SKILL_SCRIPT_DIR = _REPO_ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+if str(_SKILL_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SKILL_SCRIPT_DIR))
+import impact_renderer as _impact_renderer
+import payload_identity as _payload_identity
+
+
 _RAW_DIRECTORY = "raw"
 _DERIVED_ARTIFACTS = frozenset(("probes.json", "controller.json", "report.md", "scores.json", "performance.json"))
 _REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
@@ -327,7 +335,7 @@ def _load_existing(output_root: Path, raw_root: Path, identity: dict[str, object
         if verify_manifest(output_root, manifest_path.read_text(encoding="utf-8")):
             return None
         ledger = json.loads(controller.read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError, json.JSONDecodeError, RecursionError):
         return None
     if not isinstance(ledger, dict) or ledger.get("identity") != identity:
         return None
@@ -629,7 +637,7 @@ def _captured_canonical_report(
     )
     try:
         pointer = json.loads(pointer_bytes.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise ValueError("captured current pointer is not valid UTF-8 JSON") from error
     if not isinstance(pointer, dict) or set(pointer) != _POINTER_KEYS:
         raise ValueError("captured current pointer has an invalid schema")
@@ -655,7 +663,7 @@ def _captured_canonical_report(
     )
     try:
         state = json.loads(state_bytes.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise ValueError("captured compact state is not valid UTF-8 JSON") from error
     if not isinstance(state, dict) or not isinstance(state.get("report"), dict):
         raise ValueError("captured compact state report metadata is unavailable")
@@ -665,6 +673,9 @@ def _captured_canonical_report(
         raise ValueError("captured compact state disagrees with current pointer")
     if pointer.get("markdown_sha256") != markdown_digest:
         raise ValueError("captured current pointer Markdown SHA-256 does not match")
+    rendered_markdown = _impact_renderer.render_markdown(state).encode("utf-8")
+    if rendered_markdown != markdown_bytes:
+        raise ValueError("captured compact state and canonical Markdown disagree")
     digests = [
         (pointer_path, pointer_digest),
         (state_path, state_digest),
@@ -721,7 +732,7 @@ def _score_selected_attempt(
         return _scoring_evidence_failure(
             slot, result, "selected attempt metadata is not valid UTF-8"
         )
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, json.JSONDecodeError, RecursionError) as error:
         return _scoring_evidence_failure(slot, result, str(error))
     if not isinstance(metadata, dict) or (
         metadata.get("attempt"), metadata.get("client"), metadata.get("retry_of")
@@ -782,7 +793,14 @@ def _score_selected_attempt(
                 raise ValueError("selected controller evidence disagrees with raw JSONL")
             if not derived_controller.valid:
                 raise ValueError("selected controller evidence is invalid")
-        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            expected_payload = _payload_identity.payload_sha256(_REPO_ROOT)
+            if derived_controller.installed_payload_sha256 != (
+                (expected_payload,) * expected_turns
+            ):
+                raise ValueError(
+                    "installed controller payload does not match reviewed source"
+                )
+        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
             return _scoring_evidence_failure(slot, result, str(error))
 
     scoring_result = result
@@ -868,7 +886,7 @@ def _validate_attempt_evidence(
                 "attempt metadata",
             )
             metadata = json.loads(payload.decode("utf-8", errors="strict"))
-        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
             return False, ()
         if not isinstance(metadata, dict) or (
             metadata.get("attempt"),
@@ -988,7 +1006,7 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
                 observations.append(
                     _smoke_observation(raw_root, args.client, slot, result, score)
                 )
-            except (OSError, ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            except (OSError, ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
                 extraction_errors.append(
                     f"{result.case_id} performance evidence invalid: {error}"
                 )
@@ -1085,7 +1103,7 @@ def run_probe(args: argparse.Namespace, adapter: Any) -> int:
             raw_root, args.client, probe_id, _probe_artifacts(adapter, probe),
             Path(tempfile.gettempdir()) / "eval-harness-controller-quarantine",
         )
-    except (OSError, ValueError, PotentialSecretError, AttributeError, json.JSONDecodeError):
+    except (OSError, ValueError, PotentialSecretError, AttributeError, json.JSONDecodeError, RecursionError):
         return 1
     try:
         entries.append({"client": args.client, "probe_id": probe_id, "probe": _probe_payload(probe)})

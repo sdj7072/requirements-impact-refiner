@@ -6,6 +6,8 @@ from evals.harness.controller_evidence import analyze_controller_trace
 
 
 def completed(tool, arguments, structured, *, status="completed", error=None):
+    if tool == "rir_begin" and "installed_payload_sha256" not in structured:
+        structured = {**structured, "installed_payload_sha256": "a" * 64}
     return json.dumps(
         {
             "type": "item.completed",
@@ -47,6 +49,7 @@ class ControllerEvidenceTest(unittest.TestCase):
         self.assertTrue(evidence.draft_ids_match)
         self.assertTrue(evidence.finalize_succeeded)
         self.assertTrue(evidence.display_text_matches)
+        self.assertEqual(evidence.installed_payload_sha256, ("a" * 64,))
         self.assertEqual(evidence.errors, ())
 
     def test_trace_rejects_skips_duplicates_wrong_order_errors_and_output_mismatch(self):

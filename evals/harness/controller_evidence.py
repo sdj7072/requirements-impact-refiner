@@ -24,6 +24,7 @@ class ControllerEvidence:
     display_text_matches: bool
     display_text_sha256: Tuple[str, ...]
     final_output_sha256: Tuple[str, ...]
+    installed_payload_sha256: Tuple[str, ...]
 
     def to_json(self) -> str:
         payload = asdict(self)
@@ -31,6 +32,7 @@ class ControllerEvidence:
         payload["tool_order"] = list(self.tool_order)
         payload["display_text_sha256"] = list(self.display_text_sha256)
         payload["final_output_sha256"] = list(self.final_output_sha256)
+        payload["installed_payload_sha256"] = list(self.installed_payload_sha256)
         return json.dumps(payload, sort_keys=True) + "\n"
 
 
@@ -55,7 +57,7 @@ def _attempted_calls(streams: Sequence[str]):
                 continue
             try:
                 event = json.loads(line)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError):
                 malformed = True
                 continue
             item = event.get("item") if isinstance(event, dict) else None
@@ -108,10 +110,18 @@ def analyze_controller_trace(
         errors.append("controller tool attempt failed or did not complete")
 
     begin_ids = []
+    payload_digests = []
     for call in begins:
         result = _structured(call.get("result"))
         value = result.get("draft_id") if result is not None else None
         begin_ids.append(value if isinstance(value, str) and _DRAFT_ID.fullmatch(value) else None)
+        payload_digest = result.get("installed_payload_sha256") if result is not None else None
+        payload_digests.append(
+            payload_digest
+            if isinstance(payload_digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", payload_digest)
+            else None
+        )
     finalize_ids = []
     finalize_success = []
     displays = []
@@ -152,6 +162,12 @@ def analyze_controller_trace(
         )
     if not draft_match:
         errors.append("controller draft IDs do not match")
+    if expected_turns > 0 and (
+        len(payload_digests) != expected_turns
+        or any(value is None for value in payload_digests)
+        or len(set(payload_digests)) != 1
+    ):
+        errors.append("installed controller payload identity is invalid")
     if not succeeded:
         errors.append("controller finalize did not succeed")
     if not display_matches:
@@ -178,4 +194,7 @@ def analyze_controller_trace(
         display_text_matches=display_matches,
         display_text_sha256=display_digests,
         final_output_sha256=final_digests,
+        installed_payload_sha256=tuple(
+            value for value in payload_digests if isinstance(value, str)
+        ),
     )
