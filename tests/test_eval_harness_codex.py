@@ -125,6 +125,18 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "        if not os.path.isfile('first.final.txt'):\n"
         "            print('missing exact predecessor artifact', file=sys.stderr)\n"
         "            sys.exit(25)\n"
+        "    if mode == 'write-compact-report':\n"
+        "        report_dir = os.path.join('.requirements-impact-refiner', 'reports', 'RPT-001')\n"
+        "        os.makedirs(report_dir, exist_ok=True)\n"
+        "        with open(os.path.join(report_dir, 'revision-0001.json'), 'w', encoding='utf-8') as handle:\n"
+        "            handle.write('{\"schema_version\":1}\\n')\n"
+        "        with open(os.path.join(report_dir, 'revision-0001.md'), 'w', encoding='utf-8') as handle:\n"
+        "            handle.write('# Requirements Impact Report\\n')\n"
+        "        with open(os.path.join(report_dir, 'current.json'), 'w', encoding='utf-8') as handle:\n"
+        "            handle.write('{\"revision\":1}\\n')\n"
+        "    if mode == 'symlink-compact-report':\n"
+        "        os.makedirs('.requirements-impact-refiner', exist_ok=True)\n"
+        "        os.symlink('/tmp', os.path.join('.requirements-impact-refiner', 'reports'))\n"
         "    if mode == 'reject-readonly-approval' and '-s' in args and 'read-only' in args and '--approve-for-me' in args:\n"
         "        print('error: --sandbox and --approve-for-me cannot be used together', file=sys.stderr)\n"
         "        sys.exit(2)\n"
@@ -161,10 +173,10 @@ class CodexAdapterTest(unittest.TestCase):
 
         self.assertEqual(
             argv[:10],
-            ("codex", "exec", "--ephemeral", "--json", "--skip-git-repo-check", "-s", "read-only", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
+            ("codex", "exec", "--ephemeral", "--json", "--skip-git-repo-check", "-s", "workspace-write", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
         )
         self.assertIn("-s", argv)
-        self.assertIn("read-only", argv)
+        self.assertIn("workspace-write", argv)
         self.assertNotIn("--approve-for-me", argv)
         self.assertNotIn("-m", argv)
         self.assertNotIn("model_reasoning_effort", " ".join(argv))
@@ -368,6 +380,48 @@ class CodexAdapterTest(unittest.TestCase):
             metadata = json.loads((evidence / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["environment"], "Codex with Superpowers")
 
+    def test_execute_captures_compact_report_artifacts_before_workspace_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, exec_mode="write-compact-report")
+            request = make_request(temporary, ("first turn",))
+            adapter = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            )
+
+            result = adapter.execute(request)
+            evidence = request.output_root / "codex" / request.case.id / "01"
+
+            self.assertEqual(result.status, RunStatus.PASS)
+            self.assertEqual(
+                (evidence / "workspace-reports/RPT-001/revision-0001.json").read_text(),
+                '{"schema_version":1}\n',
+            )
+            self.assertEqual(
+                (evidence / "workspace-reports/RPT-001/revision-0001.md").read_text(),
+                "# Requirements Impact Report\n",
+            )
+            self.assertEqual(
+                (evidence / "workspace-reports/RPT-001/current.json").read_text(),
+                '{"revision":1}\n',
+            )
+
+    def test_execute_classifies_unsafe_workspace_report_as_infrastructure_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, exec_mode="symlink-compact-report")
+            request = make_request(temporary, ("first turn",))
+            adapter = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                quarantine_root=Path(temporary) / "quarantine",
+            )
+
+            result = adapter.execute(request)
+
+        self.assertEqual(result.status, RunStatus.INFRA_ERROR)
+        self.assertIn("workspace report capture failed", result.reason)
+
     def test_execute_returns_exact_structured_provenance_from_probe_and_argv(self):
         """A future sealed final must carry all provenance used for promotion."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -459,7 +513,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.session_id, UUID)
         self.assertNotIn("--ephemeral", execution_commands[0])
         self.assertIn("-s", execution_commands[0])
-        self.assertIn("read-only", execution_commands[0])
+        self.assertIn("workspace-write", execution_commands[0])
         self.assertNotIn("--approve-for-me", execution_commands[0])
         self.assertEqual(execution_commands[1][0:2], ["exec", "resume"])
         self.assertIn(UUID, execution_commands[1])
@@ -511,7 +565,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertFalse(first_workspace.exists())
         self.assertFalse(Path(executions[2]["cwd"]).exists())
 
-    def test_execute_succeeds_when_cli_rejects_read_only_with_auto_approve(self):
+    def test_execute_uses_workspace_write_without_auto_approve(self):
         with tempfile.TemporaryDirectory() as temporary:
             executable = write_fake_codex(temporary, exec_mode="reject-readonly-approval")
             log = Path(temporary) / "argv.jsonl"
@@ -536,7 +590,7 @@ class CodexAdapterTest(unittest.TestCase):
         execution_command = next(command for command in commands if command[0] == "exec")
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertIn("-s", execution_command)
-        self.assertIn("read-only", execution_command)
+        self.assertIn("workspace-write", execution_command)
         self.assertNotIn("--approve-for-me", execution_command)
 
     def test_resume_appends_handoff_after_exact_second_turn_request_and_evidence(self):

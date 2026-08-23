@@ -1,0 +1,8 @@
+{
+  "release": "0.3.2",
+  "selected_path_words": 3500,
+  "output_files": 100,
+  "average_output_words": 906.6,
+  "maximum_output_words": 1596,
+  "measurement": "Preserved installed-v0.3.1 corpus plus 0.3.2 selected-path routing estimate; words and bytes are proxies, not model token counts."
+}

@@ -1,0 +1,106 @@
+import json
+import unittest
+from dataclasses import replace
+from pathlib import Path
+
+
+from evals.harness.models import RunStatus
+from evals.harness.performance import (
+    PerformanceObservation,
+    evaluate_smoke_gate,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+BASELINE = ROOT / "evals" / "performance-baseline-v032.json"
+SMOKE_IDS = (
+    "POS-authorization",
+    "NEG-debugging",
+    "INT-superpowers",
+    "LINEAGE-stable-blocked",
+    "LINEAGE-reopened",
+    "LINEAGE-no-false-resolution",
+)
+
+
+class PerformanceBudgetTest(unittest.TestCase):
+    def observation(self, case_id):
+        impact_ids = () if case_id == "NEG-debugging" else ("IMP-001",)
+        return PerformanceObservation(
+            case_id=case_id,
+            repetition=1,
+            status=RunStatus.PASS,
+            attempt=1,
+            retry_of=None,
+            prompt_bytes=1200,
+            routed_resource_bytes=9000,
+            routed_resource_words=1574,
+            output_bytes=1800,
+            output_words=280,
+            duration_ms=12000,
+            input_tokens=None,
+            output_tokens=None,
+            impact_ids=impact_ids,
+            state_markdown_match=True,
+            workflow_boundary_passed=True,
+        )
+
+    def six_valid_observations(self):
+        return tuple(self.observation(case_id) for case_id in SMOKE_IDS)
+
+    def test_baseline_is_literal_and_matches_preserved_measurement(self):
+        baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+        self.assertEqual(baseline["selected_path_words"], 3500)
+        self.assertEqual(baseline["output_files"], 100)
+        self.assertEqual(baseline["average_output_words"], 906.6)
+        self.assertEqual(baseline["maximum_output_words"], 1596)
+
+    def test_smoke_gate_accepts_complete_semantic_and_budget_evidence(self):
+        result = evaluate_smoke_gate(self.six_valid_observations())
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.median_output_words, 280)
+        self.assertEqual(result.median_routed_resource_words, 1574)
+
+    def test_smoke_gate_rejects_incomplete_duplicate_or_retried_matrix(self):
+        missing = self.six_valid_observations()[:-1]
+        duplicate = self.six_valid_observations()[:-1] + (missing[0],)
+        retried = list(self.six_valid_observations())
+        retried[0] = replace(retried[0], attempt=2, retry_of="attempt-01")
+
+        self.assertIn("smoke observations do not cover the exact six cases", evaluate_smoke_gate(missing).errors)
+        self.assertIn("smoke observations contain duplicate case/repetition rows", evaluate_smoke_gate(duplicate).errors)
+        self.assertIn("smoke observations must select attempt 1 without retry", evaluate_smoke_gate(retried).errors)
+
+    def test_smoke_gate_rejects_budget_semantic_and_workflow_failures(self):
+        too_large = list(self.six_valid_observations())
+        for index in (0, 1, 2, 3):
+            too_large[index] = replace(too_large[index], output_words=900)
+        too_many_resources = list(self.six_valid_observations())
+        for index in (0, 1, 2, 3):
+            too_many_resources[index] = replace(
+                too_many_resources[index], routed_resource_words=2200
+            )
+        mismatch = list(self.six_valid_observations())
+        mismatch[0] = replace(mismatch[0], state_markdown_match=False)
+        workflow = list(self.six_valid_observations())
+        workflow[2] = replace(workflow[2], workflow_boundary_passed=False)
+
+        self.assertIn("median compact output exceeds 450 words", evaluate_smoke_gate(too_large).errors)
+        self.assertIn("median routed resources do not reduce baseline by 50 percent", evaluate_smoke_gate(too_many_resources).errors)
+        self.assertIn("state, Markdown, and compact impacts disagree", evaluate_smoke_gate(mismatch).errors)
+        self.assertIn("workflow ownership boundary failed", evaluate_smoke_gate(workflow).errors)
+
+    def test_token_fields_must_be_both_client_reported_or_both_absent(self):
+        partial = list(self.six_valid_observations())
+        partial[0] = replace(partial[0], input_tokens=100)
+
+        self.assertIn(
+            "token usage must be complete or absent",
+            evaluate_smoke_gate(partial).errors,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

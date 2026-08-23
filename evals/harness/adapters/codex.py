@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
 
 from .base import ClientAdapter
-from ..evidence import PotentialSecretError, record_run
+from ..evidence import Artifact, PotentialSecretError, record_run
 from ..models import CaseTurn, ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
 from ..process import run_command
 
@@ -74,7 +74,7 @@ class CodexAdapter(ClientAdapter):
                 "--json",
                 "--skip-git-repo-check",
                 "-s",
-                "read-only",
+                "workspace-write",
                 "-o",
                 str(final_path),
             )
@@ -127,7 +127,7 @@ class CodexAdapter(ClientAdapter):
         """Execute one request and preserve successful and infrastructure attempts."""
         probe, probe_commands = self._probe_with_commands()
         self.probe_results = probe_commands
-        artifacts: dict[str, str] = {
+        artifacts: dict[str, Artifact] = {
             "metadata.json": self._metadata_json(probe, probe_commands, (), request),
         }
         if not probe.available:
@@ -155,6 +155,12 @@ class CodexAdapter(ClientAdapter):
                 self.timeout_seconds,
             )
             artifacts.update(self._turn_artifacts("first", first_prompt, first_command, first_final))
+            capture_problem = self._capture_workspace_reports(artifacts, temporary_root)
+            if capture_problem is not None:
+                return self._record_result(
+                    request, artifacts, RunStatus.INFRA_ERROR, capture_problem,
+                    first_command, None, None, probe, first_command,
+                )
             problem, first_output = self._command_problem(first_command, first_final)
             commands = (first_command,)
             artifacts["metadata.json"] = self._metadata_json(probe, probe_commands, commands, request)
@@ -226,6 +232,12 @@ class CodexAdapter(ClientAdapter):
                 self.timeout_seconds,
             )
             artifacts.update(self._turn_artifacts("second", second_prompt, second_command, second_final))
+            capture_problem = self._capture_workspace_reports(artifacts, temporary_root)
+            if capture_problem is not None:
+                return self._record_result(
+                    request, artifacts, RunStatus.INFRA_ERROR, capture_problem,
+                    second_command, None, thread_id, probe, first_command,
+                )
             commands = (first_command, second_command)
             artifacts["metadata.json"] = self._metadata_json(probe, probe_commands, commands, request)
             problem, second_output = self._command_problem(second_command, second_final)
@@ -423,10 +435,39 @@ class CodexAdapter(ClientAdapter):
             "%s.final.txt" % name: final_output,
         }
 
+    @staticmethod
+    def _workspace_report_artifacts(workspace_root: Path) -> dict[str, bytes]:
+        report_root = workspace_root / ".requirements-impact-refiner" / "reports"
+        if not report_root.exists():
+            return {}
+        if report_root.is_symlink() or not report_root.is_dir():
+            raise ValueError("workspace report root must be a real directory")
+        artifacts: dict[str, bytes] = {}
+        for path in sorted(report_root.rglob("*")):
+            if path.is_symlink():
+                raise ValueError("workspace report artifacts must not use symlinks")
+            if not path.is_file():
+                continue
+            relative = path.relative_to(report_root)
+            if any(part in {"", ".", ".."} for part in relative.parts):
+                raise ValueError("workspace report artifact path is unsafe")
+            artifacts[(Path("workspace-reports") / relative).as_posix()] = path.read_bytes()
+        return artifacts
+
+    @classmethod
+    def _capture_workspace_reports(
+        cls, artifacts: dict[str, Artifact], workspace_root: Path
+    ) -> Optional[str]:
+        try:
+            artifacts.update(cls._workspace_report_artifacts(workspace_root))
+        except (OSError, ValueError) as error:
+            return f"workspace report capture failed: {error}"
+        return None
+
     def _record_result(
         self,
         request: RunRequest,
-        artifacts: dict[str, str],
+        artifacts: dict[str, Artifact],
         status: RunStatus,
         reason: Optional[str],
         command: Optional[CommandResult],

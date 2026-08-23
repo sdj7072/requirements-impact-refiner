@@ -156,7 +156,9 @@ class EvalHarnessContractTest(unittest.TestCase):
                 "clientProbe",
                 "commandResult",
                 "mechanicalScore",
+                "performanceObservation",
                 "runResult",
+                "smokeGateResult",
             },
         )
 
