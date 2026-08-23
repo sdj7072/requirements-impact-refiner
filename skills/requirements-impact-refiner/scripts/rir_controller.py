@@ -728,9 +728,29 @@ def _write_controller_metadata(
         os.link(temporary, path)
     except FileExistsError:
         try:
-            if path.is_symlink() or path.read_bytes() != payload:
-                raise ValueError("controller revision belongs to another draft")
-        except OSError as error:
+            existing_bytes = path.read_bytes() if not path.is_symlink() else b""
+            if existing_bytes != payload:
+                existing = json.loads(existing_bytes.decode("utf-8", errors="strict"))
+                same_draft = (
+                    isinstance(existing, dict)
+                    and existing.get("draft_id") == draft["draft_id"]
+                    and existing.get("report_id") == draft["report_id"]
+                    and existing.get("revision") == draft["revision"]
+                )
+                report_dir = path.parent
+                revision = int(draft["revision"])
+                artifacts_exist = any(
+                    (report_dir / f"revision-{revision:04d}.{suffix}").exists()
+                    for suffix in ("json", "md")
+                )
+                current = report_store.load_current(root, str(draft["report_id"]))
+                if not same_draft or artifacts_exist or (
+                    current is not None and current.revision >= revision
+                ):
+                    raise ValueError("controller revision belongs to another draft")
+                os.replace(temporary, path)
+                temporary = None
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError(f"cannot verify controller lineage: {error}") from error
     except OSError as error:
         raise ValueError(f"cannot write controller lineage: {error}") from error
@@ -772,6 +792,8 @@ def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
             if delivery == "compact"
             else impact_renderer.render_markdown(stored_state)
         )
+        if display.endswith("\n"):
+            display = display[:-1]
         _consume(_draft_path(root, request.draft_id), draft, published, key_map)
     return FinalizeResult(
         status="published",

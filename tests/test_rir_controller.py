@@ -185,6 +185,30 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(result.revision, 1)
         self.assertTrue(metadata.is_file())
 
+    def test_same_draft_can_replace_unpublished_controller_metadata(self):
+        draft = {
+            "draft_id": "0" * 32,
+            "report_id": "RPT-001",
+            "revision": 1,
+        }
+        CONTROLLER._write_controller_metadata(
+            self.root, draft, b"first\n", {"impacts": {"a": "IMP-001"}}
+        )
+
+        CONTROLLER._write_controller_metadata(
+            self.root, draft, b"corrected\n", {"impacts": {"a": "IMP-001"}}
+        )
+
+        path = (
+            self.root / ".requirements-impact-refiner" / "reports" /
+            "RPT-001" / "revision-0001.controller.json"
+        )
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            stored["state_sha256"],
+            CONTROLLER.hashlib.sha256(b"corrected\n").hexdigest(),
+        )
+
     def test_finalize_calculates_delta_and_rejects_model_ids(self):
         draft = CONTROLLER.begin_refinement(self.request())
         analysis = self.fixture("controller-analysis-post-decision.json")

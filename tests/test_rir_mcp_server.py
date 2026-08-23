@@ -43,6 +43,8 @@ class RirMcpServerTest(unittest.TestCase):
         )
         for tool in replies[1]["result"]["tools"]:
             self.assertEqual(tool["inputSchema"]["additionalProperties"], False)
+            self.assertIn("local", tool["description"].lower())
+            self.assertIn("network", tool["description"].lower())
         finalize_schema = replies[1]["result"]["tools"][1]["inputSchema"]
         analysis = finalize_schema["properties"]["analysis"]
         self.assertEqual(analysis["additionalProperties"], False)
@@ -71,6 +73,8 @@ class RirMcpServerTest(unittest.TestCase):
                 self.assertIn("impacts", begin_content["analysis_contract"]["required"])
                 self.assertIn("prior_key_map", begin_content)
                 self.assertRegex(begin_content["installed_payload_sha256"], r"^[0-9a-f]{64}$")
+                self.assertIn("post-decision requires", " ".join(begin_content["semantic_rules"]))
+                self.assertIn("blocked", " ".join(begin_content["semantic_rules"]))
                 analysis = json.loads((FIXTURES / "controller-analysis-pre-decision.json").read_text())
                 finalize = request(2, "tools/call", {"name": "rir_finalize", "arguments": {"repo_root": str(root), "draft_id": draft_id, "analysis": analysis}})
                 process.stdin.write(json.dumps(finalize) + "\n")
@@ -86,6 +90,7 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertEqual(result["structuredContent"]["status"], "published")
         self.assertTrue(result["content"][0]["text"].startswith("## Change Impact Summary"))
         self.assertEqual(result["content"][0]["text"], result["structuredContent"]["display_text"])
+        self.assertFalse(result["structuredContent"]["display_text"].endswith("\n"))
 
     def test_unknown_tool_and_malformed_params_return_bounded_errors_then_continue(self):
         replies = self.exchange(

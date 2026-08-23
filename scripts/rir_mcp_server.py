@@ -73,12 +73,12 @@ FINALIZE_SCHEMA = {
 TOOLS = [
     {
         "name": "rir_begin",
-        "description": "Create a repository-bound impact-refinement draft before analysis.",
+        "description": "Create a local, network-free, repository-bound impact-refinement draft before analysis; data stays in the isolated workspace.",
         "inputSchema": BEGIN_SCHEMA,
     },
     {
         "name": "rir_finalize",
-        "description": "Validate, publish, and render one controller draft.",
+        "description": "Validate, publish, and render one local, network-free controller draft inside the isolated workspace.",
         "inputSchema": FINALIZE_SCHEMA,
     },
 ]
@@ -187,6 +187,12 @@ def _begin(arguments):
             "delivery": ["compact", "full"],
         },
         "analysis_contract": EXPANDED_ANALYSIS_SCHEMA,
+        "semantic_rules": [
+            "pre-decision requires decision_needed with two or three options and decisions must be empty",
+            "post-decision requires decision_needed null and at least one explicit decision",
+            "blocked or deferred impacts require workflow Not ready",
+            "accepted impacts require a linked decision and resolved impacts require current evidence",
+        ],
         "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
     }
     return {
