@@ -44,7 +44,7 @@ codex plugin remove requirements-impact-refiner@requirements-impact-refiner
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-저장소의 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)은 루트 [Codex 플러그인 매니페스트](.codex-plugin/plugin.json)를 가리키며, 그 `skills` 필드는 하나뿐인 기준 `./skills/` 트리를 사용합니다. MCP 서버, hook, app, agent, dependency는 추가하지 않습니다.
+저장소의 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)은 루트 [Codex 플러그인 매니페스트](.codex-plugin/plugin.json)를 가리키며, 그 `skills` 필드는 하나뿐인 기준 `./skills/` 트리를 사용합니다. [`.mcp.json`](.mcp.json)은 로컬 표준 라이브러리 기반의 `rir_begin`, `rir_finalize` 도구도 노출합니다. MCP는 호스트가 도구를 호출할 때 구조화된 강제를 제공하고, 번들 CLI는 잘못된 finalize 시 사용자 출력을 내지 않는 하드 강제 경계입니다. 컨트롤러에는 네트워크 클라이언트나 서드파티 런타임 의존성이 없으며 hook, app, agent도 추가하지 않습니다.
 
 Claude Code에서는 Claude Code 내부에서 다음 명령을 실행합니다.
 
@@ -164,7 +164,7 @@ Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다
 
 Superpowers는 아이디어 구상, 계획, 실행, 디버깅, 리뷰의 오케스트레이터로 남습니다. Claude Code `feature-dev`는 단계형 기능 개발 흐름으로, GitHub Spec Kit은 명세와 계획 흐름으로 남습니다. Requirements Impact Refiner는 이들을 대체하거나 내장하지 않습니다. 각 흐름의 명확화와 계획 사이에서 저장소 근거 기반 영향도 목록과 반복적인 영향 축소를 제공합니다.
 
-이 프로젝트는 광범위한 아이디어 발굴, 일반 PRD 작성, 아키텍처 설계, 작업 분해, 구현, 디버깅, 코드 리뷰를 제공하지 않습니다. MCP 서버나 전용 코드 그래프 엔진도 포함하지 않습니다. 다른 프레임워크를 자동 설치·호출·연결하지 않으며, 관련 프로젝트를 언급한다고 해서 의존성이나 코드 재사용을 뜻하지 않습니다.
+이 프로젝트는 광범위한 아이디어 발굴, 일반 PRD 작성, 아키텍처 설계, 작업 분해, 구현, 디버깅, 코드 리뷰를 제공하지 않습니다. 좁은 범위의 로컬 MCP 서버와 CLI는 영향도 보고서 생성만 제어하며, 전용 코드 그래프 엔진은 포함하지 않습니다. MCP 호스트는 도구 호출을 건너뛸 수 있으므로 CLI finalize 경로만 하드 강제입니다. 다른 프레임워크를 자동 설치·호출·연결하지 않으며, 관련 프로젝트를 언급한다고 해서 의존성이나 코드 재사용을 뜻하지 않습니다.
 
 ## 8. 안전과 한계
 

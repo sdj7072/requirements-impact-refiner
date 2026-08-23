@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -14,6 +15,11 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from typing import Mapping, Optional, Tuple
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback is serialized per process
+    fcntl = None
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -28,6 +34,7 @@ import report_store
 MAX_BEGIN_BYTES = 256 * 1024
 MAX_FINALIZE_BYTES = 2 * 1024 * 1024
 MAX_STRING_BYTES = 64 * 1024
+MAX_DRAFT_BYTES = 4 * 1024 * 1024
 DRAFT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 LOCAL_KEY_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 ADAPTERS = {"generic", "superpowers", "claude-feature-dev", "spec-kit"}
@@ -77,6 +84,7 @@ class DraftResult:
     previous_sha256: str
     settings: Mapping[str, str]
     prior_state: Optional[Mapping[str, object]]
+    prior_key_map: Optional[Mapping[str, object]]
 
 
 @dataclass(frozen=True)
@@ -115,17 +123,56 @@ def _root(path: Path) -> Path:
     return root
 
 
-def _safe_directory(root: Path, relative: Path) -> Path:
-    current = root
-    for part in relative.parts:
-        current = current / part
-        if current.is_symlink():
-            raise ValueError(f"controller path uses a symlink: {current}")
-        if current.exists() and not current.is_dir():
-            raise ValueError(f"controller path is not a directory: {current}")
-        if not current.exists():
-            current.mkdir()
-    return current
+def _open_directory_at(parent_fd: int, name: str, mode: int) -> int:
+    try:
+        os.mkdir(name, mode=mode, dir_fd=parent_fd)
+    except FileExistsError:
+        pass
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        return os.open(name, flags, dir_fd=parent_fd)
+    except OSError as error:
+        raise ValueError(f"controller directory is unsafe: {name}: {error}") from error
+
+
+def _private_draft_directory_fd(root: Path) -> int:
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    root_fd = os.open(root, flags)
+    base_fd = None
+    try:
+        base_fd = _open_directory_at(root_fd, ".requirements-impact-refiner", 0o755)
+        draft_fd = _open_directory_at(base_fd, "drafts", 0o700)
+        os.fchmod(draft_fd, 0o700)
+        return draft_fd
+    finally:
+        if base_fd is not None:
+            os.close(base_fd)
+        os.close(root_fd)
+
+
+def _write_private_draft(root: Path, draft_id: str, payload: bytes) -> Path:
+    directory_fd = _private_draft_directory_fd(root)
+    file_fd = None
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        file_fd = os.open(f"{draft_id}.json", flags, 0o600, dir_fd=directory_fd)
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(file_fd, payload[offset:])
+        os.fsync(file_fd)
+    except OSError as error:
+        raise ValueError(f"cannot create draft: {error}") from error
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        os.close(directory_fd)
+    return root / ".requirements-impact-refiner" / "drafts" / f"{draft_id}.json"
 
 
 def _all_strings(value: object):
@@ -189,7 +236,7 @@ def _current_lineage(root: Path):
     prior_state, errors = compact_state.load_state_bytes(current.state_path.read_bytes())
     if errors or prior_state is None:
         raise ValueError("current report state is invalid")
-    key_map = None
+    key_map = _load_controller_metadata(current)
     drafts = root / ".requirements-impact-refiner" / "drafts"
     if drafts.is_dir() and not drafts.is_symlink():
         for path in sorted(drafts.glob("*.json")):
@@ -209,17 +256,65 @@ def _current_lineage(root: Path):
             ):
                 key_map = draft["key_map"]
     if key_map is None:
-        raise ValueError("current report is missing controller key lineage")
+        key_map = _legacy_key_map(prior_state)
     return current, prior_state, key_map
+
+
+def _legacy_key_map(state: Mapping[str, object]) -> dict[str, dict[str, str]]:
+    sections = {
+        "invariants": (state.get("current_behavior", []), "inv"),
+        "impacts": (state.get("impacts", []), "imp"),
+        "decisions": (state.get("decisions", []), "dec"),
+        "criteria": (state.get("criteria", []), "ac"),
+    }
+    result = {}
+    for name, (rows, prefix) in sections.items():
+        mapping = {}
+        for row in rows:
+            identifier = row.get("id") if isinstance(row, dict) else None
+            if not isinstance(identifier, str):
+                raise ValueError("current report cannot derive controller key lineage")
+            mapping[f"legacy-{prefix}-{identifier.rsplit('-', 1)[-1].lower()}"] = identifier
+        result[name] = mapping
+    return result
+
+
+def _controller_metadata_path(report_id: str, revision: int, root: Path) -> Path:
+    report_dir = report_store.report_directory(root, report_id, create=True)
+    return report_dir / f"revision-{revision:04d}.controller.json"
+
+
+def _load_controller_metadata(current) -> Optional[dict[str, object]]:
+    path = current.state_path.with_name(
+        f"revision-{current.revision:04d}.controller.json"
+    )
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("controller lineage metadata is unsafe")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        current_state_sha256 = hashlib.sha256(
+            current.state_path.read_bytes()
+        ).hexdigest()
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"controller lineage metadata is invalid: {error}") from error
+    if (
+        not isinstance(payload, dict)
+        or payload.get("report_id") != current.report_id
+        or payload.get("revision") != current.revision
+        or payload.get("state_sha256")
+        != current_state_sha256
+        or not isinstance(payload.get("key_map"), dict)
+    ):
+        raise ValueError("controller lineage metadata identity is invalid")
+    return payload["key_map"]
 
 
 def _draft_path(root: Path, draft_id: str) -> Path:
     if DRAFT_ID_PATTERN.fullmatch(draft_id) is None:
         raise ValueError("invalid draft ID")
-    directory = _safe_directory(
-        root, Path(".requirements-impact-refiner") / "drafts"
-    )
-    return directory / f"{draft_id}.json"
+    return root / ".requirements-impact-refiner" / "drafts" / f"{draft_id}.json"
 
 
 def begin_refinement(request: BeginRequest) -> DraftResult:
@@ -273,14 +368,7 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         "created_at": now,
         "consumed": False,
     }
-    try:
-        with path.open("xb") as stream:
-            stream.write(_canonical_bytes(draft))
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chmod(path, 0o600)
-    except OSError as error:
-        raise ValueError(f"cannot create draft: {error}") from error
+    path = _write_private_draft(root, draft_id, _canonical_bytes(draft))
     return DraftResult(
         draft_id=draft_id,
         draft_path=path,
@@ -289,18 +377,38 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         previous_sha256=previous_sha256,
         settings=settings,
         prior_state=prior_state,
+        prior_key_map=prior_key_map,
     )
 
 
 def load_draft(repo_root: Path, draft_id: str) -> dict[str, object]:
     root = _root(repo_root)
-    path = _draft_path(root, draft_id)
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("draft does not exist")
+    if DRAFT_ID_PATTERN.fullmatch(draft_id) is None:
+        raise ValueError("invalid draft ID")
+    directory_fd = _private_draft_directory_fd(root)
+    file_fd = None
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        file_fd = os.open(f"{draft_id}.json", flags, dir_fd=directory_fd)
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(file_fd, 1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_DRAFT_BYTES:
+                raise ValueError("draft exceeds 4 MiB")
+            chunks.append(chunk)
+        value = json.loads(b"".join(chunks).decode("utf-8", errors="strict"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"draft is invalid: {error}") from error
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        os.close(directory_fd)
     if not isinstance(value, dict) or value.get("draft_id") != draft_id:
         raise ValueError("draft identity is invalid")
     if value.get("repo_root") != str(root):
@@ -335,6 +443,8 @@ def _validate_analysis(analysis: Mapping[str, object]) -> None:
         rows = analysis[section]
         if not isinstance(rows, list):
             raise ValueError(f"{section} must be an array")
+        if len(rows) > 128:
+            raise ValueError(f"{section} has too many rows")
         keys = []
         for row in rows:
             _check_keys(section[:-1], row, expected)
@@ -342,6 +452,14 @@ def _validate_analysis(analysis: Mapping[str, object]) -> None:
                 keys.append(_local_key(row["key"], section[:-1]))
             if section == "impacts":
                 _check_keys("impact summary", row["summary"], SUMMARY_KEYS)
+                for name in ("invariant_keys", "decision_keys", "criterion_keys"):
+                    if not isinstance(row[name], list) or len(row[name]) > 128:
+                        raise ValueError(f"impact {name} has too many items")
+            if section == "decisions" and (
+                not isinstance(row["accepted_impact_keys"], list)
+                or len(row["accepted_impact_keys"]) > 128
+            ):
+                raise ValueError("decision accepted_impact_keys has too many items")
         if len(keys) != len(set(keys)):
             raise ValueError(f"duplicate {section} local key")
     if analysis["phase"] == "pre-decision":
@@ -351,6 +469,8 @@ def _validate_analysis(analysis: Mapping[str, object]) -> None:
             raise ValueError("decision_needed requires two or three options")
         for option in options:
             _check_keys("decision option", option, {"option", "impact_keys", "tradeoff"})
+            if not isinstance(option["impact_keys"], list) or len(option["impact_keys"]) > 128:
+                raise ValueError("decision option impact_keys has too many items")
         if analysis["decisions"]:
             raise ValueError("pre-decision analysis forbids decisions")
     else:
@@ -574,24 +694,92 @@ def _consume(path: Path, draft: dict[str, object], published, key_map) -> None:
         raise ValueError(f"cannot consume draft: {error}") from error
 
 
+@contextmanager
+def _report_lock(root: Path, report_id: str):
+    report_dir = report_store.report_directory(root, report_id, create=True)
+    lock_path = report_dir / ".controller.lock"
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise ValueError(f"cannot open controller lock: {error}") from error
+    try:
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _write_controller_metadata(
+    root: Path,
+    draft: Mapping[str, object],
+    state_bytes: bytes,
+    key_map: Mapping[str, object],
+) -> None:
+    path = _controller_metadata_path(
+        str(draft["report_id"]), int(draft["revision"]), root
+    )
+    payload = _canonical_bytes(
+        {
+            "schema_version": 1,
+            "draft_id": draft["draft_id"],
+            "report_id": draft["report_id"],
+            "revision": draft["revision"],
+            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
+            "key_map": key_map,
+        }
+    )
+    try:
+        with path.open("xb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError:
+        try:
+            if path.is_symlink() or path.read_bytes() != payload:
+                raise ValueError("controller revision belongs to another draft")
+        except OSError as error:
+            raise ValueError(f"cannot verify controller lineage: {error}") from error
+    except OSError as error:
+        raise ValueError(f"cannot write controller lineage: {error}") from error
+
+
 def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
     root = _root(request.repo_root)
     _bounded(request.analysis, MAX_FINALIZE_BYTES, "finalize input")
     draft = load_draft(root, request.draft_id)
     if draft.get("consumed") is True:
         raise ValueError("draft is already consumed")
-    state, key_map = _build_state(draft, request.analysis)
-    published = report_store.publish_revision(root, _canonical_bytes(state))
-    stored_state, errors = compact_state.load_state_bytes(published.state_path.read_bytes())
-    if errors or stored_state is None:
-        raise ValueError("published state could not be verified")
-    delivery = stored_state["settings"]["delivery"]
-    display = (
-        impact_renderer.render_compact(stored_state)
-        if delivery == "compact"
-        else impact_renderer.render_markdown(stored_state)
-    )
-    _consume(_draft_path(root, request.draft_id), draft, published, key_map)
+    with _report_lock(root, str(draft["report_id"])):
+        draft = load_draft(root, request.draft_id)
+        if draft.get("consumed") is True:
+            raise ValueError("draft is already consumed")
+        state, key_map = _build_state(draft, request.analysis)
+        state_bytes = _canonical_bytes(state)
+        _write_controller_metadata(root, draft, state_bytes, key_map)
+        try:
+            published = report_store.publish_revision(
+                root, state_bytes, resume_partial=True
+            )
+        except (FileExistsError, report_store.ReportStoreError) as error:
+            raise ValueError(f"controller publication failed: {error}") from error
+        stored_state, errors = compact_state.load_state_bytes(
+            published.state_path.read_bytes()
+        )
+        if errors or stored_state is None:
+            raise ValueError("published state could not be verified")
+        delivery = stored_state["settings"]["delivery"]
+        display = (
+            impact_renderer.render_compact(stored_state)
+            if delivery == "compact"
+            else impact_renderer.render_markdown(stored_state)
+        )
+        _consume(_draft_path(root, request.draft_id), draft, published, key_map)
     return FinalizeResult(
         status="published",
         report_id=published.report_id,

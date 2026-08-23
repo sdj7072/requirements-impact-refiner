@@ -120,6 +120,26 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertEqual(missing.stdout, "")
         self.assertEqual(bad.stdout, "")
 
+    def test_begin_rejects_wrong_evidence_type_before_tuple_conversion(self):
+        payload = json.loads(self.begin_path.read_text(encoding="utf-8"))
+        payload["repository_evidence"] = {"bad": "shape"}
+        self.begin_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        result = self.begin()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("repository_evidence", result.stderr)
+
+    def test_input_size_is_rejected_before_unbounded_json_parse(self):
+        self.begin_path.write_bytes(b"{" + b" " * (256 * 1024))
+
+        result = self.begin()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("256 KiB", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

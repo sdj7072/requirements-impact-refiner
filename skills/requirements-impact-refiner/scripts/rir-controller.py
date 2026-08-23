@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import stat
 import sys
 from pathlib import Path
 
@@ -37,9 +38,19 @@ def build_parser():
     return parser
 
 
-def _read_object(path: Path):
+def _read_object(path: Path, maximum: int, label: str):
     try:
-        raw = path.read_bytes()
+        metadata = path.lstat()
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+            raise OSError("input must be a regular non-symlink file")
+        if metadata.st_size > maximum:
+            unit = "256 KiB" if maximum == rir_controller.MAX_BEGIN_BYTES else "2 MiB"
+            raise ValueError(f"{label} exceeds {unit}")
+        with path.open("rb") as stream:
+            raw = stream.read(maximum + 1)
+        if len(raw) > maximum:
+            unit = "256 KiB" if maximum == rir_controller.MAX_BEGIN_BYTES else "2 MiB"
+            raise ValueError(f"{label} exceeds {unit}")
         text = raw.decode("utf-8")
         value = json.loads(text)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -50,13 +61,15 @@ def _read_object(path: Path):
 
 
 def _begin(args) -> int:
-    value = _read_object(args.input)
+    value = _read_object(args.input, rir_controller.MAX_BEGIN_BYTES, "begin input")
     unknown = sorted(set(value) - BEGIN_KEYS)
     if unknown:
         raise ValueError(f"unknown begin key {unknown[0]}")
     missing = sorted({"request", "repository_evidence", "adapter"} - set(value))
     if missing:
         raise ValueError(f"missing begin key {missing[0]}")
+    if not isinstance(value["repository_evidence"], list):
+        raise ValueError("repository_evidence must be an array")
     result = rir_controller.begin_refinement(
         rir_controller.BeginRequest(
             repo_root=args.repo_root,
@@ -76,13 +89,22 @@ def _begin(args) -> int:
         "audience": result.settings["audience"],
         "delivery": result.settings["delivery"],
         "prior_state": result.prior_state,
+        "prior_key_map": result.prior_key_map,
+        "repository_evidence": value["repository_evidence"],
+        "analysis_contract": json.loads(
+            (SCRIPT_DIR.parent / "schemas" / "controller-analysis.schema.json").read_text(
+                encoding="utf-8"
+            )
+        ),
     }
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0
 
 
 def _finalize(args) -> int:
-    analysis = _read_object(args.input)
+    analysis = _read_object(
+        args.input, rir_controller.MAX_FINALIZE_BYTES, "finalize input"
+    )
     result = rir_controller.finalize_refinement(
         rir_controller.FinalizeRequest(
             repo_root=args.repo_root,

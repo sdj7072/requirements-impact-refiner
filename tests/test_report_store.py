@@ -75,6 +75,24 @@ class ReportStoreTest(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             STORE.publish_revision(self.root, self.state_bytes())
 
+    def test_retry_resumes_matching_partial_revision_artifacts(self):
+        state_bytes = self.state_bytes()
+        report_dir = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+        )
+        report_dir.mkdir(parents=True)
+        (report_dir / "revision-0001.json").write_bytes(state_bytes)
+
+        published = STORE.publish_revision(
+            self.root, state_bytes, resume_partial=True
+        )
+
+        self.assertTrue(published.pointer_path.is_file())
+        self.assertTrue(published.markdown_path.is_file())
+
     def test_revision_two_hashes_exact_selected_markdown_bytes(self):
         first = STORE.publish_revision(self.root, self.state_bytes())
         second_state = self.state(revision=2)

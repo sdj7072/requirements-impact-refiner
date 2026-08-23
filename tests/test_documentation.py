@@ -106,6 +106,19 @@ class DocumentationTest(unittest.TestCase):
         self.assertIn("full-inline", body)
         self.assertNotIn("Author complete state JSON", body)
 
+    def test_public_docs_describe_controller_mcp_and_cli_enforcement(self):
+        forbidden = {
+            "README.md": ("does not add MCP servers", "does not ship an MCP server"),
+            "README.ko.md": ("MCP 서버, hook", "MCP 서버나 전용"),
+            "README.ja.md": ("MCP server、hook", "MCP server や専用"),
+        }
+        for name in READMES:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for token in (".mcp.json", "rir_begin", "rir_finalize", "MCP", "CLI"):
+                self.assertIn(token, text, f"{token} missing from {name}")
+            for obsolete in forbidden[name]:
+                self.assertNotIn(obsolete, text, name)
+
     def test_top_release_descriptions_identify_the_current_patch_release(self):
         for name in READMES:
             description = (ROOT / name).read_text(encoding="utf-8").splitlines()[4]

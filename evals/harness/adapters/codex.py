@@ -495,8 +495,16 @@ class CodexAdapter(ClientAdapter):
                 if name in ("first.jsonl", "second.jsonl") and isinstance(value, str)
             )
             expected_turns = 0 if request.case.kind == "negative" else len(request.case.turns)
+            turn_outputs = tuple(
+                value
+                for name, value in sorted(artifacts.items())
+                if name in ("first.final.txt", "second.final.txt")
+                and isinstance(value, str)
+            )
             controller = analyze_controller_trace(
-                streams, final_output, expected_turns=expected_turns
+                streams,
+                turn_outputs if expected_turns else final_output,
+                expected_turns=expected_turns,
             )
             artifacts["controller-evidence.json"] = controller.to_json()
             if not controller.valid:

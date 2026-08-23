@@ -44,7 +44,7 @@ codex plugin remove requirements-impact-refiner@requirements-impact-refiner
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-The repository marketplace at [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) resolves the root [Codex plugin manifest](.codex-plugin/plugin.json), whose `skills` field points to the single canonical `./skills/` tree. It does not add MCP servers, hooks, apps, agents, or dependencies.
+The repository marketplace at [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) resolves the root [Codex plugin manifest](.codex-plugin/plugin.json), whose `skills` field points to the single canonical `./skills/` tree. [`.mcp.json`](.mcp.json) also exposes the local, standard-library-only `rir_begin` and `rir_finalize` tools. MCP provides structured enforcement when the host calls those tools; the bundled CLI is the hard-enforcement boundary because an invalid finalize prints no user response. The controller has no network client or third-party runtime dependency, and the plugin adds no hooks, apps, or agents.
 
 For Claude Code, run these commands inside Claude Code:
 
@@ -164,7 +164,7 @@ The exact plugin identifier is `requirements-impact-refiner@requirements-impact-
 
 Superpowers remains the orchestrator for brainstorming, planning, execution, debugging, and review. Claude Code `feature-dev` remains its phased feature workflow. GitHub Spec Kit remains the specification and planning workflow. Requirements Impact Refiner neither replaces nor vendors them: it contributes the repository-backed impact ledger and iterative impact reduction between their clarification and planning stages.
 
-This project does not provide broad ideation, generic PRD generation, architecture design, task breakdowns, implementation, debugging, or code review. It does not ship an MCP server or custom code-graph engine. It does not automatically install, invoke, or chain another framework, and related-work references do not imply dependency or code reuse.
+This project does not provide broad ideation, generic PRD generation, architecture design, task breakdowns, implementation, debugging, or code review. Its narrow local MCP server and CLI control impact-report creation; it does not ship a custom code-graph engine. MCP hosts can still skip a tool call, so only the CLI finalize path is hard enforcement. The project does not automatically install, invoke, or chain another framework, and related-work references do not imply dependency or code reuse.
 
 ## 8. Safety and Limitations
 

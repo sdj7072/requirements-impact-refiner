@@ -7,22 +7,24 @@ import os
 import re
 import stat
 import tempfile
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence, Tuple
 
 from .adapters.claude import ClaudeAdapter
 from .adapters.codex import CodexAdapter
 from .catalog import load_all, select_suite
+from .controller_evidence import analyze_controller_trace
 from .evidence import PotentialSecretError, build_manifest, record_probe, record_run, verify_manifest
 from .models import CaseSpec, ClientProbe, CommandResult, MechanicalScore, RunRequest, RunResult, RunStatus
+from .performance import PerformanceObservation, evaluate_smoke_gate
 from .reporting import render_report
 from .scoring import score_mechanical
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RAW_DIRECTORY = "raw"
-_DERIVED_ARTIFACTS = frozenset(("probes.json", "controller.json", "report.md", "scores.json"))
+_DERIVED_ARTIFACTS = frozenset(("probes.json", "controller.json", "report.md", "scores.json", "performance.json"))
 _REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 _POINTER_KEYS = {
     "schema_version", "report_id", "revision", "state", "markdown",
@@ -398,6 +400,139 @@ def _score_row(score: MechanicalScore) -> dict[str, object]:
     return {"case_id": score.case_id, "repetition": score.repetition, "passed": score.passed, "findings": list(score.findings)}
 
 
+def _resource_measurement(case: CaseSpec) -> tuple[int, int]:
+    paths = [_REPO_ROOT / "skills" / "using-requirements-impact-refiner" / "SKILL.md"]
+    if case.kind != "negative":
+        adapter = (
+            "integration-superpowers.md"
+            if case.id == "INT-superpowers"
+            else "integration-generic.md"
+        )
+        core = _REPO_ROOT / "skills" / "requirements-impact-refiner"
+        paths.extend((
+            core / "SKILL.md",
+            core / "references" / "controller-workflow.md",
+            core / "references" / adapter,
+        ))
+    payloads = [path.read_bytes() for path in paths]
+    words = sum(len(payload.decode("utf-8", errors="strict").split()) for payload in payloads)
+    return sum(len(payload) for payload in payloads), words
+
+
+def _turn_usage(jsonl_payloads: Sequence[bytes]) -> tuple[Optional[int], Optional[int]]:
+    usages = []
+    for payload in jsonl_payloads:
+        for line in payload.decode("utf-8", errors="strict").splitlines():
+            event = json.loads(line)
+            if event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
+                usages.append(event["usage"])
+    if not usages:
+        return None, None
+    if any(
+        not isinstance(row.get("input_tokens"), int)
+        or isinstance(row.get("input_tokens"), bool)
+        or not isinstance(row.get("output_tokens"), int)
+        or isinstance(row.get("output_tokens"), bool)
+        for row in usages
+    ):
+        return None, None
+    return (
+        sum(row["input_tokens"] for row in usages),
+        sum(row["output_tokens"] for row in usages),
+    )
+
+
+def _smoke_observation(
+    raw_root: Path,
+    client: str,
+    slot: ScheduledRun,
+    result: RunResult,
+    score: MechanicalScore,
+) -> PerformanceObservation:
+    attempt_path = _attempt_path(raw_root, client, slot, result.attempt)
+    prompt_names = ("first.prompt.txt", "second.prompt.txt")[: len(slot.case.turns)]
+    jsonl_names = ("first.jsonl", "second.jsonl")[: len(slot.case.turns)]
+    prompts = [
+        _read_selected_file(raw_root, attempt_path / name, "smoke prompt")[0]
+        for name in prompt_names
+    ]
+    jsonl_payloads = [
+        _read_selected_file(raw_root, attempt_path / name, "smoke JSONL")[0]
+        for name in jsonl_names
+    ]
+    selected_name = "second.final.txt" if slot.case.kind == "lineage" else "first.final.txt"
+    output = _read_selected_file(
+        raw_root, attempt_path / selected_name, "smoke final output"
+    )[0].decode("utf-8", errors="strict")
+    controller_payload = json.loads(
+        _read_selected_file(
+            raw_root,
+            attempt_path / "controller-evidence.json",
+            "smoke controller evidence",
+        )[0].decode("utf-8", errors="strict")
+    )
+    metadata = json.loads(
+        _read_selected_file(
+            raw_root, attempt_path / "metadata.json", "smoke metadata"
+        )[0].decode("utf-8", errors="strict")
+    )
+    durations = metadata.get("execution_commands", [])
+    duration_ms = None
+    if isinstance(durations, list) and all(
+        isinstance(row, dict) and isinstance(row.get("elapsed_seconds"), (int, float))
+        for row in durations
+    ):
+        duration_ms = round(sum(row["elapsed_seconds"] for row in durations) * 1000)
+    input_tokens, output_tokens = _turn_usage(jsonl_payloads)
+    impact_ids = ()
+    state_match = slot.case.kind == "negative"
+    if slot.case.kind != "negative":
+        if _captured_canonical_report(
+            raw_root, attempt_path, slot.case.kind == "lineage"
+        ) is None:
+            raise ValueError("smoke report evidence is missing")
+        report_root = attempt_path / "workspace-reports"
+        reports = [path for path in report_root.iterdir() if path.is_dir() and not path.is_symlink()]
+        if len(reports) != 1:
+            raise ValueError("smoke report evidence requires exactly one report")
+        pointer = json.loads(
+            _read_selected_file(
+                raw_root, reports[0] / "current.json", "smoke current pointer"
+            )[0].decode("utf-8", errors="strict")
+        )
+        state = json.loads(
+            _read_selected_file(
+                raw_root, reports[0] / pointer["state"], "smoke compact state"
+            )[0].decode("utf-8", errors="strict")
+        )
+        impact_ids = tuple(sorted(row["id"] for row in state["impacts"]))
+        state_match = bool(impact_ids) and all(identifier in output for identifier in impact_ids)
+    routed_bytes, routed_words = _resource_measurement(slot.case)
+    return PerformanceObservation(
+        case_id=slot.case.id,
+        repetition=slot.repetition,
+        status=result.status,
+        attempt=result.attempt,
+        retry_of=result.retry_of,
+        prompt_bytes=sum(len(payload) for payload in prompts),
+        routed_resource_bytes=routed_bytes,
+        routed_resource_words=routed_words,
+        output_bytes=len(output.encode("utf-8")),
+        output_words=len(output.split()),
+        duration_ms=duration_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        impact_ids=impact_ids,
+        state_markdown_match=state_match,
+        workflow_boundary_passed=score.passed,
+        controller_begin_calls=controller_payload.get("begin_calls", -1),
+        controller_finalize_calls=controller_payload.get("finalize_calls", -1),
+        controller_draft_ids_match=controller_payload.get("draft_ids_match") is True,
+        controller_finalize_succeeded=controller_payload.get("finalize_succeeded") is True,
+        controller_display_text_matches=controller_payload.get("display_text_matches") is True,
+    )
+
+
 def _scoring_evidence_failure(
     slot: ScheduledRun, result: RunResult, finding: str
 ) -> tuple[MechanicalScore, bool, tuple[tuple[str, str], ...]]:
@@ -613,6 +748,43 @@ def _score_selected_attempt(
             slot, result, "selected final output does not match raw evidence"
         )
 
+    if metadata.get("plugin_version") == "0.4.0":
+        streams = []
+        turn_outputs = []
+        turn_names = ("first", "second")[: len(slot.case.turns)]
+        try:
+            controller_bytes, controller_digest, controller_path = _read_selected_file(
+                raw_root,
+                attempt_path / "controller-evidence.json",
+                "selected controller evidence",
+            )
+            digests.append((controller_path, controller_digest))
+            stored_controller = json.loads(
+                controller_bytes.decode("utf-8", errors="strict")
+            )
+            for name in turn_names:
+                jsonl_bytes, jsonl_digest, jsonl_path = _read_selected_file(
+                    raw_root, attempt_path / f"{name}.jsonl", "selected controller JSONL"
+                )
+                final_bytes, final_digest, final_path = _read_selected_file(
+                    raw_root, attempt_path / f"{name}.final.txt", "selected turn output"
+                )
+                streams.append(jsonl_bytes.decode("utf-8", errors="strict"))
+                turn_outputs.append(final_bytes.decode("utf-8", errors="strict"))
+                digests.extend(((jsonl_path, jsonl_digest), (final_path, final_digest)))
+            expected_turns = 0 if slot.case.kind == "negative" else len(slot.case.turns)
+            derived_controller = analyze_controller_trace(
+                streams,
+                tuple(turn_outputs) if expected_turns else selected_output,
+                expected_turns=expected_turns,
+            )
+            if stored_controller != json.loads(derived_controller.to_json()):
+                raise ValueError("selected controller evidence disagrees with raw JSONL")
+            if not derived_controller.valid:
+                raise ValueError("selected controller evidence is invalid")
+        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            return _scoring_evidence_failure(slot, result, str(error))
+
     scoring_result = result
     previous_bytes = None
     try:
@@ -806,19 +978,63 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
     }
     if not scoring_evidence_valid:
         return 1
+    smoke_gate = None
+    observations = []
+    extraction_errors = []
+    if args.suite == "smoke" and probe.plugin_version == "0.4.0":
+        for result, score in zip(results, scores):
+            slot = slots[(result.case_id, result.repetition)]
+            try:
+                observations.append(
+                    _smoke_observation(raw_root, args.client, slot, result, score)
+                )
+            except (OSError, ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                extraction_errors.append(
+                    f"{result.case_id} performance evidence invalid: {error}"
+                )
+        smoke_gate = evaluate_smoke_gate(observations)
+        if extraction_errors:
+            smoke_gate = replace(
+                smoke_gate,
+                passed=False,
+                errors=tuple(sorted(set(smoke_gate.errors + tuple(extraction_errors)))),
+            )
+        performance_payload = {
+            "observations": [asdict(row) for row in observations],
+            "gate": asdict(smoke_gate),
+        }
+        for row in performance_payload["observations"]:
+            row["status"] = row["status"].value
+            row["impact_ids"] = list(row["impact_ids"])
+        performance_payload["gate"]["errors"] = list(smoke_gate.errors)
+        try:
+            _write_derived(
+                output_root / "performance.json",
+                json.dumps(performance_payload, sort_keys=True, indent=2) + "\n",
+            )
+        except OSError:
+            return 1
     ledger = {
         "identity": identity, "suite": args.suite, "repetitions": args.repetitions,
         "attempts": attempts, "runs": finals,
         "mechanical_scores": [_score_row(score) for score in scores],
     }
+    if smoke_gate is not None:
+        ledger["smoke_gate"] = {
+            "passed": smoke_gate.passed,
+            "errors": list(smoke_gate.errors),
+            "median_output_words": smoke_gate.median_output_words,
+            "median_routed_resource_words": smoke_gate.median_routed_resource_words,
+        }
     try:
         report = render_report(results, _report_metadata(args, probe, results), scores)
     except (TypeError, ValueError):
         return 1
     if not _finalize(output_root, ledger, report, scored_digests):
         return 1
-    return 1 if any(
-        result.status is RunStatus.INVALID_EVIDENCE for result in results
+    return 1 if (
+        any(result.status is RunStatus.INVALID_EVIDENCE for result in results)
+        or (smoke_gate is not None and not smoke_gate.passed)
     ) else 0
 
 

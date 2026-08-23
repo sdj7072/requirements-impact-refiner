@@ -79,7 +79,7 @@ class ControllerEvidenceTest(unittest.TestCase):
             rows.append(completed("rir_begin", {}, {"draft_id": draft}))
             rows.append(completed("rir_finalize", {"draft_id": draft}, {"status": "published", "draft_id": draft, "display_text": display}))
 
-        lineage = analyze_controller_trace(("\n".join(rows[:2]), "\n".join(rows[2:])), "second", expected_turns=2)
+        lineage = analyze_controller_trace(("\n".join(rows[:2]), "\n".join(rows[2:])), ("first", "second"), expected_turns=2)
         negative = analyze_controller_trace(('{"type":"item.completed","item":{"type":"agent_message","text":"debug"}}',), "debug", expected_turns=0)
 
         self.assertTrue(lineage.valid)
@@ -94,7 +94,49 @@ class ControllerEvidenceTest(unittest.TestCase):
         evidence = analyze_controller_trace(("\n".join((prose, started)),), "done", expected_turns=1)
 
         self.assertFalse(evidence.valid)
-        self.assertEqual((evidence.begin_calls, evidence.finalize_calls), (0, 0))
+        self.assertEqual((evidence.begin_calls, evidence.finalize_calls), (1, 0))
+
+    def test_failed_duplicate_call_cannot_disappear_from_attempt_inventory(self):
+        draft = "0" * 32
+        good_begin = completed("rir_begin", {}, {"draft_id": draft})
+        failed_event = json.loads(completed(
+            "rir_begin", {}, {}, status="failed", error={"message": "boom"}
+        ))
+        failed_event["item"]["id"] = "item-rir_begin-duplicate"
+        failed_begin = json.dumps(failed_event)
+        good_finalize = completed(
+            "rir_finalize",
+            {"draft_id": draft},
+            {"status": "published", "display_text": "done"},
+        )
+
+        evidence = analyze_controller_trace(
+            ("\n".join((good_begin, failed_begin, good_finalize)),),
+            "done",
+            expected_turns=1,
+        )
+
+        self.assertFalse(evidence.valid)
+        self.assertEqual(
+            evidence.tool_order,
+            ("rir_begin", "rir_begin", "rir_finalize"),
+        )
+
+    def test_lineage_binds_each_finalize_display_to_its_turn_output(self):
+        rows = []
+        for suffix, display in (("0", "wrong first"), ("1", "second")):
+            draft = suffix * 32
+            rows.append(completed("rir_begin", {}, {"draft_id": draft}))
+            rows.append(completed("rir_finalize", {"draft_id": draft}, {"status": "published", "display_text": display}))
+
+        evidence = analyze_controller_trace(
+            ("\n".join(rows[:2]), "\n".join(rows[2:])),
+            ("first", "second"),
+            expected_turns=2,
+        )
+
+        self.assertFalse(evidence.valid)
+        self.assertFalse(evidence.display_text_matches)
 
     def test_same_named_tools_from_another_server_cannot_satisfy_controller_gate(self):
         draft = "0" * 32

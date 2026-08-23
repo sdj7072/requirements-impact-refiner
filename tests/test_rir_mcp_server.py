@@ -43,6 +43,11 @@ class RirMcpServerTest(unittest.TestCase):
         )
         for tool in replies[1]["result"]["tools"]:
             self.assertEqual(tool["inputSchema"]["additionalProperties"], False)
+        finalize_schema = replies[1]["result"]["tools"][1]["inputSchema"]
+        analysis = finalize_schema["properties"]["analysis"]
+        self.assertEqual(analysis["additionalProperties"], False)
+        self.assertIn("impacts", analysis["required"])
+        self.assertEqual(analysis["properties"]["impacts"]["items"]["additionalProperties"], False)
 
     def test_begin_and_finalize_tools_share_controller_state(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -60,7 +65,11 @@ class RirMcpServerTest(unittest.TestCase):
                 process.stdin.write(json.dumps(begin) + "\n")
                 process.stdin.flush()
                 begin_reply = json.loads(process.stdout.readline())
-                draft_id = begin_reply["result"]["structuredContent"]["draft_id"]
+                begin_content = begin_reply["result"]["structuredContent"]
+                draft_id = begin_content["draft_id"]
+                self.assertEqual(begin_content["repository_evidence"], ["displayName exists"])
+                self.assertIn("impacts", begin_content["analysis_contract"]["required"])
+                self.assertIn("prior_key_map", begin_content)
                 analysis = json.loads((FIXTURES / "controller-analysis-pre-decision.json").read_text())
                 finalize = request(2, "tools/call", {"name": "rir_finalize", "arguments": {"repo_root": str(root), "draft_id": draft_id, "analysis": analysis}})
                 process.stdin.write(json.dumps(finalize) + "\n")
@@ -82,13 +91,15 @@ class RirMcpServerTest(unittest.TestCase):
             [
                 request(1, "tools/call", {"name": "other", "arguments": {}}),
                 request(2, "tools/call", {"name": "rir_begin", "arguments": []}),
-                request(3, "tools/list", {}),
+                request(3, "tools/call", {"name": "rir_begin", "arguments": {"repo_root": "/tmp", "request": "x", "repository_evidence": {"bad": "shape"}, "adapter": "generic"}}),
+                request(4, "tools/list", {}),
             ]
         )
 
         self.assertEqual(replies[0]["error"]["code"], -32602)
         self.assertEqual(replies[1]["error"]["code"], -32602)
-        self.assertIn("tools", replies[2]["result"])
+        self.assertEqual(replies[2]["error"]["code"], -32602)
+        self.assertIn("tools", replies[3]["result"])
         self.assertLess(len(json.dumps(replies[0])), 2048)
 
     def test_notification_has_no_response_and_clean_eof_exits_zero(self):
@@ -99,6 +110,58 @@ class RirMcpServerTest(unittest.TestCase):
             ]
         )
         self.assertEqual([reply["id"] for reply in replies], [2])
+
+    def test_stale_finalize_returns_bounded_error_and_server_continues(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = subprocess.Popen(
+                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+            )
+            try:
+                drafts = []
+                for identifier in (1, 2):
+                    message = request(identifier, "tools/call", {"name": "rir_begin", "arguments": {"repo_root": str(root), "request": "Add nickname.", "repository_evidence": ["displayName exists"], "adapter": "generic"}})
+                    process.stdin.write(json.dumps(message) + "\n")
+                    process.stdin.flush()
+                    drafts.append(json.loads(process.stdout.readline())["result"]["structuredContent"]["draft_id"])
+                analysis = json.loads((FIXTURES / "controller-analysis-pre-decision.json").read_text())
+                replies = []
+                for identifier, draft_id in ((3, drafts[0]), (4, drafts[1])):
+                    message = request(identifier, "tools/call", {"name": "rir_finalize", "arguments": {"repo_root": str(root), "draft_id": draft_id, "analysis": analysis}})
+                    process.stdin.write(json.dumps(message) + "\n")
+                    process.stdin.flush()
+                    replies.append(json.loads(process.stdout.readline()))
+                process.stdin.write(json.dumps(request(5, "tools/list", {})) + "\n")
+                process.stdin.flush()
+                after = json.loads(process.stdout.readline())
+            finally:
+                process.stdin.close()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
+
+        self.assertIn("result", replies[0])
+        self.assertEqual(replies[1]["error"]["code"], -32602)
+        self.assertIn("tools", after["result"])
+
+    def test_line_larger_than_limit_is_rejected_even_when_newline_is_buffered(self):
+        payload = b" " * (2 * 1024 * 1024) + b"\n"
+        result = subprocess.run(
+            [sys.executable, str(SERVER)], input=payload,
+            capture_output=True, check=False,
+        )
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(replies[0]["error"]["code"], -32700)
+        self.assertIn("exceeds", replies[0]["error"]["message"])
+
+    def test_initialize_negotiates_the_supported_protocol_version(self):
+        replies = self.exchange([
+            request(1, "initialize", {"protocolVersion": "2099-01-01", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}),
+        ])
+        self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
 
 
 if __name__ == "__main__":

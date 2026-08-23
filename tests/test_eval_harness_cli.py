@@ -8,6 +8,7 @@ from unittest.mock import patch
 from evals.harness.catalog import load_all
 from evals.harness.evidence import build_manifest, record_run, verify_manifest
 from evals.harness.models import ClientProbe, CommandResult, RunResult, RunStatus
+from evals.harness.performance import PerformanceObservation, SmokeGateResult
 from evals.harness.run import (
     ScheduledRun,
     _score_selected_attempt,
@@ -151,6 +152,22 @@ class FakeAdapter:
             retry_of=retry_of,
             metadata=self.run_metadata(request),
         )
+
+
+def controller_observation(raw_root, client, slot, result, score):
+    expected = 0 if slot.case.kind == "negative" else len(slot.case.turns)
+    return PerformanceObservation(
+        case_id=slot.case.id, repetition=slot.repetition,
+        status=result.status, attempt=result.attempt, retry_of=result.retry_of,
+        prompt_bytes=10, routed_resource_bytes=10, routed_resource_words=10,
+        output_bytes=10, output_words=10, duration_ms=1,
+        input_tokens=None, output_tokens=None,
+        impact_ids=() if slot.case.kind == "negative" else ("IMP-001",),
+        state_markdown_match=True, workflow_boundary_passed=True,
+        controller_begin_calls=expected, controller_finalize_calls=expected,
+        controller_draft_ids_match=True, controller_finalize_succeeded=True,
+        controller_display_text_matches=True,
+    )
 
 
 class LineageEvidenceAdapter(FakeAdapter):
@@ -588,6 +605,35 @@ class EvalHarnessCliTest(unittest.TestCase):
             any(path.endswith("workspace-reports/RPT-001/revision-0001.md") for path, _ in digests)
         )
 
+    def test_v04_scoring_rejects_controller_evidence_detached_from_jsonl(self):
+        case = next(case for case in load_all() if case.id == "POS-authorization")
+        compact = "## Change Impact Summary\n\nValidation: passed\n"
+        canonical = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.md").read_text(encoding="utf-8")
+        state = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(encoding="utf-8")
+        pointer = json.dumps({
+            "schema_version": 1, "report_id": "RPT-001", "revision": 1,
+            "state": "revision-0001.json", "markdown": "revision-0001.md",
+            "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+        }, sort_keys=True)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            record_run(raw, "codex", case.id, 1, {
+                "metadata.json": json.dumps({"attempt": 1, "client": "codex", "retry_of": None, "plugin_version": "0.4.0"}),
+                "first.final.txt": compact,
+                "first.jsonl": '{"type":"item.completed","item":{"id":"x","type":"agent_message","text":"no tools"}}\n',
+                "controller-evidence.json": json.dumps({"valid": True, "tool_order": ["rir_begin", "rir_finalize"]}),
+                "workspace-reports/RPT-001/current.json": pointer,
+                "workspace-reports/RPT-001/revision-0001.json": state,
+                "workspace-reports/RPT-001/revision-0001.md": canonical,
+            }, root / "quarantine")
+            result = RunResult(case.id, 1, "codex", RunStatus.PASS, None, final_output=compact)
+
+            score, trusted, _ = _score_selected_attempt(raw, "codex", ScheduledRun(case, 1), result)
+
+        self.assertFalse(trusted)
+        self.assertIn("controller evidence", score.findings[0])
+
     def test_lineage_non_utf8_predecessor_invalidates_scoring_evidence(self):
         """Replacement decoding would sever the SHA from the exact predecessor bytes."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -956,6 +1002,43 @@ class EvalHarnessCliTest(unittest.TestCase):
             )
 
             self.assertEqual(run_batch(args, FakeAdapter([RunStatus.INVALID_EVIDENCE])), 1)
+
+    def test_v04_smoke_invokes_and_persists_the_performance_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                [
+                    "--client", "codex", "--suite", "smoke",
+                    "--expected-plugin-version", "0.4.0",
+                    "--output", str(output),
+                ]
+            )
+            rejected = SmokeGateResult(
+                passed=False,
+                errors=("injected budget failure",),
+                median_output_words=10,
+                median_routed_resource_words=10,
+            )
+            with patch(
+                "evals.harness.run._smoke_observation",
+                side_effect=controller_observation,
+            ), patch(
+                "evals.harness.run.evaluate_smoke_gate",
+                return_value=rejected,
+            ) as gate:
+                exit_code = run_batch(
+                    args, FakeAdapter(plugin_version="0.4.0")
+                )
+
+            payload = json.loads(
+                (output / "performance.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 1)
+        gate.assert_called_once()
+        self.assertEqual(len(payload["observations"]), 6)
+        self.assertFalse(payload["gate"]["passed"])
+        self.assertIn("injected budget failure", payload["gate"]["errors"])
 
 
 if __name__ == "__main__":

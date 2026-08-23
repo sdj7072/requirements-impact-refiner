@@ -7,19 +7,19 @@
   "properties": {
     "phase": {"enum": ["pre-decision", "post-decision"]},
     "refined_requirement": {"$ref": "#/$defs/text"},
-    "invariants": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/invariant"}},
-    "impacts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/impact"}},
+    "invariants": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/invariant"}},
+    "impacts": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/impact"}},
     "decision_needed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/decisionNeeded"}]},
-    "decisions": {"type": "array", "items": {"$ref": "#/$defs/decision"}},
-    "criteria": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/criterion"}},
-    "unresolved": {"type": "array", "items": {"$ref": "#/$defs/unresolved"}},
-    "scope": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scope"}},
+    "decisions": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/decision"}},
+    "criteria": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/criterion"}},
+    "unresolved": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/unresolved"}},
+    "scope": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/scope"}},
     "workflow": {"$ref": "#/$defs/text"}
   },
   "$defs": {
     "text": {"type": "string", "minLength": 1, "maxLength": 65536},
     "key": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
-    "keyList": {"type": "array", "items": {"$ref": "#/$defs/key"}, "uniqueItems": true},
+    "keyList": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/key"}, "uniqueItems": true},
     "invariant": {
       "type": "object", "additionalProperties": false,
       "required": ["key", "behavior", "evidence_level", "evidence"],

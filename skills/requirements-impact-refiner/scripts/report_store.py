@@ -184,6 +184,22 @@ def _write_exclusive(path: Path, payload: bytes) -> None:
         raise ReportStoreUnavailable(f"cannot write artifact {path.name}: {error}") from error
 
 
+def _write_or_verify(path: Path, payload: bytes, *, resume_partial: bool) -> None:
+    try:
+        _write_exclusive(path, payload)
+    except FileExistsError:
+        if not resume_partial or path.is_symlink():
+            raise
+        try:
+            existing = path.read_bytes()
+        except OSError as error:
+            raise ReportStoreUnavailable(
+                f"cannot verify existing artifact {path.name}: {error}"
+            ) from error
+        if existing != payload:
+            raise FileExistsError(path)
+
+
 def _replace_pointer(pointer_path: Path, payload: bytes) -> None:
     temporary_path: Path | None = None
     try:
@@ -204,7 +220,9 @@ def _replace_pointer(pointer_path: Path, payload: bytes) -> None:
         raise ReportStoreUnavailable(f"cannot publish current pointer: {error}") from error
 
 
-def publish_revision(repo_root: Path, state_bytes: bytes) -> PublishedRevision:
+def publish_revision(
+    repo_root: Path, state_bytes: bytes, *, resume_partial: bool = False
+) -> PublishedRevision:
     state, state_errors = compact_state.load_state_bytes(state_bytes)
     if state_errors or state is None:
         raise ValueError("; ".join(state_errors))
@@ -215,11 +233,23 @@ def publish_revision(repo_root: Path, state_bytes: bytes) -> PublishedRevision:
     pointer_path = report_dir / "current.json"
     state_path = report_dir / f"revision-{revision:04d}.json"
     markdown_path = report_dir / f"revision-{revision:04d}.md"
-    if state_path.exists():
-        raise FileExistsError(state_path)
-    if markdown_path.exists():
-        raise FileExistsError(markdown_path)
     current = load_current(repo_root, report_id)
+    canonical_state = _canonical_json(state)
+    markdown = impact_renderer.render_markdown(state)
+    markdown_bytes = markdown.encode("utf-8")
+    if current is not None and current.revision == revision:
+        if not resume_partial:
+            raise FileExistsError(state_path)
+        try:
+            if current.state_path.read_bytes() != canonical_state:
+                raise FileExistsError(state_path)
+            if current.markdown_path.read_bytes() != markdown_bytes:
+                raise FileExistsError(markdown_path)
+        except OSError as error:
+            raise ReportStoreUnavailable(
+                f"cannot verify published revision: {error}"
+            ) from error
+        return current
     if revision == 1:
         if current is not None:
             raise LineageError("revision 1 cannot replace an existing lineage")
@@ -230,17 +260,14 @@ def publish_revision(repo_root: Path, state_bytes: bytes) -> PublishedRevision:
             raise LineageError("revision must follow the current revision exactly")
         if report["previous_sha256"] != current.markdown_sha256:
             raise LineageError("previous_sha256 does not match selected predecessor bytes")
-    markdown = impact_renderer.render_markdown(state)
     previous_bytes = current.markdown_path.read_bytes() if current is not None else None
     markdown_errors = impact_renderer.validate_rendered_markdown(
         markdown, previous_bytes=previous_bytes
     )
     if markdown_errors:
         raise ValueError("; ".join(markdown_errors))
-    canonical_state = _canonical_json(state)
-    markdown_bytes = markdown.encode("utf-8")
-    _write_exclusive(state_path, canonical_state)
-    _write_exclusive(markdown_path, markdown_bytes)
+    _write_or_verify(state_path, canonical_state, resume_partial=resume_partial)
+    _write_or_verify(markdown_path, markdown_bytes, resume_partial=resume_partial)
     digest = _digest(markdown_bytes)
     pointer = {
         "schema_version": 1,

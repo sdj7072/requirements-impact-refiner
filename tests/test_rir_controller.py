@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,34 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(stored["repo_root"], str(self.root.resolve()))
         self.assertFalse(stored["consumed"])
 
+    def test_begin_migrates_valid_precontroller_report_lineage(self):
+        state = self.fixture("compact-state-pre-decision.json")
+        CONTROLLER.report_store.publish_revision(
+            self.root, CONTROLLER._canonical_bytes(state)
+        )
+
+        result = CONTROLLER.begin_refinement(
+            self.request(request="Revise legacy report.")
+        )
+
+        self.assertEqual(result.report_id, "RPT-001")
+        self.assertEqual(result.revision, 2)
+        self.assertEqual(
+            result.prior_key_map["impacts"],
+            {"legacy-imp-001": "IMP-001"},
+        )
+
+    def test_begin_creates_private_draft_without_post_creation_chmod_window(self):
+        with mock.patch.object(
+            CONTROLLER.os,
+            "chmod",
+            side_effect=AssertionError("post-create chmod"),
+        ):
+            result = CONTROLLER.begin_refinement(self.request())
+
+        self.assertEqual(result.draft_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(result.draft_path.parent.stat().st_mode & 0o777, 0o700)
+
     def test_begin_rejects_oversized_request_and_non_directory_root(self):
         with self.assertRaisesRegex(ValueError, "256 KiB"):
             CONTROLLER.begin_refinement(
@@ -116,6 +145,27 @@ class RirControllerTest(unittest.TestCase):
                 )
             )
 
+    def test_finalize_retry_completes_consumption_after_post_publish_failure(self):
+        draft = CONTROLLER.begin_refinement(self.request())
+        request = self.finalize(
+            draft, self.fixture("controller-analysis-pre-decision.json")
+        )
+        real_consume = CONTROLLER._consume
+        with mock.patch.object(
+            CONTROLLER,
+            "_consume",
+            side_effect=ValueError("injected consume failure"),
+        ):
+            with self.assertRaisesRegex(ValueError, "injected consume failure"):
+                CONTROLLER.finalize_refinement(request)
+
+        with mock.patch.object(CONTROLLER, "_consume", wraps=real_consume) as consume:
+            result = CONTROLLER.finalize_refinement(request)
+
+        self.assertEqual((result.report_id, result.revision), ("RPT-001", 1))
+        self.assertEqual(consume.call_count, 1)
+        self.assertTrue(CONTROLLER.load_draft(self.root, draft.draft_id)["consumed"])
+
     def test_finalize_calculates_delta_and_rejects_model_ids(self):
         draft = CONTROLLER.begin_refinement(self.request())
         analysis = self.fixture("controller-analysis-post-decision.json")
@@ -141,6 +191,14 @@ class RirControllerTest(unittest.TestCase):
         huge["refined_requirement"] = "x" * (2 * 1024 * 1024 + 1)
         with self.assertRaisesRegex(ValueError, "2 MiB"):
             CONTROLLER.finalize_refinement(self.finalize(draft, huge))
+
+    def test_finalize_rejects_schema_collection_overflow(self):
+        draft = CONTROLLER.begin_refinement(self.request())
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["scope"] = analysis["scope"] * 129
+
+        with self.assertRaisesRegex(ValueError, "scope has too many rows"):
+            CONTROLLER.finalize_refinement(self.finalize(draft, analysis))
 
     def test_revision_preserves_ids_hashes_predecessor_and_calculates_reopened(self):
         first_draft = CONTROLLER.begin_refinement(self.request())
