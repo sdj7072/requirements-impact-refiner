@@ -13,18 +13,17 @@ Use for concrete pre-planning changes; not ideation, debugging, code review, or 
 
 ## Resource paths
 
-Resolve every `references/`, `assets/`, and `scripts/` path from the directory that contains this `SKILL.md`. Set `SKILL_DIR` to it; read `SKILL_DIR/references/evidence-model.md`, the taxonomy, refinement loop, [presentation modes](references/presentation-modes.md), template chooser, selected template, and validator from it, not the plugin root or workspace root. Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`.
+Resolve every `references/`, `assets/`, `schemas/`, and `scripts/` path from the directory that contains this `SKILL.md`. Set `SKILL_DIR` to it, not the plugin root or workspace root. Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`.
 
-1. Resolve presentation settings with `scripts/resolve-settings.py`; current-request override beats repository config, then default `balanced`. Disclose invalid config and use `balanced`.
-2. Locate the latest v0.3 predecessor; record `REQ-###`, inspect evidence, and preserve current behavior as `INV-###`.
-3. First report: `RPT-###`, Revision 1, predecessor `none`, all impacts `new`. Later, preserve IDs, increment once, and hash exact predecessor bytes.
-4. Before a choice, use only the pre-decision template: one question and two or three options; never emit `DEC-###`. After an explicit choice, use only the post-decision template, link `DEC-###`, and recalculate every impact.
-5. Compute **Impact Delta** across all nine categories in the template. List each current or predecessor `IMP-###` once. Stable states are `unchanged`; terminal-to-active is `reopened`.
-6. `accepted` needs a decision; `resolved` needs evidence. Only `deferred`/`blocked` impacts are unresolved. Stop at report-only handoff.
+1. Run `scripts/resolve-settings.py` with the repository root and explicit request overrides. Invalid configuration is disclosed; use `balanced` and `compact`.
+2. Select the phase and one workflow adapter. Determine whether a predecessor exists, evidence is ambiguous, or multiple impact domains apply. Run `scripts/resource_route.py` with those flags and read only the returned paths.
+3. Inspect repository evidence. Author one complete state JSON using the compact contract. Do not omit an impact to shorten output. Preserve current behavior as `INV-###`; future `AC-###` entries are not current evidence.
+4. Run `scripts/publish-impact-report.py`. Correct exit-1 validation errors. On exit 2 with `full-inline`, render Markdown and disclose that persistence/fast revisions are unavailable.
+5. For published `compact`, return only `render-impact-report.py --format compact`. For `full`, return canonical Markdown inline. Never rewrite the renderer's facts or begin planning.
 
 ## Workflow integration
 
-Read exactly one adapter after the orchestrator is known; apply its Entry before step 1. If more than one orchestrator is active, ask the user to choose one. Never invoke their external workflow.
+Read exactly one adapter after the orchestrator is known; apply its Entry before analysis. If more than one orchestrator is active, ask the user to choose one. Never invoke their external workflow.
 
 | Selected mode | Read only |
 | --- | --- |
@@ -33,12 +32,6 @@ Read exactly one adapter after the orchestrator is known; apply its Entry before
 | `claude-feature-dev` | [Claude feature-dev](references/integration-claude-feature-dev.md) |
 | `spec-kit` | [Spec Kit](references/integration-spec-kit.md) |
 
-## Before output
+## Stop conditions
 
-- Match `Report State` to one stage template. A concrete `DEC-###` needs an explicit selection; constraints and recommendations do not select mechanics.
-- Validate with `scripts/validate-impact-report.py --require-summary REPORT.md`; add `--previous PREVIOUS.md` for a revision. If unavailable, compare conceptually and disclose the gap.
-- Before choice, include only the request and supplied constraints/invariants; keep option mechanics in **Decision Needed**. `AC-###` entries are future targets, not verified behavior.
-
-## Output shape
-
-No preamble; the first non-empty line exactly `# Requirements Impact Report`. After `Report State`, include one `Change Impact Summary` row per ledger impact, worded for the resolved audience mode and fact-bound to that `IMP-###`. Then return the complete canonical current report inline. A saved file is supplementary only. Every lineage turn returns the complete revised report inline.
+Before selection, state one question with two or three options and no `DEC-###`. `accepted` needs a decision; `resolved` needs evidence; only `blocked`/`deferred` are unresolved. Stop at the validated Planning Handoff. Compact output links the append-only JSON and Markdown; full output preserves the complete canonical report.

@@ -335,28 +335,26 @@ class PackagingTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn(
-            "Resolve every `references/`, `assets/`, and `scripts/` path from the directory that contains this `SKILL.md`.",
+            "Resolve every `references/`, `assets/`, `schemas/`, and `scripts/` path from the directory that contains this `SKILL.md`.",
             core,
         )
-        self.assertIn(
-            "read `SKILL_DIR/references/evidence-model.md`", core,
-        )
+        self.assertIn("scripts/resource_route.py", core)
+        self.assertIn("read only the returned paths", core)
         self.assertIn("not the plugin root or workspace root", core)
         self.assertIn(
             "Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`",
             core,
         )
 
-    def test_core_skill_requires_an_inline_canonical_report(self):
+    def test_core_skill_defaults_to_compact_with_full_inline_fallback(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn(
-            "first non-empty line exactly `# Requirements Impact Report`", core
-        )
-        self.assertIn("complete canonical current report inline", core)
-        self.assertIn("saved file is supplementary only", core)
-        self.assertIn("lineage turn returns the complete revised report inline", core)
+        self.assertIn("`compact`", core)
+        self.assertIn("publish-impact-report.py", core)
+        self.assertIn("render-impact-report.py", core)
+        self.assertIn("full-inline", core)
+        self.assertIn("do not omit an impact", core.lower())
 
     def test_manifest_identity_is_consistent(self):
         codex = self.load(".codex-plugin/plugin.json")

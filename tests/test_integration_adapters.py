@@ -107,7 +107,7 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         text = SKILL_PATH.read_text(encoding="utf-8")
         routing = text.split("## Workflow integration\n", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Read exactly one", routing)
-        self.assertIn("apply its Entry before step 1", routing)
+        self.assertIn("apply its Entry before analysis", routing)
         self.assertIn("If more than one orchestrator is active, ask the user to choose one", routing)
         for name, adapter in ADAPTERS.items():
             self.assertEqual(routing.count(f"| `{name}` |"), 1)

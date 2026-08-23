@@ -9,7 +9,9 @@ post-decision: Report State → requirement → current behavior/invariants → 
                → Decisions and Accepted Risks → Impact Delta → handoff
 ```
 
-Before revising, locate the latest v0.3 predecessor. If none exists, create a stable report ID at Revision 1 with predecessor `none`. Otherwise preserve the report and known impact IDs, increment the revision by exactly one, and hash the predecessor's exact bytes. If the predecessor cannot be obtained, disclose the lineage gap instead of guessing. Then create or revise `REQ-###`, establish current behavior and `INV-###`, and show the ledger first. Ask one question only if a decision is needed, provide two or three concrete options, and record the answer as `DEC-###`.
+Before revising, first inspect `.requirements-impact-refiner/reports/RPT-###/current.json` when the report ID is known. Accept its fast path only when the pointer schema is valid, its selected JSON and Markdown are repository-relative regular files, and the selected Markdown bytes match `markdown_sha256`. Preserve the state, IDs, and unchanged facts; inspect only evidence affected by the new request. The publisher validates the exact transition and calculates whether the authored Delta agrees.
+
+If no valid pointer exists, locate the latest v0.3+ Markdown predecessor. If none exists, create a stable report ID at Revision 1 with predecessor `none`. Otherwise preserve the report and known impact IDs, increment the revision by exactly one, and hash the predecessor's exact bytes. If the predecessor cannot be obtained, disclose the lineage gap instead of guessing. Then create or revise `REQ-###`, establish current behavior and `INV-###`, and ask one question only when a decision is needed.
 
 Before selection, use the pre-decision template. It forbids concrete decision IDs and the recorded-decisions section; option-specific mechanics stay in **Decision Needed**. After selection, switch to the post-decision template, record the choice, and re-evaluate every known `IMP-###`.
 
