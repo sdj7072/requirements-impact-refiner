@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.3.2`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.4.0`은 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 **Public Preview** 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -80,10 +80,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 이제 모든 보고서 앞에는 사용자 친화적인 `Change Impact Summary`가 붙습니다. 어떤 기능이 바뀌는지, 어떤 문제가 생길 수 있는지, 누구 또는 어떤 기능이 영향을 받는지, 언제 발생하는지, 어떻게 예방하거나 확인할지를 보여줍니다. 기본 대상은 `balanced`이며 저장소 루트의 `.requirements-impact-refiner.json`에서 설정할 수 있습니다.
 
 ```json
-{"audience":"balanced"}
+{"audience":"balanced","delivery":"compact"}
 ```
 
-허용값은 `simple`, `balanced`, `technical`입니다. 현재 대화에서 명시한 값이 저장소 설정보다 우선하며, `balanced`는 쉬운 설명과 유용한 기술 근거를 함께 제공합니다. 이는 Codex나 Claude의 전용 설정 화면이 아니라 모든 클라이언트에서 사용할 수 있는 스킬 설정입니다.
+audience 허용값은 `simple`, `balanced`, `technical`입니다. delivery 기본값은 compact이며, 전체 기준 보고서를 인라인으로 받으려면 `delivery: full`을 요청하거나 `"delivery":"full"`을 설정합니다. Compact 모드는 append-only JSON과 Markdown을 저장하고 짧은 요약과 경로만 반환합니다. 저장할 수 없으면 이를 밝히고 `full-inline` fallback을 사용합니다. 현재 요청이 저장소 설정보다 우선합니다. 이는 Codex나 Claude 전용 설정 화면이 아닌 크로스 클라이언트 스킬 설정입니다.
+
+![Compact delivery 흐름](assets/compact-delivery-demo.svg)
+
+전체 요청·응답·산출물·전체 렌더 예시는 [compact delivery demo](docs/compact-delivery-demo.md)를 참고하세요.
 
 로딩 후에는 변경과 저장소 범위를 함께 제시합니다. 예: “계획 전에 `displayName` API 이름 변경이 API, iOS DTO, 캐시된 프로필 경로에 미치는 영향을 정제해 줘.” 오케스트레이터가 여러 개라면 정확히 하나를 선택합니다.
 

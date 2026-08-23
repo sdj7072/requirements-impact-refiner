@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.3.2` is a repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.4.0` is a **Public Preview** repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
@@ -80,10 +80,14 @@ When the plugin is enabled, [`using-requirements-impact-refiner`](skills/using-r
 Every report now starts with a user-facing `Change Impact Summary`: which feature changes, what can go wrong, who or what is affected, when it happens, and how to prevent or check it. Its audience defaults to `balanced`. Set a repository preference in `.requirements-impact-refiner.json`:
 
 ```json
-{"audience":"balanced"}
+{"audience":"balanced","delivery":"compact"}
 ```
 
-Allowed values are `simple`, `balanced`, and `technical`. An explicit request in the current conversation overrides the repository file; `balanced` combines plain-language consequences with useful technical pointers. This is a cross-client skill setting rather than a custom Codex or Claude settings-screen control.
+Allowed audience values are `simple`, `balanced`, and `technical`. Delivery defaults to compact; request `delivery: full` or set `"delivery":"full"` to return the complete canonical report inline. Compact mode persists append-only JSON and Markdown and returns the short summary plus artifact paths. If persistence is unavailable, the skill uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
+
+![Compact delivery flow](assets/compact-delivery-demo.svg)
+
+See the [compact delivery demo](docs/compact-delivery-demo.md) for a complete request, response, artifact, and full-render example.
 
 After loading, ask for impact refinement with a concrete change and repository scope, for example: “Before planning, refine the `displayName` API rename against the API, iOS DTO, and cached-profile paths.” If multiple orchestrators are present, select exactly one.
 

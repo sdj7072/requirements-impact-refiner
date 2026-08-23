@@ -4,6 +4,7 @@ import shlex
 import struct
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -195,14 +196,14 @@ class PackagingTest(unittest.TestCase):
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.3.2")
+        self.assertEqual(manifest["version"], "0.4.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.3.2")
+        self.assertEqual(manifest["version"], "0.4.0")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_automatic_bootstrap_skill_is_discoverable(self):
@@ -211,7 +212,21 @@ class PackagingTest(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("name: using-requirements-impact-refiner", text)
         self.assertIn("Use when starting any software-development conversation", text)
-        self.assertIn('version: "0.3.2"', text)
+        self.assertIn('version: "0.4.0"', text)
+
+    def test_compact_delivery_demo_svg_is_safe_and_accessible(self):
+        path = ROOT / "assets/compact-delivery-demo.svg"
+        self.assertTrue(path.is_file())
+        tree = ET.parse(path)
+        root = tree.getroot()
+        self.assertEqual(root.attrib.get("viewBox"), "0 0 1200 600")
+        titles = [element.text for element in root.iter() if element.tag.endswith("title")]
+        self.assertTrue(any(title and title.strip() for title in titles))
+        self.assertFalse(any(element.tag.endswith("script") for element in root.iter()))
+        for element in root.iter():
+            for key, value in element.attrib.items():
+                if key.endswith("href"):
+                    self.assertFalse(value.startswith(("http://", "https://", "//")))
 
     def test_automatic_entrypoint_owns_activation_boundaries(self):
         bootstrap = (
@@ -277,7 +292,7 @@ class PackagingTest(unittest.TestCase):
         canonical = ROOT / "skills" / "requirements-impact-refiner"
         mirror_contract = {
             "references": set(),
-            "assets": {Path("logo.png")},
+            "assets": {Path("logo.png"), Path("compact-delivery-demo.svg")},
             "scripts": {Path("install-agent-skill.py")},
             "schemas": set(),
         }

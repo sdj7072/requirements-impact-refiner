@@ -11,7 +11,7 @@
       "name": "requirements-impact-refiner",
       "source": "./",
       "description": "Refines software requirements by exposing repository-backed change impacts and regression risks before planning.",
-      "version": "0.3.2",
+      "version": "0.4.0",
       "author": {
         "name": "Requirements Impact Refiner Contributors"
       },
