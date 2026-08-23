@@ -2,7 +2,7 @@
 
 ## Entry
 
-Enter after `brainstorming` design approval. Consume the approved design and its current `Planning Handoff` state without reopening ideation.
+Enter after `brainstorming` design approval. Consume the approved design and its current `Planning Handoff` state without reopening ideation. When approval state is known but the design content or repository evidence is unavailable, create a blocked impact report naming those gaps; do not reject entry, restart brainstorming, or proceed to planning.
 
 ## Ownership
 

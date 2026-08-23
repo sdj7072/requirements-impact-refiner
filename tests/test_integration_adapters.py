@@ -80,6 +80,24 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertIn("ask only for the missing requirement text or scope", entry)
         self.assertIn("not broad product ideation", entry)
 
+    def test_generic_entry_accepts_concrete_supplied_repository_evidence(self):
+        text = (REFERENCES / ADAPTERS["generic"]["file"]).read_text(encoding="utf-8")
+        entry = text.split("## Entry\n", 1)[1].split("\n## Ownership", 1)[0]
+
+        self.assertIn("concrete supplied `repository_evidence`", entry.lower())
+        self.assertIn("do not demand a mounted repository", entry)
+        self.assertIn("explicit requested mechanics as already selected", entry)
+
+    def test_superpowers_missing_design_content_becomes_a_blocked_report(self):
+        text = (REFERENCES / ADAPTERS["superpowers"]["file"]).read_text(
+            encoding="utf-8"
+        )
+        entry = text.split("## Entry\n", 1)[1].split("\n## Ownership", 1)[0]
+
+        self.assertIn("approval state is known", entry)
+        self.assertIn("blocked impact report", entry)
+        self.assertIn(SUPERPOWERS_HANDOFF_MARKER, text)
+
     def test_each_adapter_returns_the_canonical_report_without_planning(self):
         for adapter in ADAPTERS.values():
             text = (REFERENCES / adapter["file"]).read_text(encoding="utf-8")
