@@ -37,14 +37,24 @@ GraphPath = GRAPH.GraphPath
 FrontierEntry = GRAPH.FrontierEntry
 
 DEFAULT_MAX_FILE_BYTES = 1_048_576
+MAX_GRAPH_ID = 999
 IGNORED_DIRECTORIES = frozenset({
-    ".git", ".hg", ".svn", "vendor", "build", "dist", "generated",
+    ".git", ".hg", ".svn", ".requirements-impact-refiner",
+    "vendor", "build", "dist", "generated",
     "node_modules", ".next", ".venv", "venv", "target", "coverage",
 })
 _DOTTED = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
 _SLASHED = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*(?:/[A-Za-z_][A-Za-z0-9_.-]*)+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 _QUOTED = re.compile(r"(?P<quote>['\"])(?P<value>[^'\"\r\n]{2,256})(?P=quote)")
+_IMPORT = re.compile(r"(?m)^\s*(?:from|import)\s+(?P<value>[^\r\n#]+)")
+_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)(?P<prefix>\b(?:api[_-]?key|password|token|secret|credential)\b"
+    r"\s*[:=]\s*)(?P<quote>['\"])(?P<value>[^'\"\r\n]+)(?P=quote)"
+)
+_SECRET_SHAPE = re.compile(
+    r"(?i)(?:sk|pk)[-_][A-Za-z0-9_-]{12,}|[A-Za-z0-9+/]{32,}={0,2}"
+)
 _COMMON_TERMS = frozenset({
     "assert", "class", "const", "def", "export", "from", "function",
     "import", "interface", "profile", "return", "static", "string", "struct",
@@ -76,9 +86,9 @@ class ScanLimits:
     max_files: int = 500
     max_bytes: int = 8_000_000
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES
-    max_nodes: int = GRAPH.MAX_NODES
-    max_edges: int = GRAPH.MAX_EDGES
-    max_paths: int = GRAPH.MAX_PATHS
+    max_nodes: int = min(GRAPH.MAX_NODES, MAX_GRAPH_ID)
+    max_edges: int = min(GRAPH.MAX_EDGES, MAX_GRAPH_ID)
+    max_paths: int = min(GRAPH.MAX_PATHS, MAX_GRAPH_ID)
 
     def __post_init__(self) -> None:
         for name in (
@@ -93,12 +103,12 @@ class ScanLimits:
         if self.max_file_bytes > DEFAULT_MAX_FILE_BYTES:
             raise ValueError("max_file_bytes must not exceed 1 MiB")
         for name, maximum in (
-            ("max_nodes", GRAPH.MAX_NODES),
-            ("max_edges", GRAPH.MAX_EDGES),
-            ("max_paths", GRAPH.MAX_PATHS),
+            ("max_nodes", min(GRAPH.MAX_NODES, MAX_GRAPH_ID)),
+            ("max_edges", min(GRAPH.MAX_EDGES, MAX_GRAPH_ID)),
+            ("max_paths", min(GRAPH.MAX_PATHS, MAX_GRAPH_ID)),
         ):
             if getattr(self, name) > maximum:
-                raise ValueError(f"{name} exceeds graph contract maximum")
+                raise ValueError(f"{name} exceeds graph contract three-digit ID maximum")
 
 
 @dataclass(frozen=True)
@@ -165,14 +175,9 @@ def _node_kind(location: str | None, text: str) -> str:
     return "file"
 
 
-def _terms(text: str) -> frozenset[str]:
-    values = set()
-    values.update(_DOTTED.findall(text))
-    values.update(_SLASHED.findall(text))
-    values.update(_IDENTIFIER.findall(text))
-    values.update(match.group("value") for match in _QUOTED.finditer(text))
+def _expanded_terms(values) -> frozenset[str]:
     expanded = set(values)
-    for value in values:
+    for value in tuple(expanded):
         expanded.update(part for part in re.split(r"[./]", value) if len(part) >= 4)
         if "." in value:
             expanded.add(value.replace(".", "/"))
@@ -184,7 +189,51 @@ def _terms(text: str) -> frozenset[str]:
     )
 
 
-def _read_regular_file(path: Path, maximum: int) -> tuple[bytes | None, str | None]:
+def _safe_graph_text(value: str, sensitive_literals=()) -> str:
+    if value in sensitive_literals or _SECRET_SHAPE.fullmatch(value):
+        return "sensitive-sha256-" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return value
+
+
+def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
+    sensitive = set()
+
+    def replace(match):
+        value = match.group("value")
+        sensitive.add(value)
+        safe = _safe_graph_text(value, (value,))
+        return match.group("prefix") + match.group("quote") + safe + match.group("quote")
+
+    return _SENSITIVE_ASSIGNMENT.sub(replace, text), frozenset(sensitive)
+
+
+def _term_categories(text: str) -> Mapping[str, frozenset[str]]:
+    values = set()
+    values.update(_DOTTED.findall(text))
+    values.update(_SLASHED.findall(text))
+    values.update(_IDENTIFIER.findall(text))
+    values.update(match.group("value") for match in _QUOTED.finditer(text))
+    categories = {value: {"lexical"} for value in _expanded_terms(values)}
+    imports = set()
+    for match in _IMPORT.finditer(text):
+        import_text = match.group("value")
+        imports.update(_DOTTED.findall(import_text))
+        imports.update(_IDENTIFIER.findall(import_text))
+    for value in _expanded_terms(imports):
+        categories.setdefault(value, set()).add("import")
+    return MappingProxyType({
+        value: frozenset(categories[value]) for value in sorted(categories)
+    })
+
+
+def _terms(text: str) -> frozenset[str]:
+    return frozenset(_term_categories(text))
+
+
+def _read_regular_file(
+    path: Path, maximum: int, remaining: int | None = None,
+    read_allowed: bool = True,
+) -> tuple[bytes | None, str | None]:
     flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -198,16 +247,25 @@ def _read_regular_file(path: Path, maximum: int) -> tuple[bytes | None, str | No
             return None, "not-regular"
         if metadata.st_size > maximum:
             return None, "oversized"
+        if remaining is not None and metadata.st_size > remaining:
+            return None, "byte-limit"
+        if not read_allowed:
+            return None, "file-limit"
+        read_limit = min(maximum, remaining) if remaining is not None else maximum
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
-            payload = handle.read(maximum + 1)
+            payload = handle.read(read_limit + 1)
         if len(payload) > maximum:
             return None, "oversized"
+        if remaining is not None and len(payload) > remaining:
+            return None, "byte-limit"
         return payload, None
     finally:
         os.close(descriptor)
 
 
-def _walk_files(root: Path, expired, skipped: dict[str, str]):
+def _walk_files(
+    root: Path, expired, skipped: dict[str, str], traversal_errors: list[str]
+):
     pending = [root]
     while pending:
         if expired():
@@ -216,6 +274,7 @@ def _walk_files(root: Path, expired, skipped: dict[str, str]):
         try:
             entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
         except OSError:
+            traversal_errors.append(directory.relative_to(root).as_posix())
             continue
         directories = []
         for entry in entries:
@@ -234,15 +293,11 @@ def _walk_files(root: Path, expired, skipped: dict[str, str]):
         pending[0:0] = directories
 
 
-def _edge_kind(target: str, evidence: str) -> tuple[str, str]:
+def _edge_kind(target: str, categories: frozenset[str]) -> tuple[str, str]:
     lowered = target.lower()
     if "test" in lowered or "fixture" in lowered:
         return "tests", "structural-inferred"
-    if "cache" in lowered:
-        return "caches", "structural-inferred"
-    if "event" in lowered:
-        return "publishes", "structural-inferred"
-    if "/" in evidence or "." in evidence:
+    if "import" in categories:
         return "imports", "structural-inferred"
     return "references", "lexical"
 
@@ -280,36 +335,29 @@ def scan_repository(
         return _empty_result("budget_exhausted")
 
     skipped: dict[str, str] = {}
-    documents: dict[str, tuple[str, frozenset[str], str]] = {}
+    traversal_errors: list[str] = []
+    documents: dict[str, tuple[str, frozenset[str], str, Mapping[str, frozenset[str]]]] = {}
+    sensitive_literals = set()
     bytes_scanned = 0
     files_scanned = 0
     exhausted = False
-    for path, relative in _walk_files(root, expired, skipped):
+    for path, relative in _walk_files(root, expired, skipped, traversal_errors):
         if expired():
             exhausted = True
             break
-        try:
-            size = path.stat().st_size
-        except OSError:
-            skipped[relative] = "unsafe-file"
-            continue
-        if size > limits.max_file_bytes:
-            skipped[relative] = "oversized"
-            exhausted = True
-            continue
-        if files_scanned >= limits.max_files:
-            skipped[relative] = "file-limit"
-            exhausted = True
-            continue
-        if bytes_scanned + size > limits.max_bytes:
-            skipped[relative] = "byte-limit"
-            exhausted = True
-            continue
-        payload, reason = _read_regular_file(path, limits.max_file_bytes)
+        remaining = limits.max_bytes - bytes_scanned
+        payload, reason = _read_regular_file(
+            path, limits.max_file_bytes, remaining,
+            read_allowed=files_scanned < limits.max_files,
+        )
         if reason is not None or payload is None:
             skipped[relative] = reason or "unsafe-file"
-            if reason == "oversized":
+            if reason in {"oversized", "byte-limit", "file-limit"}:
                 exhausted = True
+            continue
+        if len(payload) > remaining:
+            skipped[relative] = "byte-limit"
+            exhausted = True
             continue
         files_scanned += 1
         bytes_scanned += len(payload)
@@ -321,7 +369,13 @@ def scan_repository(
         except UnicodeDecodeError:
             skipped[relative] = "invalid-utf8"
             continue
-        documents[relative] = (text, _terms(text), hashlib.sha256(payload).hexdigest())
+        safe_text, found_sensitive = _redact_sensitive_literals(text)
+        sensitive_literals.update(found_sensitive)
+        categories = _term_categories(safe_text)
+        documents[relative] = (
+            safe_text, frozenset(categories), hashlib.sha256(payload).hexdigest(),
+            categories,
+        )
 
     if expired():
         exhausted = True
@@ -362,17 +416,22 @@ def scan_repository(
                 continue
             shared = sorted(source_terms & documents[target][1], key=lambda value: (-len(value), value))
             if shared:
-                relationships.append((source, target, shared[0]))
+                evidence = shared[0]
+                categories = frozenset(
+                    documents[source][3].get(evidence, ())
+                    | documents[target][3].get(evidence, ())
+                )
+                relationships.append((source, target, evidence, categories))
 
     reachable = set(seed_locations)
     reachable.update(
-        location for location, (_, terms, _) in documents.items()
+        location for location, (_, terms, _, _) in documents.items()
         if terms & seed_terms
     )
     changed = True
     while changed and not expired():
         changed = False
-        for source, target, _ in relationships:
+        for source, target, _, _ in relationships:
             if expired():
                 exhausted = True
                 break
@@ -391,27 +450,42 @@ def scan_repository(
             location,
         ),
     )
-    candidates = [(location, None) for location in ordered_locations]
-    candidates.extend((None, seed) for seed in supplied_only)
+    error_locations = sorted(set(traversal_errors))[:GRAPH.MAX_FRONTIER]
+    candidates = [(location, None, True) for location in error_locations]
+    candidates.extend((location, None, False) for location in ordered_locations)
+    candidates.extend((None, seed, False) for seed in supplied_only)
     if len(candidates) > limits.max_nodes:
         exhausted = True
     candidates = candidates[:limits.max_nodes]
 
     nodes = []
     location_ids = {}
+    error_node_ids = {}
     node_risks = {}
-    for index, (location, seed) in enumerate(candidates, start=1):
+    for index, (location, seed, is_error) in enumerate(candidates, start=1):
         if expired():
             return deadline_result(nodes)
         node_id = f"NODE-{index:03d}"
-        if location is None:
-            label = seed.term
+        if is_error:
+            safe_location = None if location == "." else location
+            label = "unreadable repository directory"
+            risk = ("functionality",)
+            node = GraphNode(
+                node_id, "file", label, safe_location, "builtin", "lexical",
+                None, risk,
+            )
+            error_node_ids[location] = node_id
+        elif location is None:
+            label = _safe_graph_text(seed.term, sensitive_literals)
             risk = _risk_domains(seed.location, seed.term)
             node = GraphNode(node_id, "symbol", label, seed.location, "builtin", "lexical", None, risk)
         else:
-            text, _, digest = documents[location]
+            text, _, digest, _ = documents[location]
             risk = _risk_domains(location, text)
-            label = next((seed.term for seed in normalized_seeds if seed.location == location), location)
+            label = next((
+                _safe_graph_text(seed.term, sensitive_literals)
+                for seed in normalized_seeds if seed.location == location
+            ), location)
             confidence = "structural-inferred" if location in seed_locations else "lexical"
             node = GraphNode(node_id, _node_kind(location, text), label, location, "builtin", confidence, digest, risk)
             location_ids[location] = node_id
@@ -419,11 +493,11 @@ def scan_repository(
         node_risks[node_id] = risk
 
     edge_candidates = []
-    for source, target, evidence in relationships:
+    for source, target, evidence, categories in relationships:
         if expired():
             return deadline_result(nodes)
         if source in location_ids and target in location_ids:
-            kind, confidence = _edge_kind(target, evidence)
+            kind, confidence = _edge_kind(target, categories)
             edge_candidates.append((source, target, kind, confidence, evidence))
     edge_candidates.sort(key=lambda item: (location_ids[item[0]], location_ids[item[1]], item[2], item[4]))
     if len(edge_candidates) > limits.max_edges:
@@ -437,7 +511,8 @@ def scan_repository(
         edge_id = f"EDGE-{index:03d}"
         edge = GraphEdge(
             edge_id, location_ids[source], location_ids[target], kind, target,
-            evidence[:GRAPH.MAX_STRING_LENGTH], confidence, "builtin", documents[target][2],
+            _safe_graph_text(evidence, sensitive_literals)[:GRAPH.MAX_STRING_LENGTH],
+            confidence, "builtin", documents[target][2],
         )
         edges.append(edge)
         adjacency.setdefault(edge.source, []).append((edge.target, edge.id))
@@ -486,15 +561,29 @@ def scan_repository(
         ordered_domains = tuple(sorted(domains, key=lambda item: (_RISK_RANK[item], item)))
         paths.append(GraphPath(f"PATH-{index:03d}", path_nodes, path_edges, len(path_edges), ordered_domains))
 
-    frontier = ()
-    if exhausted and nodes:
-        frontier = (
-            FrontierEntry("FRONTIER-001", nodes[-1].id, "built-in scan budget exhausted", nodes[-1].risk_domains),
-        )
+    frontier_items = []
+    for location in error_locations:
+        node_id = error_node_ids.get(location)
+        if node_id is not None and len(frontier_items) < GRAPH.MAX_FRONTIER:
+            display = "repository root" if location == "." else location
+            frontier_items.append(FrontierEntry(
+                f"FRONTIER-{len(frontier_items) + 1:03d}", node_id,
+                f"unreadable directory: {display}", ("functionality",),
+            ))
+    if exhausted and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
+        frontier_items.append(FrontierEntry(
+            f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[-1].id,
+            "built-in scan budget exhausted", nodes[-1].risk_domains,
+        ))
+    frontier = tuple(frontier_items)
+    status = (
+        "provider_limited" if traversal_errors else
+        "budget_exhausted" if exhausted else "closed"
+    )
     return BuiltInScanResult(
         tuple(nodes), tuple(edges), tuple(paths), frontier,
         {location: documents[location][2] for location in sorted(documents)},
         {path: skipped[path] for path in sorted(skipped)},
         files_scanned, bytes_scanned,
-        "budget_exhausted" if exhausted else "closed",
+        status,
     )

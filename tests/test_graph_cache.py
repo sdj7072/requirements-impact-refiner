@@ -16,6 +16,18 @@ SPEC = importlib.util.spec_from_file_location("graph_cache", MODULE_PATH)
 CACHE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = CACHE
 SPEC.loader.exec_module(CACHE)
+BUILTIN_SPEC = importlib.util.spec_from_file_location(
+    "graph_builtin_cache_integration",
+    ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "graph_builtin.py",
+)
+BUILTIN = importlib.util.module_from_spec(BUILTIN_SPEC)
+sys.modules[BUILTIN_SPEC.name] = BUILTIN
+BUILTIN_SPEC.loader.exec_module(BUILTIN)
+
+
+class StaticClock:
+    def monotonic(self):
+        return 0.0
 
 
 def receipt():
@@ -106,6 +118,26 @@ class GraphCacheTest(unittest.TestCase):
         self.assertEqual(partial.invalidated_nodes, ("NODE-002", "NODE-003"))
         self.assertNotIn("NODE-001", partial.invalidated_nodes)
 
+    def test_cache_publication_never_changes_subsequent_scan_inputs_or_results(self):
+        source = self.root / "api"
+        source.mkdir()
+        (source / "profile.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+        seeds = (BUILTIN.ScanSeed("profile.displayName", "api/profile.py"),)
+        limits = BUILTIN.ScanLimits()
+        first = BUILTIN.scan_repository(self.root, seeds, limits, StaticClock())
+
+        CACHE.publish(self.root, receipt(), digests())
+        second = BUILTIN.scan_repository(self.root, seeds, limits, StaticClock())
+
+        self.assertEqual(second, first)
+        self.assertEqual(second.source_digests, first.source_digests)
+        self.assertFalse(any(
+            (node.location or "").startswith(".requirements-impact-refiner/")
+            for node in second.nodes
+        ))
+
     def test_missing_source_invalidates_the_node_and_its_dependents(self):
         first = CACHE.publish(self.root, receipt(), digests())
         current = digests()
@@ -113,6 +145,31 @@ class GraphCacheTest(unittest.TestCase):
         partial = CACHE.load(self.root, first.key, current)
         self.assertEqual(partial.status, "partial")
         self.assertEqual(partial.invalidated_nodes, ("NODE-002", "NODE-003"))
+
+    def test_new_unmapped_source_requires_full_rescan(self):
+        first = CACHE.publish(self.root, receipt(), digests())
+        current = {**digests(), "new/unmapped.py": "d" * 64}
+
+        loaded = CACHE.load(self.root, first.key, current)
+
+        self.assertEqual(loaded.status, "miss")
+        self.assertEqual(loaded.invalidated_nodes, ())
+
+        mixed = {
+            **current,
+            "desktop/profile_cache.ts": "e" * 64,
+        }
+        self.assertEqual(CACHE.load(self.root, first.key, mixed).status, "miss")
+
+    def test_changed_omitted_source_requires_full_rescan(self):
+        cached = {**digests(), "docs/omitted.md": "d" * 64}
+        first = CACHE.publish(self.root, receipt(), cached)
+        current = {**cached, "docs/omitted.md": "e" * 64}
+
+        loaded = CACHE.load(self.root, first.key, current)
+
+        self.assertEqual(loaded.status, "miss")
+        self.assertEqual(loaded.invalidated_nodes, ())
 
     def test_identity_changes_for_provider_version_config_schema_and_root(self):
         baseline = CACHE.publish(self.root, receipt(), digests())
@@ -192,6 +249,64 @@ class GraphCacheTest(unittest.TestCase):
         self.assertEqual(set(json.loads(payload)), {
             "cache_schema_version", "identity", "receipt", "source_digests",
         })
+
+    def test_secret_source_literals_never_enter_graph_or_serialized_cache(self):
+        secret = "sk-live-duplicated-super-secret-123456789"
+        fixtures = {
+            "api.py": f'MARKER = "credentialRotation"\nAPI_KEY = "{secret}"\n',
+            "worker.py": f'MARKER = "credentialRotation"\nPASSWORD = "{secret}"\n',
+            "events.py": f'MARKER = "credentialRotation"\nTOKEN = "{secret}"\n',
+        }
+        for relative, text in fixtures.items():
+            (self.root / relative).write_text(text, encoding="utf-8")
+        result = BUILTIN.scan_repository(
+            self.root,
+            (BUILTIN.ScanSeed("credentialRotation", "api.py"),),
+            BUILTIN.ScanLimits(), StaticClock(),
+        )
+
+        self.assertNotIn(secret, repr(result))
+        graph_receipt = {
+            "schema_version": 1,
+            "receipt_id": "6" * 32,
+            "draft_id": "7" * 32,
+            "repo_root_sha256": "8" * 64,
+            "request_sha256": "9" * 64,
+            "settings": {
+                "enabled": True, "max_seconds": 30, "target_seconds": 10,
+                "providers": ["auto"], "install_policy": "never", "deep": False,
+            },
+            "providers": [{
+                "name": "builtin", "status": "ready",
+                "confidence": "verified-source", "version": "builtin-v1",
+                "executable_sha256": "4" * 64,
+            }],
+            "nodes": [{
+                "id": node.id, "kind": node.kind, "label": node.label,
+                "location": node.location, "provider": node.provider,
+                "confidence": node.confidence, "source_sha256": node.source_sha256,
+                "risk_domains": list(node.risk_domains),
+            } for node in result.nodes],
+            "edges": [{
+                "id": edge.id, "source": edge.source, "target": edge.target,
+                "kind": edge.kind, "location": edge.location,
+                "evidence": edge.evidence, "confidence": edge.confidence,
+                "provider": edge.provider, "source_sha256": edge.source_sha256,
+            } for edge in result.edges],
+            "paths": [{
+                "id": path.id, "nodes": list(path.nodes), "edges": list(path.edges),
+                "distance": path.distance, "risk_domains": list(path.risk_domains),
+            } for path in result.paths],
+            "frontier": [{
+                "id": item.id, "node": item.node, "reason": item.reason,
+                "risk_domains": list(item.risk_domains),
+            } for item in result.frontier],
+            "timings_ms": {"total": 1}, "budget_status": result.budget_status,
+            "cache": {"status": "miss", "key": "5" * 64, "invalidated_nodes": []},
+        }
+        published = CACHE.publish(self.root, graph_receipt, result.source_digests)
+
+        self.assertNotIn(secret.encode("utf-8"), published.artifact.read_bytes())
 
     def test_rejects_symlinked_cache_components(self):
         outside = Path(self.temporary.name) / "outside"

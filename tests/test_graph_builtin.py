@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -85,6 +86,31 @@ class GraphBuiltinTest(unittest.TestCase):
             self.assertEqual(locations, {"src/main.py"})
             self.assertTrue({"binary", "invalid-utf8"} <= set(result.skipped.values()))
 
+    def test_unreadable_subtree_is_an_unknown_frontier_not_closed_coverage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "api").mkdir()
+            (root / "api/profile.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            (root / "blocked").mkdir()
+            real_scandir = BUILTIN.os.scandir
+
+            def controlled_scandir(directory):
+                if Path(directory).name == "blocked":
+                    raise PermissionError("controlled unreadable subtree")
+                return real_scandir(directory)
+
+            with mock.patch.object(BUILTIN.os, "scandir", side_effect=controlled_scandir):
+                result = scan(root)
+
+            self.assertEqual(result.budget_status, "provider_limited")
+            blocked = next(node for node in result.nodes if node.location == "blocked")
+            self.assertTrue(any(
+                item.node == blocked.id and "blocked" in item.reason
+                for item in result.frontier
+            ))
+
     def test_rejects_traversal_and_root_symlinks_and_skips_file_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"
@@ -125,6 +151,24 @@ class GraphBuiltinTest(unittest.TestCase):
             self.assertEqual(result.skipped["oversized.py"], "oversized")
             self.assertEqual(result.budget_status, "budget_exhausted")
 
+    def test_descriptor_growth_cannot_cross_remaining_total_byte_budget(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "growing.py").write_text("x", encoding="utf-8")
+            with mock.patch.object(
+                BUILTIN, "_read_regular_file", return_value=(b"x" * 101, None)
+            ):
+                result = scan(
+                    root,
+                    seeds=(BUILTIN.ScanSeed("profile.displayName", "growing.py"),),
+                    limits=BUILTIN.ScanLimits(max_bytes=100),
+                )
+
+            self.assertLessEqual(result.bytes_scanned, 100)
+            self.assertEqual(result.bytes_scanned, 0)
+            self.assertEqual(result.skipped["growing.py"], "byte-limit")
+            self.assertEqual(result.budget_status, "budget_exhausted")
+
     def test_path_limit_also_bounds_frontier_expansion(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -146,6 +190,27 @@ class GraphBuiltinTest(unittest.TestCase):
             self.assertEqual(len(result.paths), 1)
             self.assertLess(clock.calls, 150)
 
+    def test_three_digit_contract_caps_edge_ids_at_999(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for index in range(33):
+                (root / f"file_{index:02d}.py").write_text(
+                    'KEY = "profile.displayName"\n', encoding="utf-8"
+                )
+            result = scan(
+                root,
+                seeds=(BUILTIN.ScanSeed("profile.displayName", "file_00.py"),),
+                limits=BUILTIN.ScanLimits(
+                    max_files=100, max_bytes=100_000, max_paths=0,
+                ),
+            )
+
+            self.assertEqual(len(result.edges), 999)
+            self.assertEqual(result.edges[-1].id, "EDGE-999")
+            self.assertNotIn("EDGE-1000", {edge.id for edge in result.edges})
+            with self.assertRaisesRegex(ValueError, "three-digit"):
+                BUILTIN.ScanLimits(max_edges=1_000)
+
     def test_empty_repository_preserves_supplied_only_seed(self):
         with tempfile.TemporaryDirectory() as temporary:
             result = scan(
@@ -165,6 +230,29 @@ class GraphBuiltinTest(unittest.TestCase):
             (root / "authorization.py").write_text('KEY = "profile.displayName"\nPERMISSION = "profile.read"', encoding="utf-8")
             result = scan(root, seeds=(BUILTIN.ScanSeed("profile.displayName", "source.py"),))
             self.assertEqual(result.paths[0].risk_domains[0], "authorization/privacy")
+
+    def test_shared_quoted_data_is_lexical_reference_not_structural_import(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "api.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            (root / "profile_cache.py").write_text(
+                'CACHE_KEY = "profile.displayName"\n', encoding="utf-8"
+            )
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("profile.displayName", "api.py"),)
+            )
+            locations = {node.id: node.location for node in result.nodes}
+            matching = [
+                edge for edge in result.edges
+                if locations[edge.source] == "api.py"
+                and locations[edge.target] == "profile_cache.py"
+            ]
+
+            self.assertEqual(len(matching), 1)
+            self.assertEqual(matching[0].kind, "references")
+            self.assertEqual(matching[0].confidence, "lexical")
 
     def test_deadline_stops_before_traversal_and_during_frontier_expansion(self):
         immediate = FakeClock((5.0, 5.0))

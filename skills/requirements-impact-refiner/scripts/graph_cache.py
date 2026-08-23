@@ -313,7 +313,19 @@ def load(
         return _miss(key)
     if hashlib.sha256(_canonical_json(identity)).hexdigest() != key:
         return _miss(key)
+    changed_paths = {
+        path for path in set(cached) | set(current)
+        if cached.get(path) != current.get(path)
+    }
+    mapped_paths = {
+        node.get("location") for node in normalized["nodes"]
+        if node.get("location") is not None
+    }
+    if not changed_paths <= mapped_paths:
+        return _miss(key)
     invalidated = invalidate(normalized, cached, current)
+    if cached != current and not invalidated:
+        return _miss(key)
     status = "partial" if cached != current else "hit"
     return CacheResult(status, key, normalized, invalidated, artifact)
 
