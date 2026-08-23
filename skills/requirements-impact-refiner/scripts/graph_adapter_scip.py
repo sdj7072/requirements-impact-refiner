@@ -9,10 +9,8 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import sys
-import tempfile
 
 
 def _load(filename, name):
@@ -43,6 +41,59 @@ _MAX_OCCURRENCES = 16_384
 _MAX_SYMBOL = 4096
 
 
+class _IndexChangedError(ValueError):
+    pass
+
+
+def _read_chunk(descriptor, size):
+    return os.read(descriptor, size)
+
+
+def _deadline_expired(deadline):
+    return deadline is not None and deadline.expired()
+
+
+def _identity(info):
+    return {
+        "device": info.st_dev, "inode": info.st_ino, "size": info.st_size,
+        "modified_ns": info.st_mtime_ns,
+    }
+
+
+def _read_exact_identity(descriptor, deadline, *, write_descriptor=None):
+    initial = os.fstat(descriptor)
+    if not stat.S_ISREG(initial.st_mode) or initial.st_size <= 0 or initial.st_size > _MAX_INDEX_BYTES:
+        raise ValueError("index.scip must be a bounded regular file")
+    observed = _identity(initial)
+    remaining = initial.st_size
+    digest = hashlib.sha256()
+    total = 0
+    while remaining:
+        if _deadline_expired(deadline):
+            raise TimeoutError("shared deadline exhausted while reading index.scip")
+        chunk = _read_chunk(descriptor, min(64 * 1024, remaining))
+        if not chunk:
+            raise _IndexChangedError("index.scip shrank while reading")
+        if len(chunk) > remaining:
+            raise _IndexChangedError("index.scip exceeded its observed size")
+        total += len(chunk)
+        if total > initial.st_size or total > _MAX_INDEX_BYTES:
+            raise _IndexChangedError("index.scip exceeded its bounded identity")
+        digest.update(chunk)
+        if write_descriptor is not None:
+            offset = 0
+            while offset < len(chunk):
+                written = os.write(write_descriptor, chunk[offset:])
+                if written <= 0:
+                    raise OSError("SCIP snapshot write made no progress")
+                offset += written
+        remaining -= len(chunk)
+    final = os.fstat(descriptor)
+    if _identity(final) != observed:
+        raise _IndexChangedError("index.scip changed while reading")
+    return {**observed, "sha256": digest.hexdigest()}
+
+
 def _failure(status, detail, digests=()):
     return ProviderResult("scip", status, "verified-provider", raw_receipt_sha256=digests, detail=str(detail)[:512])
 
@@ -62,7 +113,7 @@ def _regular_index(root):
     return "ready", None
 
 
-def _index_observation(root):
+def _index_observation(root, deadline=None):
     path = root / "index.scip"
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -70,19 +121,7 @@ def _index_observation(root):
     except OSError as error:
         raise ValueError("index.scip is unavailable or unsafe") from error
     try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > _MAX_INDEX_BYTES:
-            raise ValueError("index.scip must be a bounded regular file")
-        digest = hashlib.sha256()
-        while True:
-            chunk = os.read(descriptor, 64 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-        return {
-            "sha256": digest.hexdigest(), "device": info.st_dev, "inode": info.st_ino,
-            "size": info.st_size, "modified_ns": info.st_mtime_ns,
-        }
+        return _read_exact_identity(descriptor, deadline)
     finally:
         os.close(descriptor)
 
@@ -91,9 +130,9 @@ def _same_index(left, right):
     return left == right
 
 
-def _snapshot_observation(path):
+def _snapshot_observation(directory_fd, deadline):
     try:
-        info = path.lstat()
+        info = os.stat("index.scip", dir_fd=directory_fd, follow_symlinks=False)
     except OSError:
         return None
     if (
@@ -104,22 +143,16 @@ def _snapshot_observation(path):
         return None
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(str(path), flags)
+        descriptor = os.open("index.scip", flags, dir_fd=directory_fd)
     except OSError:
         return None
     try:
         opened = os.fstat(descriptor)
-        if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) != (
-            info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
-        ):
+        if _identity(opened) != _identity(info):
             return None
-        digest = hashlib.sha256()
-        while True:
-            chunk = os.read(descriptor, 64 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-        return digest.hexdigest()
+        return _read_exact_identity(descriptor, deadline)["sha256"]
+    except (TimeoutError, _IndexChangedError, ValueError):
+        return None
     finally:
         os.close(descriptor)
 
@@ -195,78 +228,80 @@ def _parse(value, root, fingerprint):
 
 def _print(spec, root, deadline, runner, expected_identity=None):
     try:
-        before = _index_observation(root)
+        before = _index_observation(root, deadline)
+    except TimeoutError as error:
+        return None, "timed_out", str(error), None
+    except _IndexChangedError as error:
+        return None, "stale", str(error), None
     except ValueError as error:
         return None, "unsafe", str(error), None
     if expected_identity is not None and not _same_index(before, expected_identity):
         return None, "stale", "index.scip changed after probe", before
-    directory = Path(tempfile.mkdtemp(prefix="rir-scip-index-"))
-    os.chmod(directory, 0o700)
+    try:
+        directory, directory_fd = PROVIDERS.create_private_root("rir-scip-index-")
+    except OSError as error:
+        return None, "unsafe", str(error), before
     snapshot = directory / "index.scip"
     source = destination = -1
     cleaned = False
 
     def finish(value):
-        nonlocal cleaned
+        nonlocal cleaned, source, destination, directory_fd
         if cleaned:
             return value
-        try:
-            if directory.is_symlink():
-                directory.unlink()
-                cleaned = True
-                return (None, "unsafe", "private SCIP snapshot directory was replaced", before)
-            def repair(function, path, error):
-                info = os.lstat(path)
-                if stat.S_ISLNK(info.st_mode):
-                    os.unlink(path)
-                    return
-                os.chmod(path, 0o700)
-                function(path)
-            shutil.rmtree(directory, onerror=repair)
-            cleaned = not directory.exists() and not directory.is_symlink()
-        except OSError:
-            cleaned = False
-        if not cleaned:
-            return (None, "unsafe", "private SCIP snapshot cleanup failed", before)
+        if destination >= 0:
+            os.close(destination)
+            destination = -1
+        if source >= 0:
+            os.close(source)
+            source = -1
+        cleaned, changed, cleanup_detail = PROVIDERS.cleanup_private_root(
+            directory, directory_fd,
+        )
+        directory_fd = -1
+        if not cleaned or changed:
+            return (
+                None, "unsafe",
+                cleanup_detail or "private SCIP snapshot cleanup failed", before,
+            )
         return value
 
     try:
         source = os.open(str(root / "index.scip"), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         destination = os.open(
-            str(snapshot), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o400,
+            "index.scip", os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o400, dir_fd=directory_fd,
         )
-        copied = hashlib.sha256()
-        while True:
-            chunk = os.read(source, 64 * 1024)
-            if not chunk:
-                break
-            copied.update(chunk)
-            offset = 0
-            while offset < len(chunk):
-                written = os.write(destination, chunk[offset:])
-                if written <= 0:
-                    raise OSError("SCIP snapshot write made no progress")
-                offset += written
+        copied = _read_exact_identity(
+            source, deadline, write_descriptor=destination,
+        )
+        os.fchmod(destination, 0o400)
         os.fsync(destination)
         os.close(destination)
         destination = -1
-        os.chmod(snapshot, 0o400)
-        if copied.hexdigest() != before["sha256"]:
+        os.fsync(directory_fd)
+        if copied != before:
             return finish((None, "stale", "index.scip changed while snapshotting", before))
-        during = _index_observation(root)
+        during = _index_observation(root, deadline)
         if not _same_index(before, during):
             return finish((None, "stale", "index.scip changed while snapshotting", during))
         result = PROVIDERS.run_provider(
             spec, ("print", "--json", str(snapshot)), root, deadline,
             runner=runner, expect_json=True,
         )
-        snapshot_digest = _snapshot_observation(snapshot)
+        snapshot_digest = _snapshot_observation(directory_fd, deadline)
         if snapshot_digest != before["sha256"]:
+            if _deadline_expired(deadline):
+                return finish((None, "timed_out", "shared deadline exhausted while verifying SCIP snapshot", before))
             return finish((None, "unsafe", "private SCIP snapshot changed during print", before))
-        after = _index_observation(root)
+        after = _index_observation(root, deadline)
         if not _same_index(before, after):
             return finish((None, "stale", "index.scip changed during print", after))
         return finish((result, result.status, result.detail, before))
+    except TimeoutError as error:
+        return finish((None, "timed_out", str(error), before))
+    except _IndexChangedError as error:
+        return finish((None, "stale", str(error), before))
     except (OSError, ValueError) as error:
         return finish((None, "unsafe", str(error), before))
     finally:
@@ -274,7 +309,7 @@ def _print(spec, root, deadline, runner, expected_identity=None):
             os.close(source)
         if destination >= 0:
             os.close(destination)
-        if not cleaned:
+        if not cleaned and directory_fd >= 0:
             finish((None, "unsafe", "private SCIP snapshot cleanup failed", before))
 
 

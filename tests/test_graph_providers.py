@@ -488,6 +488,32 @@ class ProviderRunnerTest(unittest.TestCase):
                 os.chmod(directory, 0o700)
                 shutil.rmtree(directory)
 
+    def test_private_root_cleanup_removes_retained_renamed_inode_not_replacement(self):
+        directory, descriptor = PROVIDERS.create_private_root("rir-test-root-")
+        original = directory
+        raw = os.open(
+            "raw-index", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400,
+            dir_fd=descriptor,
+        )
+        os.write(raw, b"raw-index-bytes")
+        os.close(raw)
+        renamed = directory.with_name(directory.name + "-renamed")
+        os.rename(directory, renamed)
+        directory.mkdir(mode=0o700)
+        replacement = directory / "replacement.txt"
+        replacement.write_text("keep", encoding="utf-8")
+
+        cleaned, changed, detail = PROVIDERS.cleanup_private_root(
+            original, descriptor,
+        )
+
+        self.assertTrue(cleaned)
+        self.assertTrue(changed)
+        self.assertIn("changed", detail)
+        self.assertFalse(renamed.exists())
+        self.assertEqual(replacement.read_text(encoding="utf-8"), "keep")
+        shutil.rmtree(directory)
+
     def test_cleanup_failure_upgrades_ready_result_to_unsafe(self):
         captured = {}
         real_cleanup = PROVIDERS._cleanup_snapshot

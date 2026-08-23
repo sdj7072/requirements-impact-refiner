@@ -2,10 +2,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -506,6 +508,100 @@ class GraphAdapterTest(unittest.TestCase):
                 self.assertEqual(result.status, "stale")
                 self.assertTrue(seen)
                 self.assertTrue(all(not snapshot.exists() for snapshot in seen))
+
+    def test_scip_growing_index_and_deadline_reads_are_bounded(self):
+        index = self.root / "index.scip"
+        original = b"S" * (128 * 1024)
+        index.write_bytes(original)
+        spec = PROVIDERS.ProviderSpec("scip", self.executables["scip"])
+        real_read = SCIP._read_chunk
+        observed = {"bytes": 0, "calls": 0}
+
+        def append_after_first(descriptor, size):
+            chunk = real_read(descriptor, size)
+            observed["bytes"] += len(chunk)
+            observed["calls"] += 1
+            if observed["calls"] == 1:
+                with index.open("ab") as handle:
+                    handle.write(b"G" * (256 * 1024))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            return chunk
+
+        with mock.patch.object(SCIP, "_read_chunk", side_effect=append_after_first):
+            result, status, detail, identity = SCIP._print(
+                spec, self.root, self.deadline, self.runner({}),
+            )
+        self.assertIsNone(result)
+        self.assertEqual(status, "stale")
+        self.assertLessEqual(observed["bytes"], len(original))
+        self.assertLessEqual(observed["calls"], 2)
+
+        index.write_bytes(original)
+        deadline_clock = FakeClock()
+        deadline = PROVIDERS.Deadline(deadline_clock, 1)
+        observed = {"bytes": 0, "calls": 0}
+
+        def expire_after_first(descriptor, size):
+            chunk = real_read(descriptor, size)
+            observed["bytes"] += len(chunk)
+            observed["calls"] += 1
+            deadline_clock.current = 1.0
+            return chunk
+
+        with mock.patch.object(SCIP, "_read_chunk", side_effect=expire_after_first):
+            result, status, detail, identity = SCIP._print(
+                spec, self.root, deadline, self.runner({}),
+            )
+        self.assertIsNone(result)
+        self.assertEqual(status, "timed_out")
+        self.assertLessEqual(observed["bytes"], 64 * 1024)
+        self.assertEqual(observed["calls"], 1)
+
+    def test_scip_cleanup_tracks_renamed_private_root_without_touching_replacement(self):
+        index = self.root / "index.scip"
+        index.write_bytes(b"SCIP\x00fixture")
+        spec = PROVIDERS.ProviderSpec("scip", self.executables["scip"])
+        probe = SCIP.probe(spec, self.root, self.deadline, self._scip_runner())
+        self.assertEqual(probe.status, "ready")
+        payload = self.fixture_text("scip-print.json").encode("utf-8")
+        outside = Path(self.temporary.name) / "outside"
+        outside.mkdir()
+        sentinel = outside / "sentinel.txt"
+        sentinel.write_text("keep", encoding="utf-8")
+        state = {}
+
+        def rename_root(argv, kwargs):
+            snapshot = Path(argv[-1])
+            original_root = snapshot.parent
+            renamed_root = original_root.with_name(original_root.name + "-renamed")
+            os.rename(original_root, renamed_root)
+            renamed_snapshot = renamed_root / snapshot.name
+            os.chmod(renamed_snapshot, 0o000)
+            (renamed_root / "extra.bin").write_bytes(b"extra")
+            os.symlink(sentinel, renamed_root / "outside-link")
+            original_root.mkdir(mode=0o700)
+            replacement = original_root / "replacement.txt"
+            replacement.write_text("replacement", encoding="utf-8")
+            os.symlink(sentinel, original_root / "sentinel-link")
+            state.update(
+                renamed_root=renamed_root, original_root=original_root,
+                replacement=replacement,
+            )
+            return Completed(payload)
+
+        runner = self.runner({("print", "--json", "*"): rename_root})
+        result = SCIP.query(probe, self.seeds, self.deadline, runner)
+        self.assertEqual(result.status, "unsafe")
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+        self.assertEqual(state["replacement"].read_text(encoding="utf-8"), "replacement")
+        self.assertFalse(state["renamed_root"].exists())
+        self.assertFalse(any(
+            path != index and path.is_file() and path.read_bytes() == b"SCIP\x00fixture"
+            for path in Path(self.temporary.name).rglob("*")
+            if not path.is_symlink()
+        ))
+        shutil.rmtree(state["original_root"])
 
     def test_joern_never_cold_parses_without_existing_fresh_graph(self):
         spec = PROVIDERS.ProviderSpec("joern", self.executables["joern"])

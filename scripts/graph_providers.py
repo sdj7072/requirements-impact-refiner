@@ -422,26 +422,90 @@ def _remove_private_tree(directory_fd: int) -> None:
             raise OSError("private snapshot contains an unsupported entry type")
 
 
-def _remove_private_root(directory: Path, directory_fd: int) -> None:
+def _remove_private_root(directory: Path, directory_fd: int) -> bool:
     parent_fd = None
+    changed = False
     try:
         root_opened = os.fstat(directory_fd)
         if not stat.S_ISDIR(root_opened.st_mode):
             raise OSError("private snapshot root descriptor is unsafe")
         _remove_private_tree(directory_fd)
         parent_fd = os.open(str(directory.parent), _directory_open_flags())
-        named_root = os.stat(
-            directory.name, dir_fd=parent_fd, follow_symlinks=False,
-        )
-        if not _same_directory_identity(root_opened, named_root):
-            raise OSError("private snapshot root changed during cleanup")
-        os.rmdir(directory.name, dir_fd=parent_fd)
+        retained_name = None
+        try:
+            named_root = os.stat(
+                directory.name, dir_fd=parent_fd, follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            named_root = None
+        if named_root is not None and _same_directory_identity(root_opened, named_root):
+            retained_name = directory.name
+        else:
+            changed = True
+            with os.scandir(parent_fd) as entries:
+                names = tuple(entry.name for entry in entries)
+            matches = []
+            for name in names:
+                if not isinstance(name, str) or not name or name in {".", ".."} or "/" in name:
+                    raise OSError("private snapshot parent entry name is unsafe")
+                metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if _same_directory_identity(root_opened, metadata):
+                    matches.append(name)
+            if len(matches) != 1:
+                raise OSError("private snapshot retained root cannot be located safely")
+            retained_name = matches[0]
+        current = os.stat(retained_name, dir_fd=parent_fd, follow_symlinks=False)
+        if not _same_directory_identity(root_opened, current):
+            raise OSError("private snapshot retained root changed during cleanup")
+        os.rmdir(retained_name, dir_fd=parent_fd)
     finally:
         if parent_fd is not None:
             os.close(parent_fd)
         os.close(directory_fd)
-    if os.path.lexists(directory):
+    if not changed and os.path.lexists(directory):
         raise OSError("private snapshot root remains after cleanup")
+    return changed
+
+
+def create_private_root(prefix="rir-provider-data-"):
+    """Create and retain a no-follow descriptor for one private temporary root."""
+    directory = Path(tempfile.mkdtemp(prefix=prefix))
+    directory_fd = None
+    try:
+        directory_fd = os.open(str(directory), _directory_open_flags())
+        os.fchmod(directory_fd, 0o700)
+        opened = os.fstat(directory_fd)
+        named = directory.lstat()
+        if (
+            stat.S_IMODE(opened.st_mode) != 0o700
+            or not _same_directory_identity(opened, named)
+        ):
+            raise OSError("private snapshot root identity is unsafe")
+        return directory, directory_fd
+    except Exception:
+        if directory_fd is not None:
+            try:
+                _remove_private_root(directory, directory_fd)
+            except OSError:
+                pass
+        else:
+            try:
+                os.rmdir(directory)
+            except OSError:
+                pass
+        raise
+
+
+def cleanup_private_root(directory, directory_fd):
+    """Remove only the retained private inode; report safe rename recovery."""
+    try:
+        changed = _remove_private_root(Path(directory), directory_fd)
+    except OSError as error:
+        return False, True, _bounded_detail(
+            "private snapshot cleanup failed: " + str(error)
+        )
+    detail = "private snapshot root changed and retained inode was removed" if changed else None
+    return True, changed, detail
 
 
 def _create_executable_snapshot(
@@ -535,11 +599,13 @@ def _cleanup_snapshot(snapshot: _ExecutableSnapshot):
     if snapshot.directory_fd is None:
         return False, "provider snapshot cleanup lacks its private root descriptor"
     try:
-        _remove_private_root(snapshot.directory, snapshot.directory_fd)
+        changed = _remove_private_root(snapshot.directory, snapshot.directory_fd)
     except OSError as error:
         return False, _bounded_detail(
             "provider snapshot cleanup failed: " + str(error)
         )
+    if changed:
+        return False, "provider snapshot root changed during cleanup"
     if os.path.lexists(snapshot.path) or os.path.lexists(snapshot.directory):
         return False, "provider snapshot cleanup left private artifacts"
     return True, None
@@ -880,5 +946,5 @@ def discover_providers(
 __all__ = [
     "Deadline", "ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec",
     "PROVIDER_PRIORITY", "STDERR_LIMIT", "STDOUT_LIMIT", "discover_providers",
-    "run_provider",
+    "run_provider", "create_private_root", "cleanup_private_root",
 ]
