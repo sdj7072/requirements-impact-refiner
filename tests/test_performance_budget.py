@@ -117,6 +117,14 @@ class PerformanceBudgetTest(unittest.TestCase):
         self.assertIn("smoke observations contain duplicate case/repetition rows", evaluate_smoke_gate(duplicate).errors)
         self.assertIn("smoke observations must select attempt 1 without retry", evaluate_smoke_gate(retried).errors)
 
+    def test_smoke_gate_rejects_none_observation_without_throwing(self):
+        rows = (None,) + self.six_valid_observations()[1:]
+
+        result = evaluate_smoke_gate(rows)
+
+        self.assertFalse(result.passed)
+        self.assertIn("smoke observations contain invalid rows", result.errors)
+
     def test_smoke_gate_rejects_budget_semantic_and_workflow_failures(self):
         too_large = list(self.six_valid_observations())
         for index in (0, 1, 2, 3):

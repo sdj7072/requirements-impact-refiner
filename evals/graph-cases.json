@@ -9,14 +9,14 @@
       "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
       "required_nodes": [
         {"location": "api/profile.py", "kind": "api_field", "label": "profile.displayName", "risk_domains": ["interfaces"]},
-        {"location": "mobile/profile_decoder.swift", "kind": "api_field", "label": "mobile decoder", "risk_domains": ["interfaces", "compatibility"]},
-        {"location": "cache/profile_cache.ts", "kind": "cache", "label": "persisted profile cache", "risk_domains": ["state/concurrency"]},
-        {"location": "tests/test_profile_cache_migration.py", "kind": "test", "label": "cache migration fixture", "risk_domains": ["data", "regression"]}
+        {"location": "mobile/profile_decoder.swift", "kind": "api_field", "label": "mobile/profile_decoder.swift", "risk_domains": ["interfaces", "compatibility"]},
+        {"location": "cache/profile_cache.ts", "kind": "cache", "label": "cache/profile_cache.ts", "risk_domains": ["state/concurrency"]},
+        {"location": "tests/test_profile_cache_migration.py", "kind": "test", "label": "tests/test_profile_cache_migration.py", "risk_domains": ["data", "regression"]}
       ],
       "required_edge_types": ["references", "references", "tests"],
       "minimum_path_distance": 3,
       "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["calls", "implements"]}],
-      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "allowed_providers": ["builtin"],
       "unknown_frontier_expected": false,
       "compact_output_phrases": ["Impact scan:", "Impact paths:"],
       "controller_required": true,
@@ -34,15 +34,15 @@
       "repository_evidence": ["auth/authorize.py owns the helper", "roles/default_role.py assigns the member default", "events/audit_role.py publishes the decision", "consumers/audit_sink.py consumes it"],
       "seeds": [{"term": "authorization.workspace_edit", "location": "auth/authorize.py"}],
       "required_nodes": [
-        {"location": "auth/authorize.py", "kind": "permission", "label": "authorization helper", "risk_domains": ["authorization/privacy"]},
-        {"location": "roles/default_role.py", "kind": "permission", "label": "default role", "risk_domains": ["authorization/privacy"]},
-        {"location": "events/audit_role.py", "kind": "permission", "label": "audit event", "risk_domains": ["authorization/privacy", "operations"]},
-        {"location": "consumers/audit_sink.py", "kind": "file", "label": "downstream audit consumer", "risk_domains": ["operations"]}
+        {"location": "auth/authorize.py", "kind": "permission", "label": "authorization.workspace_edit", "risk_domains": ["authorization/privacy"]},
+        {"location": "roles/default_role.py", "kind": "permission", "label": "roles/default_role.py", "risk_domains": ["authorization/privacy"]},
+        {"location": "events/audit_role.py", "kind": "permission", "label": "events/audit_role.py", "risk_domains": ["authorization/privacy", "operations"]},
+        {"location": "consumers/audit_sink.py", "kind": "file", "label": "consumers/audit_sink.py", "risk_domains": ["operations"]}
       ],
       "required_edge_types": ["references", "references", "references"],
       "minimum_path_distance": 3,
       "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["calls", "authorizes"]}],
-      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "allowed_providers": ["builtin"],
       "unknown_frontier_expected": false,
       "compact_output_phrases": ["Impact scan:", "Impact paths:"],
       "controller_required": true,
@@ -60,15 +60,15 @@
       "repository_evidence": ["events/payment_publisher.py publishes", "queue/payment_retry.py retries", "state/payment_idempotency.py deduplicates", "billing/notify_receipt.py produces the side effect"],
       "seeds": [{"term": "billing.payment_captured", "location": "events/payment_publisher.py"}],
       "required_nodes": [
-        {"location": "events/payment_publisher.py", "kind": "event", "label": "event publisher", "risk_domains": ["operations"]},
-        {"location": "queue/payment_retry.py", "kind": "file", "label": "retry queue", "risk_domains": ["operations"]},
-        {"location": "state/payment_idempotency.py", "kind": "file", "label": "idempotency store", "risk_domains": ["state/concurrency"]},
-        {"location": "billing/notify_receipt.py", "kind": "file", "label": "billing notification side effect", "risk_domains": ["functionality"]}
+        {"location": "events/payment_publisher.py", "kind": "event", "label": "billing.payment_captured", "risk_domains": ["operations"]},
+        {"location": "queue/payment_retry.py", "kind": "file", "label": "queue/payment_retry.py", "risk_domains": ["operations"]},
+        {"location": "state/payment_idempotency.py", "kind": "file", "label": "state/payment_idempotency.py", "risk_domains": ["state/concurrency"]},
+        {"location": "billing/notify_receipt.py", "kind": "file", "label": "billing/notify_receipt.py", "risk_domains": ["functionality"]}
       ],
       "required_edge_types": ["references", "references", "references"],
       "minimum_path_distance": 3,
       "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["calls", "publishes", "subscribes"]}],
-      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "allowed_providers": ["builtin"],
       "unknown_frontier_expected": false,
       "compact_output_phrases": ["Impact scan:", "Impact paths:"],
       "controller_required": true,
@@ -86,15 +86,15 @@
       "repository_evidence": ["schema/account.json declares the key", "serialize/account_serializer.py emits it", "database/account_backfill.sql migrates it", "exports/account_report.py reads it"],
       "seeds": [{"term": "account.external_id", "location": "schema/account.json"}],
       "required_nodes": [
-        {"location": "schema/account.json", "kind": "file", "label": "schema key", "risk_domains": ["interfaces"]},
-        {"location": "serialize/account_serializer.py", "kind": "file", "label": "serializer", "risk_domains": ["data"]},
-        {"location": "database/account_backfill.sql", "kind": "file", "label": "database backfill", "risk_domains": ["data"]},
-        {"location": "exports/account_report.py", "kind": "file", "label": "export report", "risk_domains": ["functionality"]}
+        {"location": "schema/account.json", "kind": "file", "label": "account.external_id", "risk_domains": ["interfaces"]},
+        {"location": "serialize/account_serializer.py", "kind": "file", "label": "serialize/account_serializer.py", "risk_domains": ["data"]},
+        {"location": "database/account_backfill.sql", "kind": "file", "label": "database/account_backfill.sql", "risk_domains": ["data"]},
+        {"location": "exports/account_report.py", "kind": "file", "label": "exports/account_report.py", "risk_domains": ["functionality"]}
       ],
       "required_edge_types": ["references", "references", "references"],
       "minimum_path_distance": 3,
       "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["serializes", "persists"]}],
-      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "allowed_providers": ["builtin"],
       "unknown_frontier_expected": false,
       "compact_output_phrases": ["Impact scan:", "Impact paths:"],
       "controller_required": true,
@@ -112,15 +112,15 @@
       "repository_evidence": ["config/profile_sync.yaml declares the flag", "deploy/profile_worker.yaml wires it", "worker/profile_startup.py reads it", "operations/profile_health.py checks startup"],
       "seeds": [{"term": "worker.profile_sync", "location": "config/profile_sync.yaml"}],
       "required_nodes": [
-        {"location": "config/profile_sync.yaml", "kind": "configuration", "label": "configuration flag", "risk_domains": ["operations"]},
-        {"location": "deploy/profile_worker.yaml", "kind": "file", "label": "deployment manifest", "risk_domains": ["operations"]},
-        {"location": "worker/profile_startup.py", "kind": "file", "label": "worker startup", "risk_domains": ["functionality"]},
-        {"location": "operations/profile_health.py", "kind": "file", "label": "health check", "risk_domains": ["operations"]}
+        {"location": "config/profile_sync.yaml", "kind": "configuration", "label": "worker.profile_sync", "risk_domains": ["operations"]},
+        {"location": "deploy/profile_worker.yaml", "kind": "file", "label": "deploy/profile_worker.yaml", "risk_domains": ["operations"]},
+        {"location": "worker/profile_startup.py", "kind": "file", "label": "worker/profile_startup.py", "risk_domains": ["functionality"]},
+        {"location": "operations/profile_health.py", "kind": "file", "label": "operations/profile_health.py", "risk_domains": ["operations"]}
       ],
       "required_edge_types": ["references", "references", "references"],
       "minimum_path_distance": 3,
       "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["configures", "deploys", "calls"]}],
-      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "allowed_providers": ["builtin"],
       "unknown_frontier_expected": false,
       "compact_output_phrases": ["Impact scan:", "Impact paths:"],
       "controller_required": true,

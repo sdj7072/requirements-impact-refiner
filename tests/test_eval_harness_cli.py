@@ -31,6 +31,7 @@ from evals.harness.run import (
     ScheduledRun,
     _graph_observation,
     _graph_state_parity,
+    _smoke_observation,
     _score_selected_attempt,
     build_parser,
     build_schedule,
@@ -296,6 +297,68 @@ class LineageEvidenceAdapter(FakeAdapter):
 
 
 class EvalHarnessCliTest(unittest.TestCase):
+    def test_real_smoke_observation_returns_complete_negative_row(self):
+        case = next(case for case in load_all() if case.id == "NEG-debugging")
+        slot = ScheduledRun(case, 1)
+        controller = analyze_controller_trace(
+            ('{"type":"item.completed","item":{"type":"agent_message","text":"debug"}}',),
+            "debug response",
+            expected_turns=0,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            record_run(
+                raw, "codex", case.id, 1,
+                {
+                    "metadata.json": json.dumps({
+                        "attempt": 1, "client": "codex", "retry_of": None,
+                        "execution_commands": [{"elapsed_seconds": 0.125}],
+                    }),
+                    "first.prompt.txt": "debug prompt",
+                    "first.jsonl": '{"type":"item.completed","item":{"type":"agent_message"}}\n',
+                    "first.final.txt": "debug response",
+                    "controller-evidence.json": controller.to_json(),
+                },
+                root / "quarantine",
+            )
+            result = RunResult(
+                case.id, 1, "codex", RunStatus.PASS, None,
+                final_output="debug response",
+            )
+            score = MechanicalScore(case.id, 1, True, ())
+
+            observation = _smoke_observation(raw, "codex", slot, result, score)
+
+        self.assertIsInstance(observation, PerformanceObservation)
+        self.assertEqual(observation.duration_ms, 125)
+        self.assertEqual(observation.controller_begin_calls, 0)
+        self.assertTrue(observation.state_markdown_match)
+
+    def test_v04_smoke_treats_none_observation_as_extraction_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args([
+                "--client", "codex", "--suite", "smoke",
+                "--expected-plugin-version", "0.4.0", "--output", str(output),
+            ])
+            with patch(
+                "evals.harness.run._smoke_observation", return_value=None
+            ):
+                exit_code = run_batch(
+                    args, FakeAdapter(plugin_version="0.4.0")
+                )
+
+            payload = json.loads(
+                (output / "performance.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(payload["observations"], [])
+        self.assertTrue(any(
+            "performance evidence invalid" in error
+            for error in payload["gate"]["errors"]
+        ))
     def test_graph_smoke_parser_and_schedule_use_exact_checked_in_six(self):
         args = build_parser().parse_args(
             ["--client", "codex", "--suite", "graph-smoke", "--output", "out"]
@@ -400,7 +463,21 @@ class EvalHarnessCliTest(unittest.TestCase):
             ],
             "receipt_sha256": [receipt_digest],
             "trace_compact_graph_sha256": [compact_digest],
+            "trace_request_sha256": [receipt["request_sha256"]],
+            "trace_seeds": [[
+                {"term": term, "location": location}
+                for term, location in graph_case.seeds
+            ]],
             "duplicate_or_error_calls": False,
+        }
+        graph_policy = {
+            "schema_version": 1,
+            "settings": receipt["settings"],
+            "provider_inventory": ["builtin"],
+            "seeds": [
+                {"term": term, "location": location}
+                for term, location in graph_case.seeds
+            ],
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -412,7 +489,10 @@ class EvalHarnessCliTest(unittest.TestCase):
                 1,
                 {
                     "metadata.json": json.dumps(
-                        {"attempt": 1, "client": "codex", "retry_of": None}
+                        {
+                            "attempt": 1, "client": "codex", "retry_of": None,
+                            "graph_policy": graph_policy,
+                        }
                     ),
                     "first.final.txt": "Impact scan: 8.4 s\nImpact paths: PATH-001",
                     "first.jsonl": '{"type":"turn.completed"}\n',
@@ -436,10 +516,45 @@ class EvalHarnessCliTest(unittest.TestCase):
             self.assertEqual(observation.graph_duration_ms, 8400)
             self.assertTrue(any(path.endswith(f"workspace-graph/{receipt['draft_id']}.json") for path, _ in digests))
 
-            controller["receipt_sha256"] = ["0" * 64]
-            (raw / "codex" / case.id / "01" / "controller-evidence.json").write_text(
-                json.dumps(controller), encoding="utf-8"
+            controller_path = (
+                raw / "codex" / case.id / "01" / "controller-evidence.json"
             )
+            controller["trace_seeds"] = [[{
+                "term": "totally.unrelated.seed",
+                "location": graph_case.seeds[0][1],
+            }]]
+            controller_path.write_text(json.dumps(controller), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "catalog seeds"):
+                _graph_observation(
+                    raw, "codex", ScheduledRun(case, 1), result, mechanical
+                )
+            controller["trace_seeds"] = [[
+                {"term": term, "location": location}
+                for term, location in graph_case.seeds
+            ]]
+
+            controller["trace_request_sha256"] = ["0" * 64]
+            controller_path.write_text(json.dumps(controller), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "request identity"):
+                _graph_observation(
+                    raw, "codex", ScheduledRun(case, 1), result, mechanical
+                )
+            controller["trace_request_sha256"] = [receipt["request_sha256"]]
+
+            metadata_path = raw / "codex" / case.id / "01" / "metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["graph_policy"]["provider_inventory"] = ["ast-grep"]
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+            controller_path.write_text(json.dumps(controller), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "run policy"):
+                _graph_observation(
+                    raw, "codex", ScheduledRun(case, 1), result, mechanical
+                )
+            metadata["graph_policy"] = graph_policy
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+            controller["receipt_sha256"] = ["0" * 64]
+            controller_path.write_text(json.dumps(controller), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "digest disagrees"):
                 _graph_observation(
                     raw, "codex", ScheduledRun(case, 1), result, mechanical
@@ -914,7 +1029,7 @@ class EvalHarnessCliTest(unittest.TestCase):
         receipt = "f" * 32
         events = (
             {"type": "item.completed", "item": {"id": "begin", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_begin", "arguments": {}, "result": {"structured_content": {"draft_id": draft, "installed_payload_sha256": "0" * 64}}, "error": None, "status": "completed"}},
-            {"type": "item.completed", "item": {"id": "trace", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_trace_impact", "arguments": {"draft_id": draft}, "result": {"structured_content": {"receipt_id": receipt, "receipt_path": f".requirements-impact-refiner/graph/{draft}.json", "receipt_sha256": "a" * 64, "compact_graph": {}, "budget_status": "closed"}}, "error": None, "status": "completed"}},
+            {"type": "item.completed", "item": {"id": "trace", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_trace_impact", "arguments": {"draft_id": draft, "seeds": []}, "result": {"structured_content": {"receipt_id": receipt, "receipt_path": f".requirements-impact-refiner/graph/{draft}.json", "receipt_sha256": "a" * 64, "compact_graph": {}, "budget_status": "closed", "request_sha256": "c" * 64, "seeds": []}}, "error": None, "status": "completed"}},
             {"type": "item.completed", "item": {"id": "finalize", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_finalize", "arguments": {"draft_id": draft, "graph_receipt_id": receipt}, "result": {"structured_content": {"status": "published", "display_text": compact}}, "error": None, "status": "completed"}},
         )
         jsonl = "\n".join(json.dumps(event) for event in events) + "\n"

@@ -143,6 +143,8 @@ class TraceResult:
     receipt_sha256: str
     compact_graph: Mapping[str, object]
     budget_status: str
+    request_sha256: str
+    seeds: Tuple[TraceSeed, ...]
 
 
 @dataclass(frozen=True)
@@ -1599,10 +1601,7 @@ def _cas_replace_private_draft(
                 ) != expected_payload
             ):
                 raise ValueError("trace transaction changed before receipt binding")
-            os.rename(
-                filename, quarantine_name,
-                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-            )
+            _rename_noreplace(directory_fd, filename, quarantine_name)
             quarantine_fd = os.open(
                 quarantine_name, read_flags, dir_fd=directory_fd
             )
@@ -2184,10 +2183,7 @@ def _remove_exact_trace_receipt(
         ):
             raise ValueError("stale cleanup target changed or is unsafe")
 
-        os.rename(
-            filename, quarantine_name,
-            src_dir_fd=graph_fd, dst_dir_fd=graph_fd,
-        )
+        _rename_noreplace(graph_fd, filename, quarantine_name)
         quarantined = True
         quarantine_fd = os.open(quarantine_name, read_flags, dir_fd=graph_fd)
         quarantine_info = os.fstat(quarantine_fd)
@@ -2779,6 +2775,8 @@ def _bind_trace_receipt(
         receipt_id=str(receipt_value["receipt_id"]), receipt_path=receipt_path,
         receipt_sha256=digest, compact_graph=_compact_graph(receipt_value),
         budget_status=str(receipt_value["budget_status"]),
+        request_sha256=expected_request_sha256,
+        seeds=normalized_seeds,
     )
 
 
@@ -2848,6 +2846,8 @@ def trace_impact(request: TraceRequest) -> TraceResult:
                 receipt_sha256=str(context["sha256"]),
                 compact_graph=_compact_graph(receipt_value),
                 budget_status=str(receipt_value["budget_status"]),
+                request_sha256=str(binding["request_sha256"]),
+                seeds=normalized_seeds,
             )
         intent = draft.get("graph_trace_intent")
         if intent is not None:

@@ -3,10 +3,13 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from evals.harness.adapters.codex import CodexAdapter
 from evals.harness.graph_scoring import load_graph_cases
-from evals.harness.models import CaseSpec, CaseTurn, RunRequest, RunStatus
+from evals.harness.models import (
+    CaseSpec, CaseTurn, ClientProbe, RunRequest, RunStatus,
+)
 
 
 UUID = "123e4567-e89b-12d3-a456-426614174000"
@@ -166,7 +169,7 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "            with open(os.path.join(graph_dir, draft + '.json'), 'wb') as handle:\n"
         "                handle.write(receipt_payload)\n"
         "            begin = {'type': 'item.completed', 'item': {'id': 'begin', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_begin', 'arguments': {'repo_root': os.getcwd()}, 'result': {'content': [], 'structured_content': {'draft_id': draft, 'installed_payload_sha256': 'a' * 64}}, 'error': None, 'status': 'completed'}}\n"
-        "            trace = {'type': 'item.completed', 'item': {'id': 'trace', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_trace_impact', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'seeds': []}, 'result': {'content': [], 'structured_content': {'receipt_id': receipt, 'receipt_path': '.requirements-impact-refiner/graph/' + draft + '.json', 'receipt_sha256': hashlib.sha256(receipt_payload).hexdigest(), 'compact_graph': {'providers': [], 'nodes': [], 'edges': [], 'paths': [], 'frontier': [], 'timings_ms': {'total': 1}, 'budget_status': 'closed'}, 'budget_status': 'closed'}}, 'error': None, 'status': 'completed'}}\n"
+        "            trace = {'type': 'item.completed', 'item': {'id': 'trace', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_trace_impact', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'seeds': []}, 'result': {'content': [], 'structured_content': {'receipt_id': receipt, 'receipt_path': '.requirements-impact-refiner/graph/' + draft + '.json', 'receipt_sha256': hashlib.sha256(receipt_payload).hexdigest(), 'compact_graph': {'providers': [], 'nodes': [], 'edges': [], 'paths': [], 'frontier': [], 'timings_ms': {'total': 1}, 'budget_status': 'closed'}, 'budget_status': 'closed', 'request_sha256': 'c' * 64, 'seeds': []}}, 'error': None, 'status': 'completed'}}\n"
         "            finalize = {'type': 'item.completed', 'item': {'id': 'finalize', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_finalize', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'graph_receipt_id': receipt, 'analysis': {}}, 'result': {'content': [{'type': 'text', 'text': 'final response'}], 'structured_content': {'status': 'published', 'display_text': 'final response'}}, 'error': None, 'status': 'completed'}}\n"
         "            print(json.dumps(begin))\n"
         "            print(json.dumps(trace))\n"
@@ -205,6 +208,39 @@ class CodexAdapterTest(unittest.TestCase):
             self.assertEqual(settings["impact_graph"]["max_seconds"], 30)
             self.assertEqual(settings["impact_graph"]["target_seconds"], 10)
             self.assertEqual(settings["impact_graph"]["install_policy"], "never")
+
+    def test_graph_case_policy_is_sealed_in_raw_run_metadata(self):
+        case = load_graph_cases()[0]
+        request = RunRequest(
+            case.to_case_spec(), 1, "codex", None, None, Path("raw")
+        )
+        probe = ClientProbe(
+            client="codex", available=True, version="fake",
+            authenticated=None, plugin_version="0.4.0",
+            enabled_plugins=(
+                "requirements-impact-refiner@requirements-impact-refiner",
+                "superpowers@openai-curated",
+            ),
+            capabilities=("fake",), reason=None,
+        )
+
+        metadata = json.loads(
+            CodexAdapter._metadata_json(probe, (), (), request)
+        )
+
+        self.assertEqual(metadata["graph_policy"], {
+            "schema_version": 1,
+            "settings": {
+                "enabled": True, "max_seconds": 30, "target_seconds": 10,
+                "providers": ["builtin"], "install_policy": "never",
+                "deep": False,
+            },
+            "provider_inventory": ["builtin"],
+            "seeds": [
+                {"term": term, "location": location}
+                for term, location in case.seeds
+            ],
+        })
 
     def test_graph_fixture_staging_never_follows_settings_or_parent_symlinks(self):
         case = load_graph_cases()[0]
@@ -274,6 +310,66 @@ class CodexAdapterTest(unittest.TestCase):
                 "name is invalid",
                 CodexAdapter._capture_workspace_graph({}, root),
             )
+
+    def test_graph_receipt_capture_is_descriptor_bound_across_parent_replacements(self):
+        for boundary in ("workspace-base", "base-graph"):
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / "workspace"
+                graph = root / ".requirements-impact-refiner/graph"
+                graph.mkdir(parents=True)
+                receipt_name = "a" * 32 + ".json"
+                (graph / receipt_name).write_bytes(b"inside-receipt")
+                outside_base = Path(temporary) / "outside-base"
+                outside_graph = Path(temporary) / "outside-graph"
+                (outside_base / "graph").mkdir(parents=True)
+                outside_graph.mkdir()
+                (outside_base / "graph" / receipt_name).write_bytes(
+                    b"outside-base-receipt"
+                )
+                (outside_graph / receipt_name).write_bytes(
+                    b"outside-graph-receipt"
+                )
+                saved = Path(temporary) / f"saved-{boundary}"
+                real_open = os.open
+                raced = False
+
+                def racing_open(path, flags, *args, **kwargs):
+                    nonlocal raced
+                    selected = os.fspath(path)
+                    if not raced and boundary == "workspace-base" and (
+                        selected == os.fspath(graph)
+                        or selected == ".requirements-impact-refiner"
+                    ):
+                        raced = True
+                        os.rename(root / ".requirements-impact-refiner", saved)
+                        os.symlink(outside_base, root / ".requirements-impact-refiner")
+                    elif not raced and boundary == "base-graph" and (
+                        selected == os.fspath(graph) or selected == "graph"
+                    ):
+                        raced = True
+                        os.rename(graph, saved)
+                        os.symlink(outside_graph, graph)
+                    return real_open(path, flags, *args, **kwargs)
+
+                artifacts = {}
+                with patch(
+                    "evals.harness.adapters.codex.os.open",
+                    side_effect=racing_open,
+                ):
+                    problem = CodexAdapter._capture_workspace_graph(artifacts, root)
+
+                self.assertTrue(raced)
+                self.assertIn("capture failed", problem)
+                self.assertEqual(artifacts, {})
+                if boundary == "workspace-base":
+                    self.assertEqual(
+                        (saved / "graph" / receipt_name).read_bytes(),
+                        b"inside-receipt",
+                    )
+                else:
+                    self.assertEqual(
+                        (saved / receipt_name).read_bytes(), b"inside-receipt"
+                    )
 
     def test_v04_run_records_and_enforces_controller_trace(self):
         plugins = [

@@ -22,6 +22,7 @@ from .graph_scoring import (
     GraphScore,
     canonical_receipt_bytes,
     compact_graph,
+    graph_run_policy,
     load_graph_cases,
     score_graph,
 )
@@ -516,6 +517,73 @@ def _smoke_observation(
             "smoke controller evidence",
         )[0].decode("utf-8", errors="strict")
     )
+    metadata = json.loads(
+        _read_selected_file(
+            raw_root, attempt_path / "metadata.json", "smoke metadata"
+        )[0].decode("utf-8", errors="strict")
+    )
+    durations = metadata.get("execution_commands", [])
+    duration_ms = None
+    if isinstance(durations, list) and all(
+        isinstance(row, dict) and isinstance(row.get("elapsed_seconds"), (int, float))
+        for row in durations
+    ):
+        duration_ms = round(sum(row["elapsed_seconds"] for row in durations) * 1000)
+    input_tokens, output_tokens = _turn_usage(jsonl_payloads)
+    impact_ids = ()
+    state_match = slot.case.kind == "negative"
+    if slot.case.kind != "negative":
+        if _captured_canonical_report(
+            raw_root, attempt_path, slot.case.kind == "lineage"
+        ) is None:
+            raise ValueError("smoke report evidence is missing")
+        report_root = attempt_path / "workspace-reports"
+        reports = [
+            path for path in report_root.iterdir()
+            if path.is_dir() and not path.is_symlink()
+        ]
+        if len(reports) != 1:
+            raise ValueError("smoke report evidence requires exactly one report")
+        pointer = json.loads(
+            _read_selected_file(
+                raw_root, reports[0] / "current.json", "smoke current pointer"
+            )[0].decode("utf-8", errors="strict")
+        )
+        state = json.loads(
+            _read_selected_file(
+                raw_root, reports[0] / pointer["state"], "smoke compact state"
+            )[0].decode("utf-8", errors="strict")
+        )
+        impact_ids = tuple(sorted(row["id"] for row in state["impacts"]))
+        state_match = bool(impact_ids) and all(
+            identifier in output for identifier in impact_ids
+        )
+    routed_bytes, routed_words = _resource_measurement(slot.case)
+    return PerformanceObservation(
+        case_id=slot.case.id,
+        repetition=slot.repetition,
+        status=result.status,
+        attempt=result.attempt,
+        retry_of=result.retry_of,
+        prompt_bytes=sum(len(payload) for payload in prompts),
+        routed_resource_bytes=routed_bytes,
+        routed_resource_words=routed_words,
+        output_bytes=len(output.encode("utf-8")),
+        output_words=len(output.split()),
+        duration_ms=duration_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        impact_ids=impact_ids,
+        state_markdown_match=state_match,
+        workflow_boundary_passed=score.passed,
+        controller_begin_calls=controller_payload.get("begin_calls", -1),
+        controller_finalize_calls=controller_payload.get("finalize_calls", -1),
+        controller_draft_ids_match=controller_payload.get("draft_ids_match") is True,
+        controller_finalize_succeeded=controller_payload.get("finalize_succeeded") is True,
+        controller_display_text_exact_match=controller_payload.get("display_text_exact_match") is True,
+        controller_display_text_presentation_equivalent=controller_payload.get("display_text_presentation_equivalent") is True,
+        controller_display_comparison=controller_payload.get("display_comparison", ""),
+    )
 
 
 _GRAPH_CONFIDENCE_RANK = {
@@ -601,6 +669,14 @@ def _graph_observation(raw_root, client, slot, result, mechanical_score):
     cases = {case.id: case for case in load_graph_cases()}
     case = cases[slot.case.id]
     attempt_path = _attempt_path(raw_root, client, slot, result.attempt)
+    metadata = json.loads(
+        _read_selected_file(
+            raw_root, attempt_path / "metadata.json", "graph run metadata"
+        )[0].decode("utf-8", errors="strict")
+    )
+    expected_policy = graph_run_policy(case)
+    if not isinstance(metadata, dict) or metadata.get("graph_policy") != expected_policy:
+        raise ValueError("graph run policy does not match staged builtin policy")
     output_bytes, _, _ = _read_selected_file(
         raw_root, attempt_path / "first.final.txt", "graph final output"
     )
@@ -621,7 +697,7 @@ def _graph_observation(raw_root, client, slot, result, mechanical_score):
     if case.kind == "positive":
         for field in (
             "draft_ids", "receipt_ids", "receipt_paths", "receipt_sha256",
-            "trace_compact_graph_sha256",
+            "trace_compact_graph_sha256", "trace_request_sha256", "trace_seeds",
         ):
             if not isinstance(controller.get(field), list) or len(controller[field]) != 1:
                 raise ValueError(f"graph controller {field} is not exact")
@@ -629,6 +705,8 @@ def _graph_observation(raw_root, client, slot, result, mechanical_score):
         receipt_path = controller["receipt_paths"][0]
         if receipt_path != f".requirements-impact-refiner/graph/{draft_id}.json":
             raise ValueError("graph receipt path disagrees with draft ID")
+        if controller["trace_seeds"] != [expected_policy["seeds"]]:
+            raise ValueError("graph trace arguments do not match catalog seeds")
         payload, digest, relative = _read_selected_file(
             raw_root,
             attempt_path / "workspace-graph" / f"{draft_id}.json",
@@ -645,6 +723,19 @@ def _graph_observation(raw_root, client, slot, result, mechanical_score):
             or receipt.get("receipt_id") != controller["receipt_ids"][0]
         ):
             raise ValueError("graph receipt identity disagrees with controller trace")
+        if receipt.get("request_sha256") != controller["trace_request_sha256"][0]:
+            raise ValueError(
+                "graph receipt request identity does not match traced catalog seeds"
+            )
+        provider_inventory = [
+            row.get("name") for row in receipt.get("providers", ())
+            if isinstance(row, dict)
+        ]
+        if (
+            receipt.get("settings") != expected_policy["settings"]
+            or provider_inventory != expected_policy["provider_inventory"]
+        ):
+            raise ValueError("graph receipt does not match staged builtin run policy")
         compact_digest = hashlib.sha256(
             json.dumps(
                 compact_graph(receipt), ensure_ascii=False, sort_keys=True,
@@ -683,68 +774,6 @@ def _graph_observation(raw_root, client, slot, result, mechanical_score):
         output_tokens=output_tokens,
     )
     return observation, graph_score, receipt_digests
-    metadata = json.loads(
-        _read_selected_file(
-            raw_root, attempt_path / "metadata.json", "smoke metadata"
-        )[0].decode("utf-8", errors="strict")
-    )
-    durations = metadata.get("execution_commands", [])
-    duration_ms = None
-    if isinstance(durations, list) and all(
-        isinstance(row, dict) and isinstance(row.get("elapsed_seconds"), (int, float))
-        for row in durations
-    ):
-        duration_ms = round(sum(row["elapsed_seconds"] for row in durations) * 1000)
-    input_tokens, output_tokens = _turn_usage(jsonl_payloads)
-    impact_ids = ()
-    state_match = slot.case.kind == "negative"
-    if slot.case.kind != "negative":
-        if _captured_canonical_report(
-            raw_root, attempt_path, slot.case.kind == "lineage"
-        ) is None:
-            raise ValueError("smoke report evidence is missing")
-        report_root = attempt_path / "workspace-reports"
-        reports = [path for path in report_root.iterdir() if path.is_dir() and not path.is_symlink()]
-        if len(reports) != 1:
-            raise ValueError("smoke report evidence requires exactly one report")
-        pointer = json.loads(
-            _read_selected_file(
-                raw_root, reports[0] / "current.json", "smoke current pointer"
-            )[0].decode("utf-8", errors="strict")
-        )
-        state = json.loads(
-            _read_selected_file(
-                raw_root, reports[0] / pointer["state"], "smoke compact state"
-            )[0].decode("utf-8", errors="strict")
-        )
-        impact_ids = tuple(sorted(row["id"] for row in state["impacts"]))
-        state_match = bool(impact_ids) and all(identifier in output for identifier in impact_ids)
-    routed_bytes, routed_words = _resource_measurement(slot.case)
-    return PerformanceObservation(
-        case_id=slot.case.id,
-        repetition=slot.repetition,
-        status=result.status,
-        attempt=result.attempt,
-        retry_of=result.retry_of,
-        prompt_bytes=sum(len(payload) for payload in prompts),
-        routed_resource_bytes=routed_bytes,
-        routed_resource_words=routed_words,
-        output_bytes=len(output.encode("utf-8")),
-        output_words=len(output.split()),
-        duration_ms=duration_ms,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        impact_ids=impact_ids,
-        state_markdown_match=state_match,
-        workflow_boundary_passed=score.passed,
-        controller_begin_calls=controller_payload.get("begin_calls", -1),
-        controller_finalize_calls=controller_payload.get("finalize_calls", -1),
-        controller_draft_ids_match=controller_payload.get("draft_ids_match") is True,
-        controller_finalize_succeeded=controller_payload.get("finalize_succeeded") is True,
-        controller_display_text_exact_match=controller_payload.get("display_text_exact_match") is True,
-        controller_display_text_presentation_equivalent=controller_payload.get("display_text_presentation_equivalent") is True,
-        controller_display_comparison=controller_payload.get("display_comparison", ""),
-    )
 
 
 def _scoring_evidence_failure(
@@ -1218,9 +1247,12 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
         for result, score in zip(results, scores):
             slot = slots[(result.case_id, result.repetition)]
             try:
-                observations.append(
-                    _smoke_observation(raw_root, args.client, slot, result, score)
+                observation = _smoke_observation(
+                    raw_root, args.client, slot, result, score
                 )
+                if not isinstance(observation, PerformanceObservation):
+                    raise ValueError("smoke observation is missing or invalid")
+                observations.append(observation)
             except (OSError, ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
                 extraction_errors.append(
                     f"{result.case_id} performance evidence invalid: {error}"

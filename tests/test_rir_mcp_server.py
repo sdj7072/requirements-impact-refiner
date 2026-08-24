@@ -296,6 +296,10 @@ class RirMcpServerTest(unittest.TestCase):
                     json.loads(trace_reply["result"]["content"][0]["text"]), traced
                 )
                 self.assertTrue(traced["compact_graph"]["paths"])
+                self.assertEqual(traced["seeds"], [
+                    {"term": "profile.displayName", "location": "api/profile.py"}
+                ])
+                self.assertRegex(traced["request_sha256"], r"^[0-9a-f]{64}$")
                 analysis = json.loads(
                     (FIXTURES / "controller-analysis-pre-decision.json").read_text()
                 )

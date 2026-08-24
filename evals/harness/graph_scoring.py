@@ -2,12 +2,43 @@
 
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
 from pathlib import Path, PurePosixPath
 import re
+import sys
 from typing import Mapping, Optional, Sequence, Tuple
 
 from .models import CaseSpec, CaseTurn
+
+
+def _load_graph_contract():
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "skills" / "requirements-impact-refiner" / "scripts"
+        / "impact_graph.py"
+    )
+    module_name = "_rir_eval_impact_graph_" + hashlib.sha256(
+        str(path).encode("utf-8")
+    ).hexdigest()[:16]
+    loaded = sys.modules.get(module_name)
+    if loaded is not None:
+        return loaded
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError("packaged graph receipt contract is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+GRAPH_CONTRACT = _load_graph_contract()
+canonical_receipt_bytes = GRAPH_CONTRACT.canonical_receipt_bytes
 
 
 GRAPH_CASE_IDS = (
@@ -21,6 +52,14 @@ GRAPH_CASE_IDS = (
 HIGH_RISK_DOMAINS = frozenset(
     ("authorization/privacy", "legal/policy", "data", "interfaces", "operations", "state/concurrency")
 )
+BUILTIN_GRAPH_SETTINGS = {
+    "enabled": True,
+    "max_seconds": 30,
+    "target_seconds": 10,
+    "providers": ["builtin"],
+    "install_policy": "never",
+    "deep": False,
+}
 _CASE_KEYS = frozenset((
     "id", "kind", "request", "repository_evidence", "seeds",
     "required_nodes", "required_edge_types", "minimum_path_distance",
@@ -87,6 +126,27 @@ class GraphScore:
     providers: Tuple[str, ...]
     uncovered_high_risk_nodes: Tuple[str, ...]
     matched_path_ids: Tuple[str, ...]
+
+
+def graph_run_policy(case: GraphCaseSpec) -> dict[str, object]:
+    if not isinstance(case, GraphCaseSpec):
+        raise TypeError("case must be a GraphCaseSpec")
+    if case.kind == "negative":
+        return {
+            "schema_version": 1,
+            "settings": None,
+            "provider_inventory": [],
+            "seeds": [],
+        }
+    return {
+        "schema_version": 1,
+        "settings": dict(BUILTIN_GRAPH_SETTINGS),
+        "provider_inventory": ["builtin"],
+        "seeds": [
+            {"term": term, "location": location}
+            for term, location in case.seeds
+        ],
+    }
 
 
 def _strings(value, label, *, allow_empty=True, unique=True):
@@ -216,10 +276,6 @@ def load_graph_cases(path: Optional[Path] = None) -> Tuple[GraphCaseSpec, ...]:
     return cases
 
 
-def canonical_receipt_bytes(receipt: Mapping[str, object]) -> bytes:
-    return (json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
-
-
 def compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
@@ -279,6 +335,35 @@ def _ordered_subset(required: Sequence[str], observed: Sequence[str]) -> bool:
     return all(any(value == candidate for candidate in iterator) for value in required)
 
 
+def _normalized_label(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    return " ".join(value.split())
+
+
+def _required_nodes_match(required_nodes, path_nodes) -> bool:
+    position = 0
+    for required in required_nodes:
+        found = None
+        for index in range(position, len(path_nodes)):
+            observed = path_nodes[index]
+            if (
+                observed.get("location") == required.location
+                and observed.get("kind") == required.kind
+                and _normalized_label(observed.get("label"))
+                == _normalized_label(required.label)
+                and frozenset(required.risk_domains).issubset(
+                    observed.get("risk_domains", ())
+                )
+            ):
+                found = index
+                break
+        if found is None:
+            return False
+        position = found + 1
+    return True
+
+
 def score_graph(case: GraphCaseSpec, receipt: Optional[Mapping[str, object]], final_output: str) -> GraphScore:
     if not isinstance(case, GraphCaseSpec):
         raise TypeError("case must be a GraphCaseSpec")
@@ -290,6 +375,20 @@ def score_graph(case: GraphCaseSpec, receipt: Optional[Mapping[str, object]], fi
     findings = []
     if not isinstance(receipt, Mapping):
         return GraphScore(case.id, False, ("positive graph case requires a receipt",), 0, None, None, (), (), ())
+    validation_errors = GRAPH_CONTRACT.validate_receipt(receipt)
+    if validation_errors:
+        findings = tuple(
+            "production receipt validation: " + error
+            for error in validation_errors
+        )
+        receipt_id = receipt.get("receipt_id")
+        if not isinstance(receipt_id, str) or re.fullmatch(
+            r"[0-9a-f]{32}", receipt_id
+        ) is None:
+            receipt_id = None
+        return GraphScore(
+            case.id, False, findings, 0, receipt_id, None, (), (), ()
+        )
     receipt_id = receipt.get("receipt_id")
     if not isinstance(receipt_id, str) or re.fullmatch(r"[0-9a-f]{32}", receipt_id) is None:
         findings.append("receipt identity is invalid")
@@ -313,23 +412,14 @@ def score_graph(case: GraphCaseSpec, receipt: Optional[Mapping[str, object]], fi
     provider_names = tuple(sorted({row.get("name") for row in providers_raw if isinstance(row, dict) and isinstance(row.get("name"), str)}))
     if any(name not in case.allowed_providers for name in provider_names):
         findings.append("disallowed provider appears in receipt inventory")
-    required_locations = tuple(node.location for node in case.required_nodes)
-    required_kinds = {node.location: node.kind for node in case.required_nodes}
-    required_risks = {
-        node.location: frozenset(node.risk_domains)
-        for node in case.required_nodes
-    }
-    required_risks_match = all(
-        any(
-            row.get("location") == location
-            and required_risks[location].issubset(row.get("risk_domains", ()))
-            for row in nodes_raw if isinstance(row, dict)
-        )
-        for location in required_locations
-    )
-    if not required_risks_match:
-        findings.append("required node risk domains are missing")
+    expected_policy = graph_run_policy(case)
+    if (
+        receipt.get("settings") != expected_policy["settings"]
+        or list(provider_names) != expected_policy["provider_inventory"]
+    ):
+        findings.append("builtin graph provider policy does not match receipt")
     matching_paths = []
+    identity_path_exists = False
     maximum_distance = 0
     for path in paths_raw:
         if not isinstance(path, dict) or not isinstance(path.get("nodes"), list) or not isinstance(path.get("edges"), list):
@@ -338,19 +428,21 @@ def score_graph(case: GraphCaseSpec, receipt: Optional[Mapping[str, object]], fi
         path_edges = [edges.get(identifier) for identifier in path["edges"]]
         if any(row is None for row in path_nodes + path_edges):
             continue
-        locations = tuple(row.get("location") for row in path_nodes)
-        kinds_match = all(any(row.get("location") == location and row.get("kind") == required_kinds[location] for row in path_nodes) for location in required_locations)
         edge_types = tuple(row.get("kind") for row in path_edges)
+        identity_matches = _required_nodes_match(case.required_nodes, path_nodes)
+        identity_path_exists = identity_path_exists or identity_matches
         if (
-            _ordered_subset(required_locations, locations)
-            and kinds_match
-            and required_risks_match
+            identity_matches
             and _ordered_subset(case.required_edge_types, edge_types)
         ):
             matching_paths.append(path)
             distance = path.get("distance")
             if isinstance(distance, int) and not isinstance(distance, bool):
                 maximum_distance = max(maximum_distance, distance)
+    if not identity_path_exists:
+        findings.append(
+            "required node identity must bind label, kind, location, and risks"
+        )
     if not matching_paths:
         findings.append("required graph path or required edge types are missing")
     if maximum_distance < case.minimum_path_distance:

@@ -25,11 +25,14 @@ def completed(tool, arguments, structured, *, status="completed", error=None):
     )
 
 
-def completed_trace(draft_id, receipt_id=None):
+def completed_trace(draft_id, receipt_id=None, seeds=()):
     selected = receipt_id or ("f" * 32)
+    seed_rows = [
+        {"term": term, "location": location} for term, location in seeds
+    ]
     return completed(
         "rir_trace_impact",
-        {"repo_root": "/tmp/work", "draft_id": draft_id, "seeds": []},
+        {"repo_root": "/tmp/work", "draft_id": draft_id, "seeds": seed_rows},
         {
             "receipt_id": selected,
             "receipt_path": f".requirements-impact-refiner/graph/{draft_id}.json",
@@ -40,6 +43,8 @@ def completed_trace(draft_id, receipt_id=None):
                 "timings_ms": {"total": 8}, "budget_status": "closed",
             },
             "budget_status": "closed",
+            "request_sha256": "c" * 64,
+            "seeds": seed_rows,
         },
     )
 
@@ -78,6 +83,8 @@ class ControllerEvidenceTest(unittest.TestCase):
         self.assertEqual(evidence.draft_ids, (draft_id,))
         self.assertEqual(evidence.receipt_ids, ("f" * 32,))
         self.assertEqual(evidence.receipt_sha256, ("b" * 64,))
+        self.assertEqual(evidence.trace_request_sha256, ("c" * 64,))
+        self.assertEqual(evidence.trace_seeds, ((),))
         self.assertRegex(evidence.trace_compact_graph_sha256[0], r"^[0-9a-f]{64}$")
         self.assertFalse(evidence.duplicate_or_error_calls)
         self.assertEqual(evidence.errors, ())

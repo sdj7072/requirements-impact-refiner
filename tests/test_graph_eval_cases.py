@@ -38,7 +38,7 @@ class GraphEvalCasesTest(unittest.TestCase):
             self.assertEqual(case.minimum_path_distance, 3)
             self.assertTrue(case.required_edge_types)
             self.assertTrue(case.forbidden_precision)
-            self.assertTrue(case.allowed_providers)
+            self.assertEqual(case.allowed_providers, ("builtin",))
             self.assertIsInstance(case.unknown_frontier_expected, bool)
             self.assertEqual(
                 case.compact_output_phrases, ("Impact scan:", "Impact paths:"),
@@ -95,6 +95,7 @@ class GraphEvalCasesTest(unittest.TestCase):
                 by_location = {row.location: row for row in result.nodes}
                 for required in case.required_nodes:
                     observed = by_location[required.location]
+                    self.assertEqual(observed.label, required.label)
                     self.assertEqual(observed.kind, required.kind)
                     self.assertTrue(
                         set(required.risk_domains).issubset(observed.risk_domains)

@@ -11,7 +11,7 @@ from typing import Any, Optional, Sequence, Tuple
 from .base import ClientAdapter
 from ..controller_evidence import analyze_controller_trace
 from ..evidence import Artifact, PotentialSecretError, record_run
-from ..graph_scoring import load_graph_cases
+from ..graph_scoring import graph_run_policy, load_graph_cases
 from ..models import CaseTurn, ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
 from ..process import run_command
 
@@ -500,15 +500,9 @@ class CodexAdapter(ClientAdapter):
         root = Path(workspace_root)
         if root.is_symlink() or not root.is_dir():
             raise ValueError("graph fixture workspace must be a real directory")
+        policy = graph_run_policy(case)
         settings = {
-            "impact_graph": {
-                "enabled": True,
-                "max_seconds": 30,
-                "target_seconds": 10,
-                "providers": ["builtin"],
-                "install_policy": "never",
-                "deep": False,
-            },
+            "impact_graph": policy["settings"],
             "audience": "technical",
             "delivery": "compact",
         }
@@ -562,28 +556,31 @@ class CodexAdapter(ClientAdapter):
 
     @staticmethod
     def _workspace_graph_artifacts(workspace_root: Path) -> dict[str, bytes]:
-        base = workspace_root / ".requirements-impact-refiner"
-        graph_root = base / "graph"
-        if not base.exists():
-            return {}
-        if base.is_symlink() or not base.is_dir():
-            raise ValueError("workspace graph base must be a real directory")
-        if not graph_root.exists():
-            return {}
-        if graph_root.is_symlink() or not graph_root.is_dir():
-            raise ValueError("workspace graph root must be a real directory")
         directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(
             os, "O_NOFOLLOW", 0
         )
         file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        directory_fd = os.open(graph_root, directory_flags)
+        workspace_fd = base_fd = graph_fd = None
         try:
+            workspace_fd = os.open(workspace_root, directory_flags)
+            try:
+                base_fd = os.open(
+                    ".requirements-impact-refiner",
+                    directory_flags,
+                    dir_fd=workspace_fd,
+                )
+            except FileNotFoundError:
+                return {}
+            try:
+                graph_fd = os.open("graph", directory_flags, dir_fd=base_fd)
+            except FileNotFoundError:
+                return {}
             artifacts = {}
-            for name in sorted(os.listdir(directory_fd)):
+            for name in sorted(os.listdir(graph_fd)):
                 if re.fullmatch(r"[0-9a-f]{32}\.json", name) is None:
                     raise ValueError("workspace graph receipt name is invalid")
                 try:
-                    descriptor = os.open(name, file_flags, dir_fd=directory_fd)
+                    descriptor = os.open(name, file_flags, dir_fd=graph_fd)
                 except OSError as error:
                     raise ValueError(
                         "workspace graph artifacts must not use symlinks"
@@ -627,7 +624,9 @@ class CodexAdapter(ClientAdapter):
                 artifacts[f"workspace-graph/{name}"] = payload
             return artifacts
         finally:
-            os.close(directory_fd)
+            for descriptor in (graph_fd, base_fd, workspace_fd):
+                if descriptor is not None:
+                    os.close(descriptor)
 
     @classmethod
     def _capture_workspace_graph(
@@ -783,8 +782,7 @@ class CodexAdapter(ClientAdapter):
                 "timed_out": command.timed_out,
             }
 
-        return json.dumps(
-            {
+        payload = {
                 "client": "codex",
                 "environment": _COMPOSITION_LABEL,
                 "version": probe.version,
@@ -796,9 +794,14 @@ class CodexAdapter(ClientAdapter):
                 "retry_of": request.retry_of,
                 "probe_commands": [command_payload(command) for command in probe_commands],
                 "execution_commands": [command_payload(command) for command in commands],
-            },
-            sort_keys=True,
+            }
+        graph_case = next(
+            (case for case in load_graph_cases() if case.id == request.case.id),
+            None,
         )
+        if graph_case is not None:
+            payload["graph_policy"] = graph_run_policy(graph_case)
+        return json.dumps(payload, sort_keys=True)
 
     @staticmethod
     def _unavailable_probe(

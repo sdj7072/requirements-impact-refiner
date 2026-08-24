@@ -106,21 +106,26 @@ def evaluate_smoke_gate(
     observations: Sequence[PerformanceObservation],
 ) -> SmokeGateResult:
     errors = []
-    keys = [(row.case_id, row.repetition) for row in observations]
+    valid_observations = tuple(
+        row for row in observations if isinstance(row, PerformanceObservation)
+    )
+    if len(valid_observations) != len(observations):
+        errors.append("smoke observations contain invalid rows")
+    keys = [(row.case_id, row.repetition) for row in valid_observations]
     expected = {(case_id, 1) for case_id in SMOKE_CASE_IDS}
-    if set(keys) != expected or len(observations) != len(expected):
+    if set(keys) != expected or len(valid_observations) != len(expected):
         errors.append("smoke observations do not cover the exact six cases")
     if len(set(keys)) != len(keys):
         errors.append("smoke observations contain duplicate case/repetition rows")
-    if any(row.attempt != 1 or row.retry_of is not None for row in observations):
+    if any(row.attempt != 1 or row.retry_of is not None for row in valid_observations):
         errors.append("smoke observations must select attempt 1 without retry")
-    if any(row.status is not RunStatus.PASS for row in observations):
+    if any(row.status is not RunStatus.PASS for row in valid_observations):
         errors.append("every smoke runtime result must pass")
-    if any(not row.state_markdown_match for row in observations):
+    if any(not row.state_markdown_match for row in valid_observations):
         errors.append("state, Markdown, and compact impacts disagree")
-    if any(not row.workflow_boundary_passed for row in observations):
+    if any(not row.workflow_boundary_passed for row in valid_observations):
         errors.append("workflow ownership boundary failed")
-    for row in observations:
+    for row in valid_observations:
         expected_calls = (
             0
             if row.case_id == "NEG-debugging"
@@ -131,22 +136,22 @@ def evaluate_smoke_gate(
             or row.controller_finalize_calls != expected_calls
         ):
             errors.append("controller call count or order failed")
-    if any(not row.controller_draft_ids_match for row in observations):
+    if any(not row.controller_draft_ids_match for row in valid_observations):
         errors.append("controller draft IDs disagree")
-    if any(not row.controller_finalize_succeeded for row in observations):
+    if any(not row.controller_finalize_succeeded for row in valid_observations):
         errors.append("controller finalize failed")
     if any(
         not row.controller_display_text_presentation_equivalent
         or row.controller_display_comparison != "codex-markdown-v1"
-        for row in observations
+        for row in valid_observations
     ):
         errors.append("controller display text differs from final output")
     if any(
         (row.input_tokens is None) != (row.output_tokens is None)
-        for row in observations
+        for row in valid_observations
     ):
         errors.append("token usage must be complete or absent")
-    for row in observations:
+    for row in valid_observations:
         if row.case_id != "NEG-debugging" and not row.impact_ids:
             errors.append(f"{row.case_id} has no preserved impact identifiers")
         for field in (
@@ -159,9 +164,9 @@ def evaluate_smoke_gate(
             value = getattr(row, field)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 errors.append(f"{row.case_id} has invalid {field}")
-    median_output = _median([row.output_words for row in observations])
+    median_output = _median([row.output_words for row in valid_observations])
     median_resources = _median(
-        [row.routed_resource_words for row in observations]
+        [row.routed_resource_words for row in valid_observations]
     )
     if median_output > MAX_MEDIAN_OUTPUT_WORDS:
         errors.append("median compact output exceeds 450 words")

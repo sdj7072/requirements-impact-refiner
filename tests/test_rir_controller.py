@@ -129,6 +129,13 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(
             stored["graph_receipt"]["sha256"], traced.receipt_sha256
         )
+        self.assertEqual(
+            traced.request_sha256, stored["graph_receipt"]["request_sha256"]
+        )
+        self.assertEqual(
+            traced.seeds,
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+        )
 
     def test_trace_uses_coordinator_normalized_seed_identity(self):
         self.enable_builtin_graph()
@@ -149,6 +156,13 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(
             [row["term"] for row in stored["graph_receipt"]["seeds"]],
             ["authorization.profile", "profile.displayName"],
+        )
+        self.assertEqual(
+            tuple(seed.term for seed in traced.seeds),
+            ("authorization.profile", "profile.displayName"),
+        )
+        self.assertEqual(
+            traced.request_sha256, stored["graph_receipt"]["request_sha256"]
         )
         self.assertRegex(traced.receipt_id, r"^[0-9a-f]{32}$")
 
@@ -418,14 +432,14 @@ class RirControllerTest(unittest.TestCase):
                 )
                 published = receipt_path.read_bytes()
                 filename = f"{draft.draft_id}.json"
-                real_rename = CONTROLLER.os.rename
+                real_rename = CONTROLLER._rename_noreplace
                 real_link = CONTROLLER.os.link
                 real_unlink = CONTROLLER.os.unlink
                 interrupted = False
 
-                def interrupting_rename(source, destination, **kwargs):
+                def interrupting_rename(directory_fd, source, destination):
                     nonlocal interrupted
-                    result = real_rename(source, destination, **kwargs)
+                    result = real_rename(directory_fd, source, destination)
                     if (
                         not interrupted
                         and phase == "after-quarantine-rename"
@@ -478,7 +492,7 @@ class RirControllerTest(unittest.TestCase):
                         "binding recovery must not republish"
                     ),
                 ), mock.patch.object(
-                    CONTROLLER.os, "rename", side_effect=interrupting_rename
+                    CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
                 ), mock.patch.object(
                     CONTROLLER.os, "link", side_effect=interrupting_link
                 ), mock.patch.object(
@@ -873,6 +887,69 @@ class RirControllerTest(unittest.TestCase):
                         CONTROLLER.load_draft(self.root, draft.draft_id), expected
                     )
 
+    def _assert_durable_cas_quarantine_destination_is_no_clobber(
+        self, replacement_kind
+    ):
+        draft = CONTROLLER.begin_refinement(
+            self.request(request=f"CAS quarantine destination {replacement_kind}")
+        )
+        expected = CONTROLLER.load_draft(self.root, draft.draft_id)
+        replacement = dict(expected)
+        replacement["graph_trace_intent"] = {"intent_id": "c" * 32}
+        token = "d" * 32
+        destination_name = f".{draft.draft_id}.{token}.quarantine"
+        draft_directory = self.root / ".requirements-impact-refiner/drafts"
+        destination = draft_directory / destination_name
+        canonical = draft_directory / f"{draft.draft_id}.json"
+        outside = self.root / f"cas-quarantine-outside-{replacement_kind}"
+        outside.write_bytes(b"outside-safe")
+        foreign = f"cas-quarantine-foreign-{replacement_kind}".encode("utf-8")
+        real_claim = CONTROLLER._rename_noreplace
+        inserted = False
+
+        def race_claim(directory_fd, source, selected):
+            nonlocal inserted
+            if source == f"{draft.draft_id}.json" and selected == destination_name:
+                self._install_cleanup_replacement(
+                    replacement_kind,
+                    destination_name,
+                    directory_fd,
+                    outside,
+                    foreign,
+                )
+                inserted = True
+            return real_claim(directory_fd, source, selected)
+
+        with mock.patch.object(
+            CONTROLLER.secrets, "token_hex", return_value=token
+        ), mock.patch.object(
+            CONTROLLER, "_rename_noreplace", side_effect=race_claim
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "compare-and-swap|quarantine|uncertain"
+            ):
+                CONTROLLER._cas_replace_private_draft(
+                    Path(str(expected["repo_root"])),
+                    draft.draft_id,
+                    expected,
+                    replacement,
+                )
+
+        self.assertTrue(inserted)
+        self.assertEqual(canonical.read_bytes(), CONTROLLER._canonical_bytes(expected))
+        self.assertTrue((draft_directory / f".{draft.draft_id}.transaction").exists())
+        if replacement_kind == "regular":
+            self.assertEqual(destination.read_bytes(), foreign)
+        else:
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def test_durable_cas_quarantine_does_not_clobber_late_regular_destination(self):
+        self._assert_durable_cas_quarantine_destination_is_no_clobber("regular")
+
+    def test_durable_cas_quarantine_does_not_clobber_late_symlink_destination(self):
+        self._assert_durable_cas_quarantine_destination_is_no_clobber("symlink")
+
     def test_trace_intent_write_failure_cannot_publish_and_retry_is_fresh(self):
         self.enable_builtin_graph()
         draft = CONTROLLER.begin_refinement(self.request(request="Intent write fault"))
@@ -1166,30 +1243,31 @@ class RirControllerTest(unittest.TestCase):
         graph_dir, path, expected = self._private_cleanup_receipt(draft_id)
         saved = graph_dir / "saved-opened-exact.json"
         foreign = b"foreign-after-open"
-        real_rename = CONTROLLER.os.rename
+        real_rename = CONTROLLER._rename_noreplace
+        real_path_rename = CONTROLLER.os.rename
         swapped = False
 
-        def swap_before_quarantine(source, destination, **kwargs):
+        def swap_before_quarantine(directory_fd, source, destination):
             nonlocal swapped
             if source == f"{draft_id}.json" and not swapped:
                 swapped = True
-                real_rename(
+                real_path_rename(
                     source, saved.name,
-                    src_dir_fd=kwargs["src_dir_fd"],
-                    dst_dir_fd=kwargs["dst_dir_fd"],
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
                 )
                 descriptor = os.open(
                     source, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                    0o600, dir_fd=kwargs["src_dir_fd"],
+                    0o600, dir_fd=directory_fd,
                 )
                 try:
                     os.write(descriptor, foreign)
                 finally:
                     os.close(descriptor)
-            return real_rename(source, destination, **kwargs)
+            return real_rename(directory_fd, source, destination)
 
         with mock.patch.object(
-            CONTROLLER.os, "rename", side_effect=swap_before_quarantine
+            CONTROLLER, "_rename_noreplace", side_effect=swap_before_quarantine
         ):
             with self.assertRaisesRegex(ValueError, "cleanup.*changed|uncertain"):
                 CONTROLLER._remove_exact_trace_receipt(
@@ -1198,6 +1276,65 @@ class RirControllerTest(unittest.TestCase):
 
         self.assertEqual(path.read_bytes(), foreign)
         self.assertEqual(saved.read_bytes(), expected)
+
+    def _assert_stale_receipt_quarantine_destination_is_no_clobber(
+        self, replacement_kind
+    ):
+        draft_id = ("8" if replacement_kind == "regular" else "9") * 32
+        graph_dir, receipt, expected = self._private_cleanup_receipt(
+            draft_id, payload=f"stale-exact-{replacement_kind}".encode("utf-8")
+        )
+        cleanup_id = "e" * 32
+        destination_name = f".{draft_id}.{cleanup_id}.stale"
+        destination = graph_dir / destination_name
+        outside = self.root / f"stale-destination-outside-{replacement_kind}"
+        outside.write_bytes(b"outside-safe")
+        foreign = f"stale-destination-foreign-{replacement_kind}".encode("utf-8")
+        real_claim = CONTROLLER._rename_noreplace
+        inserted = False
+        committed = False
+
+        def race_claim(directory_fd, source, selected):
+            nonlocal inserted
+            if source == f"{draft_id}.json" and selected == destination_name:
+                self._install_cleanup_replacement(
+                    replacement_kind,
+                    destination_name,
+                    directory_fd,
+                    outside,
+                    foreign,
+                )
+                inserted = True
+            return real_claim(directory_fd, source, selected)
+
+        def commit():
+            nonlocal committed
+            committed = True
+
+        with mock.patch.object(
+            CONTROLLER.secrets, "token_hex", return_value=cleanup_id
+        ), mock.patch.object(
+            CONTROLLER, "_rename_noreplace", side_effect=race_claim
+        ):
+            with self.assertRaisesRegex(ValueError, "cleanup|quarantine|unsafe"):
+                CONTROLLER._remove_exact_trace_receipt(
+                    self.root, draft_id, expected, commit=commit
+                )
+
+        self.assertTrue(inserted)
+        self.assertFalse(committed)
+        self.assertEqual(receipt.read_bytes(), expected)
+        if replacement_kind == "regular":
+            self.assertEqual(destination.read_bytes(), foreign)
+        else:
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def test_stale_receipt_quarantine_does_not_clobber_late_regular_destination(self):
+        self._assert_stale_receipt_quarantine_destination_is_no_clobber("regular")
+
+    def test_stale_receipt_quarantine_does_not_clobber_late_symlink_destination(self):
+        self._assert_stale_receipt_quarantine_destination_is_no_clobber("symlink")
 
     def test_stale_cleanup_guard_mutation_preserves_regular_and_symlink_replacements(self):
         for index, replacement_kind in enumerate(("regular", "symlink")):
@@ -1507,6 +1644,28 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(source.read_bytes(), b"exact-source")
         self.assertTrue(destination.is_symlink())
         self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def test_noreplace_quarantine_claim_fails_closed_when_platform_is_unsupported(self):
+        directory = self.root / "noreplace-unsupported"
+        directory.mkdir()
+        source = directory / "source.phase"
+        destination = directory / "source.phase.removing"
+        source.write_bytes(b"exact-source")
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        directory_fd = os.open(directory, flags)
+        try:
+            with mock.patch.object(CONTROLLER.sys, "platform", "unsupported"):
+                with self.assertRaisesRegex(OSError, "unavailable"):
+                    CONTROLLER._rename_noreplace(
+                        directory_fd, source.name, destination.name
+                    )
+        finally:
+            os.close(directory_fd)
+
+        self.assertEqual(source.read_bytes(), b"exact-source")
+        self.assertFalse(destination.exists())
 
     def _assert_quarantine_destination_race_is_no_clobber(self, replacement_kind):
         directory = self.root / f"quarantine-race-{replacement_kind}"

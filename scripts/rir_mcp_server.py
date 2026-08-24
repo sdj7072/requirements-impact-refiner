@@ -362,6 +362,11 @@ def _trace(arguments):
         "receipt_sha256": result.receipt_sha256,
         "compact_graph": result.compact_graph,
         "budget_status": result.budget_status,
+        "request_sha256": result.request_sha256,
+        "seeds": [
+            {"term": seed.term, "location": seed.location}
+            for seed in result.seeds
+        ],
     }
     return {
         "content": [{

@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 import re
-from typing import Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union
 
 
 _DRAFT_ID = re.compile(r"\A[0-9a-f]{32}\Z")
@@ -36,6 +36,8 @@ class ControllerEvidence:
     receipt_paths: Tuple[str, ...]
     receipt_sha256: Tuple[str, ...]
     trace_compact_graph_sha256: Tuple[str, ...]
+    trace_request_sha256: Tuple[str, ...]
+    trace_seeds: Tuple[Tuple[Tuple[str, Optional[str]], ...], ...]
 
     def to_json(self) -> str:
         payload = asdict(self)
@@ -51,6 +53,14 @@ class ControllerEvidence:
         payload["trace_compact_graph_sha256"] = list(
             self.trace_compact_graph_sha256
         )
+        payload["trace_request_sha256"] = list(self.trace_request_sha256)
+        payload["trace_seeds"] = [
+            [
+                {"term": term, "location": location}
+                for term, location in seeds
+            ]
+            for seeds in self.trace_seeds
+        ]
         return json.dumps(payload, sort_keys=True) + "\n"
 
 
@@ -70,6 +80,24 @@ def _presentation_bytes(value: str) -> str:
     if normalized.endswith("\n"):
         normalized = normalized[:-1]
     return "\n".join(line.rstrip(" \t") for line in normalized.split("\n"))
+
+
+def _normalized_seeds(value):
+    if not isinstance(value, list):
+        return None
+    seeds = []
+    for row in value:
+        if not isinstance(row, dict) or set(row) != {"term", "location"}:
+            return None
+        term, location = row["term"], row["location"]
+        if (
+            not isinstance(term, str)
+            or not term.strip()
+            or (location is not None and not isinstance(location, str))
+        ):
+            return None
+        seeds.append((term, location))
+    return tuple(sorted(set(seeds), key=lambda row: (row[1] or "", row[0])))
 
 
 def _attempted_calls(streams: Sequence[str]):
@@ -160,6 +188,8 @@ def analyze_controller_trace(
     receipt_paths = []
     receipt_digests = []
     compact_digests = []
+    request_digests = []
+    trace_seed_values = []
     trace_success = []
     for call in traces:
         arguments = call.get("arguments")
@@ -174,6 +204,13 @@ def analyze_controller_trace(
         receipt_path = result.get("receipt_path") if result is not None else None
         receipt_digest = result.get("receipt_sha256") if result is not None else None
         compact_graph = result.get("compact_graph") if result is not None else None
+        request_digest = result.get("request_sha256") if result is not None else None
+        argument_seeds = _normalized_seeds(
+            arguments.get("seeds") if isinstance(arguments, dict) else None
+        )
+        result_seeds = _normalized_seeds(
+            result.get("seeds") if result is not None else None
+        )
         valid_receipt_id = (
             receipt_id
             if isinstance(receipt_id, str) and _DRAFT_ID.fullmatch(receipt_id)
@@ -209,6 +246,14 @@ def analyze_controller_trace(
         receipt_paths.append(valid_path)
         receipt_digests.append(valid_digest)
         compact_digests.append(compact_digest)
+        valid_request_digest = (
+            request_digest
+            if isinstance(request_digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", request_digest)
+            else None
+        )
+        request_digests.append(valid_request_digest)
+        trace_seed_values.append(argument_seeds)
         trace_success.append(
             call.get("status") == "completed"
             and call.get("error") is None
@@ -217,9 +262,11 @@ def analyze_controller_trace(
                 value is not None
                 for value in (
                     trace_ids[-1], valid_receipt_id, valid_path,
-                    valid_digest, compact_digest,
+                    valid_digest, compact_digest, valid_request_digest,
                 )
             )
+            and argument_seeds is not None
+            and result_seeds == argument_seeds
         )
     finalize_ids = []
     finalize_receipt_ids = []
@@ -355,5 +402,11 @@ def analyze_controller_trace(
         ),
         trace_compact_graph_sha256=tuple(
             value for value in compact_digests if isinstance(value, str)
+        ),
+        trace_request_sha256=tuple(
+            value for value in request_digests if isinstance(value, str)
+        ),
+        trace_seeds=tuple(
+            value for value in trace_seed_values if value is not None
         ),
     )
