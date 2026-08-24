@@ -123,12 +123,11 @@ class IntegrationAdapterContractTest(unittest.TestCase):
 
     def test_skill_routes_to_exactly_one_adapter_after_selection(self):
         text = SKILL_PATH.read_text(encoding="utf-8")
-        routing = text.split("## Workflow integration\n", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("Read exactly one", routing)
-        self.assertIn("apply its Entry before analysis", routing)
-        self.assertIn("If more than one orchestrator is active, ask the user to choose one", routing)
+        routing = text.split("## Detailed refinement\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("After yes", routing)
+        self.assertIn("exactly one adapter", routing)
         for name, adapter in ADAPTERS.items():
-            self.assertEqual(routing.count(f"| `{name}` |"), 1)
+            self.assertEqual(routing.count(f"[{name}]"), 1)
             self.assertEqual(routing.count(f"(references/{adapter['file']})"), 1)
 
     def test_skill_activation_excludes_code_review_without_excluding_all_review(self):
@@ -144,7 +143,7 @@ class IntegrationAdapterContractTest(unittest.TestCase):
 
     def test_skill_entrypoint_stays_below_three_hundred_forty_words(self):
         words = SKILL_PATH.read_text(encoding="utf-8").split()
-        self.assertLess(len(words), 340)
+        self.assertLess(len(words), 180)
 
 
 if __name__ == "__main__":

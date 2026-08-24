@@ -455,18 +455,11 @@ class PackagingTest(unittest.TestCase):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn(
-            "Resolve every `references/`, `assets/`, `schemas/`, and `scripts/` path from the directory that contains this `SKILL.md`.",
-            core,
-        )
+        self.assertIn("Resolve links from this `SKILL.md` directory", core)
+        self.assertIn("references/fast-scan.md", core)
         self.assertIn("references/controller-workflow.md", core)
-        self.assertIn("references/transitive-impact-graph.md", core)
+        self.assertNotIn("references/transitive-impact-graph.md", core)
         self.assertIn("exactly one adapter", core)
-        self.assertIn("not the plugin root or workspace root", core)
-        self.assertIn(
-            "Byte-identical plugin-root mirrors are fallback only if a client loses or misinfers `SKILL_DIR`",
-            core,
-        )
 
     def test_core_skill_defaults_to_compact_with_full_inline_fallback(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
@@ -489,9 +482,9 @@ class PackagingTest(unittest.TestCase):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertLess(core.index("`rir_begin`"), core.index("Inspect only the evidence"))
-        self.assertIn("supplied evidence is valid input even when the workspace is empty", core.lower())
-        self.assertIn("stop before planning or implementation", core)
+        self.assertIn("`rir_scan`", core)
+        self.assertIn("supplied evidence", core.lower())
+        self.assertIn("Stop; do not promote, plan, or implement", core)
 
     def test_manifest_identity_is_consistent(self):
         codex = self.load(".codex-plugin/plugin.json")

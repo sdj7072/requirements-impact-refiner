@@ -4,7 +4,7 @@ Request:
 
 > Before planning, add an optional `nickname` field to the profile JSON response while preserving clients that only know `displayName`.
 
-Default `balanced` + `compact` response after `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text`:
+Default `balanced` Fast Scan response after one `rir_scan` call:
 
 | Impact | Possible issue | Affected | Prevention |
 | --- | --- | --- | --- |
@@ -20,7 +20,7 @@ Default `balanced` + `compact` response after `rir_begin → rir_trace_impact �
 
 **Coverage:** Impact scan: 8.4 s · 8 nodes / 7 edges · 2 unknown frontiers
 
-The response then asks one decision question and links the validated artifacts:
+The response first asks whether detailed refinement is wanted. Only after yes does promotion create and link validated report artifacts:
 
 ```text
 State: .requirements-impact-refiner/reports/RPT-001/revision-0001.json

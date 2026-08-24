@@ -85,7 +85,9 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 
 audience 허용값은 `simple`, `balanced`, `technical`입니다. delivery 기본값은 compact이며, 전체 기준 보고서를 인라인으로 받으려면 `delivery: full`을 요청하거나 `"delivery":"full"`을 설정합니다. Compact 모드는 append-only JSON과 Markdown을 저장하고 짧은 요약과 경로만 반환합니다. 저장할 수 없으면 이를 밝히고 `full-inline` fallback을 사용합니다. 현재 요청이 저장소 설정보다 우선합니다. 이는 Codex나 Claude 전용 설정 화면이 아닌 크로스 클라이언트 스킬 설정입니다.
 
-그래프를 켠 정제는 `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` 순서를 사용합니다. receipt는 impact별 짧은 경로와 coverage footer 하나를 추가하며 raw provider output은 노출하지 않습니다. 모든 클라이언트에서 동일한 제한 로컬 graph 설정을 사용합니다.
+기본 경로는 `rir_scan` 1회와 최대 `180 words`의 renderer-owned 응답입니다. 고위험 결과도 상세 정제를 자동 실행하지 않고 먼저 묻습니다. 그래프 엔진 목표는 `10s`, 상한은 `30s`지만 전체 모델 시간 보장은 아닙니다. 첫 대표 canary는 API → decoder → cache → migration 경로를 17 ms에 찾았지만 모델 턴은 `297.159`초였고 strict one-call automation에 실패했으므로 v0.4는 계속 `not verified`입니다.
+
+상세 그래프 정제는 호환성을 위해 `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text`를 유지합니다. 승격된 Fast Scan은 trace를 건너뛰고 기존 receipt를 재사용합니다. receipt는 impact별 짧은 경로와 coverage footer 하나를 추가하며 raw provider output은 노출하지 않습니다. 모든 클라이언트에서 동일한 제한 로컬 graph 설정을 사용합니다.
 
 ```json
 {"impact_graph":{"enabled":true,"max_seconds":30,"target_seconds":10,"providers":["auto"],"install_policy":"never","deep":false}}

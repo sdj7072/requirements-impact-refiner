@@ -85,7 +85,9 @@ Every report now starts with a user-facing `Change Impact Summary`: which featur
 
 Allowed audience values are `simple`, `balanced`, and `technical`. Delivery defaults to compact; request `delivery: full` or set `"delivery":"full"` to return the complete canonical report inline. Compact mode persists append-only JSON and Markdown and returns the short summary plus artifact paths. If persistence is unavailable, the skill uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
 
-Graph-enabled refinement uses `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text`. The receipt adds a short per-impact path and one coverage footer; it never exposes raw provider output. Configure the bounded, local graph pass with the same settings in every client:
+The default path is one `rir_scan` call and a renderer-owned response of at most `180 words`; high-risk results ask before detailed refinement. The graph engine targets `10s` with a `30s` ceiling, but this does not promise total model latency: the first representative canary found the API → decoder → cache → migration path in 17 ms while the model turn took `297.159` seconds and failed strict one-call automation, so v0.4 remains `not verified`.
+
+Detailed graph refinement still supports `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` for compatibility. A promoted Fast Scan skips trace and reuses its receipt. The receipt adds a short per-impact path and one coverage footer; it never exposes raw provider output. Configure the bounded, local graph pass with the same settings in every client:
 
 ```json
 {"impact_graph":{"enabled":true,"max_seconds":30,"target_seconds":10,"providers":["auto"],"install_policy":"never","deep":false}}

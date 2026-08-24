@@ -85,7 +85,9 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 
 audience は `simple`, `balanced`, `technical` を指定できます。delivery の既定値は compact です。完全な正規報告をインラインで返すには `delivery: full` を依頼するか `"delivery":"full"` を設定します。Compact モードは append-only JSON と Markdown を保存し、短い要約とパスだけを返します。保存できない場合は明示した `full-inline` fallback を使います。現在の依頼がリポジトリ設定より優先されます。これは Codex や Claude 専用画面ではなくクロスクライアントのスキル設定です。
 
-グラフ有効時の精緻化は `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` の順です。receipt は impact ごとの短い path と一つの coverage footer を加え、raw provider output は表示しません。全クライアントで同じ bounded local graph 設定を使います。
+既定経路は `rir_scan` 1回と最大 `180 words` の renderer-owned 応答です。high-risk でも detailed refinement を自動実行せず先に確認します。graph engine の target は `10s`、ceiling は `30s` ですが total model latency の保証ではありません。最初の representative canary は API → decoder → cache → migration path を17 msで発見しましたが model turn は `297.159`秒で strict one-call automation に失敗したため、v0.4 は `not verified` のままです。
+
+互換性のため detailed graph refinement は `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` を維持します。promoted Fast Scan は trace を省略して receipt を再利用します。receipt は impact ごとの短い path と一つの coverage footer を加え、raw provider output は表示しません。全クライアントで同じ bounded local graph 設定を使います。
 
 ```json
 {"impact_graph":{"enabled":true,"max_seconds":30,"target_seconds":10,"providers":["auto"],"install_policy":"never","deep":false}}

@@ -37,7 +37,7 @@
       <circle cx="64" cy="47" r="7" fill="#FFFFFF"/>
       <circle cx="53" cy="68" r="7" fill="#FFFFFF"/>
       <path d="M43 47 L64 47 L53 68 Z" fill="none" stroke="#FFFFFF" stroke-width="4"/>
-      <text x="24" y="118" fill="#FFFFFF" font-size="24" font-weight="700">Impact receipt</text>
+      <text x="24" y="118" fill="#FFFFFF" font-size="24" font-weight="700">Fast Scan</text>
       <text x="24" y="154" fill="#BDB7D9" font-size="16">Feature · issue</text>
       <text x="24" y="180" fill="#BDB7D9" font-size="16">path · frontier</text>
       <text x="24" y="206" fill="#BDB7D9" font-size="16">coverage footer</text>
@@ -50,10 +50,10 @@
       <rect width="190" height="250" rx="28" fill="#24213C" stroke="#595274"/>
       <circle cx="53" cy="53" r="29" fill="#6D5EF5"/>
       <text x="53" y="63" text-anchor="middle" fill="#FFFFFF" font-size="30" font-weight="800">?</text>
-      <text x="24" y="118" fill="#FFFFFF" font-size="24" font-weight="700">Decision</text>
-      <text x="24" y="154" fill="#BDB7D9" font-size="16">One focused</text>
-      <text x="24" y="180" fill="#BDB7D9" font-size="16">question</text>
-      <text x="24" y="206" fill="#BDB7D9" font-size="16">2–3 options</text>
+      <text x="24" y="118" fill="#FFFFFF" font-size="24" font-weight="700">Refine?</text>
+      <text x="24" y="154" fill="#BDB7D9" font-size="16">Show risks first</text>
+      <text x="24" y="180" fill="#BDB7D9" font-size="16">user chooses</text>
+      <text x="24" y="206" fill="#BDB7D9" font-size="16">no auto promotion</text>
     </g>
 
     <path d="M900 315 H950" stroke="#8F84D8" stroke-width="8" stroke-linecap="round"/>

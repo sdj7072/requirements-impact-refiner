@@ -97,26 +97,30 @@ class DocumentationTest(unittest.TestCase):
     def test_core_skill_is_a_short_controller_first_positive_recipe(self):
         core = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         body = core.split("---", 2)[2]
-        self.assertLess(len(core.split()), 340)
-        self.assertEqual(body.count("`rir_begin`"), 1)
-        self.assertEqual(body.count("`rir_trace_impact`"), 1)
-        self.assertEqual(body.count("`rir_finalize`"), 1)
-        self.assertLess(body.index("`rir_begin`"), body.index("`rir_trace_impact"))
-        self.assertLess(body.index("`rir_trace_impact"), body.index("`rir_finalize`"))
-        self.assertIn("return `display_text`", body)
-        self.assertIn("controller-workflow.md", body)
-        self.assertIn("transitive-impact-graph.md", body)
+        self.assertLess(len(core.split()), 180)
+        route = body.split("## Default Fast Scan\n", 1)[1].split("\n## ", 1)[0]
+        self.assertEqual(route.count("`rir_scan`"), 1)
+        self.assertNotIn("rir_begin", route)
+        self.assertNotIn("rir_trace_impact", route)
+        self.assertNotIn("rir_finalize", route)
+        self.assertIn("Return `display_text`", body)
+        self.assertIn("ask whether", route.lower())
+        self.assertIn("stop", route.lower())
+        self.assertIn("fast-scan.md", body)
         self.assertIn("CLI fallback", body)
         self.assertIn("full-inline", body)
-        self.assertIn("Do not author graph JSON", body)
-        recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)\n4\. (.+)\n5\. (.+)", body)
+        recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)\n4\. (.+)", route)
         self.assertEqual(recipe.groups(), (
-            "`rir_begin`", "`rir_trace_impact`", "inspect compact receipt",
-            "`rir_finalize`", "return `display_text` verbatim",
+            "Call `rir_scan` once with the change and supplied evidence.",
+            "Return `display_text` verbatim.",
+            "Ask whether the user wants detailed refinement.",
+            "Stop; do not promote, plan, or implement without the answer.",
         ))
 
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
         required = (
+            "rir_scan",
+            "180 words",
             "rir_trace_impact",
             "10s",
             "30s",
@@ -125,6 +129,7 @@ class DocumentationTest(unittest.TestCase):
             "unknown frontiers",
             "Deep",
             "Task 7",
+            "297.159",
         )
         for name in READMES:
             text = (ROOT / name).read_text(encoding="utf-8")

@@ -2,6 +2,8 @@
 
 This reference defines detailed fallback and analysis rules. The MCP recipe in `SKILL.md` is the normal path.
 
+Read this reference only after the user accepts detailed refinement. A promoted Fast Scan already owns its graph receipt: call `rir_begin` with `scan_id`, do not call `rir_trace_impact`, and finalize once with the returned `graph_receipt_id`.
+
 ## Before begin
 
 - Resolve presentation overrides from the user's request. Otherwise the controller loads `.requirements-impact-refiner.json` and uses disclosed `balanced` + `compact` defaults for invalid configuration.
