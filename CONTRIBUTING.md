@@ -83,4 +83,4 @@ Related-work sections may describe Superpowers, Claude Code `feature-dev`, GitHu
 
 ## Scope
 
-Keep the project focused on repository-backed pre-planning impact discovery, traceability, user decisions, and whole-set recalculation. Proposals for broad ideation, implementation planning, coding, debugging, code review, an MCP server, or a custom code-graph engine are outside v1 scope.
+Keep the project focused on repository-backed pre-planning impact discovery, traceability, user decisions, and whole-set recalculation. Since v0.4 the scope includes the narrow local MCP server that controls impact-report creation, the bounded built-in lexical scanner, and detect-only external provider adapters. Proposals for broad ideation, implementation planning, coding, debugging, code review, a full code-graph engine (AST parsing, import resolution, symbol tables), or automatic provider installation remain out of scope.
