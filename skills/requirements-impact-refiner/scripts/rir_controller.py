@@ -2517,6 +2517,23 @@ def _path_confidence(path, nodes, edges) -> str:
     return max(values, key=lambda value: GRAPH_CONFIDENCE_RANK[value])
 
 
+def _path_provenance(path, nodes, edges) -> str:
+    records = [nodes[node] for node in path["nodes"]]
+    records.extend(edges[edge] for edge in path["edges"])
+    providers = list(dict.fromkeys(
+        row.get("provider") for row in records if row.get("provider")
+    ))
+    locations = list(dict.fromkeys(
+        row.get("location") for row in records if row.get("location")
+    ))
+    provider = " + ".join(providers) if providers else "unavailable"
+    location = " + ".join(locations) if locations else "unavailable"
+    return (
+        f"provider {provider}; confidence {_path_confidence(path, nodes, edges)}; "
+        f"location {location}"
+    )
+
+
 def _validate_graph_coverage(
     analysis: Mapping[str, object], context: dict[str, object]
 ) -> None:
@@ -3114,20 +3131,25 @@ def _build_state(draft, analysis, graph_context=None):
     if graph_context is not None:
         receipt = graph_context["receipt"]
         receipt_nodes = {row["id"]: row for row in receipt["nodes"]}
+        receipt_edges = {row["id"]: row for row in receipt["edges"]}
         receipt_paths = {row["id"]: row for row in receipt["paths"]}
         for row in analysis["impacts"]:
             path_descriptions = []
+            path_provenance = []
             for path_key in graph_context["impact_paths"][row["key"]]:
                 path = receipt_paths[path_key]
                 labels = [receipt_nodes[node]["label"] for node in path["nodes"]]
                 path_descriptions.append(f"{path_key}: " + " → ".join(labels))
+                path_provenance.append(
+                    f"{path_key}: {_path_provenance(path, receipt_nodes, receipt_edges)}"
+                )
             rationale = graph_context["rationales"].get(row["key"])
             scope.append({
                 "boundary": f"Graph paths for {impact_ids[row['key']]}",
-                "evidence": "; ".join(path_descriptions) if path_descriptions else str(rationale),
+                "evidence": " || ".join(path_descriptions) if path_descriptions else str(rationale),
                 "confidence": (
-                    f"{graph_context['impact_confidences'][row['key']]}; "
-                    "receipt-validated graph evidence; no confidence upgrade."
+                    " || ".join(path_provenance) if path_provenance else
+                    "provider unavailable; confidence unknown; location unavailable"
                 ),
             })
         provider_summary = [

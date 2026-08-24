@@ -24,12 +24,17 @@ VALIDATOR_SPEC = importlib.util.spec_from_file_location(
 VALIDATOR = importlib.util.module_from_spec(VALIDATOR_SPEC)
 VALIDATOR_SPEC.loader.exec_module(VALIDATOR)
 GENERIC_ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
+COMPACT_WORD_LIMIT = 450
+COMPACT_SUMMARY_ROWS = 6
+COMPACT_FIELD_WORDS = 8
 
 
 def _text(value: object) -> str:
     return (
         str(value)
         .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
         .replace("|", "&#124;")
         .replace("`", "&#96;")
         .replace("\r\n", "\n")
@@ -43,6 +48,8 @@ def _restore(value: str) -> str:
         value.replace("<br>", "\n")
         .replace("&#96;", "`")
         .replace("&#124;", "|")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
         .replace("&amp;", "&")
     )
 
@@ -257,64 +264,93 @@ def _graph_scope(state):
     return paths, coverage
 
 
-def _coverage_provider(coverage):
-    if coverage is None:
-        return "unavailable"
-    fields = coverage.split(" · ")
-    return fields[1].split(" (", 1)[0] if len(fields) > 1 else "unavailable"
+def _short(value, limit):
+    words = str(value).split()
+    return " ".join(words[:limit]) + (" …" if len(words) > limit else "")
 
 
-def _compact_path(evidence, confidence, audience, provider):
+def _word_count(lines):
+    return len("\n".join(lines).split())
+
+
+def _compact_path(evidence, confidence, audience):
+    evidence = evidence.split(" || ", 1)[0]
+    confidence = confidence.split(" || ", 1)[0]
     if audience == "simple":
-        return "; ".join(
-            segment.split(": ", 1)[-1] for segment in evidence.split("; ")
-        )
+        return evidence.split(": ", 1)[-1]
     if audience == "balanced":
         return evidence
-    details = confidence
-    if "provider " not in details:
-        details = f"provider {provider}; {details}"
-    if "location " not in details:
-        details = f"{details}; location unavailable from compact receipt"
-    return f"{evidence} ({details})"
+    return f"{evidence} ({confidence})"
+
+
+def _severity_rank(row):
+    return {"critical": 0, "high": 1, "medium": 2, "low": 3}[row["severity"]]
+
+
+def _coverage_text(value):
+    match = re.search(r"(Impact scan: [^·]+).*?(\d+ unknown frontiers)", value)
+    if match:
+        return f"{match.group(1).strip()} · {match.group(2)}"
+    return value
 
 
 def render_compact(state: Mapping[str, object]) -> str:
     errors = compact_state.validate_state(state)
     if errors:
         raise ValueError("; ".join(errors))
+    ranked = sorted(enumerate(state["summary"]), key=lambda item: (_severity_rank(item[1]), item[0]))
+    displayed = [row for _, row in ranked[:COMPACT_SUMMARY_ROWS]]
     lines = ["## Change Impact Summary", "", "| Impact | Possible issue | Affected | Prevention |", "| --- | --- | --- | --- |"]
-    for row in state["summary"]:
-        lines.append(f"| {_identifier(row['impact_id'])} | {_text(row['possible_issue'])} | {_text(row['affected'])} | {_text(row['prevention'])} |")
+    for row in displayed:
+        lines.append(f"| {_identifier(row['impact_id'])} | {_text(_short(row['possible_issue'], COMPACT_FIELD_WORDS))} | {_text(_short(row['affected'], COMPACT_FIELD_WORDS))} | {_text(_short(row['prevention'], COMPACT_FIELD_WORDS))} |")
+    omitted = len(state["summary"]) - len(displayed)
+    if omitted:
+        lines.append(f"| — | {omitted} lower-priority impacts remain in the full report. | — | — |")
     graph_paths, graph_coverage = _graph_scope(state)
-    if graph_paths:
-        lines.extend(("", "**Impact paths:**"))
-        audience = state["settings"]["audience"]
-        provider = _coverage_provider(graph_coverage)
-        for row in state["summary"]:
-            path = graph_paths.get(row["impact_id"])
-            if path is not None:
-                evidence, confidence = path
-                lines.append(
-                    f"- {_identifier(row['impact_id'])}: {_text(_compact_path(evidence, confidence, audience, provider))}"
-                )
-    if graph_coverage is not None:
-        lines.extend(("", f"**Coverage:** {_text(graph_coverage)}"))
     remaining = [row for row in state["summary"] if row["status"] in {"accepted", "deferred", "blocked"}]
+    tail = []
     if remaining:
-        lines.extend(("", "**Remaining risks:** " + "; ".join(_text(row["possible_issue"]) for row in remaining)))
+        shown_risks = remaining[:3]
+        risk_text = "; ".join(_text(_short(row["possible_issue"], COMPACT_FIELD_WORDS)) for row in shown_risks)
+        if len(remaining) > len(shown_risks):
+            risk_text += f"; {len(remaining) - len(shown_risks)} more in the full report"
+        tail.extend(("", "**Remaining risks:** " + risk_text))
     if state["report"]["phase"] == "pre-decision":
         needed = state["decision_needed"]
-        lines.extend(("", f"**Decision needed:** {_text(needed['question'])}"))
-        lines.extend(f"- {_text(option['option'])}: {_text(option['tradeoff'])}" for option in needed["options"])
+        tail.extend(("", f"**Decision needed:** {_text(_short(needed['question'], 18))}"))
+        tail.extend(f"- {_text(_short(option['option'], 10))}: {_text(_short(option['tradeoff'], 12))}" for option in needed["options"])
     else:
-        choices = "; ".join(_text(row["choice"]) for row in state["decisions"])
-        lines.extend(("", f"**Recorded decision:** {choices}"))
-    lines.extend((
+        shown_decisions = state["decisions"][:3]
+        choices = "; ".join(_text(_short(row["choice"], 18)) for row in shown_decisions)
+        if len(state["decisions"]) > len(shown_decisions):
+            choices += f"; {len(state['decisions']) - len(shown_decisions)} more in the full report"
+        tail.extend(("", f"**Recorded decision:** {choices}"))
+    tail.extend((
         "", f"Validation: passed · Report {_identifier(state['report']['id'])} revision {state['report']['revision']}",
         f"State: `{_artifact_path(state, 'json')}`", f"Full report: `{_artifact_path(state, 'md')}`",
     ))
-    return "\n".join(lines) + "\n"
+    graph_lines = []
+    if graph_coverage is not None:
+        graph_lines.extend(("", f"**Coverage:** {_text(_coverage_text(graph_coverage))}"))
+    if graph_paths:
+        candidates = []
+        for _, row in ranked:
+            path = graph_paths.get(row["impact_id"])
+            if path is None:
+                continue
+            evidence, confidence = path
+            candidates.append(f"- {_identifier(row['impact_id'])}: {_text(_short(_compact_path(evidence, confidence, state['settings']['audience']), 36))}")
+        selected = []
+        for candidate in candidates:
+            proposal = lines + ["", "**Impact paths:**"] + selected + [candidate] + graph_lines + tail
+            if _word_count(proposal) <= COMPACT_WORD_LIMIT:
+                selected.append(candidate)
+        if selected:
+            graph_lines = ["", "**Impact paths:**"] + selected + graph_lines
+    output = lines + graph_lines + tail
+    if _word_count(output) > COMPACT_WORD_LIMIT:
+        raise ValueError("compact output exceeds word budget")
+    return "\n".join(output) + "\n"
 
 
 def _unquote(value: str) -> str:

@@ -91,6 +91,14 @@ Graph-enabled refinement uses `rir_begin → rir_trace_impact → inspect compac
 {"impact_graph":{"enabled":true,"max_seconds":30,"target_seconds":10,"providers":["auto"],"install_policy":"never","deep":false}}
 ```
 
+CLI fallback uses the same executable sequence:
+
+```sh
+python3 "$SKILL_DIR/scripts/rir-controller.py" begin --repo-root REPO --input REQUEST.json
+python3 "$SKILL_DIR/scripts/rir-controller.py" trace --repo-root REPO --draft-id DRAFT_ID --input SEEDS.json
+python3 "$SKILL_DIR/scripts/rir-controller.py" finalize --repo-root REPO --draft-id DRAFT_ID --graph-receipt-id RECEIPT_ID --input ANALYSIS.json
+```
+
 The target is `10s` with a `30s` hard ceiling. It is detect-only: no automatic install or network. Optional local providers (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`) retain their own licenses and can be missing, unsafe, unsupported, stale, failed, or timed out. The built-in fallback has limited precision; cache hits reuse only matching receipts, partial cache remains partial, and Deep broadens bounded discovery without proving completeness. Keep unknown frontiers visible. `full-inline` and CLI fallback preserve those limits. Compatibility remains `not verified`/`blocked` where the table says so; transaction correctness and review are not closed because Task 5's parked exclusive-quarantine race still requires Task 7.
 
 ![Compact delivery flow](assets/compact-delivery-demo.svg)

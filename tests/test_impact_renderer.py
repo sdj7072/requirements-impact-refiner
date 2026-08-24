@@ -15,12 +15,14 @@ FIXTURES = ROOT / "tests" / "fixtures"
 def load_module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
 RENDERER = load_module("impact_renderer", SKILL_SCRIPTS / "impact_renderer.py")
 DOMAIN = load_module("impact_report", SKILL_SCRIPTS / "impact_report.py")
+CONTROLLER = load_module("rir_controller", SKILL_SCRIPTS / "rir_controller.py")
 CLI = SKILL_SCRIPTS / "render-impact-report.py"
 
 
@@ -34,6 +36,53 @@ def semantic_tables(text):
 class ImpactRendererTest(unittest.TestCase):
     def fixture(self, name="compact-state-post-decision.json"):
         return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+    def controller_graph_state(self, audience="technical", count=2):
+        analysis = json.loads(
+            (FIXTURES / "controller-analysis-pre-decision.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        providers = ("codegraph", "scip")
+        nodes, edges, paths = [], [], []
+        for index in range(count):
+            path_id = f"PATH-{index + 1:03d}"
+            provider = providers[index % len(providers)]
+            start, end, edge = (
+                f"NODE-{index * 2 + 1:03d}",
+                f"NODE-{index * 2 + 2:03d}",
+                f"EDGE-{index + 1:03d}",
+            )
+            nodes.extend((
+                {"id": start, "label": f"<api-{index} data-x='1'>", "provider": provider, "confidence": "verified-provider", "location": f"api/profile_{index}.py"},
+                {"id": end, "label": f"desktop cache {index}", "provider": provider, "confidence": "verified-provider", "location": f"desktop/cache_{index}.ts"},
+            ))
+            edges.append({"id": edge, "provider": provider, "confidence": "verified-provider", "location": f"desktop/cache_{index}.ts"})
+            paths.append({"id": path_id, "nodes": [start, end], "edges": [edge]})
+        key = analysis["impacts"][0]["key"]
+        analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in paths]
+        settings = {
+            "audience": audience, "audience_source": "request",
+            "delivery": "compact", "delivery_source": "default",
+            "impact_graph": {"enabled": True, "max_seconds": 30, "target_seconds": 10, "providers": ["auto"], "install_policy": "never", "deep": False},
+        }
+        state, _ = CONTROLLER._build_state(
+            {"request": "Change profile", "settings": settings, "adapter": "generic", "prior_state": None, "prior_key_map": {}, "report_id": "RPT-001", "revision": 1, "previous_sha256": "none"},
+            analysis,
+            {
+                "receipt": {
+                    "nodes": nodes, "edges": edges, "paths": paths,
+                    "providers": [{"name": name, "status": "ready"} for name in providers],
+                    "timings_ms": {"total": 8400}, "frontier": [{"id": "FRONTIER-001"}, {"id": "FRONTIER-002"}],
+                    "budget_status": "provider_limited", "receipt_id": "a" * 32,
+                },
+                "impact_paths": {key: [row["id"] for row in paths]},
+                "rationales": {key: None},
+                "impact_confidences": {key: "verified-provider"},
+                "sha256": "a" * 64,
+            },
+        )
+        return state
 
     def test_markdown_render_is_byte_deterministic_and_validator_clean(self):
         state = self.fixture()
@@ -61,75 +110,43 @@ class ImpactRendererTest(unittest.TestCase):
         self.assertIn("Full report:", rendered)
         self.assertIn("Validation: passed", rendered)
 
-    def test_compact_output_explains_indirect_path_and_unknown_frontier(self):
-        state = self.fixture()
-        state["scope"].extend((
-            {
-                "boundary": "Graph paths for IMP-001",
-                "evidence": "PATH-001: A → profile event → desktop cache → migration test",
-                "confidence": "unknown; receipt-validated graph evidence; no confidence upgrade.",
-            },
-            {
-                "boundary": "Impact graph coverage",
-                "evidence": "Impact scan: 8.4 s · builtin (ready) · 4 nodes / 3 edges · 2 unknown frontiers",
-                "confidence": "provider_limited; receipt 0123456789abcdef0123456789abcdef; sha256 a; frontier FRONTIER-001,FRONTIER-002",
-            },
-        ))
+    def test_compact_output_uses_controller_receipt_paths_and_unknown_frontier(self):
+        state = self.controller_graph_state()
 
         text = RENDERER.render_compact(state)
 
-        self.assertIn("A → profile event → desktop cache → migration test", text)
+        self.assertIn("PATH-001: &lt;api-0 data-x='1'&gt; → desktop cache 0", text)
         self.assertIn("Impact scan: 8.4 s", text)
         self.assertIn("2 unknown frontiers", text)
         self.assertEqual(text.count("Impact scan:"), 1)
 
-    def test_compact_graph_details_follow_audience_and_escape_safely(self):
-        state = self.fixture()
-        state["scope"].extend((
-            {
-                "boundary": "Graph paths for IMP-001",
-                "evidence": "PATH-001: API | profile event → desktop cache",
-                "confidence": "lexical; provider builtin; location desktop/profile_cache.ts",
-            },
-            {
-                "boundary": "Impact graph coverage",
-                "evidence": "Impact scan: 1.0 s · builtin (ready) · 3 nodes / 2 edges · 0 unknown frontiers",
-                "confidence": "closed; receipt x; sha256 y; frontier none",
-            },
-        ))
+    def test_compact_graph_details_follow_audience_and_exact_controller_provenance(self):
+        simple = RENDERER.render_compact(self.controller_graph_state("simple"))
+        balanced = RENDERER.render_compact(self.controller_graph_state("balanced"))
+        technical_state = self.controller_graph_state("technical")
+        technical = RENDERER.render_compact(technical_state)
 
-        state["settings"]["audience"] = "simple"
-        simple = RENDERER.render_compact(state)
-        state["settings"]["audience"] = "balanced"
-        balanced = RENDERER.render_compact(state)
-        state["settings"]["audience"] = "technical"
-        technical = RENDERER.render_compact(state)
-
-        self.assertIn("API &#124; profile event → desktop cache", simple)
+        self.assertIn("&lt;api-0 data-x='1'&gt; → desktop cache 0", simple)
         self.assertNotIn("PATH-001", simple)
-        self.assertIn("PATH-001: API &#124; profile event → desktop cache", balanced)
-        self.assertIn("provider builtin; location desktop/profile_cache.ts", technical)
+        self.assertIn("PATH-001: &lt;api-0 data-x='1'&gt; → desktop cache 0", balanced)
+        self.assertIn("PATH-001: provider codegraph; confidence verified-provider; location api/profile_0.py", technical)
+        provenance = next(row["confidence"] for row in technical_state["scope"] if row["boundary"] == "Graph paths for IMP-001")
+        self.assertIn("PATH-002: provider scip; confidence verified-provider; location api/profile_1.py", provenance)
+        self.assertNotIn("provider codegraph + scip", technical)
 
-    def test_technical_path_discloses_compact_receipt_location_limit(self):
-        state = self.fixture()
-        state["settings"]["audience"] = "technical"
-        state["scope"].extend((
-            {
-                "boundary": "Graph paths for IMP-001",
-                "evidence": "PATH-001: API → cache",
-                "confidence": "verified-source; receipt-validated graph evidence",
-            },
-            {
-                "boundary": "Impact graph coverage",
-                "evidence": "Impact scan: 1.0 s · builtin (ready) · 2 nodes / 1 edge · 0 unknown frontiers",
-                "confidence": "closed",
-            },
-        ))
-
-        text = RENDERER.render_compact(state)
-
-        self.assertIn("provider builtin", text)
-        self.assertIn("location unavailable from compact receipt", text)
+    def test_compact_graph_output_stays_bounded_without_malformed_markdown(self):
+        for audience in ("simple", "balanced", "technical"):
+            rendered = RENDERER.render_compact(
+                self.controller_graph_state(audience, count=32)
+            )
+            self.assertLessEqual(len(rendered.split()), 450, audience)
+            self.assertIn("Impact scan: 8.4 s", rendered)
+            self.assertIn("2 unknown frontiers", rendered)
+            self.assertIn("`IMP-001`", rendered)
+            self.assertFalse(any("<api-" in line for line in rendered.splitlines()))
+            for line in rendered.splitlines():
+                if line.startswith("|"):
+                    self.assertEqual(line.count("|"), 5)
 
     def test_existing_markdown_converts_without_semantic_loss(self):
         markdown = (FIXTURES / "compact-state-post-decision.md").read_text(
@@ -146,15 +163,16 @@ class ImpactRendererTest(unittest.TestCase):
 
     def test_cell_escaping_preserves_table_shape_and_non_ascii(self):
         state = self.fixture()
-        state["summary"][0]["possible_issue"] = "한글 | 日本語\n`code`"
+        state["summary"][0]["possible_issue"] = "<img src=x> 한글 | 日本語\n`code`"
 
         rendered = RENDERER.render_markdown(state)
         parsed, errors = RENDERER.state_from_markdown(rendered)
 
         self.assertEqual(errors, [])
         self.assertEqual(
-            parsed["summary"][0]["possible_issue"], "한글 | 日本語\n`code`"
+            parsed["summary"][0]["possible_issue"], "<img src=x> 한글 | 日本語\n`code`"
         )
+        self.assertIn("&lt;img src=x&gt;", rendered)
 
     def test_cli_refuses_overwrite_without_force_and_supports_conversion(self):
         with tempfile.TemporaryDirectory() as directory:

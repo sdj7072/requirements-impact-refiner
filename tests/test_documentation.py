@@ -1,5 +1,6 @@
 import re
 import shlex
+import json
 import unittest
 from pathlib import Path
 
@@ -108,6 +109,11 @@ class DocumentationTest(unittest.TestCase):
         self.assertIn("CLI fallback", body)
         self.assertIn("full-inline", body)
         self.assertIn("Do not author graph JSON", body)
+        recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)\n4\. (.+)\n5\. (.+)", body)
+        self.assertEqual(recipe.groups(), (
+            "`rir_begin`", "`rir_trace_impact`", "inspect compact receipt",
+            "`rir_finalize`", "return `display_text` verbatim",
+        ))
 
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
         required = (
@@ -124,6 +130,21 @@ class DocumentationTest(unittest.TestCase):
             text = (ROOT / name).read_text(encoding="utf-8")
             for token in required:
                 self.assertIn(token, text, f"{token} missing from {name}")
+
+    def test_graph_cli_and_settings_are_identical_in_all_languages(self):
+        canonical = (ROOT / "README.md").read_text(encoding="utf-8")
+        graph_setting = re.findall(r'\{"impact_graph":.*\}', canonical)[0]
+        commands = next(
+            block for block in re.findall(r"```sh\n(.*?)\n```", canonical, re.DOTALL)
+            if "trace --repo-root REPO" in block and "--graph-receipt-id RECEIPT_ID" in block
+        )
+        self.assertEqual(json.loads(graph_setting), {
+            "impact_graph": {"enabled": True, "max_seconds": 30, "target_seconds": 10, "providers": ["auto"], "install_policy": "never", "deep": False}
+        })
+        for name in READMES[1:]:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn(graph_setting, text)
+            self.assertIn(commands, text)
 
     def test_public_docs_describe_controller_mcp_and_cli_enforcement(self):
         forbidden = {

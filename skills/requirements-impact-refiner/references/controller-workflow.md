@@ -28,10 +28,11 @@ Write strict UTF-8 request and analysis JSON files, then run the same controller
 
 ```sh
 python3 "$SKILL_DIR/scripts/rir-controller.py" begin --repo-root REPO --input REQUEST.json
-python3 "$SKILL_DIR/scripts/rir-controller.py" finalize --repo-root REPO --draft-id DRAFT --input ANALYSIS.json
+python3 "$SKILL_DIR/scripts/rir-controller.py" trace --repo-root REPO --draft-id DRAFT_ID --input SEEDS.json
+python3 "$SKILL_DIR/scripts/rir-controller.py" finalize --repo-root REPO --draft-id DRAFT_ID --graph-receipt-id RECEIPT_ID --input ANALYSIS.json
 ```
 
-Begin stdout is metadata. Successful finalize stdout is renderer-owned display text. Exit 1 means correct the analysis and reuse the draft; exit 2 means invocation or I/O failed.
+Use `draft_id` from begin stdout as `DRAFT_ID` and `receipt_id` from trace stdout as `RECEIPT_ID`; `SEEDS.json` contains the trace `seeds` array. Begin/trace stdout is metadata. Successful finalize stdout is renderer-owned display text. Exit 1 means correct the analysis and reuse the draft; exit 2 means invocation or I/O failed.
 
 ## Full-inline fallback
 
