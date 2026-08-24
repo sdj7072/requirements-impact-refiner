@@ -119,6 +119,7 @@ class FastScanReceipt:
     graph_receipt: Mapping[str, object]
     risk_level: str
     frontier: Tuple[Mapping[str, object], ...]
+    candidates: Tuple[Mapping[str, object], ...]
     elapsed_ms: int
     cache_status: str
     can_promote: bool
@@ -135,7 +136,7 @@ def derive_seeds(
 
 Derivation order is exact path+symbol, qualified symbol, bounded distinctive-term repository match, then supplied-evidence location. Unmatched generic prose cannot become a guessed seed.
 
-The schema requires the exact top-level keys: schema_version, status, scan_id, receipt_id, repo_root_sha256, request_sha256, payload_sha256, settings, source_inventory, seeds, graph_receipt, risk_level, frontier, elapsed_ms, cache_status, can_promote, created_at.
+The schema requires the exact top-level keys: schema_version, status, scan_id, receipt_id, repo_root_sha256, request_sha256, payload_sha256, settings, source_inventory, seeds, graph_receipt, risk_level, frontier, candidates, elapsed_ms, cache_status, can_promote, created_at.
 
 - [ ] **Step 4: Add mirror and payload coverage**
 
@@ -225,6 +226,7 @@ class FastScanResult:
     risk_level: str
     paths: Tuple[Mapping[str, object], ...]
     frontier: Tuple[Mapping[str, object], ...]
+    candidates: Tuple[Mapping[str, object], ...]
     elapsed_ms: int
     cache_status: str
     can_promote: bool
@@ -589,6 +591,6 @@ No tag, release, merge, or push is authorized here.
 
 - Spec coverage: UX, derivation, private receipt, promotion, renderer, deadline, cache, compatibility, token routing, tests, and rollout map to Tasks 1–7.
 - File boundaries: contract, store/renderer, controller, transports, docs, evaluation, and live evidence are independently reviewable.
-- Type consistency: scan_id, receipt_id, receipt_sha256, display_text, risk_level, paths, frontier, elapsed_ms, cache_status, and can_promote are introduced once and reused.
+- Type consistency: scan_id, receipt_id, receipt_sha256, display_text, risk_level, paths, frontier, candidates, elapsed_ms, cache_status, and can_promote are introduced once and reused.
 - Safety: no provider install/network behavior, automatic promotion, live retry, full security rescan, tag, release, push, or merge.
 - Placeholder scan: clean; tasks name exact files, signatures, commands, failures, and commit boundaries.

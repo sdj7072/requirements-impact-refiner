@@ -72,6 +72,7 @@ Output:
   "risk_level": "low | medium | high | critical | unknown",
   "paths": [],
   "frontier": [],
+  "candidates": [],
   "elapsed_ms": 17,
   "cache_status": "hit | miss | bypassed",
   "can_promote": true
@@ -92,6 +93,8 @@ Fast Scan derives seeds deterministically from the bounded request and supplied 
 The controller ranks and deduplicates candidates, preserves their derivation evidence, and passes a bounded set to the existing graph coordinator. It never asks the model to invent edges or manually construct seeds.
 
 If no trustworthy seed can be derived, the tool returns `needs_input` with at most three repository-backed candidates. It does not silently broaden to a repository-wide guess and does not automatically issue a second scan.
+
+Each candidate contains only `term`, optional repository-relative `location`, and receipt-backed `derivation`; complete and partial results return an empty candidate list.
 
 ## Persistence and Promotion
 
