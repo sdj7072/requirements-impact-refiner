@@ -273,7 +273,8 @@ git commit -m "feat: execute and render fast impact scans"
 - Adds ScanRequest, ScanResult, and scan_impact(request).
 - Extends BeginRequest with scan_id: Optional[str] = None.
 - Extends DraftResult with scan_id: Optional[str] and graph_receipt_id: Optional[str].
-- Promoted drafts bind the exact scan and graph receipt.
+- Promoted drafts store a promoted_scan binding to the exact immutable wrapper receipt; the embedded graph stays scan-ID-bound and is never copied or rewritten.
+- Task 3 may add prepare_fast_scan_identity(...) to fast_scan.py so begin can recompute request/evidence/settings/source/payload freshness without invoking the graph coordinator.
 
 - [ ] **Step 1: Write controller RED tests**
 
@@ -321,6 +322,8 @@ scan_impact resolves existing presentation/graph settings and calls Task 2 exact
 - [ ] **Step 4: Implement promotion binding**
 
 Add scan_id to BeginRequest. Before creating a draft, validate root, normalized request/evidence, settings, source inventory, payload, scan digest, and embedded graph receipt. Persist scan identity in the private draft. Promotion is compare-and-swap safe and one-way; failed draft publication leaves the scan reusable.
+
+Finalize detects promoted_scan, loads the wrapper through fast_scan_store, verifies its canonical SHA and current source inventory, validates the embedded production graph receipt, and passes that original mapping to _validate_graph_coverage and _build_state. It must not require the embedded graph draft_id to equal the promoted draft ID because the wrapper proves the scan-to-draft binding. A test spy proves graph_coordinator.trace_impact and provider execution are never called by promotion or promoted finalize.
 
 - [ ] **Step 5: Verify and commit**
 

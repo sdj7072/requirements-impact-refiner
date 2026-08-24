@@ -116,6 +116,10 @@ The receipt is mode `0600`, atomically published, and bound to:
 
 The existing `rir_begin` gains an optional `scan_id`. When present, it validates freshness and identity, creates a normal draft bound to the existing receipt, and skips graph execution. Detailed refinement then requires only analysis plus `rir_finalize`.
 
+The embedded graph receipt remains bound to the Fast Scan ID. Promotion never copies it into a draft-named graph file and never rewrites its `draft_id`, request hash, receipt ID, or canonical bytes. The promoted draft stores a `promoted_scan` binding to the immutable wrapper receipt. Finalize follows that binding, revalidates the wrapper, embedded graph, payload, request/evidence/settings identity, and current source digests, then supplies the original graph to coverage validation.
+
+Freshness verification may repeat bounded source inventory hashing, but it must not call the graph coordinator, built-in scanner, provider discovery, or provider execution.
+
 Promotion is explicit and one-way. A promoted scan cannot be rebound to another repository, request, draft, or payload. A stale or partial receipt remains visible and cannot support a false resolved impact.
 
 ## Rendering
