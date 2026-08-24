@@ -15,8 +15,7 @@ Use after bootstrap for concrete pre-planning changes; not ideation, debugging, 
 
 1. Call `rir_scan` once with the change and supplied evidence.
 2. Return `display_text` verbatim.
-3. Ask whether the user wants detailed refinement.
-4. Stop; do not promote, plan, or implement without the answer.
+3. Stop; the renderer-owned question already asks whether to refine.
 
 Do not invent paths, rerun providers, or hide frontiers. Resolve links from this `SKILL.md` directory. Read [Fast Scan](references/fast-scan.md) only for fallback or technical detail.
 

@@ -484,7 +484,10 @@ class PackagingTest(unittest.TestCase):
         )
         self.assertIn("`rir_scan`", core)
         self.assertIn("supplied evidence", core.lower())
-        self.assertIn("Stop; do not promote, plan, or implement", core)
+        self.assertIn(
+            "Stop; the renderer-owned question already asks whether to refine",
+            core,
+        )
 
     def test_manifest_identity_is_consistent(self):
         codex = self.load(".codex-plugin/plugin.json")

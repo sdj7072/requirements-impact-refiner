@@ -29,6 +29,7 @@ class FastScanRendererTest(unittest.TestCase):
         self.assertIn("→", text)
         self.assertIn("Possible issue", text)
         self.assertEqual(text.count("Coverage:"), 1)
+        self.assertEqual(text.count("Do you want detailed refinement?"), 1)
         self.assertLessEqual(len(text.split()), 180)
 
     def test_technical_output_escapes_and_preserves_provenance(self):

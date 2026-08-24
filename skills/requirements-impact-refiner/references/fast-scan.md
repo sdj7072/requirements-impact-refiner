@@ -6,7 +6,7 @@ Call `rir_scan` once with `repo_root`, the user's exact change request, supplied
 
 `complete` means the bounded inventory and graph closed within 30 seconds. `partial` means known paths are useful but unknown impact remains. `needs_input` means no trustworthy repository-backed seed was available; show at most three returned candidates and ask for one concrete boundary.
 
-High or critical risk never triggers detailed refinement automatically. Ask whether the user wants it. If no, stop. If yes, read `controller-workflow.md` and exactly one integration adapter, then call `rir_begin` with `scan_id`. The promoted draft already owns the graph receipt: do not call `rir_trace_impact`. Finalize once with the supplied `graph_receipt_id`.
+High or critical risk never triggers detailed refinement automatically. `display_text` already ends with the refinement question, so return it verbatim and stop. If the user's next answer is no, stop. If yes, read `controller-workflow.md` and exactly one integration adapter, then call `rir_begin` with `scan_id`. The promoted draft already owns the graph receipt: do not call `rir_trace_impact`. Finalize once with the supplied `graph_receipt_id`.
 
 CLI fallback:
 

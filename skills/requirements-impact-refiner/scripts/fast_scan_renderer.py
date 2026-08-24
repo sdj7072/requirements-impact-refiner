@@ -16,6 +16,8 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
     if audience not in AUDIENCES: raise ValueError("audience is invalid")
     status = receipt.get("status")
     footer = f"Coverage: {status}; {receipt.get('elapsed_ms', 0)} ms; cache {receipt.get('cache_status', 'bypassed')}."
+    if status != "needs_input":
+        footer += " Do you want detailed refinement?"
     if status == "needs_input":
         candidates = receipt.get("candidates", [])
         listed = "; ".join(_text(row.get("term")) + (" (" + _text(row.get("location")) + ")" if row.get("location") else "") for row in candidates[:3]) or "no repository-backed candidate"

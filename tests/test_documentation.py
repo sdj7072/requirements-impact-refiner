@@ -104,17 +104,15 @@ class DocumentationTest(unittest.TestCase):
         self.assertNotIn("rir_trace_impact", route)
         self.assertNotIn("rir_finalize", route)
         self.assertIn("Return `display_text`", body)
-        self.assertIn("ask whether", route.lower())
         self.assertIn("stop", route.lower())
         self.assertIn("fast-scan.md", body)
         self.assertIn("CLI fallback", body)
         self.assertIn("full-inline", body)
-        recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)\n4\. (.+)", route)
+        recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)", route)
         self.assertEqual(recipe.groups(), (
             "Call `rir_scan` once with the change and supplied evidence.",
             "Return `display_text` verbatim.",
-            "Ask whether the user wants detailed refinement.",
-            "Stop; do not promote, plan, or implement without the answer.",
+            "Stop; the renderer-owned question already asks whether to refine.",
         ))
 
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
