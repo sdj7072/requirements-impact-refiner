@@ -85,6 +85,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 
 audience は `simple`, `balanced`, `technical` を指定できます。delivery の既定値は compact です。完全な正規報告をインラインで返すには `delivery: full` を依頼するか `"delivery":"full"` を設定します。Compact モードは append-only JSON と Markdown を保存し、短い要約とパスだけを返します。保存できない場合は明示した `full-inline` fallback を使います。現在の依頼がリポジトリ設定より優先されます。これは Codex や Claude 専用画面ではなくクロスクライアントのスキル設定です。
 
+グラフ有効時の精緻化は `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` の順です。receipt は impact ごとの短い path と一つの coverage footer を加え、raw provider output は表示しません。全クライアントで同じ bounded local graph 設定を使います。
+
+```json
+{"impact_graph":{"enabled":true,"max_seconds":30,"target_seconds":10,"providers":["auto"],"install_policy":"never","deep":false}}
+```
+
+target は `10s`、hard ceiling は `30s` です。detect-only であり no automatic install or network です。optional local provider (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`) は各自の license に従い、missing、unsafe、unsupported、stale、failed、timed out になり得ます。builtin fallback の precision は限定的で、cache hit は一致する receipt だけを再利用し、partial cache は partial のままです。Deep は bounded discovery を広げるだけで complete を証明しません。unknown frontiers は残します。`full-inline` と CLI fallback もこの制限を維持します。表の compatibility は `not verified`/`blocked` のままで、transaction correctness と review は closed ではありません。Task 5 の parked exclusive-quarantine race は Task 7 が閉じる必要があります。
+
 ![Compact delivery flow](assets/compact-delivery-demo.svg)
 
 完全な依頼、応答、成果物、full render の例は [compact delivery demo](docs/compact-delivery-demo.md) を参照してください。

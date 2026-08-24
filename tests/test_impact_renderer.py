@@ -61,6 +61,76 @@ class ImpactRendererTest(unittest.TestCase):
         self.assertIn("Full report:", rendered)
         self.assertIn("Validation: passed", rendered)
 
+    def test_compact_output_explains_indirect_path_and_unknown_frontier(self):
+        state = self.fixture()
+        state["scope"].extend((
+            {
+                "boundary": "Graph paths for IMP-001",
+                "evidence": "PATH-001: A → profile event → desktop cache → migration test",
+                "confidence": "unknown; receipt-validated graph evidence; no confidence upgrade.",
+            },
+            {
+                "boundary": "Impact graph coverage",
+                "evidence": "Impact scan: 8.4 s · builtin (ready) · 4 nodes / 3 edges · 2 unknown frontiers",
+                "confidence": "provider_limited; receipt 0123456789abcdef0123456789abcdef; sha256 a; frontier FRONTIER-001,FRONTIER-002",
+            },
+        ))
+
+        text = RENDERER.render_compact(state)
+
+        self.assertIn("A → profile event → desktop cache → migration test", text)
+        self.assertIn("Impact scan: 8.4 s", text)
+        self.assertIn("2 unknown frontiers", text)
+        self.assertEqual(text.count("Impact scan:"), 1)
+
+    def test_compact_graph_details_follow_audience_and_escape_safely(self):
+        state = self.fixture()
+        state["scope"].extend((
+            {
+                "boundary": "Graph paths for IMP-001",
+                "evidence": "PATH-001: API | profile event → desktop cache",
+                "confidence": "lexical; provider builtin; location desktop/profile_cache.ts",
+            },
+            {
+                "boundary": "Impact graph coverage",
+                "evidence": "Impact scan: 1.0 s · builtin (ready) · 3 nodes / 2 edges · 0 unknown frontiers",
+                "confidence": "closed; receipt x; sha256 y; frontier none",
+            },
+        ))
+
+        state["settings"]["audience"] = "simple"
+        simple = RENDERER.render_compact(state)
+        state["settings"]["audience"] = "balanced"
+        balanced = RENDERER.render_compact(state)
+        state["settings"]["audience"] = "technical"
+        technical = RENDERER.render_compact(state)
+
+        self.assertIn("API &#124; profile event → desktop cache", simple)
+        self.assertNotIn("PATH-001", simple)
+        self.assertIn("PATH-001: API &#124; profile event → desktop cache", balanced)
+        self.assertIn("provider builtin; location desktop/profile_cache.ts", technical)
+
+    def test_technical_path_discloses_compact_receipt_location_limit(self):
+        state = self.fixture()
+        state["settings"]["audience"] = "technical"
+        state["scope"].extend((
+            {
+                "boundary": "Graph paths for IMP-001",
+                "evidence": "PATH-001: API → cache",
+                "confidence": "verified-source; receipt-validated graph evidence",
+            },
+            {
+                "boundary": "Impact graph coverage",
+                "evidence": "Impact scan: 1.0 s · builtin (ready) · 2 nodes / 1 edge · 0 unknown frontiers",
+                "confidence": "closed",
+            },
+        ))
+
+        text = RENDERER.render_compact(state)
+
+        self.assertIn("provider builtin", text)
+        self.assertIn("location unavailable from compact receipt", text)
+
     def test_existing_markdown_converts_without_semantic_loss(self):
         markdown = (FIXTURES / "compact-state-post-decision.md").read_text(
             encoding="utf-8"

@@ -445,6 +445,7 @@ class PackagingTest(unittest.TestCase):
             core,
         )
         self.assertIn("references/controller-workflow.md", core)
+        self.assertIn("references/transitive-impact-graph.md", core)
         self.assertIn("exactly one adapter", core)
         self.assertIn("not the plugin root or workspace root", core)
         self.assertIn(
@@ -462,6 +463,12 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("renderer-owned display text", workflow)
         self.assertIn("full-inline", core)
         self.assertIn("Every affected behavior gets an impact row", workflow)
+
+    def test_distribution_contains_transitive_impact_graph_reference_mirror(self):
+        canonical = ROOT / "skills/requirements-impact-refiner/references/transitive-impact-graph.md"
+        mirror = ROOT / "references/transitive-impact-graph.md"
+        self.assertTrue(canonical.is_file())
+        self.assertEqual(canonical.read_bytes(), mirror.read_bytes())
 
     def test_core_skill_runs_routing_before_workspace_availability_checks(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(

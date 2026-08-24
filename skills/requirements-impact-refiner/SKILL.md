@@ -1,6 +1,6 @@
 ---
 name: requirements-impact-refiner
-description: Use when the automatic bootstrap has selected a concrete behavior change needing impact refinement, or the user explicitly requests it, before planning; with Superpowers, after approved brainstorming; excludes ideation, explanation, debugging, code review, status, and an already impact-refined requirement or plan
+description: Use when the automatic bootstrap has selected a concrete behavior change needing impact refinement, or the user explicitly requests it, before planning; with Superpowers, after approved brainstorming; excludes ideation, explanation, debugging, code review, status, and an already impact-refined requirement or plan.
 license: MIT
 compatibility: Agent Skills clients; repository access and tests improve evidence.
 metadata:
@@ -17,17 +17,19 @@ Resolve every `references/`, `assets/`, `schemas/`, and `scripts/` path from the
 
 ## Normal MCP recipe
 
-Perform exactly these actions:
+Read one selected adapter, [Controller workflow](references/controller-workflow.md), and [transitive graph guidance](references/transitive-impact-graph.md). Then do exactly:
 
-1. Select one adapter from the table below.
-2. Call `rir_begin` with the repository root, request, supplied evidence, adapter, and any explicit presentation overrides.
-3. Inspect only the evidence needed to fill the returned analysis contract. Supplied evidence is valid input even when the workspace is empty. A needed clarification belongs in a complete pre-decision analysis; never emit a standalone question.
-4. Call `rir_finalize` with the returned draft ID and normalized analysis. Correct validation errors without changing the draft ID.
-5. On success, return `display_text` verbatim and stop before planning or implementation.
+1. `rir_begin`
+2. `rir_trace_impact`
+3. inspect compact receipt
+4. `rir_finalize`
+5. return `display_text` verbatim
+
+Inspect only the evidence needed to fill the returned analysis contract; supplied evidence is valid input even when the workspace is empty. Use only the compact receipt for graph evidence. Do not author graph JSON, rerun providers, invent edges, suppress frontiers, begin planning, or rewrite renderer-owned facts; stop before planning or implementation.
 
 ## Workflow integration
 
-Read exactly one adapter and [Controller workflow](references/controller-workflow.md); apply its Entry before analysis. If more than one orchestrator is active, ask the user to choose one. Never invoke their external workflow.
+Read exactly one adapter and apply its Entry before analysis. If more than one orchestrator is active, ask the user to choose one; never invoke its external workflow.
 
 | Selected mode | Read only |
 | --- | --- |
@@ -38,4 +40,4 @@ Read exactly one adapter and [Controller workflow](references/controller-workflo
 
 ## Fallbacks
 
-CLI fallback uses the same controller via `scripts/rir-controller.py`; its successful finalize stdout is the response. Use `full-inline` only when neither MCP nor CLI is available, disclose that persistence and fast revisions are unavailable, and follow the controller workflow reference. Never rewrite renderer-owned facts.
+CLI fallback uses `scripts/rir-controller.py`; successful finalize stdout is the response. Use `full-inline` only when MCP and CLI are both unavailable, disclose unavailable persistence and fast revisions, and follow Controller workflow.

@@ -244,6 +244,41 @@ def _artifact_path(state, suffix):
     return f".requirements-impact-refiner/reports/{report['id']}/revision-{report['revision']:04d}.{suffix}"
 
 
+def _graph_scope(state):
+    paths = {}
+    coverage = None
+    for row in state["scope"]:
+        boundary = row["boundary"]
+        match = re.fullmatch(r"Graph paths for (IMP-\d{3})", boundary)
+        if match:
+            paths[match.group(1)] = (row["evidence"], row["confidence"])
+        elif boundary == "Impact graph coverage":
+            coverage = row["evidence"]
+    return paths, coverage
+
+
+def _coverage_provider(coverage):
+    if coverage is None:
+        return "unavailable"
+    fields = coverage.split(" · ")
+    return fields[1].split(" (", 1)[0] if len(fields) > 1 else "unavailable"
+
+
+def _compact_path(evidence, confidence, audience, provider):
+    if audience == "simple":
+        return "; ".join(
+            segment.split(": ", 1)[-1] for segment in evidence.split("; ")
+        )
+    if audience == "balanced":
+        return evidence
+    details = confidence
+    if "provider " not in details:
+        details = f"provider {provider}; {details}"
+    if "location " not in details:
+        details = f"{details}; location unavailable from compact receipt"
+    return f"{evidence} ({details})"
+
+
 def render_compact(state: Mapping[str, object]) -> str:
     errors = compact_state.validate_state(state)
     if errors:
@@ -251,6 +286,20 @@ def render_compact(state: Mapping[str, object]) -> str:
     lines = ["## Change Impact Summary", "", "| Impact | Possible issue | Affected | Prevention |", "| --- | --- | --- | --- |"]
     for row in state["summary"]:
         lines.append(f"| {_identifier(row['impact_id'])} | {_text(row['possible_issue'])} | {_text(row['affected'])} | {_text(row['prevention'])} |")
+    graph_paths, graph_coverage = _graph_scope(state)
+    if graph_paths:
+        lines.extend(("", "**Impact paths:**"))
+        audience = state["settings"]["audience"]
+        provider = _coverage_provider(graph_coverage)
+        for row in state["summary"]:
+            path = graph_paths.get(row["impact_id"])
+            if path is not None:
+                evidence, confidence = path
+                lines.append(
+                    f"- {_identifier(row['impact_id'])}: {_text(_compact_path(evidence, confidence, audience, provider))}"
+                )
+    if graph_coverage is not None:
+        lines.extend(("", f"**Coverage:** {_text(graph_coverage)}"))
     remaining = [row for row in state["summary"] if row["status"] in {"accepted", "deferred", "blocked"}]
     if remaining:
         lines.extend(("", "**Remaining risks:** " + "; ".join(_text(row["possible_issue"]) for row in remaining)))

@@ -18,9 +18,13 @@ A required user choice is analysis, not an early chat response. Submit a complet
 
 `accepted` requires a decision. `resolved` requires current evidence. Only `blocked` and `deferred` remain unresolved. Do not silently remove prior impact keys.
 
+## Transitive impact receipt
+
+When graph tracing is enabled, inspect its compact receipt before analysis and use it as the sole graph source. Select receipt paths for each impact or record a supplied-only/unknown rationale. Keep every frontier visible; do not rerun a provider, invent a connection, or emit raw receipt JSON. Read [transitive-impact-graph.md](transitive-impact-graph.md) for confidence, same-risk reuse, disagreement, cache, Deep, and display rules.
+
 ## CLI fallback
 
-Write strict UTF-8 request and analysis JSON files, then run:
+Write strict UTF-8 request and analysis JSON files, then run the same controller sequence:
 
 ```sh
 python3 "$SKILL_DIR/scripts/rir-controller.py" begin --repo-root REPO --input REQUEST.json

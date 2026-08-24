@@ -142,9 +142,9 @@ class IntegrationAdapterContractTest(unittest.TestCase):
             text,
         )
 
-    def test_skill_entrypoint_stays_below_five_hundred_words(self):
+    def test_skill_entrypoint_stays_below_three_hundred_forty_words(self):
         words = SKILL_PATH.read_text(encoding="utf-8").split()
-        self.assertLess(len(words), 500)
+        self.assertLess(len(words), 340)
 
 
 if __name__ == "__main__":

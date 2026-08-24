@@ -85,6 +85,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 
 audience 허용값은 `simple`, `balanced`, `technical`입니다. delivery 기본값은 compact이며, 전체 기준 보고서를 인라인으로 받으려면 `delivery: full`을 요청하거나 `"delivery":"full"`을 설정합니다. Compact 모드는 append-only JSON과 Markdown을 저장하고 짧은 요약과 경로만 반환합니다. 저장할 수 없으면 이를 밝히고 `full-inline` fallback을 사용합니다. 현재 요청이 저장소 설정보다 우선합니다. 이는 Codex나 Claude 전용 설정 화면이 아닌 크로스 클라이언트 스킬 설정입니다.
 
+그래프를 켠 정제는 `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` 순서를 사용합니다. receipt는 impact별 짧은 경로와 coverage footer 하나를 추가하며 raw provider output은 노출하지 않습니다. 모든 클라이언트에서 동일한 제한 로컬 graph 설정을 사용합니다.
+
+```json
+{"impact_graph":{"enabled":true,"max_seconds":30,"target_seconds":10,"providers":["auto"],"install_policy":"never","deep":false}}
+```
+
+목표는 `10s`, hard ceiling은 `30s`입니다. detect-only이며 no automatic install or network입니다. 선택적 로컬 provider (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`)에는 각각의 license가 적용되고 missing, unsafe, unsupported, stale, failed, timed out일 수 있습니다. builtin fallback은 precision이 제한적이고, cache hit은 일치하는 receipt만 재사용하며 partial cache는 partial로 남습니다. Deep은 bounded discovery를 넓힐 뿐 complete를 증명하지 않습니다. unknown frontiers를 계속 표시합니다. `full-inline` 및 CLI fallback도 이 한계를 보존합니다. 표의 compatibility 상태는 `not verified`/`blocked` 그대로이며 transaction correctness와 review는 닫히지 않았습니다. Task 5의 parked exclusive-quarantine race는 Task 7이 해결해야 합니다.
+
 ![Compact delivery 흐름](assets/compact-delivery-demo.svg)
 
 전체 요청·응답·산출물·전체 렌더 예시는 [compact delivery demo](docs/compact-delivery-demo.md)를 참고하세요.

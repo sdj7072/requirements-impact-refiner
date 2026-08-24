@@ -85,6 +85,14 @@ Every report now starts with a user-facing `Change Impact Summary`: which featur
 
 Allowed audience values are `simple`, `balanced`, and `technical`. Delivery defaults to compact; request `delivery: full` or set `"delivery":"full"` to return the complete canonical report inline. Compact mode persists append-only JSON and Markdown and returns the short summary plus artifact paths. If persistence is unavailable, the skill uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
 
+Graph-enabled refinement uses `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text`. The receipt adds a short per-impact path and one coverage footer; it never exposes raw provider output. Configure the bounded, local graph pass with the same settings in every client:
+
+```json
+{"impact_graph":{"enabled":true,"max_seconds":30,"target_seconds":10,"providers":["auto"],"install_policy":"never","deep":false}}
+```
+
+The target is `10s` with a `30s` hard ceiling. It is detect-only: no automatic install or network. Optional local providers (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`) retain their own licenses and can be missing, unsafe, unsupported, stale, failed, or timed out. The built-in fallback has limited precision; cache hits reuse only matching receipts, partial cache remains partial, and Deep broadens bounded discovery without proving completeness. Keep unknown frontiers visible. `full-inline` and CLI fallback preserve those limits. Compatibility remains `not verified`/`blocked` where the table says so; transaction correctness and review are not closed because Task 5's parked exclusive-quarantine race still requires Task 7.
+
 ![Compact delivery flow](assets/compact-delivery-demo.svg)
 
 See the [compact delivery demo](docs/compact-delivery-demo.md) for a complete request, response, artifact, and full-render example.

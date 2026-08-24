@@ -96,15 +96,34 @@ class DocumentationTest(unittest.TestCase):
     def test_core_skill_is_a_short_controller_first_positive_recipe(self):
         core = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         body = core.split("---", 2)[2]
-        self.assertLess(len(body.split()), 320)
+        self.assertLess(len(core.split()), 340)
         self.assertEqual(body.count("`rir_begin`"), 1)
+        self.assertEqual(body.count("`rir_trace_impact`"), 1)
         self.assertEqual(body.count("`rir_finalize`"), 1)
-        self.assertLess(body.index("`rir_begin`"), body.index("`rir_finalize`"))
-        self.assertIn("return `display_text` verbatim", body)
+        self.assertLess(body.index("`rir_begin`"), body.index("`rir_trace_impact"))
+        self.assertLess(body.index("`rir_trace_impact"), body.index("`rir_finalize`"))
+        self.assertIn("return `display_text`", body)
         self.assertIn("controller-workflow.md", body)
+        self.assertIn("transitive-impact-graph.md", body)
         self.assertIn("CLI fallback", body)
         self.assertIn("full-inline", body)
-        self.assertNotIn("Author complete state JSON", body)
+        self.assertIn("Do not author graph JSON", body)
+
+    def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
+        required = (
+            "rir_trace_impact",
+            "10s",
+            "30s",
+            "detect-only",
+            "no automatic install or network",
+            "unknown frontiers",
+            "Deep",
+            "Task 7",
+        )
+        for name in READMES:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for token in required:
+                self.assertIn(token, text, f"{token} missing from {name}")
 
     def test_public_docs_describe_controller_mcp_and_cli_enforcement(self):
         forbidden = {
