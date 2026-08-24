@@ -6,11 +6,15 @@ AUDIENCES = {"simple", "balanced", "technical"}
 def _text(value):
     return (str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "&#124;").replace("\n", " "))
 
-def _bounded(body, footer):
-    words, footer_words = body.split(), footer.split()
-    available = max(0, WORD_LIMIT - len(footer_words))
+def _bounded(body, footer, protected=""):
+    """Trim only the body; protected safety lines and the footer always
+    survive the word cap."""
+    words = body.split()
+    protected_words = protected.split()
+    footer_words = footer.split()
+    available = max(0, WORD_LIMIT - len(footer_words) - len(protected_words))
     if len(words) > available: words = words[:max(0, available - 1)] + ["…"]
-    return " ".join(words + footer_words)
+    return " ".join(words + protected_words + footer_words)
 
 def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
     if audience not in AUDIENCES: raise ValueError("audience is invalid")
@@ -45,6 +49,7 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
             line += "; location " + _text(" + ".join(locations) or "unavailable") + "."
         lines.append(line)
     frontier = receipt.get("frontier", [])
-    if frontier: lines.append("Unknown frontier: " + "; ".join(_text(row.get("reason", "unknown")) for row in frontier[:3]) + ".")
-    if status == "partial": lines.append("Partial result: unknown impact may remain.")
-    return _bounded(" ".join(lines), footer)
+    protected = []
+    if frontier: protected.append("Unknown frontier: " + "; ".join(_text(row.get("reason", "unknown")) for row in frontier[:3]) + ".")
+    if status == "partial": protected.append("Partial result: unknown impact may remain.")
+    return _bounded(" ".join(lines), footer, " ".join(protected))

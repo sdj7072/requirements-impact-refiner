@@ -80,9 +80,27 @@ class WorkspaceDirectoryHygieneTest(unittest.TestCase):
         ignore = self.root / ".requirements-impact-refiner" / ".gitignore"
         self.assertEqual(ignore.read_text(), "*\n")
 
-    def test_existing_gitignore_is_not_overwritten(self):
+    def test_existing_gitignore_keeps_custom_lines_and_gains_ignore_all(self):
         base = self.root / ".requirements-impact-refiner"
         base.mkdir(mode=0o755)
         (base / ".gitignore").write_text("custom\n")
         self.store.publish_scan_receipt(self.root, "a" * 32, self.payload)
-        self.assertEqual((base / ".gitignore").read_text(), "custom\n")
+        lines = (base / ".gitignore").read_text().splitlines()
+        self.assertIn("custom", lines)
+        self.assertIn("*", lines)
+
+    def test_existing_ignore_all_gitignore_is_untouched(self):
+        base = self.root / ".requirements-impact-refiner"
+        base.mkdir(mode=0o755)
+        (base / ".gitignore").write_text("*\n")
+        self.store.publish_scan_receipt(self.root, "a" * 32, self.payload)
+        self.assertEqual((base / ".gitignore").read_text(), "*\n")
+
+    def test_symlinked_gitignore_is_refused(self):
+        base = self.root / ".requirements-impact-refiner"
+        base.mkdir(mode=0o755)
+        outside = Path(self.tmp.name) / "outside-ignore"
+        outside.write_text("decoy\n")
+        (base / ".gitignore").symlink_to(outside)
+        with self.assertRaises(ValueError):
+            self.store.publish_scan_receipt(self.root, "a" * 32, self.payload)

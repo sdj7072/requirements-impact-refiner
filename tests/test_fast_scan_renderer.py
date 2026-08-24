@@ -74,3 +74,37 @@ class NeedsInputQuestionTest(unittest.TestCase):
         )
         self.assertTrue(text.rstrip().endswith("?"), text)
         self.assertIn("boundary", text)
+
+
+class SafetyLinePreservationTest(unittest.TestCase):
+    """The word cap must trim issue paths, never the unknown-frontier and
+    partial-result warnings — those are the safety content of the render."""
+
+    def test_frontier_and_partial_warnings_survive_truncation(self):
+        renderer = load_renderer()
+        nodes = [
+            {"id": f"NODE-{i:03d}",
+             "label": " ".join(f"segment{i}word{j}" for j in range(18)),
+             "location": f"src/pkg{i}/file{i}.py"}
+            for i in range(20)
+        ]
+        paths = [
+            {"nodes": [f"NODE-{i:03d}", f"NODE-{(i + 1) % 20:03d}"],
+             "edges": [], "risk_domains": ["operations"]}
+            for i in range(8)
+        ]
+        receipt = {
+            "status": "partial",
+            "risk_level": "high",
+            "graph_receipt": {"nodes": nodes, "edges": [], "paths": paths},
+            "frontier": [{"reason": "graph coverage remains incomplete"}],
+            "elapsed_ms": 100,
+            "cache_status": "bypassed",
+        }
+
+        text = renderer.render_fast_scan(receipt, "balanced")
+
+        self.assertLessEqual(len(text.split()), renderer.WORD_LIMIT)
+        self.assertIn("Unknown frontier", text)
+        self.assertIn("Partial result", text)
+        self.assertIn("Do you want detailed refinement?", text)

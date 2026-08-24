@@ -418,6 +418,10 @@ class CredentialShapedEvidenceTest(unittest.TestCase):
             'DB_PASSWORD: "hunter2"',
             'STRIPE_SECRET_KEY = "sk_live_leaked"',
             'apiKey: "AIzaLeaked"',
+            'githubToken = "ghp_camel"',
+            'stripeSecretKey = "sk_live"',
+            'GITHUB_TOKEN := "walrus"',
+            'tokenProd = "suffix"',
         ):
             with self.subTest(row=row):
                 self.assertIsNotNone(self.module._SECRET.search(row), row)
@@ -473,16 +477,9 @@ class PromotionReachabilityTest(unittest.TestCase):
             'FIELD = "profile.displayName"\n', encoding="utf-8"
         )
 
-    def test_provider_limited_scan_with_complete_inventory_is_promotable(self):
+    def run_scan(self, graph):
         fast_scan = load_fast_scan()
-        graph = json.loads(
-            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        self.assertEqual(graph["budget_status"], "provider_limited")
-
-        result = fast_scan.execute_fast_scan(
+        return fast_scan.execute_fast_scan(
             fast_scan.FastScanRequest(
                 self.root, "Rename profile.displayName", (), "balanced"
             ),
@@ -491,8 +488,33 @@ class PromotionReachabilityTest(unittest.TestCase):
             coordinator=lambda *args, **kwargs: graph,
         )
 
+    def load_graph(self):
+        return json.loads(
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_missing_providers_alone_do_not_block_promotion(self):
+        graph = self.load_graph()
+        self.assertEqual(graph["budget_status"], "provider_limited")
+        for row in graph["frontier"]:
+            row["reason"] = "provider unavailable; built-in fallback used: scip"
+
+        result = self.run_scan(graph)
+
         self.assertEqual(result.status, "complete")
         self.assertTrue(result.can_promote)
+
+    def test_provider_limited_with_coverage_gap_stays_partial(self):
+        graph = self.load_graph()
+        self.assertEqual(graph["budget_status"], "provider_limited")
+        graph["frontier"][0]["reason"] = "graph coverage remains incomplete"
+
+        result = self.run_scan(graph)
+
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
 
     def test_budget_exhausted_scan_stays_partial(self):
         fast_scan = load_fast_scan()

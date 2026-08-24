@@ -47,14 +47,18 @@ _QUALIFIED = re.compile(
     r"[A-Za-z_][A-Za-z0-9_-]*"
     r"(?:\.[A-Za-z_][A-Za-z0-9_-]*)+"
 )
-# Whole identifier segments, so prefixed credential names (GITHUB_TOKEN,
-# STRIPE_SECRET_KEY) are caught while fragments (tokenizer) are not.
+# Whole identifier segments across snake, kebab, and camel case, so
+# prefixed, suffixed, and camelCase credential names (GITHUB_TOKEN,
+# stripeSecretKey, tokenProd) are caught while fragments (tokenizer) are
+# not; := is covered so walrus and Go declarations cannot slip through.
 _SECRET = re.compile(
-    r"(?i)(?<![A-Za-z0-9_])(?:[A-Za-z0-9]+[_-])*"
+    r"(?i)(?<![A-Za-z0-9_])"
+    r"(?:[A-Za-z0-9]+[_-]|(?-i:[A-Z]?[a-z0-9]+(?=[A-Z])))*"
     r"(?:api[_-]?key|api[_-]?token|api[_-]?secret|access[_-]?token|"
     r"auth[_-]?token|secret[_-]?key|token|secret|password|passwd|passphrase|"
     r"private[_-]?key|credential)"
-    r"(?:[_-][A-Za-z0-9]+)*\s*[:=]\s*\S+"
+    r"(?:[_-][A-Za-z0-9]+|(?-i:[A-Z][A-Za-z0-9]*))*"
+    r"\s*(?::=|[:=])\s*\S+"
 )
 _SOURCE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js",
@@ -686,14 +690,26 @@ def execute_fast_scan(
             settings, deadline=deadline, source_inventory=source_inventory,
         ))
         receipt_id = graph["receipt_id"]
-        # provider_limited means the built-in engine closed its bounded
-        # coverage and only optional external providers were unavailable;
-        # that gap is disclosed in the frontier and must not make the
-        # documented promotion path unreachable on default installs.
+        # A missing optional provider alone must not make the documented
+        # promotion path unreachable on default installs — but only when
+        # every frontier entry is that disclosure. Any other frontier
+        # reason (coverage gap, deadline, disagreement) keeps the scan
+        # partial and unpromotable.
+        frontier_rows = graph.get("frontier", [])
+        only_provider_gaps = all(
+            str(row.get("reason", "")).startswith("provider unavailable")
+            for row in frontier_rows
+        )
         status = (
             "complete"
-            if graph.get("budget_status") in ("closed", "provider_limited")
-            and source_inventory.complete
+            if source_inventory.complete
+            and (
+                graph.get("budget_status") == "closed"
+                or (
+                    graph.get("budget_status") == "provider_limited"
+                    and only_provider_gaps
+                )
+            )
             else "partial"
         )
         risk_level = _risk(graph)

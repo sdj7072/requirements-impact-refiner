@@ -381,6 +381,11 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
         'clientSecret = "leaked-oauth-secret"',
         'authToken: "bearer-leaked"',
         'PASSPHRASE = "correct horse"'.replace(" horse", "-horse"),
+        'githubToken = "ghp_camelcase_leak"',
+        'stripeSecretKey = "sk_live_camel"',
+        'GitHubToken = "ghp_pascal_leak"',
+        'tokenProd = "camel_suffix_leak"',
+        'GITHUB_TOKEN := "walrus_leak"',
     )
 
     PRESERVED_ASSIGNMENTS = (
@@ -441,18 +446,47 @@ class EdgeKindClassificationTest(unittest.TestCase):
             ("references", "lexical"),
         )
 
-    def test_segmented_test_paths_are_still_detected(self):
+    def test_resolving_test_edge_is_structural(self):
         directions = self.edge_kinds(
             {
-                "auth.py": 'HELPER = "shared_marker_token"\n',
-                "tests/test_auth.py": 'CHECK = "shared_marker_token"\n',
+                "auth.py": 'VALUE = "auth"\n',
+                "tests/test_auth.py": 'TARGET = "auth"\n',
             },
-            "shared_marker_token",
+            "auth",
             "auth.py",
         )
         self.assertEqual(
             directions[("auth.py", "tests/test_auth.py")],
             ("tests", "structural-inferred"),
+        )
+
+    def test_coincidental_test_edge_stays_lexical(self):
+        directions = self.edge_kinds(
+            {
+                "billing.py": 'HELPER = "shared_marker_token"\n',
+                "tests/test_auth.py": 'CHECK = "shared_marker_token"\n',
+            },
+            "shared_marker_token",
+            "billing.py",
+        )
+        self.assertEqual(
+            directions[("billing.py", "tests/test_auth.py")],
+            ("tests", "lexical"),
+        )
+
+    def test_import_resolution_rejects_substring_collisions(self):
+        module = BUILTIN
+        self.assertTrue(
+            module._import_resolves_to_target("pkg/shared_model.py", "sharedmodel")
+        )
+        self.assertTrue(
+            module._import_resolves_to_target("pkg/auth_service.py", "auth")
+        )
+        self.assertFalse(
+            module._import_resolves_to_target("pkg/app_config_loader.py", "config_loader_x")
+        )
+        self.assertFalse(
+            module._import_resolves_to_target("pkg/reconfigure.py", "config")
         )
 
     def test_import_taint_requires_target_resolution(self):
@@ -516,3 +550,32 @@ class SymlinkedParentTraversalTest(unittest.TestCase):
 
             self.assertIsNone(reason)
             self.assertEqual(payload, b"VALUE = 1\n")
+
+
+class ImportEdgeProvenanceTest(unittest.TestCase):
+    """An imports edge is evidenced by the import statement, which lives in
+    the source file — its provenance must record the source, not the target."""
+
+    def test_import_edge_records_source_location_and_digest(self):
+        import hashlib as _hashlib
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            consumer = "from shared_model import SharedModel\nvalue = SharedModel()\n"
+            (root / "consumer.py").write_text(consumer, encoding="utf-8")
+            (root / "shared_model.py").write_text(
+                "class SharedModel:\n    pass\n", encoding="utf-8"
+            )
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("SharedModel", "consumer.py"),)
+            )
+            locations = {node.id: node.location for node in result.nodes}
+            import_edges = [
+                edge for edge in result.edges
+                if edge.kind == "imports"
+                and locations[edge.source] == "consumer.py"
+            ]
+            self.assertTrue(import_edges)
+            expected = _hashlib.sha256(consumer.encode("utf-8")).hexdigest()
+            for edge in import_edges:
+                self.assertEqual(edge.location, "consumer.py")
+                self.assertEqual(edge.source_sha256, expected)

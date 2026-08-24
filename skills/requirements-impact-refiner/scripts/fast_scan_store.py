@@ -26,7 +26,8 @@ def _open_dir(parent_fd, name, mode):
 
 def _ensure_self_ignore(base_fd):
     """Keep receipt payloads (which may embed repository text) out of version
-    control by making the workspace ignore itself."""
+    control: the workspace must always ignore itself. A symlinked ignore file
+    is refused, and an existing file without an ignore-all line gains one."""
     try:
         fd = os.open(
             ".gitignore",
@@ -34,8 +35,29 @@ def _ensure_self_ignore(base_fd):
             mode=0o644, dir_fd=base_fd,
         )
     except FileExistsError:
-        return
-    except OSError:
+        try:
+            fd = os.open(
+                ".gitignore",
+                os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=base_fd,
+            )
+        except OSError as error:
+            raise ValueError("scan directory is unsafe") from error
+        try:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("scan directory is unsafe")
+            with os.fdopen(fd, "r+", closefd=False, encoding="utf-8") as handle:
+                content = handle.read()
+                if "*" not in content.splitlines():
+                    handle.seek(0, os.SEEK_END)
+                    if content and not content.endswith("\n"):
+                        handle.write("\n")
+                    handle.write("*\n")
+                    handle.flush()
+                    os.fsync(fd)
+        finally:
+            os.close(fd)
         return
     try:
         os.write(fd, b"*\n")

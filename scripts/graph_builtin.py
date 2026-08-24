@@ -48,18 +48,20 @@ _SLASHED = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*(?:/[A-Za-z_][A-Za-z0-9_.-]*)+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 _QUOTED = re.compile(r"(?P<quote>['\"])(?P<value>[^'\"\r\n]{2,256})(?P=quote)")
 _IMPORT = re.compile(r"(?m)^\s*(?:from|import)\s+(?P<value>[^\r\n#]+)")
-# Credential-shaped names are matched as whole identifier segments so that
-# prefixed and suffixed forms (GITHUB_TOKEN, STRIPE_SECRET_KEY, apiKey) are
-# caught, while embedded fragments (tokenizer, keyboard) are preserved.
+# Credential-shaped names are matched as whole identifier segments — snake,
+# kebab, and camel case, with prefixes and suffixes (GITHUB_TOKEN,
+# stripeSecretKey, tokenProd) — while embedded fragments (tokenizer,
+# keyboard) are preserved. The assignment operator also covers := so a
+# walrus or Go declaration cannot strand the literal outside the match.
 _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)(?P<prefix>(?<![A-Za-z0-9_])(?P<keyquote>['\"]?)"
-    r"(?:[A-Za-z0-9]+[_-])*"
+    r"(?:[A-Za-z0-9]+[_-]|(?-i:[A-Z]?[a-z0-9]+(?=[A-Z])))*"
     r"(?:aws[_-]secret[_-]access[_-]key|client[_-]?secret|access[_-]?token|"
     r"refresh[_-]?token|auth[_-]?token|api[_-]?key|api[_-]?secret|"
     r"private[_-]key|secret[_-]?key|token|password|passwd|passphrase|secret|"
     r"credential)"
-    r"(?:[_-][A-Za-z0-9]+)*"
-    r"(?P=keyquote)\s*[:=]\s*)"
+    r"(?:[_-][A-Za-z0-9]+|(?-i:[A-Z][A-Za-z0-9]*))*"
+    r"(?P=keyquote)\s*(?::=|[:=])\s*)"
     r"(?:(?P<quote>['\"])(?P<quoted>[^'\"\r\n]+)(?P=quote)|"
     r"(?P<bare>[^\s,#}\]]+))"
 )
@@ -338,25 +340,30 @@ def _is_test_path(target: str) -> bool:
 
 
 def _import_resolves_to_target(target: str, evidence: str) -> bool:
-    """An imports edge must plausibly resolve to the target file, not merely
-    share a token that happened to appear on an import line of the source."""
+    """An edge earns structural confidence only when the evidence token
+    plausibly names the target file — exact collapsed equality or a whole
+    stem segment, never a substring, which collides (config in
+    reconfigure)."""
     stem = target.lower().rsplit("/", 1)[-1].split(".", 1)[0]
     collapsed_stem = re.sub(r"[^a-z0-9]", "", stem)
     collapsed_evidence = re.sub(r"[^a-z0-9]", "", evidence.lower())
     if len(collapsed_evidence) < 3 or not collapsed_stem:
         return False
-    return (
-        collapsed_evidence in collapsed_stem
-        or collapsed_stem in collapsed_evidence
-    )
+    if collapsed_evidence == collapsed_stem:
+        return True
+    segments = {part for part in re.split(r"[^a-z0-9]+", stem) if part}
+    return collapsed_evidence in segments
 
 
 def _edge_kind(
     target: str, categories: frozenset[str], evidence: str
 ) -> tuple[str, str]:
+    resolves = _import_resolves_to_target(target, evidence)
     if _is_test_path(target):
-        return "tests", "structural-inferred"
-    if "import" in categories and _import_resolves_to_target(target, evidence):
+        # A test-shaped filename alone is a lexical coincidence; structural
+        # confidence additionally requires the evidence to name the target.
+        return "tests", "structural-inferred" if resolves else "lexical"
+    if "import" in categories and resolves:
         return "imports", "structural-inferred"
     return "references", "lexical"
 
@@ -578,10 +585,15 @@ def scan_repository(
         if expired():
             return deadline_result(nodes, edges)
         edge_id = f"EDGE-{index:03d}"
+        # An imports edge is evidenced by the import statement in the source
+        # file; every other kind is evidenced by the shared occurrence in the
+        # target. Provenance records where the evidence actually lives.
+        evidence_location = source if kind == "imports" else target
         edge = GraphEdge(
-            edge_id, location_ids[source], location_ids[target], kind, target,
+            edge_id, location_ids[source], location_ids[target], kind,
+            evidence_location,
             _safe_graph_text(evidence, sensitive_literals)[:GRAPH.MAX_STRING_LENGTH],
-            confidence, "builtin", documents[target][2],
+            confidence, "builtin", documents[evidence_location][2],
         )
         edges.append(edge)
         adjacency.setdefault(edge.source, []).append((edge.target, edge.id))
