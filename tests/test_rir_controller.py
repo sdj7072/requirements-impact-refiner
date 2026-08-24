@@ -137,6 +137,81 @@ class RirControllerTest(unittest.TestCase):
             (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
         )
 
+    def test_fast_scan_promotes_and_finalizes_without_graph_rerun(self):
+        self.enable_builtin_graph()
+        scan = CONTROLLER.scan_impact(
+            CONTROLLER.ScanRequest(
+                self.root, "Rename profile.displayName", (), "balanced"
+            )
+        )
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "trace_impact",
+            side_effect=AssertionError("promotion must not rerun graph"),
+        ):
+            draft = CONTROLLER.begin_refinement(
+                CONTROLLER.BeginRequest(
+                    self.root,
+                    "Rename profile.displayName",
+                    (),
+                    "generic",
+                    scan_id=scan.scan_id,
+                )
+            )
+            analysis = self.fixture("controller-analysis-pre-decision.json")
+            analysis["impacts"][0]["graph_path_keys"] = [
+                row["id"] for row in scan.paths
+            ]
+            if not analysis["impacts"][0]["graph_path_keys"]:
+                analysis["impacts"][0]["coverage_rationale"] = (
+                    "Fast Scan found no closed repository path."
+                )
+            analysis["impacts"][0]["evidence_level"] = "unknown"
+            result = CONTROLLER.finalize_refinement(
+                CONTROLLER.FinalizeRequest(
+                    self.root, draft.draft_id, analysis, scan.receipt_id
+                )
+            )
+
+        self.assertEqual(result.status, "published")
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        self.assertEqual(stored["promoted_scan"]["scan_id"], scan.scan_id)
+        self.assertEqual(draft.scan_id, scan.scan_id)
+        self.assertEqual(draft.graph_receipt_id, scan.receipt_id)
+
+    def test_fast_scan_promotion_rejects_wrong_request_and_source_mutation(self):
+        self.enable_builtin_graph()
+        scan = CONTROLLER.scan_impact(
+            CONTROLLER.ScanRequest(
+                self.root, "Rename profile.displayName", (), "balanced"
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "request|identity"):
+            CONTROLLER.begin_refinement(
+                CONTROLLER.BeginRequest(
+                    self.root, "Different request", (), "generic",
+                    scan_id=scan.scan_id,
+                )
+            )
+        (self.root / "api/profile.py").write_text(
+            'FIELD = "profile.changed"\n', encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "stale|source|identity"):
+            CONTROLLER.begin_refinement(
+                CONTROLLER.BeginRequest(
+                    self.root, "Rename profile.displayName", (), "generic",
+                    scan_id=scan.scan_id,
+                )
+            )
+
+    def test_legacy_begin_has_no_promoted_scan_identity(self):
+        draft = CONTROLLER.begin_refinement(self.request())
+        self.assertIsNone(draft.scan_id)
+        self.assertIsNone(draft.graph_receipt_id)
+        self.assertNotIn(
+            "promoted_scan", CONTROLLER.load_draft(self.root, draft.draft_id)
+        )
+
     def test_trace_uses_coordinator_normalized_seed_identity(self):
         self.enable_builtin_graph()
         draft = CONTROLLER.begin_refinement(self.request())

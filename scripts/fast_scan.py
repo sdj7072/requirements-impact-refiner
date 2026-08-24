@@ -187,6 +187,19 @@ class FastScanResult:
     can_promote: bool
 
 
+@dataclass(frozen=True)
+class PreparedFastScan:
+    root: Path
+    settings: object
+    deadline: object
+    seeds: Tuple[DerivedSeed, ...]
+    source_inventory: object
+    inventory_mapping: Mapping[str, object]
+    request_sha256: str
+    scan_id: str
+    repo_root_sha256: str
+
+
 def _root(value: Path) -> Path:
     path = Path(value)
     try:
@@ -616,28 +629,19 @@ def execute_fast_scan(
     *,
     coordinator=graph_coordinator.trace_impact,
 ) -> FastScanResult:
-    root = _root(request.repo_root)
-    if not isinstance(payload_sha256, str) or _HEX64.fullmatch(payload_sha256) is None:
-        raise ValueError("payload_sha256 must be 64 lowercase hex characters")
-    settings = graph_coordinator.GraphSettings(**dict(graph_settings))
-    deadline = graph_coordinator.Deadline(time, settings.max_seconds)
-    seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
-    source_inventory = _inventory(root, deadline)
-    inventory_mapping = {
-        "digests": dict(source_inventory.digests),
-        "complete": source_inventory.complete,
-        "reason": source_inventory.reason,
-    }
-    identity = json.dumps({
-        "root": str(root), "change_request": request.change_request,
-        "evidence": list(request.evidence), "settings": settings.to_mapping(),
-        "payload_sha256": payload_sha256,
-        "source_inventory": inventory_mapping,
-        "seeds": [row.to_mapping() for row in seeds],
-    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    request_sha = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-    scan_id = request_sha[:32]
-    root_sha = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+    prepared = prepare_fast_scan_identity(
+        request, graph_settings, payload_sha256
+    )
+    root = prepared.root
+    settings = prepared.settings
+    deadline = prepared.deadline
+    seeds = prepared.seeds
+    source_inventory = prepared.source_inventory
+    inventory_mapping = prepared.inventory_mapping
+    request_sha = prepared.request_sha256
+    scan_id = prepared.scan_id
+    root_sha = prepared.repo_root_sha256
+
     try:
         existing_payload = fast_scan_store.load_scan_receipt_bytes(root, scan_id)
     except FileNotFoundError:
@@ -696,8 +700,42 @@ def execute_fast_scan(
     )
 
 
+def prepare_fast_scan_identity(
+    request: FastScanRequest,
+    graph_settings: Mapping[str, object],
+    payload_sha256: str,
+) -> PreparedFastScan:
+    root = _root(request.repo_root)
+    if not isinstance(payload_sha256, str) or _HEX64.fullmatch(payload_sha256) is None:
+        raise ValueError("payload_sha256 must be 64 lowercase hex characters")
+    settings = graph_coordinator.GraphSettings(**dict(graph_settings))
+    deadline = graph_coordinator.Deadline(time, settings.max_seconds)
+    seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
+    source_inventory = _inventory(root, deadline)
+    inventory_mapping = {
+        "digests": dict(source_inventory.digests),
+        "complete": source_inventory.complete,
+        "reason": source_inventory.reason,
+    }
+    identity = json.dumps({
+        "root": str(root), "change_request": request.change_request,
+        "evidence": list(request.evidence), "settings": settings.to_mapping(),
+        "payload_sha256": payload_sha256,
+        "source_inventory": inventory_mapping,
+        "seeds": [row.to_mapping() for row in seeds],
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    request_sha = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    scan_id = request_sha[:32]
+    root_sha = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+    return PreparedFastScan(
+        root, settings, deadline, seeds, source_inventory,
+        inventory_mapping, request_sha, scan_id, root_sha,
+    )
+
+
 __all__ = [
     "DerivedSeed", "FastScanReceipt", "FastScanRequest", "FastScanResult",
+    "PreparedFastScan",
     "canonical_fast_scan_bytes", "derive_seeds", "execute_fast_scan",
-    "validate_fast_scan_receipt",
+    "prepare_fast_scan_identity", "validate_fast_scan_receipt",
 ]

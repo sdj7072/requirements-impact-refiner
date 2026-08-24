@@ -31,7 +31,10 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import compact_state
+import fast_scan
+import fast_scan_store
 import impact_renderer
+import payload_identity
 import report_store
 
 
@@ -115,6 +118,7 @@ class BeginRequest:
     adapter: str
     audience_override: Optional[str] = None
     delivery_override: Optional[str] = None
+    scan_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +131,19 @@ class DraftResult:
     settings: Mapping[str, str]
     prior_state: Optional[Mapping[str, object]]
     prior_key_map: Optional[Mapping[str, object]]
+    scan_id: Optional[str] = None
+    graph_receipt_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ScanRequest:
+    repo_root: Path
+    change_request: str
+    evidence: Tuple[str, ...]
+    audience_override: Optional[str] = None
+
+
+ScanResult = fast_scan.FastScanResult
 
 
 @dataclass(frozen=True)
@@ -360,6 +377,71 @@ def _draft_path(root: Path, draft_id: str) -> Path:
     return root / ".requirements-impact-refiner" / "drafts" / f"{draft_id}.json"
 
 
+def _payload_sha256() -> str:
+    candidate = SCRIPT_DIR.parent
+    if not (candidate / ".codex-plugin" / "plugin.json").is_file():
+        candidate = SCRIPT_DIR.parents[2]
+    return payload_identity.payload_sha256(candidate)
+
+
+def scan_impact(request: ScanRequest) -> ScanResult:
+    root = _root(request.repo_root)
+    if not isinstance(request.evidence, tuple):
+        raise ValueError("scan evidence must be a tuple")
+    settings = SETTINGS.resolve(root, request.audience_override, None)
+    return fast_scan.execute_fast_scan(
+        fast_scan.FastScanRequest(
+            root, request.change_request, request.evidence, settings["audience"]
+        ),
+        settings["impact_graph"],
+        _payload_sha256(),
+    )
+
+
+def _promoted_scan(root, request, settings):
+    if request.scan_id is None:
+        return None
+    if DRAFT_ID_PATTERN.fullmatch(request.scan_id) is None:
+        raise ValueError("invalid Fast Scan ID")
+    prepared = fast_scan.prepare_fast_scan_identity(
+        fast_scan.FastScanRequest(
+            root, request.request, request.repository_evidence,
+            settings["audience"],
+        ),
+        settings["impact_graph"],
+        _payload_sha256(),
+    )
+    if prepared.scan_id != request.scan_id:
+        raise ValueError("Fast Scan request identity does not match")
+    payload = fast_scan_store.load_scan_receipt_bytes(root, request.scan_id)
+    value = json.loads(payload)
+    errors = fast_scan.validate_fast_scan_receipt(value)
+    if errors or fast_scan.canonical_fast_scan_bytes(value) != payload:
+        raise ValueError("Fast Scan receipt is invalid")
+    if value["status"] != "complete" or value["can_promote"] is not True:
+        raise ValueError("Fast Scan receipt is not promotable")
+    if (
+        value["request_sha256"] != prepared.request_sha256
+        or value["repo_root_sha256"] != prepared.repo_root_sha256
+        or value["payload_sha256"] != _payload_sha256()
+        or value["settings"] != prepared.settings.to_mapping()
+        or value["source_inventory"] != dict(prepared.inventory_mapping)
+        or value["seeds"] != [row.to_mapping() for row in prepared.seeds]
+    ):
+        raise ValueError("Fast Scan source or identity is stale")
+    graph = value["graph_receipt"]
+    graph_errors = GRAPH.validate_receipt(graph)
+    if graph_errors:
+        raise ValueError("Fast Scan graph receipt is invalid")
+    graph_payload = GRAPH.canonical_receipt_bytes(graph)
+    return {
+        "scan_id": request.scan_id,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "receipt_id": graph["receipt_id"],
+        "receipt_sha256": hashlib.sha256(graph_payload).hexdigest(),
+    }
+
+
 def begin_refinement(request: BeginRequest) -> DraftResult:
     root = _root(request.repo_root)
     if request.adapter not in ADAPTERS:
@@ -379,6 +461,7 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
     settings = SETTINGS.resolve(
         root, request.audience_override, request.delivery_override
     )
+    promotion = _promoted_scan(root, request, settings)
     current_lineage = _current_lineage(root)
     if current_lineage is None:
         report_id = _next_report_id(root)
@@ -411,6 +494,8 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         "created_at": now,
         "consumed": False,
     }
+    if promotion is not None:
+        draft["promoted_scan"] = promotion
     path = _write_private_draft(root, draft_id, _canonical_bytes(draft))
     return DraftResult(
         draft_id=draft_id,
@@ -421,6 +506,10 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         settings=settings,
         prior_state=prior_state,
         prior_key_map=prior_key_map,
+        scan_id=None if promotion is None else promotion["scan_id"],
+        graph_receipt_id=(
+            None if promotion is None else promotion["receipt_id"]
+        ),
     )
 
 
@@ -2546,6 +2635,36 @@ def _load_graph_context(
     return {"receipt": receipt, "sha256": digest, "binding": binding}
 
 
+def _load_promoted_scan_context(
+    root: Path, draft: Mapping[str, object], selected_receipt_id: Optional[str]
+) -> dict[str, object]:
+    binding = draft.get("promoted_scan")
+    if not isinstance(binding, dict) or set(binding) != {
+        "scan_id", "sha256", "receipt_id", "receipt_sha256",
+    }:
+        raise ValueError("promoted Fast Scan binding is invalid")
+    if selected_receipt_id != binding["receipt_id"]:
+        raise ValueError("Fast Scan graph receipt does not match draft")
+    request = BeginRequest(
+        root, draft["request"], tuple(draft["repository_evidence"]),
+        draft["adapter"], draft["settings"]["audience"],
+        draft["settings"]["delivery"], binding["scan_id"],
+    )
+    promotion = _promoted_scan(root, request, draft["settings"])
+    if promotion != binding:
+        raise ValueError("promoted Fast Scan binding is stale")
+    payload = fast_scan_store.load_scan_receipt_bytes(root, binding["scan_id"])
+    if hashlib.sha256(payload).hexdigest() != binding["sha256"]:
+        raise ValueError("promoted Fast Scan digest is stale")
+    wrapper = json.loads(payload)
+    receipt = wrapper["graph_receipt"]
+    graph_payload = GRAPH.canonical_receipt_bytes(receipt)
+    if hashlib.sha256(graph_payload).hexdigest() != binding["receipt_sha256"]:
+        raise ValueError("promoted graph receipt digest is stale")
+    _verify_receipt_sources(root, receipt)
+    return {"receipt": receipt, "sha256": binding["receipt_sha256"], "binding": binding}
+
+
 def _path_confidence(path, nodes, edges) -> str:
     values = [nodes[node]["confidence"] for node in path["nodes"]]
     values.extend(edges[edge]["confidence"] for edge in path["edges"])
@@ -2828,6 +2947,8 @@ def trace_impact(request: TraceRequest) -> TraceResult:
         draft = load_draft(root, request.draft_id)
         if draft.get("consumed") is True:
             raise ValueError("draft is already consumed")
+        if draft.get("promoted_scan") is not None:
+            raise ValueError("promoted Fast Scan draft must not be traced again")
         if draft.get("graph_receipt") is not None:
             binding = draft["graph_receipt"]
             requested_seeds = [
@@ -3420,8 +3541,12 @@ def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
         graph_settings = draft.get("settings", {}).get("impact_graph", {})
         graph_context = None
         if graph_settings.get("enabled") is True:
-            graph_context = _load_graph_context(
-                root, draft, request.graph_receipt_id
+            graph_context = (
+                _load_promoted_scan_context(
+                    root, draft, request.graph_receipt_id
+                )
+                if draft.get("promoted_scan") is not None
+                else _load_graph_context(root, draft, request.graph_receipt_id)
             )
             _validate_analysis(request.analysis)
             _validate_graph_coverage(request.analysis, graph_context)
