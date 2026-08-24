@@ -21,6 +21,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import fast_scan_renderer
 import fast_scan_store
+import graph_builtin
 import graph_coordinator
 
 
@@ -61,9 +62,12 @@ _SOURCE_SUFFIXES = {
     ".scala", ".sh", ".sql", ".swift", ".ts", ".tsx", ".vue", ".yaml",
     ".yml", ".json", ".toml", ".xml",
 }
+# Session-control directories plus the graph scanner's dependency and build
+# directories, so scan identity is never bound to node_modules churn and
+# dependency files are never read or hashed.
 _CONTROL_PARTS = {
     ".git", ".requirements-impact-refiner", "__pycache__", ".pytest_cache",
-}
+} | set(graph_builtin.IGNORED_DIRECTORIES)
 _REQUIRED_KEYS = {
     "schema_version", "status", "scan_id", "receipt_id",
     "repo_root_sha256", "request_sha256", "payload_sha256", "settings",

@@ -303,11 +303,40 @@ def _walk_files(
         pending[0:0] = directories
 
 
-def _edge_kind(target: str, categories: frozenset[str]) -> tuple[str, str]:
-    lowered = target.lower()
-    if "test" in lowered or "fixture" in lowered:
+_TEST_PATH_TOKENS = frozenset(
+    {"test", "tests", "testing", "conftest", "fixture", "fixtures"}
+)
+
+
+def _is_test_path(target: str) -> bool:
+    """Match whole path segments so latest/contest/testimonial stay untouched."""
+    for part in target.lower().split("/"):
+        for token in re.split(r"[^a-z0-9]+", part):
+            if token in _TEST_PATH_TOKENS:
+                return True
+    return False
+
+
+def _import_resolves_to_target(target: str, evidence: str) -> bool:
+    """An imports edge must plausibly resolve to the target file, not merely
+    share a token that happened to appear on an import line of the source."""
+    stem = target.lower().rsplit("/", 1)[-1].split(".", 1)[0]
+    collapsed_stem = re.sub(r"[^a-z0-9]", "", stem)
+    collapsed_evidence = re.sub(r"[^a-z0-9]", "", evidence.lower())
+    if len(collapsed_evidence) < 3 or not collapsed_stem:
+        return False
+    return (
+        collapsed_evidence in collapsed_stem
+        or collapsed_stem in collapsed_evidence
+    )
+
+
+def _edge_kind(
+    target: str, categories: frozenset[str], evidence: str
+) -> tuple[str, str]:
+    if _is_test_path(target):
         return "tests", "structural-inferred"
-    if "import" in categories:
+    if "import" in categories and _import_resolves_to_target(target, evidence):
         return "imports", "structural-inferred"
     return "references", "lexical"
 
@@ -517,7 +546,7 @@ def scan_repository(
         if expired():
             return deadline_result(nodes)
         if source in location_ids and target in location_ids:
-            kind, confidence = _edge_kind(target, categories)
+            kind, confidence = _edge_kind(target, categories, evidence)
             edge_candidates.append((source, target, kind, confidence, evidence))
     edge_candidates.sort(key=lambda item: (location_ids[item[0]], location_ids[item[1]], item[2], item[4]))
     if len(edge_candidates) > limits.max_edges:

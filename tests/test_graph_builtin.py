@@ -403,3 +403,78 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
                 safe_text, found = BUILTIN._redact_sensitive_literals(line)
                 self.assertEqual(safe_text, line)
                 self.assertEqual(found, frozenset())
+
+
+class EdgeKindClassificationTest(unittest.TestCase):
+    """Test-path detection must match whole path segments, and an imports
+    edge must plausibly resolve to its target, because structural-inferred
+    is the confidence tier that unlocks inferred evidence downstream."""
+
+    def edge_kinds(self, files, seed_term, seed_location):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative, content in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),)
+            )
+            locations = {node.id: node.location for node in result.nodes}
+            return {
+                (locations[edge.source], locations[edge.target]):
+                (edge.kind, edge.confidence)
+                for edge in result.edges
+            }
+
+    def test_test_substring_in_filename_is_not_a_test_path(self):
+        directions = self.edge_kinds(
+            {
+                "results_latest.py": 'MARKER = "shared_marker_token"\n',
+                "contest_rules.py": 'VALUE = "shared_marker_token"\n',
+            },
+            "shared_marker_token",
+            "results_latest.py",
+        )
+        self.assertEqual(
+            directions[("results_latest.py", "contest_rules.py")],
+            ("references", "lexical"),
+        )
+
+    def test_segmented_test_paths_are_still_detected(self):
+        directions = self.edge_kinds(
+            {
+                "auth.py": 'HELPER = "shared_marker_token"\n',
+                "tests/test_auth.py": 'CHECK = "shared_marker_token"\n',
+            },
+            "shared_marker_token",
+            "auth.py",
+        )
+        self.assertEqual(
+            directions[("auth.py", "tests/test_auth.py")],
+            ("tests", "structural-inferred"),
+        )
+
+    def test_import_taint_requires_target_resolution(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.py": (
+                    "from shared_model import SharedModel\n"
+                    "value = SharedModel()\n"
+                ),
+                "shared_model.py": "class SharedModel:\n    pass\n",
+                "narrative_docs.py": (
+                    'NOTE = "SharedModel is documented elsewhere"\n'
+                ),
+            },
+            "SharedModel",
+            "consumer.py",
+        )
+        self.assertEqual(
+            directions[("consumer.py", "shared_model.py")],
+            ("imports", "structural-inferred"),
+        )
+        self.assertEqual(
+            directions[("consumer.py", "narrative_docs.py")],
+            ("references", "lexical"),
+        )

@@ -426,3 +426,32 @@ class CredentialShapedEvidenceTest(unittest.TestCase):
         for row in ('tokenizer = "whitespace"', 'keyboard_layout = "qwerty"'):
             with self.subTest(row=row):
                 self.assertIsNone(self.module._SECRET.search(row), row)
+
+
+class IgnoredDirectoryParityTest(unittest.TestCase):
+    """The inventory walker must skip the same dependency and build
+    directories as the graph scanner, so scan identity is not bound to
+    node_modules churn and dependency files are never hashed."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name) / "repo"
+        self.root.mkdir()
+
+    def write(self, relative, content):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def test_inventory_skips_dependency_and_build_directories(self):
+        fast_scan = load_fast_scan()
+        self.write("src/app.py", 'VALUE = "kept"\n')
+        self.write("node_modules/pkg/package.json", '{"token": "npm_leaked"}\n')
+        self.write(".venv/lib/site.py", "SITE = 1\n")
+        self.write("dist/bundle.js", "var bundled = 1;\n")
+        self.write("vendor/lib.rb", "VENDORED = 1\n")
+
+        inventory = fast_scan._inventory(self.root, FakeDeadline())
+
+        self.assertEqual(sorted(inventory.digests), ["src/app.py"])
