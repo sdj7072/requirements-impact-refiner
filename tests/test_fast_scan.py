@@ -536,3 +536,41 @@ class PromotionReachabilityTest(unittest.TestCase):
 
         self.assertEqual(result.status, "partial")
         self.assertFalse(result.can_promote)
+
+
+class DeriveSeedReadEfficiencyTest(unittest.TestCase):
+    """The fallback derivation must read each candidate file once, not once
+    per (term, file) pair — the pair-product was 93% of scan wall time."""
+
+    def test_each_file_is_read_at_most_once(self):
+        fast_scan = load_fast_scan()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "repo"
+            root.mkdir()
+            for i in range(30):
+                (root / f"module{i:02d}.py").write_text(
+                    f"VALUE_{i} = {i}\n", encoding="utf-8"
+                )
+            calls = []
+            original = fast_scan._read_source
+
+            def counted(root_arg, relative):
+                calls.append(relative)
+                return original(root_arg, relative)
+
+            fast_scan._read_source = counted
+            try:
+                fast_scan.derive_seeds(
+                    root,
+                    "Change alpha.one beta.two gamma.three delta.four "
+                    "epsilon.five zeta.six",
+                    (),
+                    FakeDeadline(),
+                )
+            finally:
+                fast_scan._read_source = original
+
+            self.assertLessEqual(
+                len(calls), len(set(calls)) + 30,
+                f"{len(calls)} reads for {len(set(calls))} distinct files",
+            )

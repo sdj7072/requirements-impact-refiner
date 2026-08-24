@@ -43,7 +43,7 @@ _PATH = re.compile(
     r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+"
 )
 _QUALIFIED = re.compile(
-    r"(?<![A-Za-z0-9_])"
+    r"(?<![A-Za-z0-9_.-])"
     r"[A-Za-z_][A-Za-z0-9_-]*"
     r"(?:\.[A-Za-z_][A-Za-z0-9_-]*)+"
 )
@@ -440,13 +440,22 @@ def derive_seeds(
 
     if len(ordered) < maximum:
         files = tuple(_source_files(root, deadline))
+        # Read each candidate file once for the whole term sweep; the
+        # (term, file) pair-product of reads dominated scan wall time.
+        source_cache: dict[str, Optional[tuple[str, str]]] = {}
+
+        def _cached_source(relative: str) -> Optional[tuple[str, str]]:
+            if relative not in source_cache:
+                source_cache[relative] = _read_source(root, relative)
+            return source_cache[relative]
+
         for term in all_terms:
             for relative in files:
                 if len(ordered) >= maximum or _expired(deadline):
                     break
                 if (term, relative) in seen:
                     continue
-                source = _read_source(root, relative)
+                source = _cached_source(relative)
                 if source is not None and term in source[0]:
                     seen.add((term, relative))
                     ordered.append(
