@@ -49,6 +49,10 @@
 ~~~python
 def test_derives_file_symbol_and_evidence_seeds(self):
     self.write("api/profile.py", 'FIELD = "profile.displayName"\n')
+    self.write(
+        "mobile/profile_decoder.swift",
+        'let field = "profile.displayName"\n',
+    )
     seeds = FAST_SCAN.derive_seeds(
         self.root,
         "Rename profile.displayName in api/profile.py",
