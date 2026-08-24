@@ -13,6 +13,8 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from impact_report import (
     calculate_delta,
+    strip_fenced_blocks,
+    table_block,
     parse_report,
     render_delta,
     validate_authored_delta,
@@ -198,7 +200,7 @@ REQUIRED_DEFINITION_ROWS = {
 def markdown_sections(text: str) -> dict[str, str]:
     sections: dict[str, list[str]] = {}
     current = None
-    for line in text.splitlines():
+    for line in strip_fenced_blocks(text).splitlines():
         if line.startswith("## "):
             current = line[3:].strip()
             sections[current] = []
@@ -209,7 +211,7 @@ def markdown_sections(text: str) -> dict[str, str]:
 
 def duplicate_section_names(text: str) -> set[str]:
     counts: dict[str, int] = {}
-    for line in text.splitlines():
+    for line in strip_fenced_blocks(text).splitlines():
         if line.startswith("## "):
             name = line[3:].strip()
             counts[name] = counts.get(name, 0) + 1
@@ -224,9 +226,11 @@ def parse_table(
     section_name: str, section: str, expected_headers: list[str]
 ) -> tuple[list[dict[str, str]], list[str]]:
     errors: list[str] = []
-    lines = [line.strip() for line in section.splitlines() if line.strip().startswith("|")]
+    lines, extra_table = table_block(section)
+    if extra_table:
+        errors.append(f"multiple tables in {section_name}")
     if len(lines) < 2:
-        return [], [f"invalid table schema in {section_name}"]
+        return [], errors + [f"invalid table schema in {section_name}"]
     headers = table_cells(lines[0])
     if headers != expected_headers:
         return [], [f"invalid table schema in {section_name}"]
@@ -598,8 +602,13 @@ def validate_report(
             errors.append(f"revision {current.metadata.revision} requires --previous")
         return sorted(set(errors))
     previous, previous_parse_errors = parse_report(previous_text)
-    errors.extend(previous_parse_errors)
-    errors.extend(_validate_single_report(previous_text))
+    errors.extend(
+        f"previous report: {error}" for error in previous_parse_errors
+    )
+    errors.extend(
+        f"previous report: {error}"
+        for error in _validate_single_report(previous_text)
+    )
     if previous.metadata is None:
         return sorted(set(errors))
     if previous_bytes is None:

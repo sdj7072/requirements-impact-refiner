@@ -971,22 +971,13 @@ if __name__ == "__main__":
 
 
 class ShippedTemplateStructureTest(unittest.TestCase):
-    """The shipped templates, with placeholders filled, must not teach
-    structural violations that survive a faithful copy."""
+    """A faithful copy of a shipped template — placeholders numbered and the
+    first option picked from every enum menu — must validate with zero
+    errors, so the template can never teach a violation."""
 
-    STRUCTURAL_FRAGMENTS = (
-        "must be new, not",
-        "more than once",
-        "requires a revision description",
-        "requires distinct options",
-        "requires one focused question",
-        "requires a nonempty trade-off",
-        "unresolved impact",
-        "duplicate section",
-        "invalid table schema",
-    )
+    MENU = re.compile(r"(`[^`]+`)(?:\s*/\s*`[^`]+`)+")
 
-    def structural_errors(self, template_name):
+    def filled(self, template_name):
         template = (
             ROOT
             / "skills"
@@ -995,19 +986,114 @@ class ShippedTemplateStructureTest(unittest.TestCase):
             / template_name
         ).read_text()
         filled = template.replace("###", "001")
-        errors = VALIDATOR.validate_report(filled)
-        return [
-            error
-            for error in errors
-            if any(fragment in error for fragment in self.STRUCTURAL_FRAGMENTS)
-        ]
+        filled = self.MENU.sub(r"\1", filled)
+        filled = filled.replace("Match the ledger severity.", "`critical`")
+        filled = filled.replace("Match the ledger state.", "`detected`")
+        return filled
 
-    def test_pre_decision_template_has_no_structural_errors(self):
+    def test_pre_decision_template_validates_cleanly(self):
         self.assertEqual(
-            self.structural_errors("impact-report-pre-decision-template.md"), []
+            VALIDATOR.validate_report(
+                self.filled("impact-report-pre-decision-template.md")
+            ),
+            [],
         )
 
-    def test_post_decision_template_has_no_structural_errors(self):
+    def test_post_decision_template_validates_cleanly(self):
         self.assertEqual(
-            self.structural_errors("impact-report-post-decision-template.md"), []
+            VALIDATOR.validate_report(
+                self.filled("impact-report-post-decision-template.md")
+            ),
+            [],
+        )
+
+
+class ParserRobustnessTest(unittest.TestCase):
+    """Reports are prose documents: fenced examples and stray tables must not
+    silently replace or extend the canonical sections."""
+
+    def test_fenced_example_sections_are_ignored(self):
+        report = VALID_REPORT.replace(
+            "## Planning Handoff",
+            "The following fenced example must stay inert:\n\n"
+            "```markdown\n"
+            "## Impact Ledger\n"
+            "| ID | State |\n"
+            "| --- | --- |\n"
+            "| IMP-999 | detected |\n"
+            "```\n\n"
+            "## Planning Handoff",
+            1,
+        )
+
+        self.assertEqual(VALIDATOR.validate_report(report), [])
+
+    def test_second_table_in_a_section_is_rejected(self):
+        report = VALID_REPORT.replace(
+            "## Current Refined Requirement",
+            "A stray table must not define new identifiers:\n\n"
+            "| Requirement ID | Original request | Source |\n"
+            "| --- | --- | --- |\n"
+            "| REQ-002 | Ship it unguarded. | Nobody asked. |\n\n"
+            "## Current Refined Requirement",
+            1,
+        )
+
+        errors = VALIDATOR.validate_report(report)
+        self.assertIn("multiple tables in Original Requirement", errors)
+        self.assertNotIn("REQ-002", {  # phantom must not become a definition
+            error.split()[-1] for error in errors if "unknown reference" in error
+        })
+
+
+class CalculateDeltaGuardTest(unittest.TestCase):
+    """The reusable module must fail with a controlled error on an invalid
+    lifecycle state, not a raw KeyError."""
+
+    def test_invalid_state_raises_value_error(self):
+        module_path = (
+            ROOT
+            / "skills"
+            / "requirements-impact-refiner"
+            / "scripts"
+            / "impact_report.py"
+        )
+        spec = importlib.util.spec_from_file_location("impact_report_guard", module_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        previous, _ = module.parse_report(
+            VALID_REPORT.replace("| accepted |", "| refining |", 1)
+        )
+        current, _ = module.parse_report(
+            VALID_REPORT.replace("| accepted |", "| bogus-state |", 1)
+        )
+        with self.assertRaises(ValueError):
+            module.calculate_delta(previous, current)
+
+
+class PreviousReportErrorAttributionTest(unittest.TestCase):
+    """Errors found in the predecessor must say so, or the user cannot tell
+    which file to fix."""
+
+    def test_previous_errors_are_prefixed(self):
+        import hashlib as _hashlib
+
+        previous = VALID_REPORT.replace("| accepted |", "| ignored |", 1)
+        digest = _hashlib.sha256(previous.encode("utf-8")).hexdigest()
+        current = VALID_REPORT.replace(
+            "| RPT-001 | 1 | none |", f"| RPT-001 | 2 | {digest} |", 1
+        ).replace("| new | IMP-001 |", "| new | none |", 1).replace(
+            "| unchanged | none |", "| unchanged | IMP-001 |", 1
+        )
+
+        errors = VALIDATOR.validate_report(
+            current,
+            previous_text=previous,
+            previous_bytes=previous.encode("utf-8"),
+        )
+        self.assertTrue(
+            any(error.startswith("previous report: invalid impact state") for error in errors),
+            errors,
         )

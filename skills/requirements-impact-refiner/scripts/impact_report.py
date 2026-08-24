@@ -71,10 +71,32 @@ class ParsedReport:
     tables: Mapping[str, Sequence[Mapping[str, str]]]
 
 
+def strip_fenced_blocks(text: str) -> str:
+    """Blank out fenced code blocks so a quoted example section or table can
+    never replace or extend the canonical document structure."""
+    lines = []
+    fence: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if fence is None and (
+            stripped.startswith("```") or stripped.startswith("~~~")
+        ):
+            fence = stripped[:3]
+            lines.append("")
+            continue
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+            lines.append("")
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def markdown_sections(text: str) -> dict[str, str]:
     sections: dict[str, list[str]] = {}
     current: str | None = None
-    for line in text.splitlines():
+    for line in strip_fenced_blocks(text).splitlines():
         if line.startswith("## "):
             current = line[3:].strip()
             sections[current] = []
@@ -87,8 +109,26 @@ def table_cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
+def table_block(section: str) -> tuple[list[str], bool]:
+    """Return the first contiguous table run and whether more table content
+    follows it; a second run must never extend the canonical table."""
+    lines: list[str] = []
+    started = False
+    ended = False
+    for raw in section.splitlines():
+        line = raw.strip()
+        if line.startswith("|"):
+            if ended:
+                return lines, True
+            started = True
+            lines.append(line)
+        elif started:
+            ended = True
+    return lines, False
+
+
 def parse_section_table(section: str) -> list[dict[str, str]]:
-    lines = [line.strip() for line in section.splitlines() if line.strip().startswith("|")]
+    lines, _ = table_block(section)
     if len(lines) < 2:
         return []
     headers = table_cells(lines[0])
@@ -412,6 +452,10 @@ def calculate_delta(
         elif previous_state == current_state:
             category = "unchanged"
         else:
+            if current_state not in STATE_TO_DELTA:
+                raise ValueError(
+                    f"invalid impact state {current_state} for {impact_id}"
+                )
             category = STATE_TO_DELTA[current_state]
         result[category].append(impact_id)
     for ids in result.values():
