@@ -309,6 +309,96 @@ class FastScanTest(unittest.TestCase):
         self.assertEqual(set(schema["properties"]), expected)
         self.assertFalse(schema["additionalProperties"])
 
+    def test_execute_calls_graph_once_persists_and_renders(self):
+        fast_scan = load_fast_scan()
+        self.write("api/profile.py", 'FIELD = "profile.displayName"\n')
+        graph = json.loads(
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        graph["budget_status"] = "closed"
+        graph["frontier"] = []
+        calls = []
+
+        def coordinator(*args, **kwargs):
+            calls.append((args, kwargs))
+            return graph
+
+        result = fast_scan.execute_fast_scan(
+            fast_scan.FastScanRequest(
+                self.root, "Rename profile.displayName", (), "balanced"
+            ),
+            graph["settings"],
+            payload_sha256="a" * 64,
+            coordinator=coordinator,
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result.status, "complete")
+        self.assertTrue(result.can_promote)
+        self.assertLessEqual(len(result.display_text.split()), 180)
+        self.assertTrue(
+            (self.root / ".requirements-impact-refiner/scans" /
+             (result.scan_id + ".json")).is_file()
+        )
+
+    def test_execute_needs_input_without_graph_call(self):
+        fast_scan = load_fast_scan()
+
+        def coordinator(*args, **kwargs):
+            self.fail("coordinator must not run without a trustworthy seed")
+
+        result = fast_scan.execute_fast_scan(
+            fast_scan.FastScanRequest(self.root, "make it nicer", (), "simple"),
+            {
+                "enabled": True, "max_seconds": 30, "target_seconds": 10,
+                "providers": ["builtin"], "install_policy": "never",
+                "deep": False,
+            },
+            payload_sha256="a" * 64,
+            coordinator=coordinator,
+        )
+        self.assertEqual(result.status, "needs_input")
+        self.assertFalse(result.can_promote)
+
+    def test_execute_reuses_exact_scan_and_source_mutation_invalidates_it(self):
+        fast_scan = load_fast_scan()
+        source = self.write("api/profile.py", 'FIELD = "profile.displayName"\n')
+        graph = json.loads(
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        graph["budget_status"] = "closed"
+        graph["frontier"] = []
+        calls = []
+
+        def coordinator(*args, **kwargs):
+            calls.append(1)
+            value = copy.deepcopy(graph)
+            value["receipt_id"] = ("%032x" % len(calls))
+            return value
+
+        request = fast_scan.FastScanRequest(
+            self.root, "Rename profile.displayName", (), "balanced"
+        )
+        first = fast_scan.execute_fast_scan(
+            request, graph["settings"], "a" * 64, coordinator=coordinator
+        )
+        second = fast_scan.execute_fast_scan(
+            request, graph["settings"], "a" * 64, coordinator=coordinator
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(second.scan_id, first.scan_id)
+        self.assertEqual(second.cache_status, "hit")
+
+        source.write_text('FIELD = "profile.displayName"\n# changed\n', encoding="utf-8")
+        third = fast_scan.execute_fast_scan(
+            request, graph["settings"], "a" * 64, coordinator=coordinator
+        )
+        self.assertEqual(len(calls), 2)
+        self.assertNotEqual(third.scan_id, first.scan_id)
+
 
 if __name__ == "__main__":
     unittest.main()

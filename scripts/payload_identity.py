@@ -15,6 +15,8 @@ ROOT_FILES = (
     "schemas/fast-impact-scan.schema.json",
     "scripts/compact_state.py",
     "scripts/fast_scan.py",
+    "scripts/fast_scan_renderer.py",
+    "scripts/fast_scan_store.py",
     "scripts/graph_adapter_ast_grep.py",
     "scripts/graph_adapter_codegraph.py",
     "scripts/graph_adapter_joern.py",

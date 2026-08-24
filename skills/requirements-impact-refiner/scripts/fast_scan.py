@@ -9,8 +9,19 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import sys
+import time
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Mapping, Optional, Tuple
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import fast_scan_renderer
+import fast_scan_store
+import graph_coordinator
 
 
 MAX_CHANGE_BYTES = 4 * 1024
@@ -158,6 +169,22 @@ class FastScanReceipt:
             "can_promote": self.can_promote,
             "created_at": self.created_at,
         }
+
+
+@dataclass(frozen=True)
+class FastScanResult:
+    status: str
+    scan_id: str
+    receipt_id: str
+    receipt_sha256: str
+    display_text: str
+    risk_level: str
+    paths: Tuple[Mapping[str, object], ...]
+    frontier: Tuple[Mapping[str, object], ...]
+    candidates: Tuple[Mapping[str, object], ...]
+    elapsed_ms: int
+    cache_status: str
+    can_promote: bool
 
 
 def _root(value: Path) -> Path:
@@ -549,7 +576,128 @@ def canonical_fast_scan_bytes(value: Mapping[str, object] | FastScanReceipt) -> 
     ).encode("utf-8")
 
 
+def _graph_mapping(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return _thaw(value)
+    return json.loads(graph_coordinator.GRAPH.canonical_receipt_bytes(value))
+
+
+def _inventory(root: Path, deadline: object):
+    digests = {}
+    for relative in _source_files(root, deadline):
+        source = _read_source(root, relative)
+        if source is not None:
+            digests[relative] = source[1]
+    complete = not _expired(deadline)
+    return graph_coordinator.SourceInventory(
+        digests, complete, None if complete else "deadline"
+    )
+
+
+def _risk(graph: Mapping[str, object]) -> str:
+    domains = {
+        domain
+        for collection in (graph.get("nodes", []), graph.get("frontier", []))
+        for row in collection
+        if isinstance(row, Mapping)
+        for domain in row.get("risk_domains", [])
+    }
+    if domains & {"authorization/privacy", "legal/policy"}:
+        return "critical"
+    if domains & {"data", "interfaces", "operations", "state/concurrency"}:
+        return "high"
+    return "medium" if graph.get("nodes") else "low"
+
+
+def execute_fast_scan(
+    request: FastScanRequest,
+    graph_settings: Mapping[str, object],
+    payload_sha256: str,
+    *,
+    coordinator=graph_coordinator.trace_impact,
+) -> FastScanResult:
+    root = _root(request.repo_root)
+    if not isinstance(payload_sha256, str) or _HEX64.fullmatch(payload_sha256) is None:
+        raise ValueError("payload_sha256 must be 64 lowercase hex characters")
+    settings = graph_coordinator.GraphSettings(**dict(graph_settings))
+    deadline = graph_coordinator.Deadline(time, settings.max_seconds)
+    seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
+    source_inventory = _inventory(root, deadline)
+    inventory_mapping = {
+        "digests": dict(source_inventory.digests),
+        "complete": source_inventory.complete,
+        "reason": source_inventory.reason,
+    }
+    identity = json.dumps({
+        "root": str(root), "change_request": request.change_request,
+        "evidence": list(request.evidence), "settings": settings.to_mapping(),
+        "payload_sha256": payload_sha256,
+        "source_inventory": inventory_mapping,
+        "seeds": [row.to_mapping() for row in seeds],
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    request_sha = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    scan_id = request_sha[:32]
+    root_sha = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+    try:
+        existing_payload = fast_scan_store.load_scan_receipt_bytes(root, scan_id)
+    except FileNotFoundError:
+        existing_payload = None
+    if existing_payload is not None:
+        existing = json.loads(existing_payload)
+        errors = validate_fast_scan_receipt(existing)
+        if errors or existing.get("request_sha256") != request_sha:
+            raise ValueError("existing fast scan receipt is invalid")
+        rendered = dict(existing)
+        rendered["cache_status"] = "hit"
+        display = fast_scan_renderer.render_fast_scan(rendered, request.audience)
+        graph = existing["graph_receipt"]
+        return FastScanResult(
+            existing["status"], scan_id, existing["receipt_id"],
+            hashlib.sha256(existing_payload).hexdigest(), display,
+            existing["risk_level"], tuple(graph.get("paths", [])),
+            tuple(existing["frontier"]), tuple(existing["candidates"]),
+            min(30_000, deadline.elapsed_ms()), "hit",
+            existing["can_promote"],
+        )
+    candidates = []
+    if not seeds:
+        graph = {}
+        status = "needs_input"
+        receipt_id = hashlib.sha256((scan_id + ":needs-input").encode()).hexdigest()[:32]
+        risk_level = "unknown"
+        cache_status = "bypassed"
+    else:
+        graph = _graph_mapping(coordinator(
+            root, {"draft_id": scan_id},
+            tuple(graph_coordinator.ScanSeed(row.term, row.location) for row in seeds),
+            settings, deadline=deadline, source_inventory=source_inventory,
+        ))
+        receipt_id = graph["receipt_id"]
+        status = "complete" if graph.get("budget_status") == "closed" and source_inventory.complete else "partial"
+        risk_level = _risk(graph)
+        cache_status = graph.get("cache", {}).get("status", "bypassed")
+    elapsed = min(30_000, deadline.elapsed_ms())
+    receipt = FastScanReceipt(
+        1, status, scan_id, receipt_id, root_sha, request_sha, payload_sha256,
+        settings.to_mapping(), inventory_mapping,
+        seeds, graph, risk_level, tuple(graph.get("frontier", [])),
+        tuple(candidates), elapsed, cache_status, status == "complete",
+        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+    payload = canonical_fast_scan_bytes(receipt)
+    fast_scan_store.publish_scan_receipt(root, scan_id, payload)
+    mapping = receipt.to_mapping()
+    display = fast_scan_renderer.render_fast_scan(mapping, request.audience)
+    digest = hashlib.sha256(payload).hexdigest()
+    return FastScanResult(
+        status, scan_id, receipt_id, digest, display, risk_level,
+        tuple(graph.get("paths", [])), tuple(graph.get("frontier", [])),
+        tuple(candidates), elapsed, cache_status, status == "complete",
+    )
+
+
 __all__ = [
-    "DerivedSeed", "FastScanReceipt", "FastScanRequest",
-    "canonical_fast_scan_bytes", "derive_seeds", "validate_fast_scan_receipt",
+    "DerivedSeed", "FastScanReceipt", "FastScanRequest", "FastScanResult",
+    "canonical_fast_scan_bytes", "derive_seeds", "execute_fast_scan",
+    "validate_fast_scan_receipt",
 ]
