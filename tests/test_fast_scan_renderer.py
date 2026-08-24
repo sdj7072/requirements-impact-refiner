@@ -108,3 +108,57 @@ class SafetyLinePreservationTest(unittest.TestCase):
         self.assertIn("Unknown frontier", text)
         self.assertIn("Partial result", text)
         self.assertIn("Do you want detailed refinement?", text)
+
+
+class WholeLineTrimmingTest(unittest.TestCase):
+    """Trimming must drop whole path lines, never cut technical provenance
+    mid-line, and an oversized frontier must not push past the word cap."""
+
+    def build_receipt(self, path_count=10, frontier_words=4):
+        nodes = [
+            {"id": f"NODE-{i:03d}",
+             "label": " ".join(f"part{i}w{j}" for j in range(12)),
+             "location": f"src/pkg{i}/module_file_{i}.py",
+             "provider": "builtin", "confidence": "lexical"}
+            for i in range(path_count + 1)
+        ]
+        edges = [
+            {"id": f"EDGE-{i:03d}", "kind": "references",
+             "confidence": "lexical"}
+            for i in range(path_count)
+        ]
+        paths = [
+            {"nodes": [f"NODE-{i:03d}", f"NODE-{i + 1:03d}"],
+             "edges": [f"EDGE-{i:03d}"], "risk_domains": ["operations"]}
+            for i in range(path_count)
+        ]
+        return {
+            "status": "partial",
+            "risk_level": "high",
+            "graph_receipt": {"nodes": nodes, "edges": edges, "paths": paths},
+            "frontier": [
+                {"reason": " ".join(f"gapword{i}" for i in range(frontier_words))}
+            ],
+            "elapsed_ms": 100,
+            "cache_status": "bypassed",
+        }
+
+    def test_technical_provenance_is_never_cut_mid_line(self):
+        renderer = load_renderer()
+        text = renderer.render_fast_scan(self.build_receipt(), "technical")
+
+        self.assertLessEqual(len(text.split()), renderer.WORD_LIMIT)
+        for chunk in text.split("- ")[1:]:
+            if "provider" in chunk:
+                self.assertIn("; location", chunk, chunk)
+
+    def test_oversized_frontier_stays_within_word_cap(self):
+        renderer = load_renderer()
+        text = renderer.render_fast_scan(
+            self.build_receipt(path_count=2, frontier_words=400), "balanced"
+        )
+
+        self.assertLessEqual(len(text.split()), renderer.WORD_LIMIT)
+        self.assertIn("Unknown frontier", text)
+        self.assertIn("Partial result", text)
+        self.assertIn("Do you want detailed refinement?", text)

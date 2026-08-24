@@ -267,8 +267,17 @@ def _paths(text: str) -> tuple[str, ...]:
 
 
 def _read_source(root: Path, relative: str) -> Optional[tuple[str, str]]:
+    return _read_source_detailed(root, relative)[0]
+
+
+def _read_source_detailed(
+    root: Path, relative: str
+) -> tuple[Optional[tuple[str, str]], Optional[str]]:
+    """Read a source file; on failure, say whether the content is
+    legitimately outside a text inventory (binary, encoding) or genuinely
+    unaccounted for (permission, mutation, oversize)."""
     if not _safe_relative(relative):
-        return None
+        return None, "control"
     parts = PurePosixPath(relative).parts
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
     file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -285,17 +294,16 @@ def _read_source(root: Path, relative: str) -> Optional[tuple[str, str]]:
             parent_fd = next_fd
         descriptor = os.open(parts[-1], file_flags, dir_fd=parent_fd)
         before = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or before.st_size > MAX_SOURCE_BYTES
-        ):
-            return None
+        if not stat.S_ISREG(before.st_mode):
+            return None, "not-regular"
+        if before.st_size > MAX_SOURCE_BYTES:
+            return None, "unreadable-source"
         chunks = []
         remaining = before.st_size
         while remaining:
             chunk = os.read(descriptor, min(65536, remaining))
             if not chunk:
-                return None
+                return None, "unreadable-source"
             chunks.append(chunk)
             remaining -= len(chunk)
         after = os.fstat(descriptor)
@@ -303,14 +311,17 @@ def _read_source(root: Path, relative: str) -> Optional[tuple[str, str]]:
             (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
             != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
         ):
-            return None
+            return None, "unreadable-source"
         raw = b"".join(chunks)
         if b"\x00" in raw:
-            return None
-        text = raw.decode("utf-8")
-        return text, hashlib.sha256(raw).hexdigest()
-    except (OSError, UnicodeDecodeError):
-        return None
+            return None, "binary"
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None, "encoding"
+        return (text, hashlib.sha256(raw).hexdigest()), None
+    except OSError:
+        return None, "unreadable-source"
     finally:
         if descriptor is not None:
             os.close(descriptor)
@@ -617,16 +628,25 @@ def _graph_mapping(value: object) -> dict[str, object]:
     return json.loads(graph_coordinator.GRAPH.canonical_receipt_bytes(value))
 
 
+_BENIGN_SKIPS = {"binary", "encoding", "not-regular", "control"}
+
+
 def _inventory(root: Path, deadline: object):
     digests = {}
+    unreadable = False
     for relative in _source_files(root, deadline):
-        source = _read_source(root, relative)
+        source, reason = _read_source_detailed(root, relative)
         if source is not None:
             digests[relative] = source[1]
-    complete = not _expired(deadline)
-    return graph_coordinator.SourceInventory(
-        digests, complete, None if complete else "deadline"
-    )
+        elif reason not in _BENIGN_SKIPS:
+            unreadable = True
+    if _expired(deadline):
+        return graph_coordinator.SourceInventory(digests, False, "deadline")
+    if unreadable:
+        return graph_coordinator.SourceInventory(
+            digests, False, "unreadable-source"
+        )
+    return graph_coordinator.SourceInventory(digests, True, None)
 
 
 def _risk(graph: Mapping[str, object]) -> str:

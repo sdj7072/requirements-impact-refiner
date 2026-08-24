@@ -1836,11 +1836,28 @@ def _compact_node_rank(row: Mapping[str, object]) -> tuple[int, str]:
 
 
 def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list, dict]:
-    paths = list(receipt["paths"])[:COMPACT_MAX_PATHS]
-    frontier = list(receipt["frontier"])[:COMPACT_MAX_FRONTIER]
-    required = {node_id for row in paths for node_id in row["nodes"]}
-    required.update(row["node"] for row in frontier)
-    by_id = {row["id"]: row for row in receipt["nodes"]}
+    # Admit paths and frontier entries only while their nodes fit the node
+    # cap, so every delivered reference stays resolvable and the cap holds
+    # even when deep paths alone would demand more nodes than the budget.
+    required: set = set()
+    paths = []
+    for row in receipt["paths"]:
+        if len(paths) >= COMPACT_MAX_PATHS:
+            break
+        candidate = required | set(row["nodes"])
+        if len(candidate) > COMPACT_MAX_NODES:
+            break
+        required = candidate
+        paths.append(row)
+    frontier = []
+    for row in receipt["frontier"]:
+        if len(frontier) >= COMPACT_MAX_FRONTIER:
+            break
+        candidate = required | {row["node"]}
+        if len(candidate) > COMPACT_MAX_NODES:
+            break
+        required = candidate
+        frontier.append(row)
     selected = [row for row in receipt["nodes"] if row["id"] in required]
     if len(selected) < COMPACT_MAX_NODES:
         remaining = sorted(
@@ -1970,7 +1987,7 @@ def _receipt_source_inventory(
         or (complete and reason is not None)
         or (
             not complete
-            and reason not in {"deadline", "collection-limit", "traversal"}
+            and reason not in {"deadline", "collection-limit", "traversal", "unreadable-source"}
         )
         or identity.get("repo_root_sha256")
         != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
@@ -2111,7 +2128,7 @@ def _validate_trace_intent(
         or (
             not intent.get("source_inventory_complete")
             and intent.get("source_inventory_reason")
-            not in {"deadline", "collection-limit", "traversal"}
+            not in {"deadline", "collection-limit", "traversal", "unreadable-source"}
         )
         or not isinstance(intent.get("source_inventory_sha256"), str)
         or re.fullmatch(

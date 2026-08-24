@@ -44,7 +44,7 @@ _IDENTITY_FIELDS = frozenset({
     "source_digests", "receipt_id", "draft_id", "request_sha256",
     "source_inventory_complete", "source_inventory_reason",
 })
-_INVENTORY_REASONS = frozenset({"deadline", "collection-limit", "traversal"})
+_INVENTORY_REASONS = frozenset({"deadline", "collection-limit", "traversal", "unreadable-source"})
 MAX_CACHE_BYTES = GRAPH.MAX_RECEIPT_BYTES * 2
 
 

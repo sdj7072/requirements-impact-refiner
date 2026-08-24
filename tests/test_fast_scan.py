@@ -574,3 +574,40 @@ class DeriveSeedReadEfficiencyTest(unittest.TestCase):
                 len(calls), len(set(calls)) + 30,
                 f"{len(calls)} reads for {len(set(calls))} distinct files",
             )
+
+
+class InventoryCompletenessTest(unittest.TestCase):
+    """An unreadable regular source file means the inventory did not account
+    for content that exists; claiming complete would let promotion proceed
+    on unverified ground. Binary or non-UTF-8 files are legitimately outside
+    a text inventory."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name) / "repo"
+        self.root.mkdir()
+        (self.root / "ok.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    def test_permission_denied_source_marks_inventory_incomplete(self):
+        import os as _os
+        blocked = self.root / "blocked.py"
+        blocked.write_text("HIDDEN = 1\n", encoding="utf-8")
+        blocked.chmod(0o000)
+        self.addCleanup(lambda: blocked.chmod(0o644))
+
+        fast_scan = load_fast_scan()
+        inventory = fast_scan._inventory(self.root, FakeDeadline())
+
+        self.assertFalse(inventory.complete)
+        self.assertEqual(inventory.reason, "unreadable-source")
+        self.assertIn("ok.py", inventory.digests)
+
+    def test_binary_content_source_stays_complete(self):
+        (self.root / "weird.py").write_bytes(b"BIN\x00ARY")
+
+        fast_scan = load_fast_scan()
+        inventory = fast_scan._inventory(self.root, FakeDeadline())
+
+        self.assertTrue(inventory.complete)
+        self.assertEqual(sorted(inventory.digests), ["ok.py"])

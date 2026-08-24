@@ -388,6 +388,22 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
         'GITHUB_TOKEN := "walrus_leak"',
     )
 
+    WRAPPED_ASSIGNMENTS = (
+        ('token := []byte("real-secret-value")', "real-secret-value"),
+        ('password = map[string]string{"k": "real-secret-value"}',
+         "real-secret-value"),
+        ('API_KEY = os.getenv("FALLBACK", "real-secret-value")',
+         "real-secret-value"),
+        ('token = "first-secret" + "second-secret"', "second-secret"),
+    )
+
+    def test_wrapped_assignment_literals_are_redacted(self):
+        for line, secret in self.WRAPPED_ASSIGNMENTS:
+            with self.subTest(line=line):
+                safe_text, found = BUILTIN._redact_sensitive_literals(line)
+                self.assertNotIn(secret, safe_text, safe_text)
+                self.assertTrue(found)
+
     PRESERVED_ASSIGNMENTS = (
         'tokenizer = "whitespace"',
         'keyboard_layout = "qwerty"',
@@ -472,6 +488,28 @@ class EdgeKindClassificationTest(unittest.TestCase):
         self.assertEqual(
             directions[("billing.py", "tests/test_auth.py")],
             ("tests", "lexical"),
+        )
+
+    def test_imported_member_name_does_not_link_unrelated_module_file(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.py": (
+                    "from helpers import auth\n"
+                    "value = auth()\n"
+                ),
+                "helpers.py": "def auth():\n    return True\n",
+                "auth.py": 'UNRELATED = "auth"\n',
+            },
+            "auth",
+            "consumer.py",
+        )
+        self.assertEqual(
+            directions[("consumer.py", "helpers.py")],
+            ("imports", "structural-inferred"),
+        )
+        self.assertEqual(
+            directions[("consumer.py", "auth.py")],
+            ("references", "lexical"),
         )
 
     def test_import_resolution_rejects_substring_collisions(self):

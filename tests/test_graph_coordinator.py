@@ -623,3 +623,95 @@ class GraphCoordinatorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LimitedMergeDisclosureTest(unittest.TestCase):
+    """Merge compaction or provider disagreement must leave a visible
+    non-provider frontier entry: downstream promotion treats a frontier made
+    solely of provider-unavailable disclosures as complete coverage."""
+
+    def test_limited_merge_appends_coverage_frontier(self):
+        import tempfile
+        from pathlib import Path as _Path
+
+        original = COORDINATOR._merge_provider_results
+
+        def limited_merge(base, results):
+            nodes, edges, paths, frontier, _ = original(base, results)
+            return nodes, edges, paths, frontier, True
+
+        COORDINATOR._merge_provider_results = limited_merge
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = _Path(temporary)
+                (root / "api.py").write_text(
+                    'FIELD = "profile.displayName"\n', encoding="utf-8"
+                )
+                receipt = COORDINATOR.trace_impact(
+                    root,
+                    {"draft_id": "DRAFT-001", "request_sha256": "0" * 64,
+                     "request": "Rename profile.displayName"},
+                    (COORDINATOR.ScanSeed("profile.displayName", "api.py"),),
+                    {"enabled": True, "max_seconds": 30, "target_seconds": 10,
+                     "providers": ["auto"], "install_policy": "never",
+                     "deep": False},
+                )
+        finally:
+            COORDINATOR._merge_provider_results = original
+
+        reasons = [row.reason for row in receipt.frontier]
+        self.assertTrue(
+            any(reason.startswith("provider unavailable") for reason in reasons),
+            reasons,
+        )
+        self.assertEqual(receipt.budget_status, "provider_limited")
+        self.assertTrue(
+            any(not reason.startswith("provider unavailable") for reason in reasons),
+            reasons,
+        )
+
+
+class SeedRiskTokenizationTest(unittest.TestCase):
+    """Seed risk keywords must match whole identifier tokens: author.name,
+    statement.value, and rapid.value are not authorization, concurrency, or
+    interface risks."""
+
+    def test_substring_fragments_do_not_classify(self):
+        cases = {
+            "author.name": "authorization/privacy",
+            "statement.value": "state/concurrency",
+            "rapid.value": "interfaces",
+            "contest.entry": "regression",
+        }
+        for term, forbidden in cases.items():
+            with self.subTest(term=term):
+                domains = COORDINATOR._risk_domains(
+                    COORDINATOR.ScanSeed(term, "src/module.py")
+                )
+                self.assertNotIn(forbidden, domains, domains)
+
+    def test_true_signals_still_classify(self):
+        self.assertIn(
+            "authorization/privacy",
+            COORDINATOR._risk_domains(
+                COORDINATOR.ScanSeed("authorization.workspace_edit", "auth/authorize.py")
+            ),
+        )
+        self.assertIn(
+            "interfaces",
+            COORDINATOR._risk_domains(
+                COORDINATOR.ScanSeed("profile.displayName", "api/profile.py")
+            ),
+        )
+        self.assertIn(
+            "data",
+            COORDINATOR._risk_domains(
+                COORDINATOR.ScanSeed("cache.invalidate", "cache/store.py")
+            ),
+        )
+        self.assertIn(
+            "state/concurrency",
+            COORDINATOR._risk_domains(
+                COORDINATOR.ScanSeed("lock.acquire", "sync/mutex.py")
+            ),
+        )

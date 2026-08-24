@@ -79,7 +79,9 @@ class SourceInventory:
             (self.complete and self.reason is not None)
             or (
                 not self.complete
-                and self.reason not in {"deadline", "collection-limit", "traversal"}
+                and self.reason
+                not in {"deadline", "collection-limit", "traversal",
+                        "unreadable-source"}
             )
         ):
             raise ValueError("source inventory reason is invalid")
@@ -154,25 +156,47 @@ def _trace_identity(root, draft_id, request_sha256, seeds, settings, probes):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
+# Seed risk keywords match whole identifier tokens (camel boundaries
+# split), never substrings: author.name, statement.value, and rapid.value
+# must not classify as authorization, concurrency, or interface risks.
+_SEED_RISK_PATTERNS = {
+    "authorization/privacy": re.compile(
+        r"auth(?:z|n|orization|oriz\w+|entic\w+)?|oauth|permissions?|"
+        r"privacy|roles|access|acl|rbac"
+    ),
+    "legal/policy": re.compile(
+        r"legal|licenses?|licensing|policy|policies|compliance|terms"
+    ),
+    "data": re.compile(
+        r"schemas?|database|db|cached?|caches|persist\w*|profiles?|data"
+    ),
+    "interfaces": re.compile(r"apis?|contracts?|events?|clients?"),
+    "operations": re.compile(
+        r"deploy\w*|configs?|configuration|workers?|health|operations?"
+    ),
+    "state/concurrency": re.compile(
+        r"states?|stateful|concurr\w*|locks?|locking|locked|races?|"
+        r"retry|retries|idempot\w*|mutex"
+    ),
+    "regression": re.compile(r"regressions?|tests?|testing|conftest|fixtures?"),
+    "compatibility": re.compile(
+        r"compatibility|compat|backward|legacy|migrations?"
+    ),
+}
+_SEED_CAMEL_BOUNDARY = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
+
+
 def _risk_domains(seed: ScanSeed) -> tuple:
-    text = (seed.term + " " + (seed.location or "")).lower()
+    haystack = _SEED_CAMEL_BOUNDARY.sub(
+        " ", seed.term + " " + (seed.location or "")
+    ).lower()
+    tokens = {token for token in re.split(r"[^a-z0-9]+", haystack) if token}
     domains = set()
-    if any(term in text for term in ("auth", "permission", "privacy", "role", "access")):
-        domains.add("authorization/privacy")
-    if any(term in text for term in ("legal", "license", "policy", "compliance", "terms")):
-        domains.add("legal/policy")
-    if any(term in text for term in ("schema", "database", "cache", "persist", "profile", "data")):
-        domains.add("data")
-    if any(term in text for term in ("api", "contract", "event", "client")):
-        domains.add("interfaces")
-    if any(term in text for term in ("deploy", "config", "worker", "health", "operation")):
-        domains.add("operations")
-    if any(term in text for term in ("state", "concurrency", "lock", "race", "retry", "idempot")):
-        domains.add("state/concurrency")
-    if any(term in text for term in ("regression", "test", "fixture")):
-        domains.add("regression")
-    if any(term in text for term in ("compatibility", "backward", "legacy", "migration")):
-        domains.add("compatibility")
+    for domain, pattern in _SEED_RISK_PATTERNS.items():
+        if any(pattern.fullmatch(token) for token in tokens):
+            domains.add(domain)
     if not domains:
         domains.add("functionality")
     return tuple(sorted(domains, key=lambda item: (_RISK_RANK[item], item)))
@@ -924,6 +948,17 @@ def trace_impact(
         )
     nodes, edges, paths, frontier, limited = _merge_provider_results(scan, provider_results)
     frontier.extend(_unavailable_frontier(nodes, final_probes, provider_results))
+    if limited and nodes:
+        # Compaction or provider disagreement is a coverage gap; it must be
+        # visible even when provider-unavailable entries already exist,
+        # because promotion treats a frontier made solely of those
+        # disclosures as complete built-in coverage.
+        frontier.append(_frontier(
+            "FRONTIER-000", nodes[0].id,
+            "graph coverage remains incomplete: provider results were "
+            "compacted or disagreed",
+            nodes[0].risk_domains,
+        ))
     if not source_inventory.complete:
         if not nodes and normalized_seeds:
             nodes = [_placeholder(normalized_seeds[0], 1)]

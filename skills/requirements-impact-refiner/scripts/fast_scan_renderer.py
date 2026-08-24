@@ -6,15 +6,28 @@ AUDIENCES = {"simple", "balanced", "technical"}
 def _text(value):
     return (str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "&#124;").replace("\n", " "))
 
-def _bounded(body, footer, protected=""):
-    """Trim only the body; protected safety lines and the footer always
-    survive the word cap."""
-    words = body.split()
-    protected_words = protected.split()
+def _bounded_lines(lines, footer, protected=""):
+    """Assemble whole body lines under the word cap. The footer always
+    survives; protected safety text is word-trimmed only if it alone would
+    overflow; body lines are dropped whole, never cut mid-line, so technical
+    provenance stays intact."""
     footer_words = footer.split()
+    protected_words = protected.split()
+    safety_budget = max(0, WORD_LIMIT - len(footer_words))
+    if len(protected_words) > safety_budget:
+        protected_words = protected_words[:max(0, safety_budget - 1)] + ["…"]
     available = max(0, WORD_LIMIT - len(footer_words) - len(protected_words))
-    if len(words) > available: words = words[:max(0, available - 1)] + ["…"]
-    return " ".join(words + protected_words + footer_words)
+    kept = []
+    used = 0
+    for line in lines:
+        line_words = line.split()
+        if used + len(line_words) > available:
+            if kept:
+                kept.append("…")
+            break
+        kept.extend(line_words)
+        used += len(line_words)
+    return " ".join(kept + protected_words + footer_words)
 
 def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
     if audience not in AUDIENCES: raise ValueError("audience is invalid")
@@ -30,7 +43,7 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
     if status == "needs_input":
         candidates = receipt.get("candidates", [])
         listed = "; ".join(_text(row.get("term")) + (" (" + _text(row.get("location")) + ")" if row.get("location") else "") for row in candidates[:3]) or "no repository-backed candidate"
-        return _bounded("Fast impact scan needs more input. Candidate boundaries: " + listed + ".", footer)
+        return _bounded_lines(["Fast impact scan needs more input. Candidate boundaries: " + listed + "."], footer)
     graph = receipt.get("graph_receipt", {})
     nodes = {row.get("id"): row for row in graph.get("nodes", [])}
     edges = {row.get("id"): row for row in graph.get("edges", [])}
@@ -50,6 +63,6 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
         lines.append(line)
     frontier = receipt.get("frontier", [])
     protected = []
-    if frontier: protected.append("Unknown frontier: " + "; ".join(_text(row.get("reason", "unknown")) for row in frontier[:3]) + ".")
     if status == "partial": protected.append("Partial result: unknown impact may remain.")
-    return _bounded(" ".join(lines), footer, " ".join(protected))
+    if frontier: protected.append("Unknown frontier: " + "; ".join(_text(row.get("reason", "unknown")) for row in frontier[:3]) + ".")
+    return _bounded_lines(lines, footer, " ".join(protected))

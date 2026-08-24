@@ -69,9 +69,9 @@ _SENSITIVE_ASSIGNMENT = re.compile(
     r"credential)"
     r"(?:[_-][A-Za-z0-9]+|(?-i:[A-Z][A-Za-z0-9]*))*"
     r"(?P=keyquote)\s*(?::=|[:=])\s*)"
-    r"(?:(?P<quote>['\"])(?P<quoted>[^'\"\r\n]+)(?P=quote)|"
-    r"(?P<bare>[^\s,#}\]]+))"
+    r"(?P<rest>[^\r\n]+)"
 )
+_QUOTED_LITERAL = re.compile(r"(?P<q>['\"])(?P<value>[^'\"\r\n]+)(?P=q)")
 _COMMON_TERMS = frozenset({
     "assert", "class", "const", "def", "export", "from", "function",
     "import", "interface", "profile", "return", "static", "string", "struct",
@@ -230,15 +230,57 @@ def _safe_graph_text(value: str, sensitive_literals=()) -> str:
     return value
 
 
+def _value_expression_end(rest: str) -> int:
+    """Index where the credential's value expression ends: the first
+    top-level comma, closing brace/bracket, or comment start outside quotes,
+    tracking nesting so wrapped calls and container literals stay inside."""
+    depth = 0
+    quote = None
+    for index, char in enumerate(rest):
+        if quote is not None:
+            if char == quote:
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return index
+            depth -= 1
+        elif depth == 0 and char in ",#":
+            return index
+    return len(rest)
+
+
 def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
     sensitive = set()
 
     def replace(match):
-        value = match.group("quoted") or match.group("bare")
-        sensitive.add(value)
-        safe = _safe_graph_text(value, (value,))
-        quote = match.group("quote") or ""
-        return match.group("prefix") + quote + safe + quote
+        rest = match.group("rest")
+        span = _value_expression_end(rest)
+        value_text, remainder = rest[:span], rest[span:]
+
+        def redact_literal(literal):
+            value = literal.group("value")
+            sensitive.add(value)
+            quote = literal.group("q")
+            return quote + _safe_graph_text(value, (value,)) + quote
+
+        # Every quoted literal inside the credential's value expression is
+        # redacted, so wrapped forms — []byte("..."), map{...: "..."},
+        # getenv(_, "...") — cannot strand the secret; literals past the
+        # expression boundary (sibling JSON keys) are left intact.
+        redacted, quoted_count = _QUOTED_LITERAL.subn(redact_literal, value_text)
+        if quoted_count == 0:
+            bare = re.match(r"[^\s,#})\]]+", value_text)
+            if bare is None:
+                return match.group(0)
+            value = bare.group(0)
+            sensitive.add(value)
+            redacted = _safe_graph_text(value, (value,)) + value_text[bare.end():]
+        return match.group("prefix") + redacted + remainder
 
     return _SENSITIVE_ASSIGNMENT.sub(replace, text), frozenset(sensitive)
 
@@ -260,6 +302,23 @@ def _term_categories(text: str) -> Mapping[str, frozenset[str]]:
     return MappingProxyType({
         value: frozenset(categories[value]) for value in sorted(categories)
     })
+
+
+def _import_modules(text: str) -> frozenset[str]:
+    """Collapsed module-path tokens from import statements. Only these can
+    justify an imports edge: an imported member name (from helpers import
+    auth) must not structurally link an unrelated file carrying that name."""
+    modules = set()
+    for match in _IMPORT.finditer(text):
+        import_text = match.group("value")
+        if match.group(0).lstrip().startswith("from"):
+            import_text = import_text.split(" import ", 1)[0]
+        import_text = re.sub(r"\bas\s+\w+", " ", import_text)
+        for token in _DOTTED.findall(import_text) + _IDENTIFIER.findall(import_text):
+            collapsed = re.sub(r"[^a-z0-9]", "", token.lower())
+            if len(collapsed) >= 3:
+                modules.add(collapsed)
+    return frozenset(modules)
 
 
 def _terms(text: str) -> frozenset[str]:
@@ -380,15 +439,28 @@ def _import_resolves_to_target(target: str, evidence: str) -> bool:
     return collapsed_evidence in segments
 
 
+def _module_resolves_to_target(target: str, modules: frozenset[str]) -> bool:
+    stem = target.lower().rsplit("/", 1)[-1].split(".", 1)[0]
+    collapsed_stem = re.sub(r"[^a-z0-9]", "", stem)
+    if not collapsed_stem:
+        return False
+    segments = {part for part in re.split(r"[^a-z0-9]+", stem) if part}
+    return any(
+        module == collapsed_stem or module in segments or
+        module.endswith(collapsed_stem)
+        for module in modules
+    )
+
+
 def _edge_kind(
-    target: str, categories: frozenset[str], evidence: str
+    target: str, modules: frozenset[str], evidence: str
 ) -> tuple[str, str]:
-    resolves = _import_resolves_to_target(target, evidence)
     if _is_test_path(target):
         # A test-shaped filename alone is a lexical coincidence; structural
         # confidence additionally requires the evidence to name the target.
+        resolves = _import_resolves_to_target(target, evidence)
         return "tests", "structural-inferred" if resolves else "lexical"
-    if "import" in categories and resolves:
+    if _module_resolves_to_target(target, modules):
         return "imports", "structural-inferred"
     return "references", "lexical"
 
@@ -427,7 +499,7 @@ def scan_repository(
 
     skipped: dict[str, str] = {}
     traversal_errors: list[str] = []
-    documents: dict[str, tuple[str, frozenset[str], str, Mapping[str, frozenset[str]]]] = {}
+    documents: dict[str, tuple[str, frozenset[str], str, Mapping[str, frozenset[str]], frozenset[str]]] = {}
     sensitive_literals = set()
     bytes_scanned = 0
     files_scanned = 0
@@ -465,7 +537,7 @@ def scan_repository(
         categories = _term_categories(safe_text)
         documents[relative] = (
             safe_text, frozenset(categories), hashlib.sha256(payload).hexdigest(),
-            categories,
+            categories, _import_modules(safe_text),
         )
 
     if expired():
@@ -511,12 +583,12 @@ def scan_repository(
                 # — identical pick to the previous full sort, without paying
                 # an O(k log k) sort for every ordered file pair.
                 evidence = min(shared, key=lambda value: (-len(value), value))
-                categories = documents[source][3].get(evidence, frozenset())
-                relationships.append((source, target, evidence, categories))
+                modules = documents[source][4]
+                relationships.append((source, target, evidence, modules))
 
     reachable = set(seed_locations)
     reachable.update(
-        location for location, (_, terms, _, _) in documents.items()
+        location for location, (_, terms, _, _, _) in documents.items()
         if terms & seed_terms
     )
     changed = True
@@ -584,7 +656,7 @@ def scan_repository(
             risk = _risk_domains(seed.location, seed.term)
             node = GraphNode(node_id, "symbol", label, seed.location, "builtin", "lexical", None, risk)
         else:
-            text, _, digest, _ = documents[location]
+            text, _, digest, _, _ = documents[location]
             risk = _risk_domains(location, text)
             label = next((
                 _safe_graph_text(seed.term, sensitive_literals)
@@ -597,11 +669,11 @@ def scan_repository(
         node_risks[node_id] = risk
 
     edge_candidates = []
-    for source, target, evidence, categories in relationships:
+    for source, target, evidence, modules in relationships:
         if expired():
             return deadline_result(nodes)
         if source in location_ids and target in location_ids:
-            kind, confidence = _edge_kind(target, categories, evidence)
+            kind, confidence = _edge_kind(target, modules, evidence)
             edge_candidates.append((source, target, kind, confidence, evidence))
     edge_candidates.sort(key=lambda item: (location_ids[item[0]], location_ids[item[1]], item[2], item[4]))
     if len(edge_candidates) > limits.max_edges:

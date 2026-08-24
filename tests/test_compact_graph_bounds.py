@@ -103,6 +103,31 @@ class CompactGraphBoundsTest(unittest.TestCase):
             {"nodes": 0, "paths": 0, "frontier": 0},
         )
 
+    def test_node_cap_holds_even_when_deep_paths_demand_more(self):
+        receipt = big_receipt(node_count=474, path_count=0, frontier_count=40)
+        # 16 six-node chains over distinct nodes demand 96 required nodes
+        receipt["paths"] = [
+            {
+                "id": f"PATH-{i:03d}",
+                "nodes": [f"NODE-{(i * 6 + j):03d}" for j in range(6)],
+                "edges": [f"EDGE-{(i * 6 + j):03d}" for j in range(5)],
+                "distance": 5,
+                "risk_domains": ["operations"],
+            }
+            for i in range(16)
+        ]
+        compact = CONTROLLER._compact_graph(receipt)
+
+        self.assertLessEqual(len(compact["nodes"]), CONTROLLER.COMPACT_MAX_NODES)
+        kept = {row["key"] for row in compact["nodes"]}
+        for path in compact["paths"]:
+            for node in path["nodes"]:
+                self.assertIn(node["key"], kept)
+        for row in compact["frontier"]:
+            self.assertIn(row["node_key"], kept)
+        payload = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+        self.assertLessEqual(len(payload.encode("utf-8")), 24_000)
+
     def test_path_and_frontier_nodes_survive_truncation(self):
         compact = CONTROLLER._compact_graph(big_receipt())
         kept = {row["key"] for row in compact["nodes"]}
