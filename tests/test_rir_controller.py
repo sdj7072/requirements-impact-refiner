@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -2068,6 +2069,62 @@ class RirControllerTest(unittest.TestCase):
             metadata["graph_receipt"],
             {"receipt_id": receipt.receipt_id, "sha256": receipt.receipt_sha256},
         )
+
+    def test_public_flow_preserves_structured_long_mixed_provider_paths(self):
+        self.enable_builtin_graph()
+        (self.root / "events").mkdir()
+        (self.root / "events/profile.py").write_text("EVENT = True\n", encoding="utf-8")
+        config = json.loads((self.root / ".requirements-impact-refiner.json").read_text())
+        config["impact_graph"]["providers"] = ["codegraph", "scip"]
+        (self.root / ".requirements-impact-refiner.json").write_text(json.dumps(config), encoding="utf-8")
+        draft = CONTROLLER.begin_refinement(self.request(audience_override="technical"))
+
+        def fake_trace(root, graph_draft, seeds, graph_settings, **kwargs):
+            settings = CONTROLLER.GRAPH_COORDINATOR._settings(graph_settings)
+            providers = (
+                CONTROLLER.GRAPH.ProviderStatus("codegraph", "ready", "verified-provider"),
+                CONTROLLER.GRAPH.ProviderStatus("scip", "ready", "verified-provider"),
+            )
+            request_sha = CONTROLLER.GRAPH_COORDINATOR._request_sha256(graph_draft, seeds, settings)
+            receipt_id = CONTROLLER.GRAPH_COORDINATOR._trace_identity(root, graph_draft["draft_id"], request_sha, seeds, settings, providers)
+            digest = lambda path: hashlib.sha256((root / path).read_bytes()).hexdigest()
+            long_label = "<profile || `wire|field`> " + "long-label " * 40
+            receipt = CONTROLLER.GRAPH.GraphReceipt(
+                receipt_id, graph_draft["draft_id"], hashlib.sha256(str(root).encode()).hexdigest(), request_sha, settings, providers,
+                (
+                    CONTROLLER.GRAPH.GraphNode("NODE-001", "api_field", long_label, "api/profile.py", "codegraph", "verified-provider", digest("api/profile.py"), ("interfaces",)),
+                    CONTROLLER.GRAPH.GraphNode("NODE-002", "cache", "desktop cache", "desktop/profile_cache.ts", "codegraph", "verified-provider", digest("desktop/profile_cache.ts"), ("data",)),
+                    CONTROLLER.GRAPH.GraphNode("NODE-003", "event", "event consumer", "events/profile.py", "scip", "verified-provider", digest("events/profile.py"), ("operations",)),
+                ),
+                (
+                    CONTROLLER.GRAPH.GraphEdge("EDGE-001", "NODE-001", "NODE-002", "references", "desktop/profile_cache.ts", "wire", "verified-provider", "codegraph", digest("desktop/profile_cache.ts")),
+                    CONTROLLER.GRAPH.GraphEdge("EDGE-002", "NODE-001", "NODE-003", "publishes", "events/profile.py", "wire", "verified-provider", "scip", digest("events/profile.py")),
+                ),
+                (
+                    CONTROLLER.GRAPH.GraphPath("PATH-001", ("NODE-001", "NODE-002"), ("EDGE-001",), 1, ("interfaces", "data")),
+                    CONTROLLER.GRAPH.GraphPath("PATH-002", ("NODE-001", "NODE-003"), ("EDGE-002",), 1, ("interfaces", "operations")),
+                ), (), {"total": 8400}, "closed", {"status": "miss", "key": "0" * 64, "invalidated_nodes": []},
+            )
+            published = CONTROLLER.GRAPH_COORDINATOR.CACHE.publish(root, receipt, kwargs["source_inventory"].digests)
+            receipt = replace(receipt, cache={"status": "miss", "key": published.key, "invalidated_nodes": []})
+            CONTROLLER.GRAPH_COORDINATOR._persist_receipt(root, receipt)
+            return receipt
+
+        with mock.patch.object(CONTROLLER.GRAPH_COORDINATOR, "trace_impact", side_effect=fake_trace):
+            receipt = CONTROLLER.trace_impact(CONTROLLER.TraceRequest(self.root, draft.draft_id, (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),)))
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = ["PATH-001", "PATH-002"]
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
+        state = json.loads(result.state_path.read_text(encoding="utf-8"))
+        paths = state["graph_paths"][0]["paths"]
+        self.assertEqual(paths[0]["providers"], ["codegraph"])
+        self.assertEqual(paths[1]["providers"], ["codegraph", "scip"])
+        self.assertEqual(paths[1]["locations"], ["api/profile.py", "events/profile.py"])
+        self.assertIn("&#124;&#124;", result.display_text)
+        self.assertIn("provider codegraph; confidence verified-provider; location api/profile.py", result.display_text)
+        self.assertNotIn("<profile", result.display_text)
+        self.assertLessEqual(len(result.display_text.split()), 450)
 
     def test_finalize_accepts_supplied_only_unknown_with_rationale_and_frontier(self):
         self.enable_builtin_graph()
