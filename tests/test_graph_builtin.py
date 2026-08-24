@@ -478,3 +478,41 @@ class EdgeKindClassificationTest(unittest.TestCase):
             directions[("consumer.py", "narrative_docs.py")],
             ("references", "lexical"),
         )
+
+
+class SymlinkedParentTraversalTest(unittest.TestCase):
+    """The reader must refuse paths whose parent components are symlinks,
+    otherwise a directory swapped for a symlink between the walk check and
+    the read lands out-of-repo content in the receipt."""
+
+    def test_refuses_file_behind_symlinked_parent_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            repo = base / "repo"
+            outside = base / "outside"
+            repo.mkdir()
+            outside.mkdir()
+            (outside / "secret.py").write_text(
+                'LEAKED = "outside-the-repo"\n', encoding="utf-8"
+            )
+            (repo / "linkdir").symlink_to(outside)
+
+            payload, reason = BUILTIN._read_regular_file(
+                repo, "linkdir/secret.py", 1 << 20
+            )
+
+            self.assertIsNone(payload)
+            self.assertEqual(reason, "unsafe-file")
+
+    def test_still_reads_regular_files_through_real_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            (repo / "pkg").mkdir()
+            (repo / "pkg" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+            payload, reason = BUILTIN._read_regular_file(
+                repo, "pkg/module.py", 1 << 20
+            )
+
+            self.assertIsNone(reason)
+            self.assertEqual(payload, b"VALUE = 1\n")

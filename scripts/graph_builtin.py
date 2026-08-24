@@ -239,15 +239,35 @@ def _terms(text: str) -> frozenset[str]:
     return frozenset(_term_categories(text))
 
 
+def _open_below_root(root: Path, relative: str) -> int:
+    """Open relative under root with a per-component descriptor walk, so a
+    parent directory swapped for a symlink after the walk check cannot pull
+    out-of-repo content into the scan."""
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    file_flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        directory_flags |= os.O_NOFOLLOW
+        file_flags |= os.O_NOFOLLOW
+    parts = [part for part in relative.split("/") if part]
+    if not parts or any(part in {".", ".."} for part in parts):
+        raise ValueError("unsafe relative path")
+    parent = os.open(str(root), directory_flags)
+    try:
+        for part in parts[:-1]:
+            next_parent = os.open(part, directory_flags, dir_fd=parent)
+            os.close(parent)
+            parent = next_parent
+        return os.open(parts[-1], file_flags, dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
 def _read_regular_file(
-    path: Path, maximum: int, remaining: int | None = None,
+    root: Path, relative: str, maximum: int, remaining: int | None = None,
     read_allowed: bool = True,
 ) -> tuple[bytes | None, str | None]:
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
     try:
-        descriptor = os.open(str(path), flags)
+        descriptor = _open_below_root(root, relative)
     except (OSError, ValueError):
         return None, "unsafe-file"
     try:
@@ -386,7 +406,7 @@ def scan_repository(
             break
         remaining = limits.max_bytes - bytes_scanned
         payload, reason = _read_regular_file(
-            path, limits.max_file_bytes, remaining,
+            root, relative, limits.max_file_bytes, remaining,
             read_allowed=files_scanned < limits.max_files,
         )
         if reason is not None or payload is None:

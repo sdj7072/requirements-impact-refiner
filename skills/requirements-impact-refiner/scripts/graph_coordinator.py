@@ -336,7 +336,7 @@ def _collect_source_digests(root: Path, deadline: Deadline):
             return SourceInventory(digests, False, "deadline")
         remaining = 8_000_000 - total_bytes
         payload, reason = BUILTIN._read_regular_file(
-            path, BUILTIN.DEFAULT_MAX_FILE_BYTES, remaining,
+            root, relative, BUILTIN.DEFAULT_MAX_FILE_BYTES, remaining,
             read_allowed=files < 500,
         )
         if reason is not None or payload is None:
