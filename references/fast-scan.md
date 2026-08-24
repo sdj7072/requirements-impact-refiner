@@ -4,7 +4,7 @@ Use this reference for the default one-call impact preview.
 
 Call `rir_scan` once with `repo_root`, the user's exact change request, supplied evidence, and presentation mode. Return `display_text` verbatim. Do not rewrite paths, risks, provenance, candidates, frontier, timing, or cache status.
 
-`complete` means the bounded inventory and graph closed within 30 seconds. `partial` means known paths are useful but unknown impact remains. `needs_input` means no trustworthy repository-backed seed was available; show at most three returned candidates and ask for one concrete boundary.
+`complete` means the bounded inventory closed and the built-in graph finished its coverage within 30 seconds; unavailable optional external providers stay disclosed in the frontier and do not block promotion. `partial` means known paths are useful but unknown impact remains. `needs_input` means no trustworthy repository-backed seed was available; show at most three returned candidates and ask for one concrete boundary.
 
 High or critical risk never triggers detailed refinement automatically. `display_text` already ends with the refinement question, so return it verbatim and stop. If the user's next answer is no, stop. If yes, read `controller-workflow.md` and exactly one integration adapter, then call `rir_begin` with `scan_id`. The promoted draft already owns the graph receipt: do not call `rir_trace_impact`. Finalize once with the supplied `graph_receipt_id`.
 

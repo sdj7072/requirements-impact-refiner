@@ -455,3 +455,62 @@ class IgnoredDirectoryParityTest(unittest.TestCase):
         inventory = fast_scan._inventory(self.root, FakeDeadline())
 
         self.assertEqual(sorted(inventory.digests), ["src/app.py"])
+
+
+class PromotionReachabilityTest(unittest.TestCase):
+    """A scan whose built-in engine closed its bounded coverage must be
+    promotable even when no optional external provider is installed;
+    otherwise the documented rir_begin promotion path is unreachable on
+    every default install."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name) / "repo"
+        self.root.mkdir()
+        (self.root / "api").mkdir()
+        (self.root / "api" / "profile.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+
+    def test_provider_limited_scan_with_complete_inventory_is_promotable(self):
+        fast_scan = load_fast_scan()
+        graph = json.loads(
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(graph["budget_status"], "provider_limited")
+
+        result = fast_scan.execute_fast_scan(
+            fast_scan.FastScanRequest(
+                self.root, "Rename profile.displayName", (), "balanced"
+            ),
+            graph["settings"],
+            payload_sha256="a" * 64,
+            coordinator=lambda *args, **kwargs: graph,
+        )
+
+        self.assertEqual(result.status, "complete")
+        self.assertTrue(result.can_promote)
+
+    def test_budget_exhausted_scan_stays_partial(self):
+        fast_scan = load_fast_scan()
+        graph = json.loads(
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        graph["budget_status"] = "budget_exhausted"
+
+        result = fast_scan.execute_fast_scan(
+            fast_scan.FastScanRequest(
+                self.root, "Rename profile.displayName", (), "balanced"
+            ),
+            graph["settings"],
+            payload_sha256="a" * 64,
+            coordinator=lambda *args, **kwargs: graph,
+        )
+
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)

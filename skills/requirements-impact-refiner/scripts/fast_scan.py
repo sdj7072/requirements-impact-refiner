@@ -686,7 +686,16 @@ def execute_fast_scan(
             settings, deadline=deadline, source_inventory=source_inventory,
         ))
         receipt_id = graph["receipt_id"]
-        status = "complete" if graph.get("budget_status") == "closed" and source_inventory.complete else "partial"
+        # provider_limited means the built-in engine closed its bounded
+        # coverage and only optional external providers were unavailable;
+        # that gap is disclosed in the frontier and must not make the
+        # documented promotion path unreachable on default installs.
+        status = (
+            "complete"
+            if graph.get("budget_status") in ("closed", "provider_limited")
+            and source_inventory.complete
+            else "partial"
+        )
         risk_level = _risk(graph)
         cache_status = graph.get("cache", {}).get("status", "bypassed")
     elapsed = min(30_000, deadline.elapsed_ms())
