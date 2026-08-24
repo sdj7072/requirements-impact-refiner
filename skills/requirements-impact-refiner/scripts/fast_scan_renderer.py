@@ -18,6 +18,11 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
     footer = f"Coverage: {status}; {receipt.get('elapsed_ms', 0)} ms; cache {receipt.get('cache_status', 'bypassed')}."
     if status != "needs_input":
         footer += " Do you want detailed refinement?"
+    else:
+        footer += (
+            " Which file, symbol, or API is the concrete boundary of this"
+            " change?"
+        )
     if status == "needs_input":
         candidates = receipt.get("candidates", [])
         listed = "; ".join(_text(row.get("term")) + (" (" + _text(row.get("location")) + ")" if row.get("location") else "") for row in candidates[:3]) or "no repository-backed candidate"

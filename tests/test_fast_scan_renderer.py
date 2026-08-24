@@ -54,3 +54,23 @@ class FastScanRendererTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NeedsInputQuestionTest(unittest.TestCase):
+    """needs_input must end with a question, because the skill instructs the
+    agent to return display_text verbatim and stop; without one the
+    conversation dead-ends."""
+
+    def test_needs_input_asks_for_a_concrete_boundary(self):
+        renderer = load_renderer()
+        text = renderer.render_fast_scan(
+            {
+                "status": "needs_input",
+                "candidates": [],
+                "elapsed_ms": 9,
+                "cache_status": "bypassed",
+            },
+            "balanced",
+        )
+        self.assertTrue(text.rstrip().endswith("?"), text)
+        self.assertIn("boundary", text)
