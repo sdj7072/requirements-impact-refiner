@@ -23,7 +23,9 @@ BEGIN_KEYS = {
     "adapter",
     "audience_override",
     "delivery_override",
+    "scan_id",
 }
+SCAN_KEYS = {"change_request", "evidence", "presentation"}
 TRACE_KEYS = {"seeds"}
 TRACE_SEED_KEYS = {"term", "location"}
 
@@ -34,6 +36,11 @@ def build_parser():
     begin = subparsers.add_parser("begin")
     begin.add_argument("--repo-root", type=Path, required=True)
     begin.add_argument("--input", type=Path, required=True)
+    begin.add_argument("--scan-id")
+    scan = subparsers.add_parser("scan")
+    scan.add_argument("--repo-root", type=Path, required=True)
+    scan.add_argument("--input", type=Path, required=True)
+    scan.add_argument("--json", action="store_true")
     trace = subparsers.add_parser("trace")
     trace.add_argument("--repo-root", type=Path, required=True)
     trace.add_argument("--draft-id", required=True)
@@ -93,6 +100,7 @@ def _begin(args) -> int:
             adapter=value["adapter"],
             audience_override=value.get("audience_override"),
             delivery_override=value.get("delivery_override"),
+            scan_id=args.scan_id or value.get("scan_id"),
         )
     )
     payload = {
@@ -105,6 +113,8 @@ def _begin(args) -> int:
         "delivery": result.settings["delivery"],
         "prior_state": result.prior_state,
         "prior_key_map": result.prior_key_map,
+        "scan_id": result.scan_id,
+        "graph_receipt_id": result.graph_receipt_id,
         "repository_evidence": value["repository_evidence"],
         "analysis_contract": json.loads(
             (SCRIPT_DIR.parent / "schemas" / "controller-analysis.schema.json").read_text(
@@ -129,6 +139,39 @@ def _finalize(args) -> int:
         )
     )
     print(result.display_text, end="" if result.display_text.endswith("\n") else "\n")
+    return 0
+
+
+def _scan(args) -> int:
+    value = _read_object(args.input, rir_controller.MAX_BEGIN_BYTES, "scan input")
+    unknown = sorted(set(value) - SCAN_KEYS)
+    if unknown:
+        raise ValueError(f"unknown scan key {unknown[0]}")
+    if "change_request" not in value:
+        raise ValueError("missing scan key change_request")
+    evidence = value.get("evidence", [])
+    if not isinstance(evidence, list):
+        raise ValueError("scan evidence must be an array")
+    result = rir_controller.scan_impact(rir_controller.ScanRequest(
+        args.repo_root, value["change_request"], tuple(evidence),
+        value.get("presentation"),
+    ))
+    if args.json:
+        payload = {
+            "status": result.status, "scan_id": result.scan_id,
+            "receipt_id": result.receipt_id,
+            "receipt_sha256": result.receipt_sha256,
+            "display_text": result.display_text,
+            "risk_level": result.risk_level, "paths": list(result.paths),
+            "frontier": list(result.frontier),
+            "candidates": list(result.candidates),
+            "elapsed_ms": result.elapsed_ms,
+            "cache_status": result.cache_status,
+            "can_promote": result.can_promote,
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    else:
+        print(result.display_text, end="" if result.display_text.endswith("\n") else "\n")
     return 0
 
 
@@ -171,6 +214,8 @@ def _trace(args) -> int:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "scan":
+            return _scan(args)
         if args.command == "begin":
             return _begin(args)
         if args.command == "trace":

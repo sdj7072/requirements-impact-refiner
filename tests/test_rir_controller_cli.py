@@ -31,6 +31,7 @@ class RirControllerCliTest(unittest.TestCase):
         self.begin_path = input_root / "begin.json"
         self.analysis_path = input_root / "analysis.json"
         self.seeds_path = input_root / "seeds.json"
+        self.scan_path = input_root / "scan.json"
         self.begin_path.write_text(
             json.dumps(
                 {
@@ -52,6 +53,14 @@ class RirControllerCliTest(unittest.TestCase):
                     ]
                 }
             ),
+            encoding="utf-8",
+        )
+        self.scan_path.write_text(
+            json.dumps({
+                "change_request": "Rename profile.displayName",
+                "evidence": [],
+                "presentation": "balanced",
+            }),
             encoding="utf-8",
         )
 
@@ -108,6 +117,37 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertEqual(payload["report_id"], "RPT-001")
         self.assertEqual(payload["revision"], 1)
         self.assertEqual(payload["delivery"], "compact")
+
+    def test_scan_text_json_and_begin_promotion(self):
+        self.enable_graph_sources()
+        text_result = self.run_cli(
+            "scan", "--repo-root", self.root, "--input", self.scan_path
+        )
+        self.assertEqual(text_result.returncode, 0, text_result.stderr)
+        self.assertIn("Fast impact scan:", text_result.stdout)
+
+        json_result = self.run_cli(
+            "scan", "--repo-root", self.root, "--input", self.scan_path,
+            "--json",
+        )
+        payload = json.loads(json_result.stdout)
+        self.assertRegex(payload["scan_id"], r"^[0-9a-f]{32}$")
+        self.assertTrue(payload["display_text"].startswith("Fast impact scan:"))
+        self.assertIn("Coverage:", payload["display_text"])
+        self.assertEqual(payload["cache_status"], "hit")
+
+        self.begin_path.write_text(
+            json.dumps({
+                "request": "Rename profile.displayName",
+                "repository_evidence": [],
+                "adapter": "generic",
+            }),
+            encoding="utf-8",
+        )
+
+        begin_value = json.loads(self.begin("--scan-id", payload["scan_id"]).stdout)
+        self.assertEqual(begin_value["scan_id"], payload["scan_id"])
+        self.assertEqual(begin_value["graph_receipt_id"], payload["receipt_id"])
 
     def test_finalize_stdout_is_renderer_output_only(self):
         begin = json.loads(self.begin().stdout)

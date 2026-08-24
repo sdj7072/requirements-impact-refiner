@@ -64,19 +64,23 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual(
             [tool["name"] for tool in replies[1]["result"]["tools"]],
-            ["rir_begin", "rir_trace_impact", "rir_finalize"],
+            ["rir_scan", "rir_begin", "rir_trace_impact", "rir_finalize"],
         )
         for tool in replies[1]["result"]["tools"]:
             self.assertEqual(tool["inputSchema"]["additionalProperties"], False)
             self.assertIn("local", tool["description"].lower())
             self.assertIn("network", tool["description"].lower())
-        trace_schema = replies[1]["result"]["tools"][1]["inputSchema"]
+        scan_schema = replies[1]["result"]["tools"][0]["inputSchema"]
+        self.assertEqual(
+            scan_schema["required"], ["repo_root", "change_request"]
+        )
+        trace_schema = replies[1]["result"]["tools"][2]["inputSchema"]
         self.assertEqual(trace_schema["properties"]["seeds"]["items"]["additionalProperties"], False)
         self.assertEqual(
             trace_schema["properties"]["seeds"]["items"]["required"],
             ["term", "location"],
         )
-        finalize_schema = replies[1]["result"]["tools"][2]["inputSchema"]
+        finalize_schema = replies[1]["result"]["tools"][3]["inputSchema"]
         analysis = finalize_schema["properties"]["analysis"]
         self.assertEqual(analysis["additionalProperties"], False)
         self.assertIn("impacts", analysis["required"])
@@ -84,6 +88,52 @@ class RirMcpServerTest(unittest.TestCase):
         impact_properties = analysis["properties"]["impacts"]["items"]["properties"]
         self.assertIn("graph_path_keys", impact_properties)
         self.assertIn("coverage_rationale", impact_properties)
+
+    def test_scan_returns_renderer_text_and_structured_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_graph_config(root, True)
+            (root / "api").mkdir()
+            (root / "api/profile.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            replies = self.exchange([
+                request(1, "tools/call", {
+                    "name": "rir_scan",
+                    "arguments": {
+                        "repo_root": str(root),
+                        "change_request": "Rename profile.displayName",
+                        "evidence": [],
+                        "presentation": "balanced",
+                    },
+                })
+            ])
+            result = replies[0]["result"]
+            self.assertEqual(
+                result["content"][0]["text"],
+                result["structuredContent"]["display_text"],
+            )
+            self.assertRegex(
+                result["structuredContent"]["scan_id"], r"^[0-9a-f]{32}$"
+            )
+            promoted = self.exchange([
+                request(2, "tools/call", {
+                    "name": "rir_begin",
+                    "arguments": {
+                        "repo_root": str(root),
+                        "request": "Rename profile.displayName",
+                        "repository_evidence": [],
+                        "adapter": "generic",
+                        "scan_id": result["structuredContent"]["scan_id"],
+                    },
+                })
+            ])[0]["result"]["structuredContent"]
+            self.assertEqual(
+                promoted["graph_receipt_id"],
+                result["structuredContent"]["receipt_id"],
+            )
+            rules = " ".join(promoted["semantic_rules"])
+            self.assertIn("do not call rir_trace_impact", rules)
 
     def test_begin_and_finalize_tools_share_controller_state(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -336,7 +386,7 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertLess(len(json.dumps(replies[0])), 2048)
         self.assertEqual(
             [tool["name"] for tool in replies[1]["result"]["tools"]],
-            ["rir_begin", "rir_trace_impact", "rir_finalize"],
+            ["rir_scan", "rir_begin", "rir_trace_impact", "rir_finalize"],
         )
 
     @unittest.skipIf(fcntl is None, "requires POSIX flock")

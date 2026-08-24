@@ -46,6 +46,16 @@ def _expand_schema(schema, root):
 
 EXPANDED_ANALYSIS_SCHEMA = _expand_schema(ANALYSIS_SCHEMA, ANALYSIS_SCHEMA)
 
+SCAN_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["repo_root", "change_request"],
+    "properties": {
+        "repo_root": {"type": "string", "minLength": 1},
+        "change_request": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "evidence": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+        "presentation": {"enum": ["simple", "balanced", "technical"]},
+    },
+}
 
 BEGIN_SCHEMA = {
     "type": "object",
@@ -58,6 +68,7 @@ BEGIN_SCHEMA = {
         "adapter": {"enum": ["generic", "superpowers", "claude-feature-dev", "spec-kit"]},
         "audience_override": {"type": ["string", "null"], "enum": ["simple", "balanced", "technical", None]},
         "delivery_override": {"type": ["string", "null"], "enum": ["compact", "full", None]},
+        "scan_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{32}$"},
     },
 }
 TRACE_SCHEMA = {
@@ -98,6 +109,7 @@ FINALIZE_SCHEMA = {
     },
 }
 TOOLS = [
+    {"name": "rir_scan", "description": "Run one bounded local, network-free Fast Scan without automatic detailed refinement.", "inputSchema": SCAN_SCHEMA},
     {
         "name": "rir_begin",
         "description": "Create a local, network-free, repository-bound impact-refinement draft before analysis; data stays in the isolated workspace.",
@@ -199,6 +211,7 @@ def _begin(arguments):
             adapter=arguments["adapter"],
             audience_override=arguments.get("audience_override"),
             delivery_override=arguments.get("delivery_override"),
+            scan_id=arguments.get("scan_id"),
         )
     )
     root = Path(arguments["repo_root"]).resolve()
@@ -295,7 +308,11 @@ def _begin(arguments):
         },
         "analysis_contract": EXPANDED_ANALYSIS_SCHEMA,
         "semantic_rules": [
-            "when settings.impact_graph.enabled is true, call rir_trace_impact exactly once before finalize and return its graph_receipt_id unchanged",
+            (
+                "this promoted Fast Scan already supplies graph_receipt_id; do not call rir_trace_impact and return the supplied ID unchanged to finalize"
+                if result.scan_id is not None
+                else "when settings.impact_graph.enabled is true, call rir_trace_impact exactly once before finalize and return its graph_receipt_id unchanged"
+            ),
             "every graph-enabled impact requires receipt-local graph_path_keys or supplied-only unknown coverage_rationale without upgrading evidence confidence",
             "pre-decision requires decision_needed with two or three options and decisions must be empty",
             "post-decision requires decision_needed null and at least one explicit decision",
@@ -307,6 +324,8 @@ def _begin(arguments):
             "reassess every carry_forward_impacts row; when new evidence changes the same risk, reuse its key and change its state so terminal-to-active Delta is reopened; create a new key only for a distinct risk",
         ],
         "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
+        "scan_id": result.scan_id,
+        "graph_receipt_id": result.graph_receipt_id,
     }
     return {
         "content": [{"type": "text", "text": json.dumps(structured, ensure_ascii=False, sort_keys=True)}],
@@ -341,6 +360,26 @@ def _finalize(arguments):
         "structuredContent": structured,
         "isError": False,
     }
+
+
+def _scan(arguments):
+    _validate_arguments(arguments, SCAN_SCHEMA, "rir_scan")
+    result = rir_controller.scan_impact(rir_controller.ScanRequest(
+        Path(arguments["repo_root"]), arguments["change_request"],
+        tuple(arguments.get("evidence", [])), arguments.get("presentation"),
+    ))
+    structured = {
+        "status": result.status, "scan_id": result.scan_id,
+        "receipt_id": result.receipt_id,
+        "receipt_sha256": result.receipt_sha256,
+        "display_text": result.display_text,
+        "risk_level": result.risk_level,
+        "paths": list(result.paths), "frontier": list(result.frontier),
+        "candidates": list(result.candidates), "elapsed_ms": result.elapsed_ms,
+        "cache_status": result.cache_status, "can_promote": result.can_promote,
+    }
+    return {"content": [{"type": "text", "text": result.display_text}],
+            "structuredContent": structured, "isError": False}
 
 
 def _trace(arguments):
@@ -399,7 +438,9 @@ def handle(message):
     name = params.get("name")
     arguments = params.get("arguments")
     try:
-        if name == "rir_begin":
+        if name == "rir_scan":
+            result = _scan(arguments)
+        elif name == "rir_begin":
             result = _begin(arguments)
         elif name == "rir_trace_impact":
             result = _trace(arguments)
