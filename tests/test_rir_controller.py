@@ -566,7 +566,7 @@ class RirControllerTest(unittest.TestCase):
                 real_write_component = (
                     CONTROLLER._write_private_transaction_component
                 )
-                real_rename = CONTROLLER.os.rename
+                real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
                 interrupted = False
 
@@ -610,9 +610,9 @@ class RirControllerTest(unittest.TestCase):
                         raise SimulatedProcessInterruption(phase)
                     return result
 
-                def interrupting_rename(source, destination, **kwargs):
+                def interrupting_rename(directory_fd, source, destination):
                     nonlocal interrupted
-                    result = real_rename(source, destination, **kwargs)
+                    result = real_rename(directory_fd, source, destination)
                     if (
                         not interrupted
                         and boundary == "quarantine"
@@ -646,7 +646,7 @@ class RirControllerTest(unittest.TestCase):
                     "_write_private_transaction_component",
                     side_effect=interrupting_write,
                 ), mock.patch.object(
-                    CONTROLLER.os, "rename", side_effect=interrupting_rename
+                    CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
                 ), mock.patch.object(
                     CONTROLLER.os, "unlink", side_effect=interrupting_unlink
                 ):
@@ -807,7 +807,7 @@ class RirControllerTest(unittest.TestCase):
                         f"foreign-{target_kind}-{replacement_kind}".encode("utf-8")
                     )
                     real_write = CONTROLLER._write_private_transaction_component
-                    real_rename = CONTROLLER.os.rename
+                    real_rename = CONTROLLER._rename_noreplace
                     real_unlink = CONTROLLER.os.unlink
                     inserted = False
 
@@ -828,14 +828,14 @@ class RirControllerTest(unittest.TestCase):
                         )
                         inserted = True
 
-                    def replacing_rename(source, destination, **kwargs):
+                    def replacing_rename(directory_fd, source, destination):
                         if (
                             not inserted
                             and source == target_name
                             and str(destination).endswith(".removing")
                         ):
-                            install(kwargs["src_dir_fd"])
-                        return real_rename(source, destination, **kwargs)
+                            install(directory_fd)
+                        return real_rename(directory_fd, source, destination)
 
                     def replacing_unlink(path, **kwargs):
                         if not inserted and path == target_name:
@@ -849,7 +849,7 @@ class RirControllerTest(unittest.TestCase):
                         "_write_private_transaction_component",
                         side_effect=fail_manifest,
                     ), mock.patch.object(
-                        CONTROLLER.os, "rename", side_effect=replacing_rename
+                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
                     ), mock.patch.object(
                         CONTROLLER.os, "unlink", side_effect=replacing_unlink
                     ):
@@ -1209,7 +1209,7 @@ class RirControllerTest(unittest.TestCase):
                 outside = self.root / f"guard-outside-{replacement_kind}"
                 outside.write_bytes(b"outside-safe")
                 foreign = f"foreign-{replacement_kind}".encode("utf-8")
-                real_rename = CONTROLLER.os.rename
+                real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
                 inserted = False
                 committed = False
@@ -1227,14 +1227,14 @@ class RirControllerTest(unittest.TestCase):
                     )
                     inserted = True
 
-                def replacing_rename(source, destination, **kwargs):
+                def replacing_rename(directory_fd, source, destination):
                     if (
                         not inserted
                         and source == filename
                         and str(destination).endswith(".removing")
                     ):
-                        install(kwargs["src_dir_fd"])
-                    return real_rename(source, destination, **kwargs)
+                        install(directory_fd)
+                    return real_rename(directory_fd, source, destination)
 
                 def replacing_unlink(selected, **kwargs):
                     if not inserted and selected == filename:
@@ -1246,7 +1246,7 @@ class RirControllerTest(unittest.TestCase):
                     committed = True
 
                 with mock.patch.object(
-                    CONTROLLER.os, "rename", side_effect=replacing_rename
+                    CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
                 ), mock.patch.object(
                     CONTROLLER.os, "unlink", side_effect=replacing_unlink
                 ):
@@ -1281,7 +1281,7 @@ class RirControllerTest(unittest.TestCase):
                 outside.write_bytes(b"outside-safe")
                 foreign = f"recovery-foreign-{replacement_kind}".encode("utf-8")
                 real_unlink = CONTROLLER.os.unlink
-                real_rename = CONTROLLER.os.rename
+                real_rename = CONTROLLER._rename_noreplace
                 interrupted = False
 
                 def interrupt_stale_quarantine(selected, **kwargs):
@@ -1292,7 +1292,7 @@ class RirControllerTest(unittest.TestCase):
                     return real_unlink(selected, **kwargs)
 
                 def interrupt_stale_quarantine_rename(
-                    source, destination, **kwargs
+                    directory_fd, source, destination
                 ):
                     nonlocal interrupted
                     if (
@@ -1304,15 +1304,15 @@ class RirControllerTest(unittest.TestCase):
                         raise SimulatedProcessInterruption(
                             "recovery guard prepared"
                         )
-                    return real_rename(source, destination, **kwargs)
+                    return real_rename(directory_fd, source, destination)
 
                 with mock.patch.object(
                     CONTROLLER.os,
                     "unlink",
                     side_effect=interrupt_stale_quarantine,
                 ), mock.patch.object(
-                    CONTROLLER.os,
-                    "rename",
+                    CONTROLLER,
+                    "_rename_noreplace",
                     side_effect=interrupt_stale_quarantine_rename,
                 ):
                     with self.assertRaises(SimulatedProcessInterruption):
@@ -1341,14 +1341,14 @@ class RirControllerTest(unittest.TestCase):
                     )
                     inserted = True
 
-                def replacing_rename(source, destination, **kwargs):
+                def replacing_rename(directory_fd, source, destination):
                     if (
                         not inserted
                         and source == filename
                         and str(destination).endswith(".removing")
                     ):
-                        install(kwargs["src_dir_fd"])
-                    return real_rename(source, destination, **kwargs)
+                        install(directory_fd)
+                    return real_rename(directory_fd, source, destination)
 
                 def replacing_unlink(selected, **kwargs):
                     if not inserted and selected == filename:
@@ -1356,7 +1356,7 @@ class RirControllerTest(unittest.TestCase):
                     return real_unlink(selected, **kwargs)
 
                 with mock.patch.object(
-                    CONTROLLER.os, "rename", side_effect=replacing_rename
+                    CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
                 ), mock.patch.object(
                     CONTROLLER.os, "unlink", side_effect=replacing_unlink
                 ):
@@ -1395,7 +1395,7 @@ class RirControllerTest(unittest.TestCase):
                     directory_fd, name, 1024, "test transaction component"
                 )
                 self.assertIsNotNone(component)
-                real_rename = CONTROLLER.os.rename
+                real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
                 inserted = False
 
@@ -1411,14 +1411,14 @@ class RirControllerTest(unittest.TestCase):
                     )
                     inserted = True
 
-                def replacing_rename(source, destination, **kwargs):
+                def replacing_rename(directory_fd, source, destination):
                     if (
                         not inserted
                         and source == name
                         and str(destination).endswith(".removing")
                     ):
                         install()
-                    return real_rename(source, destination, **kwargs)
+                    return real_rename(directory_fd, source, destination)
 
                 def replacing_unlink(path, **kwargs):
                     if not inserted and path == name:
@@ -1427,7 +1427,7 @@ class RirControllerTest(unittest.TestCase):
 
                 try:
                     with mock.patch.object(
-                        CONTROLLER.os, "rename", side_effect=replacing_rename
+                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
                     ), mock.patch.object(
                         CONTROLLER.os, "unlink", side_effect=replacing_unlink
                     ):
@@ -1453,6 +1453,135 @@ class RirControllerTest(unittest.TestCase):
                     self.assertTrue(selected.is_symlink())
                     self.assertEqual(outside.read_bytes(), b"outside-safe")
 
+    def test_noreplace_quarantine_claim_preserves_regular_destination(self):
+        directory = self.root / "noreplace-regular"
+        directory.mkdir()
+        source = directory / "source.phase"
+        destination = directory / "source.phase.removing"
+        source.write_bytes(b"exact-source")
+        destination.write_bytes(b"foreign-destination")
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        directory_fd = os.open(directory, flags)
+        try:
+            self.assertTrue(
+                hasattr(CONTROLLER, "_rename_noreplace"),
+                "cleanup needs an exclusive no-clobber quarantine claim",
+            )
+            with self.assertRaises(FileExistsError):
+                CONTROLLER._rename_noreplace(
+                    directory_fd, source.name, destination.name
+                )
+        finally:
+            os.close(directory_fd)
+
+        self.assertEqual(source.read_bytes(), b"exact-source")
+        self.assertEqual(destination.read_bytes(), b"foreign-destination")
+
+    def test_noreplace_quarantine_claim_preserves_symlink_destination(self):
+        directory = self.root / "noreplace-symlink"
+        directory.mkdir()
+        source = directory / "source.phase"
+        destination = directory / "source.phase.removing"
+        outside = self.root / "noreplace-outside"
+        source.write_bytes(b"exact-source")
+        outside.write_bytes(b"outside-safe")
+        os.symlink(outside, destination)
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        directory_fd = os.open(directory, flags)
+        try:
+            self.assertTrue(
+                hasattr(CONTROLLER, "_rename_noreplace"),
+                "cleanup needs an exclusive no-clobber quarantine claim",
+            )
+            with self.assertRaises(FileExistsError):
+                CONTROLLER._rename_noreplace(
+                    directory_fd, source.name, destination.name
+                )
+        finally:
+            os.close(directory_fd)
+
+        self.assertEqual(source.read_bytes(), b"exact-source")
+        self.assertTrue(destination.is_symlink())
+        self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def _assert_quarantine_destination_race_is_no_clobber(self, replacement_kind):
+        directory = self.root / f"quarantine-race-{replacement_kind}"
+        directory.mkdir()
+        name = "component.phase"
+        removing_name = f"{name}.removing"
+        selected = directory / name
+        destination = directory / removing_name
+        outside = self.root / f"quarantine-race-outside-{replacement_kind}"
+        exact = b"exact-transaction-component"
+        foreign = f"foreign-destination-{replacement_kind}".encode("utf-8")
+        selected.write_bytes(exact)
+        selected.chmod(0o600)
+        outside.write_bytes(b"outside-safe")
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        directory_fd = os.open(directory, flags)
+        component = CONTROLLER._open_optional_transaction_component(
+            directory_fd, name, 1024, "test transaction component"
+        )
+        self.assertIsNotNone(component)
+        real_claim = CONTROLLER._rename_noreplace
+        inserted = False
+
+        def insert_at_destination_window(claim_fd, source, destination_name):
+            nonlocal inserted
+            self.assertEqual(claim_fd, directory_fd)
+            self.assertEqual(source, name)
+            self.assertEqual(destination_name, removing_name)
+            self._install_cleanup_replacement(
+                replacement_kind,
+                removing_name,
+                directory_fd,
+                outside,
+                foreign,
+            )
+            inserted = True
+            return real_claim(claim_fd, source, destination_name)
+
+        try:
+            with mock.patch.object(
+                CONTROLLER,
+                "_rename_noreplace",
+                side_effect=insert_at_destination_window,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "quarantined|already exists|uncertain"
+                ):
+                    CONTROLLER._unlink_transaction_component(
+                        directory_fd,
+                        name,
+                        component,
+                        exact,
+                        1024,
+                        "test transaction component",
+                    )
+        finally:
+            os.close(component[0])
+            os.close(directory_fd)
+
+        self.assertTrue(inserted)
+        self.assertEqual(selected.read_bytes(), exact)
+        if replacement_kind == "regular":
+            self.assertEqual(destination.read_bytes(), foreign)
+        else:
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def test_transaction_quarantine_does_not_clobber_late_regular_destination(self):
+        self._assert_quarantine_destination_race_is_no_clobber("regular")
+
+    def test_transaction_quarantine_does_not_clobber_late_symlink_destination(self):
+        self._assert_quarantine_destination_race_is_no_clobber("symlink")
+
     def test_transaction_component_write_failure_preserves_cleanup_replacement(self):
         for index, replacement_kind in enumerate(("regular", "symlink")):
             with self.subTest(replacement_kind=replacement_kind):
@@ -1468,7 +1597,7 @@ class RirControllerTest(unittest.TestCase):
                 if hasattr(os, "O_NOFOLLOW"):
                     flags |= os.O_NOFOLLOW
                 directory_fd = os.open(directory, flags)
-                real_rename = CONTROLLER.os.rename
+                real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
                 inserted = False
 
@@ -1484,14 +1613,14 @@ class RirControllerTest(unittest.TestCase):
                     )
                     inserted = True
 
-                def replacing_rename(source, destination, **kwargs):
+                def replacing_rename(directory_fd, source, destination):
                     if (
                         not inserted
                         and source == name
                         and str(destination).endswith(".removing")
                     ):
                         install()
-                    return real_rename(source, destination, **kwargs)
+                    return real_rename(directory_fd, source, destination)
 
                 def replacing_unlink(path, **kwargs):
                     if not inserted and path == name:
@@ -1504,7 +1633,7 @@ class RirControllerTest(unittest.TestCase):
                         "fsync",
                         side_effect=OSError("injected component fsync failure"),
                     ), mock.patch.object(
-                        CONTROLLER.os, "rename", side_effect=replacing_rename
+                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
                     ), mock.patch.object(
                         CONTROLLER.os, "unlink", side_effect=replacing_unlink
                     ):
@@ -1567,7 +1696,7 @@ class RirControllerTest(unittest.TestCase):
                 outside.write_bytes(b"outside-safe")
                 foreign = b"foreign-late-receipt"
                 real_unlink = CONTROLLER.os.unlink
-                real_rename = CONTROLLER.os.rename
+                real_rename = CONTROLLER._rename_noreplace
                 inserted = False
 
                 def insert_receipt_replacement(directory_fd):
@@ -1603,20 +1732,20 @@ class RirControllerTest(unittest.TestCase):
                         insert_receipt_replacement(kwargs["dir_fd"])
                     return real_unlink(path, **kwargs)
 
-                def insert_at_late_rename(source, destination, **kwargs):
-                    result = real_rename(source, destination, **kwargs)
+                def insert_at_late_rename(directory_fd, source, destination):
+                    result = real_rename(directory_fd, source, destination)
                     if (
                         not inserted
                         and str(source).endswith(".stale")
                         and str(destination).endswith(".removing")
                     ):
-                        insert_receipt_replacement(kwargs["dst_dir_fd"])
+                        insert_receipt_replacement(directory_fd)
                     return result
 
                 with mock.patch.object(
                     CONTROLLER.os, "unlink", side_effect=insert_at_late_window
                 ), mock.patch.object(
-                    CONTROLLER.os, "rename", side_effect=insert_at_late_rename
+                    CONTROLLER, "_rename_noreplace", side_effect=insert_at_late_rename
                 ):
                     with self.assertRaisesRegex(
                         ValueError, "cleanup.*replacement|cleanup.*uncertain"
@@ -1678,7 +1807,7 @@ class RirControllerTest(unittest.TestCase):
             'FIELD = "profile.displayName"\n', encoding="utf-8"
         )
         real_unlink = CONTROLLER.os.unlink
-        real_rename = CONTROLLER.os.rename
+        real_rename = CONTROLLER._rename_noreplace
         interrupted = False
 
         def interrupt_before_quarantine_cleanup(path, **kwargs):
@@ -1688,7 +1817,7 @@ class RirControllerTest(unittest.TestCase):
                 raise SimulatedProcessInterruption("stale-cleanup-guard")
             return real_unlink(path, **kwargs)
 
-        def interrupt_before_quarantine_rename(source, destination, **kwargs):
+        def interrupt_before_quarantine_rename(directory_fd, source, destination):
             nonlocal interrupted
             if (
                 not interrupted
@@ -1697,15 +1826,15 @@ class RirControllerTest(unittest.TestCase):
             ):
                 interrupted = True
                 raise SimulatedProcessInterruption("stale-cleanup-guard")
-            return real_rename(source, destination, **kwargs)
+            return real_rename(directory_fd, source, destination)
 
         with mock.patch.object(
             CONTROLLER.os,
             "unlink",
             side_effect=interrupt_before_quarantine_cleanup,
         ), mock.patch.object(
-            CONTROLLER.os,
-            "rename",
+            CONTROLLER,
+            "_rename_noreplace",
             side_effect=interrupt_before_quarantine_rename,
         ):
             with self.assertRaises(SimulatedProcessInterruption):

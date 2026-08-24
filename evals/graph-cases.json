@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "GRAPH-api-mobile-cache-migration",
+      "kind": "positive",
+      "request": "Change the public profile field profile.displayName to profile.name and refine every transitive impact before implementation.",
+      "repository_evidence": ["api/profile.py publishes the profile field", "mobile/profile_decoder.swift decodes it", "cache/profile_cache.ts persists the mobile model", "tests/test_profile_cache_migration.py protects old cache migration"],
+      "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
+      "required_nodes": [
+        {"location": "api/profile.py", "kind": "api_field", "label": "profile.displayName", "risk_domains": ["interfaces"]},
+        {"location": "mobile/profile_decoder.swift", "kind": "api_field", "label": "mobile decoder", "risk_domains": ["interfaces", "compatibility"]},
+        {"location": "cache/profile_cache.ts", "kind": "cache", "label": "persisted profile cache", "risk_domains": ["state/concurrency"]},
+        {"location": "tests/test_profile_cache_migration.py", "kind": "test", "label": "cache migration fixture", "risk_domains": ["data", "regression"]}
+      ],
+      "required_edge_types": ["references", "references", "tests"],
+      "minimum_path_distance": 3,
+      "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["calls", "implements"]}],
+      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "unknown_frontier_expected": false,
+      "compact_output_phrases": ["Impact scan:", "Impact paths:"],
+      "controller_required": true,
+      "fixture_files": [
+        {"path": "api/profile.py", "content": "PROFILE_FIELD = \"profile.displayName\"\nMOBILE_LINK = \"profile.mobile.decoder\"\n"},
+        {"path": "mobile/profile_decoder.swift", "content": "let dtoModel = \"ProfileDTO\"\nlet decoder = \"profile.mobile.decoder\"\nlet nextLink = \"profile.persist.stage\"\n"},
+        {"path": "cache/profile_cache.ts", "content": "export const nextLink = \"profile.persist.stage\";\nexport const finalLink = \"profile.legacy.stage\";\n"},
+        {"path": "tests/test_profile_cache_migration.py", "content": "MIGRATION_LINK = \"profile.legacy.stage\"\n"}
+      ]
+    },
+    {
+      "id": "GRAPH-auth-role-audit-consumer",
+      "kind": "positive",
+      "request": "Change authorization helper authorization.workspace_edit and refine effects on default roles, audit events, and consumers.",
+      "repository_evidence": ["auth/authorize.py owns the helper", "roles/default_role.py assigns the member default", "events/audit_role.py publishes the decision", "consumers/audit_sink.py consumes it"],
+      "seeds": [{"term": "authorization.workspace_edit", "location": "auth/authorize.py"}],
+      "required_nodes": [
+        {"location": "auth/authorize.py", "kind": "permission", "label": "authorization helper", "risk_domains": ["authorization/privacy"]},
+        {"location": "roles/default_role.py", "kind": "permission", "label": "default role", "risk_domains": ["authorization/privacy"]},
+        {"location": "events/audit_role.py", "kind": "permission", "label": "audit event", "risk_domains": ["authorization/privacy", "operations"]},
+        {"location": "consumers/audit_sink.py", "kind": "file", "label": "downstream audit consumer", "risk_domains": ["operations"]}
+      ],
+      "required_edge_types": ["references", "references", "references"],
+      "minimum_path_distance": 3,
+      "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["calls", "authorizes"]}],
+      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "unknown_frontier_expected": false,
+      "compact_output_phrases": ["Impact scan:", "Impact paths:"],
+      "controller_required": true,
+      "fixture_files": [
+        {"path": "auth/authorize.py", "content": "HELPER = \"authorization.workspace_edit\"\nROLE_LINK = \"authorization.default.role\"\n"},
+        {"path": "roles/default_role.py", "content": "ROLE_LINK = \"authorization.default.role\"\nAUDIT_LINK = \"authorization.audit.event\"\n"},
+        {"path": "events/audit_role.py", "content": "AUDIT_LINK = \"authorization.audit.event\"\nCONSUMER_LINK = \"audit.consumer.sink\"\n"},
+        {"path": "consumers/audit_sink.py", "content": "CONSUMER_LINK = \"audit.consumer.sink\"\nQUEUE_KIND = \"audit.queue.sink\"\n"}
+      ]
+    },
+    {
+      "id": "GRAPH-event-retry-idempotency-side-effect",
+      "kind": "positive",
+      "request": "Change event billing.payment_captured and refine effects through retry, idempotency, and billing notification side effects.",
+      "repository_evidence": ["events/payment_publisher.py publishes", "queue/payment_retry.py retries", "state/payment_idempotency.py deduplicates", "billing/notify_receipt.py produces the side effect"],
+      "seeds": [{"term": "billing.payment_captured", "location": "events/payment_publisher.py"}],
+      "required_nodes": [
+        {"location": "events/payment_publisher.py", "kind": "event", "label": "event publisher", "risk_domains": ["operations"]},
+        {"location": "queue/payment_retry.py", "kind": "file", "label": "retry queue", "risk_domains": ["operations"]},
+        {"location": "state/payment_idempotency.py", "kind": "file", "label": "idempotency store", "risk_domains": ["state/concurrency"]},
+        {"location": "billing/notify_receipt.py", "kind": "file", "label": "billing notification side effect", "risk_domains": ["functionality"]}
+      ],
+      "required_edge_types": ["references", "references", "references"],
+      "minimum_path_distance": 3,
+      "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["calls", "publishes", "subscribes"]}],
+      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "unknown_frontier_expected": false,
+      "compact_output_phrases": ["Impact scan:", "Impact paths:"],
+      "controller_required": true,
+      "fixture_files": [
+        {"path": "events/payment_publisher.py", "content": "EVENT = \"billing.payment_captured\"\nRETRY_LINK = \"billing.payment.retry\"\n"},
+        {"path": "queue/payment_retry.py", "content": "RETRY_LINK = \"billing.payment.retry\"\nIDEMPOTENCY_LINK = \"billing.payment.idempotency\"\n"},
+        {"path": "state/payment_idempotency.py", "content": "IDEMPOTENCY_LINK = \"billing.payment.idempotency\"\nSIDE_EFFECT_LINK = \"billing.payment.notification\"\n"},
+        {"path": "billing/notify_receipt.py", "content": "SIDE_EFFECT_LINK = \"billing.payment.notification\"\n"}
+      ]
+    },
+    {
+      "id": "GRAPH-schema-serializer-backfill-export",
+      "kind": "positive",
+      "request": "Change schema key account.external_id and refine effects through serialization, database backfill, and exported reports.",
+      "repository_evidence": ["schema/account.json declares the key", "serialize/account_serializer.py emits it", "database/account_backfill.sql migrates it", "exports/account_report.py reads it"],
+      "seeds": [{"term": "account.external_id", "location": "schema/account.json"}],
+      "required_nodes": [
+        {"location": "schema/account.json", "kind": "file", "label": "schema key", "risk_domains": ["interfaces"]},
+        {"location": "serialize/account_serializer.py", "kind": "file", "label": "serializer", "risk_domains": ["data"]},
+        {"location": "database/account_backfill.sql", "kind": "file", "label": "database backfill", "risk_domains": ["data"]},
+        {"location": "exports/account_report.py", "kind": "file", "label": "export report", "risk_domains": ["functionality"]}
+      ],
+      "required_edge_types": ["references", "references", "references"],
+      "minimum_path_distance": 3,
+      "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["serializes", "persists"]}],
+      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "unknown_frontier_expected": false,
+      "compact_output_phrases": ["Impact scan:", "Impact paths:"],
+      "controller_required": true,
+      "fixture_files": [
+        {"path": "schema/account.json", "content": "{\"key\": \"account.external_id\", \"serializer\": \"account.schema.serializer\"}\n"},
+        {"path": "serialize/account_serializer.py", "content": "SERIALIZER_LINK = \"account.schema.serializer\"\nBACKFILL_LINK = \"account.database.backfill\"\n"},
+        {"path": "database/account_backfill.sql", "content": "-- account.database.backfill\n-- account.export.report\n"},
+        {"path": "exports/account_report.py", "content": "REPORT_LINK = \"account.export.report\"\n"}
+      ]
+    },
+    {
+      "id": "GRAPH-config-deploy-worker-health",
+      "kind": "positive",
+      "request": "Change configuration flag worker.profile_sync and refine effects through deployment, worker startup, and health checks.",
+      "repository_evidence": ["config/profile_sync.yaml declares the flag", "deploy/profile_worker.yaml wires it", "worker/profile_startup.py reads it", "operations/profile_health.py checks startup"],
+      "seeds": [{"term": "worker.profile_sync", "location": "config/profile_sync.yaml"}],
+      "required_nodes": [
+        {"location": "config/profile_sync.yaml", "kind": "configuration", "label": "configuration flag", "risk_domains": ["operations"]},
+        {"location": "deploy/profile_worker.yaml", "kind": "file", "label": "deployment manifest", "risk_domains": ["operations"]},
+        {"location": "worker/profile_startup.py", "kind": "file", "label": "worker startup", "risk_domains": ["functionality"]},
+        {"location": "operations/profile_health.py", "kind": "file", "label": "health check", "risk_domains": ["operations"]}
+      ],
+      "required_edge_types": ["references", "references", "references"],
+      "minimum_path_distance": 3,
+      "forbidden_precision": [{"provider": "builtin", "confidences": ["verified-provider"], "edge_types": ["configures", "deploys", "calls"]}],
+      "allowed_providers": ["builtin", "ast-grep", "codegraph", "scip", "joern"],
+      "unknown_frontier_expected": false,
+      "compact_output_phrases": ["Impact scan:", "Impact paths:"],
+      "controller_required": true,
+      "fixture_files": [
+        {"path": "config/profile_sync.yaml", "content": "flag: worker.profile_sync\ndeploy_link: worker.profile.deploy\n"},
+        {"path": "deploy/profile_worker.yaml", "content": "deploy_link: worker.profile.deploy\nstartup_link: worker.profile.startup\n"},
+        {"path": "worker/profile_startup.py", "content": "STARTUP_LINK = \"worker.profile.startup\"\nHEALTH_LINK = \"worker.profile.health\"\n"},
+        {"path": "operations/profile_health.py", "content": "HEALTH_LINK = \"worker.profile.health\"\nQUEUE_KIND = \"worker.health.queue\"\n"}
+      ]
+    },
+    {
+      "id": "GRAPH-negative-no-change",
+      "kind": "negative",
+      "request": "Explain the difference between a local variable and a public API field. Do not change or inspect a repository.",
+      "repository_evidence": [],
+      "seeds": [],
+      "required_nodes": [],
+      "required_edge_types": [],
+      "minimum_path_distance": 0,
+      "forbidden_precision": [],
+      "allowed_providers": [],
+      "unknown_frontier_expected": false,
+      "compact_output_phrases": [],
+      "controller_required": false,
+      "fixture_files": []
+    }
+  ]
+}

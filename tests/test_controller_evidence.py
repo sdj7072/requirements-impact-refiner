@@ -25,6 +25,25 @@ def completed(tool, arguments, structured, *, status="completed", error=None):
     )
 
 
+def completed_trace(draft_id, receipt_id=None):
+    selected = receipt_id or ("f" * 32)
+    return completed(
+        "rir_trace_impact",
+        {"repo_root": "/tmp/work", "draft_id": draft_id, "seeds": []},
+        {
+            "receipt_id": selected,
+            "receipt_path": f".requirements-impact-refiner/graph/{draft_id}.json",
+            "receipt_sha256": "b" * 64,
+            "compact_graph": {
+                "providers": [{"name": "builtin", "status": "ready"}],
+                "nodes": [], "edges": [], "paths": [], "frontier": [],
+                "timings_ms": {"total": 8}, "budget_status": "closed",
+            },
+            "budget_status": "closed",
+        },
+    )
+
+
 class ControllerEvidenceTest(unittest.TestCase):
     def test_completed_begin_finalize_trace_binds_draft_and_display_bytes(self):
         draft_id = "0123456789abcdef0123456789abcdef"
@@ -32,9 +51,10 @@ class ControllerEvidenceTest(unittest.TestCase):
         trace = "\n".join(
             (
                 completed("rir_begin", {"repo_root": "/tmp/work"}, {"draft_id": draft_id}),
+                completed_trace(draft_id),
                 completed(
                     "rir_finalize",
-                    {"repo_root": "/tmp/work", "draft_id": draft_id, "analysis": {}},
+                    {"repo_root": "/tmp/work", "draft_id": draft_id, "graph_receipt_id": "f" * 32, "analysis": {}},
                     {"status": "published", "draft_id": draft_id, "display_text": display},
                 ),
             )
@@ -43,15 +63,23 @@ class ControllerEvidenceTest(unittest.TestCase):
         evidence = analyze_controller_trace((trace,), display, expected_turns=1)
 
         self.assertTrue(evidence.valid)
-        self.assertEqual(evidence.tool_order, ("rir_begin", "rir_finalize"))
+        self.assertEqual(evidence.tool_order, ("rir_begin", "rir_trace_impact", "rir_finalize"))
         self.assertEqual(evidence.begin_calls, 1)
+        self.assertEqual(evidence.trace_calls, 1)
         self.assertEqual(evidence.finalize_calls, 1)
         self.assertTrue(evidence.draft_ids_match)
+        self.assertTrue(evidence.trace_succeeded)
+        self.assertTrue(evidence.finalize_receipt_ids_match)
         self.assertTrue(evidence.finalize_succeeded)
         self.assertTrue(evidence.display_text_exact_match)
         self.assertTrue(evidence.display_text_presentation_equivalent)
         self.assertEqual(evidence.display_comparison, "codex-markdown-v1")
         self.assertEqual(evidence.installed_payload_sha256, ("a" * 64,))
+        self.assertEqual(evidence.draft_ids, (draft_id,))
+        self.assertEqual(evidence.receipt_ids, ("f" * 32,))
+        self.assertEqual(evidence.receipt_sha256, ("b" * 64,))
+        self.assertRegex(evidence.trace_compact_graph_sha256[0], r"^[0-9a-f]{64}$")
+        self.assertFalse(evidence.duplicate_or_error_calls)
         self.assertEqual(evidence.errors, ())
 
     def test_trace_rejects_skips_duplicates_wrong_order_errors_and_output_mismatch(self):
@@ -81,10 +109,12 @@ class ControllerEvidenceTest(unittest.TestCase):
         rows = []
         for suffix, display in (("0", "first"), ("1", "second")):
             draft = suffix * 32
+            receipt = ("f" if suffix == "0" else "e") * 32
             rows.append(completed("rir_begin", {}, {"draft_id": draft}))
-            rows.append(completed("rir_finalize", {"draft_id": draft}, {"status": "published", "draft_id": draft, "display_text": display}))
+            rows.append(completed_trace(draft, receipt))
+            rows.append(completed("rir_finalize", {"draft_id": draft, "graph_receipt_id": receipt}, {"status": "published", "draft_id": draft, "display_text": display}))
 
-        lineage = analyze_controller_trace(("\n".join(rows[:2]), "\n".join(rows[2:])), ("first", "second"), expected_turns=2)
+        lineage = analyze_controller_trace(("\n".join(rows[:3]), "\n".join(rows[3:])), ("first", "second"), expected_turns=2)
         negative = analyze_controller_trace(('{"type":"item.completed","item":{"type":"agent_message","text":"debug"}}',), "debug", expected_turns=0)
 
         self.assertTrue(lineage.valid)
@@ -127,15 +157,42 @@ class ControllerEvidenceTest(unittest.TestCase):
             ("rir_begin", "rir_begin", "rir_finalize"),
         )
 
+    def test_same_id_terminal_error_cannot_be_overwritten_by_success(self):
+        draft = "0" * 32
+        receipt = "f" * 32
+        failed = json.loads(completed_trace(draft, receipt))
+        failed["item"]["status"] = "failed"
+        failed["item"]["error"] = {"message": "first terminal failed"}
+        events = (
+            completed("rir_begin", {}, {"draft_id": draft}),
+            json.dumps(failed),
+            completed_trace(draft, receipt),
+            completed(
+                "rir_finalize",
+                {"draft_id": draft, "graph_receipt_id": receipt},
+                {"status": "published", "display_text": "done"},
+            ),
+        )
+
+        evidence = analyze_controller_trace(
+            ("\n".join(events),), "done", expected_turns=1
+        )
+
+        self.assertFalse(evidence.valid)
+        self.assertTrue(evidence.duplicate_or_error_calls)
+        self.assertIn("controller JSONL is malformed", evidence.errors)
+
     def test_lineage_binds_each_finalize_display_to_its_turn_output(self):
         rows = []
         for suffix, display in (("0", "wrong first"), ("1", "second")):
             draft = suffix * 32
+            receipt = ("f" if suffix == "0" else "e") * 32
             rows.append(completed("rir_begin", {}, {"draft_id": draft}))
-            rows.append(completed("rir_finalize", {"draft_id": draft}, {"status": "published", "display_text": display}))
+            rows.append(completed_trace(draft, receipt))
+            rows.append(completed("rir_finalize", {"draft_id": draft, "graph_receipt_id": receipt}, {"status": "published", "display_text": display}))
 
         evidence = analyze_controller_trace(
-            ("\n".join(rows[:2]), "\n".join(rows[2:])),
+            ("\n".join(rows[:3]), "\n".join(rows[3:])),
             ("first", "second"),
             expected_turns=2,
         )
@@ -149,7 +206,8 @@ class ControllerEvidenceTest(unittest.TestCase):
         final = "Summary\nState: `state.json`  \nFull report: `report.md`"
         trace = "\n".join((
             completed("rir_begin", {}, {"draft_id": draft}),
-            completed("rir_finalize", {"draft_id": draft}, {"status": "published", "display_text": display}),
+            completed_trace(draft),
+            completed("rir_finalize", {"draft_id": draft, "graph_receipt_id": "f" * 32}, {"status": "published", "display_text": display}),
         ))
 
         evidence = analyze_controller_trace((trace,), final, expected_turns=1)
@@ -165,12 +223,14 @@ class ControllerEvidenceTest(unittest.TestCase):
     def test_same_named_tools_from_another_server_cannot_satisfy_controller_gate(self):
         draft = "0" * 32
         begin = json.loads(completed("rir_begin", {}, {"draft_id": draft}))
-        finalize = json.loads(completed("rir_finalize", {"draft_id": draft}, {"status": "published", "display_text": "done"}))
+        trace = json.loads(completed_trace(draft))
+        finalize = json.loads(completed("rir_finalize", {"draft_id": draft, "graph_receipt_id": "f" * 32}, {"status": "published", "display_text": "done"}))
         begin["item"]["server"] = "unrelated"
+        trace["item"]["server"] = "unrelated"
         finalize["item"]["server"] = "unrelated"
 
         evidence = analyze_controller_trace(
-            ("\n".join((json.dumps(begin), json.dumps(finalize))),),
+            ("\n".join((json.dumps(begin), json.dumps(trace), json.dumps(finalize))),),
             "done",
             expected_turns=1,
         )

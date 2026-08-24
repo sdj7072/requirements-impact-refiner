@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from evals.harness.adapters.codex import CodexAdapter
+from evals.harness.graph_scoring import load_graph_cases
 from evals.harness.models import CaseSpec, CaseTurn, RunRequest, RunStatus
 
 
@@ -104,7 +105,7 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
     script = Path(directory) / "fake-codex.py"
     script.write_text(
         "#!/usr/bin/env python3\n"
-        "import json, os, sys\n"
+        "import hashlib, json, os, sys\n"
         "args = sys.argv[1:]\n"
         "log = os.environ.get('FAKE_CODEX_LOG')\n"
         "cwd_log = os.environ.get('FAKE_CODEX_CWD_LOG')\n"
@@ -158,9 +159,17 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "        print('{\\\"type\\\":\\\"thread.started\\\",\\\"thread_id\\\":\\\"" + UUID + "\\\"}')\n"
         "        if mode == 'controller-success':\n"
         "            draft = '0123456789abcdef0123456789abcdef'\n"
+        "            receipt = 'fedcba9876543210fedcba9876543210'\n"
+        "            graph_dir = os.path.join('.requirements-impact-refiner', 'graph')\n"
+        "            os.makedirs(graph_dir, exist_ok=True)\n"
+        "            receipt_payload = b'{}\\n'\n"
+        "            with open(os.path.join(graph_dir, draft + '.json'), 'wb') as handle:\n"
+        "                handle.write(receipt_payload)\n"
         "            begin = {'type': 'item.completed', 'item': {'id': 'begin', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_begin', 'arguments': {'repo_root': os.getcwd()}, 'result': {'content': [], 'structured_content': {'draft_id': draft, 'installed_payload_sha256': 'a' * 64}}, 'error': None, 'status': 'completed'}}\n"
-        "            finalize = {'type': 'item.completed', 'item': {'id': 'finalize', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_finalize', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'analysis': {}}, 'result': {'content': [{'type': 'text', 'text': 'final response'}], 'structured_content': {'status': 'published', 'display_text': 'final response'}}, 'error': None, 'status': 'completed'}}\n"
+        "            trace = {'type': 'item.completed', 'item': {'id': 'trace', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_trace_impact', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'seeds': []}, 'result': {'content': [], 'structured_content': {'receipt_id': receipt, 'receipt_path': '.requirements-impact-refiner/graph/' + draft + '.json', 'receipt_sha256': hashlib.sha256(receipt_payload).hexdigest(), 'compact_graph': {'providers': [], 'nodes': [], 'edges': [], 'paths': [], 'frontier': [], 'timings_ms': {'total': 1}, 'budget_status': 'closed'}, 'budget_status': 'closed'}}, 'error': None, 'status': 'completed'}}\n"
+        "            finalize = {'type': 'item.completed', 'item': {'id': 'finalize', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_finalize', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'graph_receipt_id': receipt, 'analysis': {}}, 'result': {'content': [{'type': 'text', 'text': 'final response'}], 'structured_content': {'status': 'published', 'display_text': 'final response'}}, 'error': None, 'status': 'completed'}}\n"
         "            print(json.dumps(begin))\n"
+        "            print(json.dumps(trace))\n"
         "            print(json.dumps(finalize))\n"
         "    if mode != 'missing-final':\n"
         "        output = args[args.index('-o') + 1]\n"
@@ -176,6 +185,96 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
 
 
 class CodexAdapterTest(unittest.TestCase):
+    def test_graph_case_fixture_is_staged_inside_isolated_workspace(self):
+        case = load_graph_cases()[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            CodexAdapter._stage_graph_fixture(case.id, root)
+
+            self.assertEqual(
+                (root / "api/profile.py").read_text(encoding="utf-8"),
+                dict(case.fixture_files)["api/profile.py"],
+            )
+            settings = json.loads(
+                (root / ".requirements-impact-refiner.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(settings["impact_graph"]["providers"], ["builtin"])
+            self.assertEqual(settings["impact_graph"]["max_seconds"], 30)
+            self.assertEqual(settings["impact_graph"]["target_seconds"], 10)
+            self.assertEqual(settings["impact_graph"]["install_policy"], "never")
+
+    def test_graph_fixture_staging_never_follows_settings_or_parent_symlinks(self):
+        case = load_graph_cases()[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            outside_settings = base / "outside-settings.json"
+            outside_settings.write_text("outside-safe", encoding="utf-8")
+            settings_root = base / "settings-root"
+            settings_root.mkdir()
+            os.symlink(
+                outside_settings,
+                settings_root / ".requirements-impact-refiner.json",
+            )
+            with self.assertRaisesRegex(ValueError, "overwrite|symlink|unsafe"):
+                CodexAdapter._stage_graph_fixture(case.id, settings_root)
+            self.assertEqual(
+                outside_settings.read_text(encoding="utf-8"), "outside-safe"
+            )
+
+            outside_directory = base / "outside-directory"
+            outside_directory.mkdir()
+            parent_root = base / "parent-root"
+            parent_root.mkdir()
+            os.symlink(outside_directory, parent_root / "api")
+            with self.assertRaisesRegex(ValueError, "overwrite|symlink|unsafe"):
+                CodexAdapter._stage_graph_fixture(case.id, parent_root)
+            self.assertFalse((outside_directory / "profile.py").exists())
+
+    def test_graph_receipts_are_captured_as_raw_regular_files_and_symlinks_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            graph = root / ".requirements-impact-refiner/graph"
+            graph.mkdir(parents=True)
+            receipt = graph / ("a" * 32 + ".json")
+            receipt.write_bytes(b"exact-receipt\n")
+            artifacts = {}
+
+            self.assertIsNone(CodexAdapter._capture_workspace_graph(artifacts, root))
+            self.assertEqual(
+                artifacts[f"workspace-graph/{'a' * 32}.json"],
+                b"exact-receipt\n",
+            )
+
+            receipt.unlink()
+            os.symlink(root / "outside", receipt)
+            self.assertIn(
+                "must not use symlinks",
+                CodexAdapter._capture_workspace_graph({}, root),
+            )
+
+    def test_graph_receipt_capture_rejects_output_flood_and_malicious_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            graph = root / ".requirements-impact-refiner/graph"
+            graph.mkdir(parents=True)
+            oversized = graph / ("a" * 32 + ".json")
+            oversized.write_bytes(b"x" * (1_048_576 + 1))
+
+            self.assertIn(
+                "maximum byte size",
+                CodexAdapter._capture_workspace_graph({}, root),
+            )
+
+            oversized.unlink()
+            (graph / "..malicious.json").write_text("{}", encoding="utf-8")
+            self.assertIn(
+                "name is invalid",
+                CodexAdapter._capture_workspace_graph({}, root),
+            )
+
     def test_v04_run_records_and_enforces_controller_trace(self):
         plugins = [
             {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.4.0", "enabled": True},
@@ -192,7 +291,13 @@ class CodexAdapterTest(unittest.TestCase):
 
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertTrue(evidence["valid"])
-        self.assertEqual(evidence["tool_order"], ["rir_begin", "rir_finalize"])
+        self.assertEqual(
+            evidence["tool_order"],
+            ["rir_begin", "rir_trace_impact", "rir_finalize"],
+        )
+        self.assertEqual(evidence["trace_calls"], 1)
+        self.assertTrue(evidence["trace_succeeded"])
+        self.assertTrue(evidence["finalize_receipt_ids_match"])
         self.assertTrue(evidence["display_text_exact_match"])
         self.assertTrue(evidence["display_text_presentation_equivalent"])
         self.assertEqual(evidence["display_comparison"], "codex-markdown-v1")

@@ -415,7 +415,9 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                         or row["lines"] != proof["lines"]
                     ):
                         raise ValueError("ast-grep match does not bind to the declared source slice")
-                except (ValueError, TypeError, json.JSONDecodeError) as error:
+                except (
+                    ValueError, TypeError, json.JSONDecodeError, RecursionError
+                ) as error:
                     return _failure("ast-grep", "failed", "structural-inferred", error, tuple(digests))
                 target_key = "match:%d:%s:%d" % (index, hashlib.sha256(path.encode()).hexdigest()[:8], row_index)
                 nodes[target_key] = {

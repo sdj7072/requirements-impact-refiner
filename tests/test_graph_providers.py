@@ -193,6 +193,26 @@ class ProviderRunnerTest(unittest.TestCase):
                 self.assertLessEqual(len(result.stdout.encode("utf-8")), 4 * 1024 * 1024)
                 self.assertLessEqual(len(result.stderr.encode("utf-8")), 256 * 1024)
 
+    def test_deep_provider_and_protobuf_json_fail_closed_without_recursion_escape(self):
+        for label, payload in (
+            ("generic-json", b"[" * 1200 + b"0" + b"]" * 1200),
+            (
+                "protobuf-json",
+                b'{"documents":' + b"[" * 1200 + b"{}" + b"]" * 1200 + b"}",
+            ),
+        ):
+            with self.subTest(label=label):
+                result = PROVIDERS.run_provider(
+                    PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
+                    ("--version",),
+                    self.repo,
+                    PROVIDERS.Deadline(self.clock, 30),
+                    runner=RecordingRunner((Completed(stdout=payload),)),
+                    expect_json=True,
+                )
+                self.assertEqual(result.status, "failed")
+                self.assertIsNone(result.parsed_json)
+
     def test_timeout_status_is_preserved(self):
         runner = RecordingRunner((subprocess.TimeoutExpired(("sg",), 2),))
         result = PROVIDERS.run_provider(

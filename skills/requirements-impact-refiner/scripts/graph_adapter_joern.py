@@ -104,7 +104,7 @@ def _metadata(root):
         raise ValueError("Joern graph metadata is unreadable")
     try:
         value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise ValueError("Joern graph metadata must be UTF-8 JSON") from error
     if not isinstance(value, dict) or set(value) != {"schemaVersion", "projectRoot", "sourceFingerprint", "createdBy"} or value["schemaVersion"] != 1:
         raise ValueError("Joern graph metadata shape is unsupported")

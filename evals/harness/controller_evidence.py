@@ -8,7 +8,7 @@ from typing import Sequence, Tuple, Union
 
 
 _DRAFT_ID = re.compile(r"\A[0-9a-f]{32}\Z")
-_TOOLS = ("rir_begin", "rir_finalize")
+_TOOLS = ("rir_begin", "rir_trace_impact", "rir_finalize")
 _SERVER = "requirements-impact-refiner"
 
 
@@ -18,15 +18,24 @@ class ControllerEvidence:
     errors: Tuple[str, ...]
     tool_order: Tuple[str, ...]
     begin_calls: int
+    trace_calls: int
     finalize_calls: int
     draft_ids_match: bool
+    trace_succeeded: bool
+    finalize_receipt_ids_match: bool
     finalize_succeeded: bool
+    duplicate_or_error_calls: bool
     display_text_exact_match: bool
     display_text_presentation_equivalent: bool
     display_comparison: str
     display_text_sha256: Tuple[str, ...]
     final_output_sha256: Tuple[str, ...]
     installed_payload_sha256: Tuple[str, ...]
+    draft_ids: Tuple[str, ...]
+    receipt_ids: Tuple[str, ...]
+    receipt_paths: Tuple[str, ...]
+    receipt_sha256: Tuple[str, ...]
+    trace_compact_graph_sha256: Tuple[str, ...]
 
     def to_json(self) -> str:
         payload = asdict(self)
@@ -35,6 +44,13 @@ class ControllerEvidence:
         payload["display_text_sha256"] = list(self.display_text_sha256)
         payload["final_output_sha256"] = list(self.final_output_sha256)
         payload["installed_payload_sha256"] = list(self.installed_payload_sha256)
+        payload["draft_ids"] = list(self.draft_ids)
+        payload["receipt_ids"] = list(self.receipt_ids)
+        payload["receipt_paths"] = list(self.receipt_paths)
+        payload["receipt_sha256"] = list(self.receipt_sha256)
+        payload["trace_compact_graph_sha256"] = list(
+            self.trace_compact_graph_sha256
+        )
         return json.dumps(payload, sort_keys=True) + "\n"
 
 
@@ -84,6 +100,13 @@ def _attempted_calls(streams: Sequence[str]):
             scoped_identifier = (stream_index, identifier)
             if scoped_identifier not in calls:
                 order.append(scoped_identifier)
+            else:
+                previous = calls[scoped_identifier]
+                if (
+                    previous.get("status") in {"completed", "failed"}
+                    or previous.get("error") is not None
+                ):
+                    malformed = True
             calls[scoped_identifier] = item
     return tuple(calls[identifier] for identifier in order), malformed
 
@@ -105,6 +128,7 @@ def analyze_controller_trace(
     calls, malformed = _attempted_calls(jsonl_streams)
     order = tuple(call["tool"] for call in calls)
     begins = tuple(call for call in calls if call["tool"] == "rir_begin")
+    traces = tuple(call for call in calls if call["tool"] == "rir_trace_impact")
     finalizes = tuple(call for call in calls if call["tool"] == "rir_finalize")
     errors = []
     expected_order = _TOOLS * expected_turns
@@ -131,13 +155,89 @@ def analyze_controller_trace(
             and re.fullmatch(r"[0-9a-f]{64}", payload_digest)
             else None
         )
+    trace_ids = []
+    receipt_ids = []
+    receipt_paths = []
+    receipt_digests = []
+    compact_digests = []
+    trace_success = []
+    for call in traces:
+        arguments = call.get("arguments")
+        trace_id = arguments.get("draft_id") if isinstance(arguments, dict) else None
+        trace_ids.append(
+            trace_id
+            if isinstance(trace_id, str) and _DRAFT_ID.fullmatch(trace_id)
+            else None
+        )
+        result = _structured(call.get("result"))
+        receipt_id = result.get("receipt_id") if result is not None else None
+        receipt_path = result.get("receipt_path") if result is not None else None
+        receipt_digest = result.get("receipt_sha256") if result is not None else None
+        compact_graph = result.get("compact_graph") if result is not None else None
+        valid_receipt_id = (
+            receipt_id
+            if isinstance(receipt_id, str) and _DRAFT_ID.fullmatch(receipt_id)
+            else None
+        )
+        valid_path = (
+            receipt_path
+            if isinstance(receipt_path, str)
+            and receipt_path
+            == f".requirements-impact-refiner/graph/{trace_id}.json"
+            else None
+        )
+        valid_digest = (
+            receipt_digest
+            if isinstance(receipt_digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", receipt_digest)
+            else None
+        )
+        compact_digest = None
+        if isinstance(compact_graph, dict):
+            try:
+                compact_digest = hashlib.sha256(
+                    json.dumps(
+                        compact_graph,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+            except (TypeError, ValueError, RecursionError):
+                compact_digest = None
+        receipt_ids.append(valid_receipt_id)
+        receipt_paths.append(valid_path)
+        receipt_digests.append(valid_digest)
+        compact_digests.append(compact_digest)
+        trace_success.append(
+            call.get("status") == "completed"
+            and call.get("error") is None
+            and result is not None
+            and all(
+                value is not None
+                for value in (
+                    trace_ids[-1], valid_receipt_id, valid_path,
+                    valid_digest, compact_digest,
+                )
+            )
+        )
     finalize_ids = []
+    finalize_receipt_ids = []
     finalize_success = []
     displays = []
     for call in finalizes:
         arguments = call.get("arguments")
         draft_id = arguments.get("draft_id") if isinstance(arguments, dict) else None
         finalize_ids.append(draft_id if isinstance(draft_id, str) and _DRAFT_ID.fullmatch(draft_id) else None)
+        receipt_id = (
+            arguments.get("graph_receipt_id")
+            if isinstance(arguments, dict) else None
+        )
+        finalize_receipt_ids.append(
+            receipt_id
+            if isinstance(receipt_id, str) and _DRAFT_ID.fullmatch(receipt_id)
+            else None
+        )
         result = _structured(call.get("result"))
         display = result.get("display_text") if result is not None else None
         displays.append(display if isinstance(display, str) else None)
@@ -152,15 +252,25 @@ def analyze_controller_trace(
 
     draft_match = (
         len(begin_ids) == expected_turns
+        and len(trace_ids) == expected_turns
         and len(finalize_ids) == expected_turns
-        and all(value is not None for value in begin_ids + finalize_ids)
-        and begin_ids == finalize_ids
+        and all(value is not None for value in begin_ids + trace_ids + finalize_ids)
+        and begin_ids == trace_ids == finalize_ids
+    )
+    traced = len(trace_success) == expected_turns and all(trace_success)
+    receipt_match = (
+        len(receipt_ids) == expected_turns
+        and len(finalize_receipt_ids) == expected_turns
+        and all(value is not None for value in receipt_ids + finalize_receipt_ids)
+        and receipt_ids == finalize_receipt_ids
     )
     succeeded = len(finalize_success) == expected_turns and all(finalize_success)
     if expected_turns == 0:
         exact_match = not calls
         presentation_equivalent = not calls
         draft_match = not calls
+        traced = not calls
+        receipt_match = not calls
         succeeded = not calls
         compared_displays = ()
     else:
@@ -178,6 +288,10 @@ def analyze_controller_trace(
         )
     if not draft_match:
         errors.append("controller draft IDs do not match")
+    if not traced:
+        errors.append("controller trace did not succeed")
+    if not receipt_match:
+        errors.append("controller trace/finalize receipt IDs do not match")
     if expected_turns > 0 and (
         len(payload_digests) != expected_turns
         or any(value is None for value in payload_digests)
@@ -199,14 +313,26 @@ def analyze_controller_trace(
         if isinstance(value, str)
     )
     unique_errors = tuple(sorted(set(errors)))
+    duplicate_or_error = (
+        malformed
+        or order != expected_order
+        or any(
+            call.get("status") != "completed" or call.get("error") is not None
+            for call in calls
+        )
+    )
     return ControllerEvidence(
         valid=not unique_errors,
         errors=unique_errors,
         tool_order=order,
         begin_calls=len(begins),
+        trace_calls=len(traces),
         finalize_calls=len(finalizes),
         draft_ids_match=draft_match,
+        trace_succeeded=traced,
+        finalize_receipt_ids_match=receipt_match,
         finalize_succeeded=succeeded,
+        duplicate_or_error_calls=duplicate_or_error,
         display_text_exact_match=exact_match,
         display_text_presentation_equivalent=presentation_equivalent,
         display_comparison="codex-markdown-v1",
@@ -214,5 +340,20 @@ def analyze_controller_trace(
         final_output_sha256=final_digests,
         installed_payload_sha256=tuple(
             value for value in payload_digests if isinstance(value, str)
+        ),
+        draft_ids=tuple(
+            value for value in begin_ids if isinstance(value, str)
+        ),
+        receipt_ids=tuple(
+            value for value in receipt_ids if isinstance(value, str)
+        ),
+        receipt_paths=tuple(
+            value for value in receipt_paths if isinstance(value, str)
+        ),
+        receipt_sha256=tuple(
+            value for value in receipt_digests if isinstance(value, str)
+        ),
+        trace_compact_graph_sha256=tuple(
+            value for value in compact_digests if isinstance(value, str)
         ),
     )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from contextlib import contextmanager
+import ctypes
+import errno
 import hashlib
 import importlib.util
 import json
@@ -805,6 +807,60 @@ def _same_inode(first, second) -> bool:
     return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
 
 
+def _rename_noreplace(directory_fd: int, source: str, destination: str) -> None:
+    """Atomically move one parent-fd-relative name without clobbering another."""
+    library = ctypes.CDLL(None, use_errno=True)
+    source_bytes = os.fsencode(source)
+    destination_bytes = os.fsencode(destination)
+    if sys.platform == "darwin":
+        operation = library.renameatx_np
+        operation.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        operation.restype = ctypes.c_int
+        result = operation(
+            directory_fd,
+            source_bytes,
+            directory_fd,
+            destination_bytes,
+            0x00000004,  # RENAME_EXCL
+        )
+    elif sys.platform.startswith("linux"):
+        try:
+            operation = library.renameat2
+        except AttributeError as error:
+            raise OSError(
+                errno.ENOTSUP, "atomic no-replace rename is unavailable"
+            ) from error
+        operation.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        operation.restype = ctypes.c_int
+        result = operation(
+            directory_fd,
+            source_bytes,
+            directory_fd,
+            destination_bytes,
+            0x00000001,  # RENAME_NOREPLACE
+        )
+    else:
+        raise OSError(errno.ENOTSUP, "atomic no-replace rename is unavailable")
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number == errno.EEXIST:
+        raise FileExistsError(error_number, os.strerror(error_number), destination)
+    raise OSError(error_number, os.strerror(error_number), source)
+
+
 def _restore_quarantined_path(
     directory_fd: int, quarantine_name: str, original_name: str
 ) -> bool:
@@ -867,28 +923,11 @@ def _unlink_transaction_component(
 
     if selected == name:
         try:
-            os.stat(
-                removing_name,
-                dir_fd=directory_fd,
-                follow_symlinks=False,
-            )
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            raise ValueError(
-                f"{label} removal quarantine is unsafe: {error}"
-            ) from error
-        else:
+            _rename_noreplace(directory_fd, name, removing_name)
+        except FileExistsError as error:
             raise ValueError(
                 f"{label} removal quarantine already exists; recovery is uncertain"
-            )
-        try:
-            os.rename(
-                name,
-                removing_name,
-                src_dir_fd=directory_fd,
-                dst_dir_fd=directory_fd,
-            )
+            ) from error
         except OSError as error:
             raise ValueError(f"{label} cannot be quarantined: {error}") from error
         selected = removing_name

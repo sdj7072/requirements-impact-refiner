@@ -1,7 +1,9 @@
 """Installed Codex composition adapter for deterministic evaluation runs."""
 
 import json
+import os
 import re
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
@@ -9,6 +11,7 @@ from typing import Any, Optional, Sequence, Tuple
 from .base import ClientAdapter
 from ..controller_evidence import analyze_controller_trace
 from ..evidence import Artifact, PotentialSecretError, record_run
+from ..graph_scoring import load_graph_cases
 from ..models import CaseTurn, ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
 from ..process import run_command
 
@@ -145,6 +148,20 @@ class CodexAdapter(ClientAdapter):
 
         with tempfile.TemporaryDirectory(prefix="codex-eval-") as temporary:
             temporary_root = Path(temporary)
+            try:
+                self._stage_graph_fixture(request.case.id, temporary_root)
+            except (OSError, ValueError) as error:
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INFRA_ERROR,
+                    f"graph fixture staging failed: {error}",
+                    None,
+                    None,
+                    None,
+                    probe,
+                    None,
+                )
             first_final = temporary_root / "first.final.txt"
             first_prompt = self._turn_prompt(
                 request.case.turns[0].prompt, request.case.turns[0].repository_evidence
@@ -156,6 +173,10 @@ class CodexAdapter(ClientAdapter):
             )
             artifacts.update(self._turn_artifacts("first", first_prompt, first_command, first_final))
             capture_problem = self._capture_workspace_reports(artifacts, temporary_root)
+            if capture_problem is None:
+                capture_problem = self._capture_workspace_graph(
+                    artifacts, temporary_root
+                )
             if capture_problem is not None:
                 return self._record_result(
                     request, artifacts, RunStatus.INFRA_ERROR, capture_problem,
@@ -233,6 +254,10 @@ class CodexAdapter(ClientAdapter):
             )
             artifacts.update(self._turn_artifacts("second", second_prompt, second_command, second_final))
             capture_problem = self._capture_workspace_reports(artifacts, temporary_root)
+            if capture_problem is None:
+                capture_problem = self._capture_workspace_graph(
+                    artifacts, temporary_root
+                )
             if capture_problem is not None:
                 return self._record_result(
                     request, artifacts, RunStatus.INFRA_ERROR, capture_problem,
@@ -462,6 +487,156 @@ class CodexAdapter(ClientAdapter):
             artifacts.update(cls._workspace_report_artifacts(workspace_root))
         except (OSError, ValueError) as error:
             return f"workspace report capture failed: {error}"
+        return None
+
+    @staticmethod
+    def _stage_graph_fixture(case_id: str, workspace_root: Path) -> None:
+        matches = tuple(case for case in load_graph_cases() if case.id == case_id)
+        if not matches:
+            return
+        case = matches[0]
+        if case.kind == "negative":
+            return
+        root = Path(workspace_root)
+        if root.is_symlink() or not root.is_dir():
+            raise ValueError("graph fixture workspace must be a real directory")
+        settings = {
+            "impact_graph": {
+                "enabled": True,
+                "max_seconds": 30,
+                "target_seconds": 10,
+                "providers": ["builtin"],
+                "install_policy": "never",
+                "deep": False,
+            },
+            "audience": "technical",
+            "delivery": "compact",
+        }
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(
+            os, "O_NOFOLLOW", 0
+        )
+        file_flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+
+        def write_file(relative: str, payload: bytes) -> None:
+            current_fd = os.open(root, directory_flags)
+            try:
+                parts = relative.split("/")
+                for part in parts[:-1]:
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=current_fd)
+                    except FileExistsError:
+                        pass
+                    next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+                    os.close(current_fd)
+                    current_fd = next_fd
+                descriptor = os.open(
+                    parts[-1], file_flags, 0o600, dir_fd=current_fd
+                )
+                try:
+                    offset = 0
+                    while offset < len(payload):
+                        written = os.write(descriptor, payload[offset:])
+                        if written <= 0:
+                            raise OSError("graph fixture write made no progress")
+                        offset += written
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                os.fsync(current_fd)
+            except OSError as error:
+                raise ValueError(
+                    "graph fixture path is unsafe or would overwrite workspace state"
+                ) from error
+            finally:
+                os.close(current_fd)
+
+        write_file(
+            ".requirements-impact-refiner.json",
+            (json.dumps(settings, sort_keys=True) + "\n").encode("utf-8"),
+        )
+        for relative, content in case.fixture_files:
+            write_file(relative, content.encode("utf-8"))
+
+    @staticmethod
+    def _workspace_graph_artifacts(workspace_root: Path) -> dict[str, bytes]:
+        base = workspace_root / ".requirements-impact-refiner"
+        graph_root = base / "graph"
+        if not base.exists():
+            return {}
+        if base.is_symlink() or not base.is_dir():
+            raise ValueError("workspace graph base must be a real directory")
+        if not graph_root.exists():
+            return {}
+        if graph_root.is_symlink() or not graph_root.is_dir():
+            raise ValueError("workspace graph root must be a real directory")
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(
+            os, "O_NOFOLLOW", 0
+        )
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        directory_fd = os.open(graph_root, directory_flags)
+        try:
+            artifacts = {}
+            for name in sorted(os.listdir(directory_fd)):
+                if re.fullmatch(r"[0-9a-f]{32}\.json", name) is None:
+                    raise ValueError("workspace graph receipt name is invalid")
+                try:
+                    descriptor = os.open(name, file_flags, dir_fd=directory_fd)
+                except OSError as error:
+                    raise ValueError(
+                        "workspace graph artifacts must not use symlinks"
+                    ) from error
+                try:
+                    before = os.fstat(descriptor)
+                    if not stat.S_ISREG(before.st_mode):
+                        raise ValueError(
+                            "workspace graph artifacts must be regular files"
+                        )
+                    if before.st_size > 1_048_576:
+                        raise ValueError(
+                            "workspace graph receipt exceeds maximum byte size"
+                        )
+                    chunks = []
+                    remaining = 1_048_576 + 1
+                    while remaining:
+                        chunk = os.read(descriptor, min(64 * 1024, remaining))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        remaining -= len(chunk)
+                    payload = b"".join(chunks)
+                    after = os.fstat(descriptor)
+                    if len(payload) > 1_048_576:
+                        raise ValueError(
+                            "workspace graph receipt exceeds maximum byte size"
+                        )
+                    if (
+                        before.st_dev, before.st_ino, before.st_size,
+                        before.st_mtime_ns,
+                    ) != (
+                        after.st_dev, after.st_ino, after.st_size,
+                        after.st_mtime_ns,
+                    ):
+                        raise ValueError(
+                            "workspace graph receipt changed while captured"
+                        )
+                finally:
+                    os.close(descriptor)
+                artifacts[f"workspace-graph/{name}"] = payload
+            return artifacts
+        finally:
+            os.close(directory_fd)
+
+    @classmethod
+    def _capture_workspace_graph(
+        cls, artifacts: dict[str, Artifact], workspace_root: Path
+    ) -> Optional[str]:
+        try:
+            artifacts.update(cls._workspace_graph_artifacts(workspace_root))
+        except (OSError, ValueError) as error:
+            return f"workspace graph capture failed: {error}"
         return None
 
     def _record_result(

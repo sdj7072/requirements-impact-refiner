@@ -797,7 +797,7 @@ def run_provider(
     elif expect_json:
         try:
             parsed = json.loads(stdout)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             status = "failed"
             detail = "provider output must contain valid JSON"
     return ProviderQuery(

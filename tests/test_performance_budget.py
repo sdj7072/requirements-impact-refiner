@@ -6,7 +6,9 @@ from pathlib import Path
 
 from evals.harness.models import RunStatus
 from evals.harness.performance import (
+    GraphPerformanceObservation,
     PerformanceObservation,
+    evaluate_graph_smoke,
     evaluate_smoke_gate,
 )
 
@@ -20,6 +22,14 @@ SMOKE_IDS = (
     "LINEAGE-stable-blocked",
     "LINEAGE-reopened",
     "LINEAGE-no-false-resolution",
+)
+GRAPH_IDS = (
+    "GRAPH-api-mobile-cache-migration",
+    "GRAPH-auth-role-audit-consumer",
+    "GRAPH-event-retry-idempotency-side-effect",
+    "GRAPH-schema-serializer-backfill-export",
+    "GRAPH-config-deploy-worker-health",
+    "GRAPH-negative-no-change",
 )
 
 
@@ -54,6 +64,33 @@ class PerformanceBudgetTest(unittest.TestCase):
 
     def six_valid_observations(self):
         return tuple(self.observation(case_id) for case_id in SMOKE_IDS)
+
+    def graph_observation(self, case_id):
+        negative = case_id == "GRAPH-negative-no-change"
+        return GraphPerformanceObservation(
+            case_id=case_id,
+            repetition=1,
+            status=RunStatus.PASS,
+            mechanical_passed=True,
+            graph_passed=True,
+            attempt=1,
+            retry_of=None,
+            graph_duration_ms=None if negative else 8400,
+            output_words=280,
+            routed_resource_words=1574,
+            receipt_state_provider_parity=True,
+            uncovered_high_risk_nodes=(),
+            controller_begin_calls=0 if negative else 1,
+            controller_trace_calls=0 if negative else 1,
+            controller_finalize_calls=0 if negative else 1,
+            controller_evidence_valid=True,
+            duplicate_or_error_calls=False,
+            input_tokens=None,
+            output_tokens=None,
+        )
+
+    def six_graph_rows(self):
+        return tuple(self.graph_observation(case_id) for case_id in GRAPH_IDS)
 
     def test_baseline_is_literal_and_matches_preserved_measurement(self):
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
@@ -116,6 +153,65 @@ class PerformanceBudgetTest(unittest.TestCase):
             "token usage must be complete or absent",
             evaluate_smoke_gate(partial).errors,
         )
+
+    def test_graph_smoke_requires_target_and_ceiling(self):
+        result = evaluate_graph_smoke(self.six_graph_rows())
+        self.assertTrue(result.passed, result.errors)
+        self.assertEqual(result.median_graph_duration_ms, 8400)
+
+        slow = replace(self.six_graph_rows()[0], graph_duration_ms=30_001)
+        over_target = tuple(
+            replace(row, graph_duration_ms=10_001)
+            if row.graph_duration_ms is not None else row
+            for row in self.six_graph_rows()
+        )
+
+        self.assertIn(
+            "graph duration exceeds 30 seconds",
+            evaluate_graph_smoke((slow,) + self.six_graph_rows()[1:]).errors,
+        )
+        self.assertIn(
+            "median graph duration exceeds 10 seconds",
+            evaluate_graph_smoke(over_target).errors,
+        )
+
+    def test_graph_smoke_gates_exact_matrix_attempt_runtime_mechanics_and_provenance(self):
+        valid = self.six_graph_rows()
+        mutations = {
+            "graph observations do not cover the exact six cases": valid[:-1],
+            "graph observations contain duplicate case/repetition rows": valid[:-1] + (valid[0],),
+            "graph observations must select attempt 1 without retry": (replace(valid[0], attempt=2, retry_of="retry"),) + valid[1:],
+            "every graph runtime result must pass": (replace(valid[0], status=RunStatus.FAIL),) + valid[1:],
+            "every graph mechanical score must pass": (replace(valid[0], mechanical_passed=False),) + valid[1:],
+            "every graph coverage score must pass": (replace(valid[0], graph_passed=False),) + valid[1:],
+            "receipt, state, and provider provenance disagree": (replace(valid[0], receipt_state_provider_parity=False),) + valid[1:],
+            "graph smoke contains uncovered high-risk nodes": (replace(valid[0], uncovered_high_risk_nodes=("NODE-999",)),) + valid[1:],
+            "controller graph call count or order failed": (replace(valid[0], controller_trace_calls=0),) + valid[1:],
+            "controller graph evidence contains duplicate or error calls": (replace(valid[0], duplicate_or_error_calls=True),) + valid[1:],
+        }
+        for finding, rows in mutations.items():
+            with self.subTest(finding=finding):
+                self.assertIn(finding, evaluate_graph_smoke(rows).errors)
+
+    def test_graph_smoke_gates_output_and_routed_guidance_but_tokens_are_informational(self):
+        rows = self.six_graph_rows()
+        too_verbose = tuple(
+            replace(row, output_words=451) for row in rows
+        )
+        too_many_resources = tuple(
+            replace(row, routed_resource_words=1751) for row in rows
+        )
+        partial_tokens = (replace(rows[0], input_tokens=100),) + rows[1:]
+
+        self.assertIn(
+            "median graph compact output exceeds 450 words",
+            evaluate_graph_smoke(too_verbose).errors,
+        )
+        self.assertIn(
+            "median graph routed guidance does not reduce baseline by 50 percent",
+            evaluate_graph_smoke(too_many_resources).errors,
+        )
+        self.assertTrue(evaluate_graph_smoke(partial_tokens).passed)
 
 
 if __name__ == "__main__":

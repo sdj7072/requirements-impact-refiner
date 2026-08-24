@@ -123,6 +123,61 @@
         "median_output_words": { "type": "number", "minimum": 0 },
         "median_routed_resource_words": { "type": "number", "minimum": 0 }
       }
+    },
+    "graphScore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "repetition", "passed", "findings", "maximum_required_distance", "receipt_id", "receipt_sha256", "providers", "uncovered_high_risk_nodes", "matched_path_ids"],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "repetition": { "type": "integer", "minimum": 1 },
+        "passed": { "type": "boolean" },
+        "findings": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "maximum_required_distance": { "type": "integer", "minimum": 0 },
+        "receipt_id": { "type": ["string", "null"], "pattern": "^[0-9a-f]{32}$" },
+        "receipt_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "providers": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "uncovered_high_risk_nodes": { "type": "array", "items": { "type": "string", "pattern": "^NODE-[0-9]{3}$" }, "uniqueItems": true },
+        "matched_path_ids": { "type": "array", "items": { "type": "string", "pattern": "^PATH-[0-9]{3}$" }, "uniqueItems": true }
+      }
+    },
+    "graphPerformanceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "repetition", "status", "mechanical_passed", "graph_passed", "attempt", "retry_of", "graph_duration_ms", "output_words", "routed_resource_words", "receipt_state_provider_parity", "uncovered_high_risk_nodes", "controller_begin_calls", "controller_trace_calls", "controller_finalize_calls", "controller_evidence_valid", "duplicate_or_error_calls", "input_tokens", "output_tokens"],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "repetition": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["pass", "partial", "fail", "blocked", "infra_error", "invalid_evidence"] },
+        "mechanical_passed": { "type": "boolean" },
+        "graph_passed": { "type": "boolean" },
+        "attempt": { "const": 1 },
+        "retry_of": { "type": "null" },
+        "graph_duration_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "output_words": { "type": "integer", "minimum": 0 },
+        "routed_resource_words": { "type": "integer", "minimum": 0 },
+        "receipt_state_provider_parity": { "type": "boolean" },
+        "uncovered_high_risk_nodes": { "type": "array", "items": { "type": "string", "pattern": "^NODE-[0-9]{3}$" }, "uniqueItems": true },
+        "controller_begin_calls": { "type": "integer", "minimum": 0 },
+        "controller_trace_calls": { "type": "integer", "minimum": 0 },
+        "controller_finalize_calls": { "type": "integer", "minimum": 0 },
+        "controller_evidence_valid": { "type": "boolean" },
+        "duplicate_or_error_calls": { "type": "boolean" },
+        "input_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "output_tokens": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "graphSmokeGateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "errors", "median_graph_duration_ms", "median_output_words", "median_routed_resource_words"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "errors": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "median_graph_duration_ms": { "type": "number", "minimum": 0 },
+        "median_output_words": { "type": "number", "minimum": 0 },
+        "median_routed_resource_words": { "type": "number", "minimum": 0 }
+      }
     }
   }
 }

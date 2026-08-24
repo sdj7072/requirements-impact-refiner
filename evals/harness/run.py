@@ -17,8 +17,21 @@ from .adapters.codex import CodexAdapter
 from .catalog import load_all, select_suite
 from .controller_evidence import analyze_controller_trace
 from .evidence import PotentialSecretError, build_manifest, record_probe, record_run, verify_manifest
+from .graph_scoring import (
+    GRAPH_CASE_IDS,
+    GraphScore,
+    canonical_receipt_bytes,
+    compact_graph,
+    load_graph_cases,
+    score_graph,
+)
 from .models import CaseSpec, ClientProbe, CommandResult, MechanicalScore, RunRequest, RunResult, RunStatus
-from .performance import PerformanceObservation, evaluate_smoke_gate
+from .performance import (
+    GraphPerformanceObservation,
+    PerformanceObservation,
+    evaluate_graph_smoke,
+    evaluate_smoke_gate,
+)
 from .reporting import render_report
 from .scoring import score_mechanical
 
@@ -32,7 +45,7 @@ import payload_identity as _payload_identity
 
 
 _RAW_DIRECTORY = "raw"
-_DERIVED_ARTIFACTS = frozenset(("probes.json", "controller.json", "report.md", "scores.json", "performance.json"))
+_DERIVED_ARTIFACTS = frozenset(("probes.json", "controller.json", "report.md", "scores.json", "graph-scores.json", "performance.json"))
 _REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 _POINTER_KEYS = {
     "schema_version", "report_id", "revision", "state", "markdown",
@@ -68,7 +81,9 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the public CLI without selecting an implicit model or suite."""
     parser = EvalArgumentParser(description=__doc__)
     parser.add_argument("--client", choices=("codex", "claude"), required=True)
-    parser.add_argument("--suite", choices=("smoke", "installed-superpowers"))
+    parser.add_argument(
+        "--suite", choices=("smoke", "graph-smoke", "installed-superpowers")
+    )
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--model")
     parser.add_argument("--reasoning")
@@ -87,9 +102,17 @@ def build_schedule(cases: Iterable[CaseSpec], suite: str, repetitions: int) -> T
     """Select a suite and nest repetitions within each canonical case."""
     if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
         raise ValueError("repetitions must be a positive integer")
+    case_values = tuple(cases)
+    if suite == "graph-smoke":
+        by_id = {case.id: case for case in case_values}
+        if len(by_id) != len(case_values) or tuple(by_id) != GRAPH_CASE_IDS:
+            raise ValueError("graph-smoke suite must contain the exact six cases")
+        selected = tuple(by_id[case_id] for case_id in GRAPH_CASE_IDS)
+    else:
+        selected = select_suite(case_values, suite)
     return tuple(
         ScheduledRun(case, repetition)
-        for case in select_suite(cases, suite)
+        for case in selected
         for repetition in range(1, repetitions + 1)
     )
 
@@ -145,10 +168,14 @@ def _batch_identity(args: argparse.Namespace, probe: ClientProbe) -> dict[str, o
         "reasoning": args.reasoning,
         "enabled_composition": _composition(probe),
         "harness_sha256": _tree_hash(_REPO_ROOT / "evals" / "harness"),
-        "catalog_sha256": _files_hash((
-            _REPO_ROOT / "evals" / "cases.json",
-            _REPO_ROOT / "evals" / "installed-v0.3-lineage-cases.json",
-        )),
+        "catalog_sha256": _files_hash(
+            (_REPO_ROOT / "evals" / "graph-cases.json",)
+            if args.suite == "graph-smoke"
+            else (
+                _REPO_ROOT / "evals" / "cases.json",
+                _REPO_ROOT / "evals" / "installed-v0.3-lineage-cases.json",
+            )
+        ),
         "skills_sha256": _tree_hash(_REPO_ROOT / "skills"),
     }
 
@@ -408,6 +435,16 @@ def _score_row(score: MechanicalScore) -> dict[str, object]:
     return {"case_id": score.case_id, "repetition": score.repetition, "passed": score.passed, "findings": list(score.findings)}
 
 
+def _graph_score_row(score: GraphScore, repetition: int) -> dict[str, object]:
+    payload = asdict(score)
+    payload["repetition"] = repetition
+    payload["findings"] = list(score.findings)
+    payload["providers"] = list(score.providers)
+    payload["uncovered_high_risk_nodes"] = list(score.uncovered_high_risk_nodes)
+    payload["matched_path_ids"] = list(score.matched_path_ids)
+    return payload
+
+
 def _resource_measurement(case: CaseSpec) -> tuple[int, int]:
     paths = [_REPO_ROOT / "skills" / "using-requirements-impact-refiner" / "SKILL.md"]
     if case.kind != "negative":
@@ -479,6 +516,173 @@ def _smoke_observation(
             "smoke controller evidence",
         )[0].decode("utf-8", errors="strict")
     )
+
+
+_GRAPH_CONFIDENCE_RANK = {
+    "verified-provider": 0,
+    "verified-source": 1,
+    "structural-inferred": 2,
+    "lexical": 3,
+}
+
+
+def _receipt_structured_path(receipt, path):
+    nodes = {row["id"]: row for row in receipt["nodes"]}
+    edges = {row["id"]: row for row in receipt["edges"]}
+    records = [nodes[key] for key in path["nodes"]]
+    records.extend(edges[key] for key in path["edges"])
+    confidences = [row["confidence"] for row in records]
+    return {
+        "id": path["id"],
+        "labels": [nodes[key]["label"] for key in path["nodes"]],
+        "providers": list(dict.fromkeys(
+            row["provider"] for row in records if row.get("provider")
+        )) or ["unavailable"],
+        "confidence": max(
+            confidences, key=lambda value: _GRAPH_CONFIDENCE_RANK[value]
+        ),
+        "locations": list(dict.fromkeys(
+            row["location"] for row in records if row.get("location")
+        )),
+    }
+
+
+def _graph_state_parity(raw_root, attempt_path, receipt, receipt_digest, score):
+    captured = _captured_canonical_report(raw_root, attempt_path, False)
+    if captured is None:
+        return False
+    report_root = attempt_path / "workspace-reports"
+    directories = [
+        path for path in report_root.iterdir()
+        if path.is_dir() and not path.is_symlink()
+    ]
+    if len(directories) != 1:
+        return False
+    pointer = json.loads(
+        _read_selected_file(
+            raw_root, directories[0] / "current.json", "graph current pointer"
+        )[0].decode("utf-8", errors="strict")
+    )
+    state = json.loads(
+        _read_selected_file(
+            raw_root, directories[0] / pointer["state"], "graph compact state"
+        )[0].decode("utf-8", errors="strict")
+    )
+    coverage = [
+        row for row in state.get("scope", ())
+        if isinstance(row, dict) and row.get("boundary") == "Impact graph coverage"
+    ]
+    if len(coverage) != 1 or (
+        f"receipt {receipt['receipt_id']}; sha256 {receipt_digest};"
+        not in coverage[0].get("confidence", "")
+    ):
+        return False
+    expected_paths = {
+        path["id"]: _receipt_structured_path(receipt, path)
+        for path in receipt["paths"]
+    }
+    observed = {}
+    for row in state.get("graph_paths", ()):
+        if not isinstance(row, dict) or not isinstance(row.get("paths"), list):
+            return False
+        for path in row["paths"]:
+            if not isinstance(path, dict):
+                return False
+            identifier = path.get("id")
+            if identifier in observed and observed[identifier] != path:
+                return False
+            observed[identifier] = path
+    if not set(score.matched_path_ids).intersection(observed):
+        return False
+    return all(expected_paths.get(key) == value for key, value in observed.items())
+
+
+def _graph_observation(raw_root, client, slot, result, mechanical_score):
+    cases = {case.id: case for case in load_graph_cases()}
+    case = cases[slot.case.id]
+    attempt_path = _attempt_path(raw_root, client, slot, result.attempt)
+    output_bytes, _, _ = _read_selected_file(
+        raw_root, attempt_path / "first.final.txt", "graph final output"
+    )
+    output = output_bytes.decode("utf-8", errors="strict")
+    controller_bytes, controller_digest, controller_relative = _read_selected_file(
+        raw_root,
+        attempt_path / "controller-evidence.json",
+        "graph controller evidence",
+    )
+    controller = json.loads(controller_bytes.decode("utf-8", errors="strict"))
+    jsonl_bytes, _, _ = _read_selected_file(
+        raw_root, attempt_path / "first.jsonl", "graph controller JSONL"
+    )
+    input_tokens, output_tokens = _turn_usage((jsonl_bytes,))
+    receipt = None
+    receipt_digests = ((controller_relative, controller_digest),)
+    parity = controller.get("valid") is True
+    if case.kind == "positive":
+        for field in (
+            "draft_ids", "receipt_ids", "receipt_paths", "receipt_sha256",
+            "trace_compact_graph_sha256",
+        ):
+            if not isinstance(controller.get(field), list) or len(controller[field]) != 1:
+                raise ValueError(f"graph controller {field} is not exact")
+        draft_id = controller["draft_ids"][0]
+        receipt_path = controller["receipt_paths"][0]
+        if receipt_path != f".requirements-impact-refiner/graph/{draft_id}.json":
+            raise ValueError("graph receipt path disagrees with draft ID")
+        payload, digest, relative = _read_selected_file(
+            raw_root,
+            attempt_path / "workspace-graph" / f"{draft_id}.json",
+            "graph receipt",
+        )
+        receipt_digests += ((relative, digest),)
+        if digest != controller["receipt_sha256"][0]:
+            raise ValueError("graph receipt digest disagrees with trace result")
+        receipt = json.loads(payload.decode("utf-8", errors="strict"))
+        if canonical_receipt_bytes(receipt) != payload:
+            raise ValueError("graph receipt bytes are not canonical")
+        if (
+            receipt.get("draft_id") != draft_id
+            or receipt.get("receipt_id") != controller["receipt_ids"][0]
+        ):
+            raise ValueError("graph receipt identity disagrees with controller trace")
+        compact_digest = hashlib.sha256(
+            json.dumps(
+                compact_graph(receipt), ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if compact_digest != controller["trace_compact_graph_sha256"][0]:
+            raise ValueError("graph compact trace disagrees with receipt")
+    graph_score = score_graph(case, receipt, output)
+    if case.kind == "positive":
+        parity = parity and _graph_state_parity(
+            raw_root, attempt_path, receipt,
+            controller["receipt_sha256"][0], graph_score,
+        )
+    duration = None if receipt is None else receipt.get("timings_ms", {}).get("total")
+    routed_bytes, routed_words = _resource_measurement(slot.case)
+    observation = GraphPerformanceObservation(
+        case_id=slot.case.id,
+        repetition=slot.repetition,
+        status=result.status,
+        mechanical_passed=mechanical_score.passed,
+        graph_passed=graph_score.passed,
+        attempt=result.attempt,
+        retry_of=result.retry_of,
+        graph_duration_ms=duration,
+        output_words=len(output.split()),
+        routed_resource_words=routed_words,
+        receipt_state_provider_parity=parity,
+        uncovered_high_risk_nodes=graph_score.uncovered_high_risk_nodes,
+        controller_begin_calls=controller.get("begin_calls", -1),
+        controller_trace_calls=controller.get("trace_calls", -1),
+        controller_finalize_calls=controller.get("finalize_calls", -1),
+        controller_evidence_valid=controller.get("valid") is True,
+        duplicate_or_error_calls=controller.get("duplicate_or_error_calls") is not False,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+    return observation, graph_score, receipt_digests
     metadata = json.loads(
         _read_selected_file(
             raw_root, attempt_path / "metadata.json", "smoke metadata"
@@ -916,9 +1120,16 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
     if _missing_manifest_with_harness_state(output_root):
         return 1
     try:
-        schedule = build_schedule(load_all() if cases is None else cases, args.suite, args.repetitions)
+        default_cases = (
+            tuple(case.to_case_spec() for case in load_graph_cases())
+            if args.suite == "graph-smoke"
+            else load_all()
+        )
+        schedule = build_schedule(default_cases if cases is None else cases, args.suite, args.repetitions)
         probe = adapter.prepare()
         if not probe.available:
+            return 1
+        if args.suite == "graph-smoke" and probe.plugin_version != "0.4.0":
             return 1
     except (OSError, ValueError, AttributeError):
         return 1
@@ -953,7 +1164,7 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
             return 1
         attempts.append(_attempt_row(first))
         selected = first
-        if first.status is RunStatus.INFRA_ERROR:
+        if first.status is RunStatus.INFRA_ERROR and args.suite != "graph-smoke":
             retry_of = "%s/%02d" % key
             retry_request = RunRequest(slot.case, slot.repetition, args.client, args.model, args.reasoning, raw_root, 2, retry_of)
             if _attempt_path(raw_root, args.client, slot, 2).exists():
@@ -999,6 +1210,8 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
     if not scoring_evidence_valid:
         return 1
     smoke_gate = None
+    graph_gate = None
+    graph_scores = []
     observations = []
     extraction_errors = []
     if args.suite == "smoke" and probe.plugin_version == "0.4.0":
@@ -1034,6 +1247,65 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
             )
         except OSError:
             return 1
+    if args.suite == "graph-smoke":
+        observations = []
+        graph_extraction_errors = []
+        graph_digest_rows = []
+        for result, score in zip(results, scores):
+            slot = slots[(result.case_id, result.repetition)]
+            try:
+                observation, graph_score, digests = _graph_observation(
+                    raw_root, args.client, slot, result, score
+                )
+                observations.append(observation)
+                graph_scores.append(graph_score)
+                graph_digest_rows.extend(digests)
+            except (
+                OSError, ValueError, KeyError, TypeError, UnicodeDecodeError,
+                json.JSONDecodeError, RecursionError,
+            ) as error:
+                graph_extraction_errors.append(
+                    f"{result.case_id} graph evidence invalid: {error}"
+                )
+        graph_gate = evaluate_graph_smoke(observations)
+        if graph_extraction_errors:
+            graph_gate = replace(
+                graph_gate,
+                passed=False,
+                errors=tuple(sorted(set(
+                    graph_gate.errors + tuple(graph_extraction_errors)
+                ))),
+            )
+        scored_digests.update(graph_digest_rows)
+        performance_payload = {
+            "observations": [asdict(row) for row in observations],
+            "gate": asdict(graph_gate),
+        }
+        for row in performance_payload["observations"]:
+            row["status"] = row["status"].value
+            row["uncovered_high_risk_nodes"] = list(
+                row["uncovered_high_risk_nodes"]
+            )
+        performance_payload["gate"]["errors"] = list(graph_gate.errors)
+        graph_payload = [
+            _graph_score_row(score, result.repetition)
+            for score, result in zip(graph_scores, results)
+        ]
+        try:
+            _write_derived(
+                output_root / "graph-scores.json",
+                json.dumps(
+                    {"scores": graph_payload}, sort_keys=True, indent=2
+                ) + "\n",
+            )
+            _write_derived(
+                output_root / "performance.json",
+                json.dumps(
+                    performance_payload, sort_keys=True, indent=2
+                ) + "\n",
+            )
+        except OSError:
+            return 1
     ledger = {
         "identity": identity, "suite": args.suite, "repetitions": args.repetitions,
         "attempts": attempts, "runs": finals,
@@ -1046,6 +1318,18 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
             "median_output_words": smoke_gate.median_output_words,
             "median_routed_resource_words": smoke_gate.median_routed_resource_words,
         }
+    if graph_gate is not None:
+        ledger["graph_scores"] = [
+            _graph_score_row(score, result.repetition)
+            for score, result in zip(graph_scores, results)
+        ]
+        ledger["graph_smoke_gate"] = {
+            "passed": graph_gate.passed,
+            "errors": list(graph_gate.errors),
+            "median_graph_duration_ms": graph_gate.median_graph_duration_ms,
+            "median_output_words": graph_gate.median_output_words,
+            "median_routed_resource_words": graph_gate.median_routed_resource_words,
+        }
     try:
         report = render_report(results, _report_metadata(args, probe, results), scores)
     except (TypeError, ValueError):
@@ -1054,7 +1338,12 @@ def run_batch(args: argparse.Namespace, adapter: Any, cases: Optional[Iterable[C
         return 1
     return 1 if (
         any(result.status is RunStatus.INVALID_EVIDENCE for result in results)
+        or (
+            args.suite == "graph-smoke"
+            and any(result.status is not RunStatus.PASS for result in results)
+        )
         or (smoke_gate is not None and not smoke_gate.passed)
+        or (graph_gate is not None and not graph_gate.passed)
     ) else 0
 
 

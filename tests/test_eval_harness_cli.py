@@ -8,10 +8,29 @@ from unittest.mock import patch
 from evals.harness.catalog import load_all
 from evals.harness.evidence import build_manifest, record_run, verify_manifest
 from evals.harness.controller_evidence import analyze_controller_trace
-from evals.harness.models import ClientProbe, CommandResult, RunResult, RunStatus
-from evals.harness.performance import PerformanceObservation, SmokeGateResult
+from evals.harness.graph_scoring import (
+    GraphScore,
+    canonical_receipt_bytes,
+    compact_graph,
+    load_graph_cases,
+)
+from evals.harness.models import (
+    ClientProbe,
+    CommandResult,
+    MechanicalScore,
+    RunResult,
+    RunStatus,
+)
+from evals.harness.performance import (
+    GraphPerformanceObservation,
+    GraphSmokeGateResult,
+    PerformanceObservation,
+    SmokeGateResult,
+)
 from evals.harness.run import (
     ScheduledRun,
+    _graph_observation,
+    _graph_state_parity,
     _score_selected_attempt,
     build_parser,
     build_schedule,
@@ -173,6 +192,43 @@ def controller_observation(raw_root, client, slot, result, score):
     )
 
 
+def graph_observation(raw_root, client, slot, result, score):
+    negative = slot.case.id == "GRAPH-negative-no-change"
+    observation = GraphPerformanceObservation(
+        case_id=slot.case.id,
+        repetition=slot.repetition,
+        status=result.status,
+        mechanical_passed=True,
+        graph_passed=True,
+        attempt=result.attempt,
+        retry_of=result.retry_of,
+        graph_duration_ms=None if negative else 8,
+        output_words=10,
+        routed_resource_words=10,
+        receipt_state_provider_parity=True,
+        uncovered_high_risk_nodes=(),
+        controller_begin_calls=0 if negative else 1,
+        controller_trace_calls=0 if negative else 1,
+        controller_finalize_calls=0 if negative else 1,
+        controller_evidence_valid=True,
+        duplicate_or_error_calls=False,
+        input_tokens=None,
+        output_tokens=None,
+    )
+    graph_score = GraphScore(
+        case_id=slot.case.id,
+        passed=True,
+        findings=(),
+        maximum_required_distance=0 if negative else 3,
+        receipt_id=None if negative else "a" * 32,
+        receipt_sha256=None if negative else "b" * 64,
+        providers=() if negative else ("builtin",),
+        uncovered_high_risk_nodes=(),
+        matched_path_ids=() if negative else ("PATH-001",),
+    )
+    return observation, graph_score, ()
+
+
 class LineageEvidenceAdapter(FakeAdapter):
     """Produces distinct valid lineage bytes for every case/repetition attempt."""
 
@@ -240,6 +296,242 @@ class LineageEvidenceAdapter(FakeAdapter):
 
 
 class EvalHarnessCliTest(unittest.TestCase):
+    def test_graph_smoke_parser_and_schedule_use_exact_checked_in_six(self):
+        args = build_parser().parse_args(
+            ["--client", "codex", "--suite", "graph-smoke", "--output", "out"]
+        )
+        cases = tuple(case.to_case_spec() for case in load_graph_cases())
+
+        schedule = build_schedule(cases, args.suite, 1)
+
+        self.assertEqual(
+            tuple(slot.case.id for slot in schedule),
+            tuple(case.id for case in load_graph_cases()),
+        )
+        self.assertTrue(all(slot.repetition == 1 for slot in schedule))
+
+    def test_graph_smoke_never_retries_an_infrastructure_attempt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args = build_parser().parse_args(
+                [
+                    "--client", "codex", "--suite", "graph-smoke",
+                    "--expected-plugin-version", "0.4.0",
+                    "--output", str(Path(temporary) / "output"),
+                ]
+            )
+            adapter = FakeAdapter(
+                statuses=(RunStatus.INFRA_ERROR,) * 6,
+                plugin_version="0.4.0",
+            )
+
+            self.assertEqual(run_batch(args, adapter), 1)
+
+        self.assertEqual(len(adapter.requests), 6)
+        self.assertTrue(all(request.attempt == 1 for request in adapter.requests))
+        self.assertTrue(all(request.retry_of is None for request in adapter.requests))
+
+    def test_graph_smoke_persists_graph_scores_and_its_dedicated_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                [
+                    "--client", "codex", "--suite", "graph-smoke",
+                    "--expected-plugin-version", "0.4.0",
+                    "--output", str(output),
+                ]
+            )
+            rejected = GraphSmokeGateResult(
+                passed=False,
+                errors=("injected graph gate failure",),
+                median_graph_duration_ms=8,
+                median_output_words=10,
+                median_routed_resource_words=10,
+            )
+            with patch(
+                "evals.harness.run._graph_observation",
+                side_effect=graph_observation,
+            ), patch(
+                "evals.harness.run.evaluate_graph_smoke",
+                return_value=rejected,
+            ) as gate:
+                exit_code = run_batch(
+                    args, FakeAdapter(plugin_version="0.4.0")
+                )
+
+            scores = json.loads(
+                (output / "graph-scores.json").read_text(encoding="utf-8")
+            )
+            performance = json.loads(
+                (output / "performance.json").read_text(encoding="utf-8")
+            )
+            controller = json.loads(
+                (output / "controller.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 1)
+        gate.assert_called_once()
+        self.assertEqual(len(scores["scores"]), 6)
+        self.assertEqual(len(performance["observations"]), 6)
+        self.assertIn("injected graph gate failure", performance["gate"]["errors"])
+        self.assertFalse(controller["graph_smoke_gate"]["passed"])
+
+    def test_graph_observation_binds_exact_raw_trace_receipt_and_digest(self):
+        from tests.test_graph_scoring import GraphScoringTest
+
+        graph_case = load_graph_cases()[0]
+        case = graph_case.to_case_spec()
+        receipt = GraphScoringTest().receipt(graph_case)
+        receipt_bytes = canonical_receipt_bytes(receipt)
+        receipt_digest = hashlib.sha256(receipt_bytes).hexdigest()
+        compact_digest = hashlib.sha256(
+            json.dumps(
+                compact_graph(receipt), sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+        controller = {
+            "valid": True,
+            "begin_calls": 1,
+            "trace_calls": 1,
+            "finalize_calls": 1,
+            "draft_ids": [receipt["draft_id"]],
+            "receipt_ids": [receipt["receipt_id"]],
+            "receipt_paths": [
+                f".requirements-impact-refiner/graph/{receipt['draft_id']}.json"
+            ],
+            "receipt_sha256": [receipt_digest],
+            "trace_compact_graph_sha256": [compact_digest],
+            "duplicate_or_error_calls": False,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            record_run(
+                raw,
+                "codex",
+                case.id,
+                1,
+                {
+                    "metadata.json": json.dumps(
+                        {"attempt": 1, "client": "codex", "retry_of": None}
+                    ),
+                    "first.final.txt": "Impact scan: 8.4 s\nImpact paths: PATH-001",
+                    "first.jsonl": '{"type":"turn.completed"}\n',
+                    "controller-evidence.json": json.dumps(controller),
+                    f"workspace-graph/{receipt['draft_id']}.json": receipt_bytes,
+                },
+                root / "quarantine",
+            )
+            result = RunResult(
+                case.id, 1, "codex", RunStatus.PASS, None,
+                final_output="Impact scan: 8.4 s\nImpact paths: PATH-001",
+            )
+            mechanical = MechanicalScore(case.id, 1, True, ())
+            with patch("evals.harness.run._graph_state_parity", return_value=True):
+                observation, score, digests = _graph_observation(
+                    raw, "codex", ScheduledRun(case, 1), result, mechanical
+                )
+
+            self.assertTrue(score.passed, score.findings)
+            self.assertTrue(observation.receipt_state_provider_parity)
+            self.assertEqual(observation.graph_duration_ms, 8400)
+            self.assertTrue(any(path.endswith(f"workspace-graph/{receipt['draft_id']}.json") for path, _ in digests))
+
+            controller["receipt_sha256"] = ["0" * 64]
+            (raw / "codex" / case.id / "01" / "controller-evidence.json").write_text(
+                json.dumps(controller), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "digest disagrees"):
+                _graph_observation(
+                    raw, "codex", ScheduledRun(case, 1), result, mechanical
+                )
+
+    def test_graph_state_parity_allows_same_exact_receipt_path_for_two_impacts(self):
+        from tests.test_graph_scoring import GraphScoringTest
+
+        graph_case = load_graph_cases()[0]
+        receipt = GraphScoringTest().receipt(graph_case)
+        score = GraphScoringTest().module().score_graph(
+            graph_case,
+            receipt,
+            "Impact scan: 8.4 s\nImpact paths: PATH-001",
+        )
+        structured = {
+            "id": "PATH-001",
+            "labels": [row["label"] for row in receipt["nodes"]],
+            "providers": ["builtin"],
+            "confidence": "lexical",
+            "locations": [row["location"] for row in receipt["nodes"]],
+        }
+        digest = hashlib.sha256(canonical_receipt_bytes(receipt)).hexdigest()
+        state = {
+            "scope": [{
+                "boundary": "Impact graph coverage",
+                "confidence": f"closed; receipt {receipt['receipt_id']}; sha256 {digest}; frontier none",
+            }],
+            "graph_paths": [
+                {"impact": "IMP-001", "paths": [structured]},
+                {"impact": "IMP-002", "paths": [structured]},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            attempt = Path(temporary)
+            report = attempt / "workspace-reports/RPT-001"
+            report.mkdir(parents=True)
+
+            def selected_file(raw_root, path, label):
+                if path.name == "current.json":
+                    payload = b'{"state":"revision-0001.json"}'
+                else:
+                    payload = json.dumps(state).encode("utf-8")
+                return payload, hashlib.sha256(payload).hexdigest(), path.as_posix()
+
+            with patch(
+                "evals.harness.run._captured_canonical_report",
+                return_value=(b"markdown", None, ()),
+            ), patch(
+                "evals.harness.run._read_selected_file",
+                side_effect=selected_file,
+            ):
+                self.assertTrue(
+                    _graph_state_parity(
+                        attempt, attempt, receipt, digest, score
+                    )
+                )
+
+    def test_graph_scoring_digest_binding_rejects_receipt_mutation_before_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            args = build_parser().parse_args(
+                [
+                    "--client", "codex", "--suite", "graph-smoke",
+                    "--expected-plugin-version", "0.4.0",
+                    "--output", str(output),
+                ]
+            )
+
+            def mutate_after_scoring(raw_root, client, slot, result, score):
+                observation, graph_score, _ = graph_observation(
+                    raw_root, client, slot, result, score
+                )
+                metadata = (
+                    raw_root / client / slot.case.id / "01" / "metadata.json"
+                )
+                original = metadata.read_bytes()
+                digest = hashlib.sha256(original).hexdigest()
+                metadata.write_bytes(original + b" ")
+                relative = "raw/" + metadata.relative_to(raw_root).as_posix()
+                return observation, graph_score, ((relative, digest),)
+
+            with patch(
+                "evals.harness.run._graph_observation",
+                side_effect=mutate_after_scoring,
+            ):
+                exit_code = run_batch(
+                    args, FakeAdapter(plugin_version="0.4.0")
+                )
+
+        self.assertEqual(exit_code, 1)
+
     def test_omitted_model_is_none(self):
         """Defaulting a model would silently alter the installed composition."""
         args = build_parser().parse_args(
@@ -619,9 +911,11 @@ class EvalHarnessCliTest(unittest.TestCase):
             "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
         }, sort_keys=True)
         draft = "0" * 32
+        receipt = "f" * 32
         events = (
             {"type": "item.completed", "item": {"id": "begin", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_begin", "arguments": {}, "result": {"structured_content": {"draft_id": draft, "installed_payload_sha256": "0" * 64}}, "error": None, "status": "completed"}},
-            {"type": "item.completed", "item": {"id": "finalize", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_finalize", "arguments": {"draft_id": draft}, "result": {"structured_content": {"status": "published", "display_text": compact}}, "error": None, "status": "completed"}},
+            {"type": "item.completed", "item": {"id": "trace", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_trace_impact", "arguments": {"draft_id": draft}, "result": {"structured_content": {"receipt_id": receipt, "receipt_path": f".requirements-impact-refiner/graph/{draft}.json", "receipt_sha256": "a" * 64, "compact_graph": {}, "budget_status": "closed"}}, "error": None, "status": "completed"}},
+            {"type": "item.completed", "item": {"id": "finalize", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_finalize", "arguments": {"draft_id": draft, "graph_receipt_id": receipt}, "result": {"structured_content": {"status": "published", "display_text": compact}}, "error": None, "status": "completed"}},
         )
         jsonl = "\n".join(json.dumps(event) for event in events) + "\n"
         controller = analyze_controller_trace((jsonl,), compact, expected_turns=1)
