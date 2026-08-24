@@ -86,4 +86,3 @@ def load_scan_receipt_bytes(root, scan_id):
     finally:
         if fd is not None: os.close(fd)
         os.close(directory_fd)
-

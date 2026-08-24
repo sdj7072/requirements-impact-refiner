@@ -41,4 +41,3 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
     if frontier: lines.append("Unknown frontier: " + "; ".join(_text(row.get("reason", "unknown")) for row in frontier[:3]) + ".")
     if status == "partial": lines.append("Partial result: unknown impact may remain.")
     return _bounded(" ".join(lines), footer)
-
