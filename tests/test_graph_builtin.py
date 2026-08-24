@@ -361,3 +361,45 @@ class GraphBuiltinTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SensitiveLiteralRedactionTest(unittest.TestCase):
+    """Prefixed and suffixed credential names must be redacted, because the
+    longest-shared-token edge evidence actively selects for secret values."""
+
+    REDACTED_ASSIGNMENTS = (
+        'token = "abc123secretvalue"',
+        'password = "hunter2hunter2"',
+        'AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMIexample"',
+        'GITHUB_TOKEN = "ghp_leakedsecret1234567890"',
+        'ANTHROPIC_API_KEY = "sk-ant-api03-leaked"',
+        'DB_PASSWORD = "hunter2hunter2"',
+        'STRIPE_SECRET_KEY = "sk_live_51leaked"',
+        'SLACK_BOT_TOKEN = "xoxb-1234-leaked"',
+        'DJANGO_SECRET_KEY = "insecure-leaked"',
+        'apiKey: "AIzaLeakedValue"',
+        'clientSecret = "leaked-oauth-secret"',
+        'authToken: "bearer-leaked"',
+        'PASSPHRASE = "correct horse"'.replace(" horse", "-horse"),
+    )
+
+    PRESERVED_ASSIGNMENTS = (
+        'tokenizer = "whitespace"',
+        'keyboard_layout = "qwerty"',
+        'monkeypatch = "fixture"',
+    )
+
+    def test_redacts_prefixed_and_suffixed_credential_names(self):
+        for line in self.REDACTED_ASSIGNMENTS:
+            with self.subTest(line=line):
+                safe_text, found = BUILTIN._redact_sensitive_literals(line)
+                value = line.split(None, 2)[-1].strip('"').rstrip(":")
+                self.assertTrue(found, line)
+                self.assertNotIn(value.strip('"'), safe_text)
+
+    def test_preserves_non_credential_identifiers(self):
+        for line in self.PRESERVED_ASSIGNMENTS:
+            with self.subTest(line=line):
+                safe_text, found = BUILTIN._redact_sensitive_literals(line)
+                self.assertEqual(safe_text, line)
+                self.assertEqual(found, frozenset())

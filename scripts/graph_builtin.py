@@ -48,11 +48,18 @@ _SLASHED = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*(?:/[A-Za-z_][A-Za-z0-9_.-]*)+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 _QUOTED = re.compile(r"(?P<quote>['\"])(?P<value>[^'\"\r\n]{2,256})(?P=quote)")
 _IMPORT = re.compile(r"(?m)^\s*(?:from|import)\s+(?P<value>[^\r\n#]+)")
+# Credential-shaped names are matched as whole identifier segments so that
+# prefixed and suffixed forms (GITHUB_TOKEN, STRIPE_SECRET_KEY, apiKey) are
+# caught, while embedded fragments (tokenizer, keyboard) are preserved.
 _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)(?P<prefix>(?<![A-Za-z0-9_])(?P<keyquote>['\"]?)"
-    r"(?:aws[_-]secret[_-]access[_-]key|client[_-]secret|access[_-]token|"
-    r"refresh[_-]token|token|password|passwd|private[_-]key|api[_-]key|secret|"
-    r"credential)(?P=keyquote)\s*[:=]\s*)"
+    r"(?:[A-Za-z0-9]+[_-])*"
+    r"(?:aws[_-]secret[_-]access[_-]key|client[_-]?secret|access[_-]?token|"
+    r"refresh[_-]?token|auth[_-]?token|api[_-]?key|api[_-]?secret|"
+    r"private[_-]key|secret[_-]?key|token|password|passwd|passphrase|secret|"
+    r"credential)"
+    r"(?:[_-][A-Za-z0-9]+)*"
+    r"(?P=keyquote)\s*[:=]\s*)"
     r"(?:(?P<quote>['\"])(?P<quoted>[^'\"\r\n]+)(?P=quote)|"
     r"(?P<bare>[^\s,#}\]]+))"
 )

@@ -46,9 +46,14 @@ _QUALIFIED = re.compile(
     r"[A-Za-z_][A-Za-z0-9_-]*"
     r"(?:\.[A-Za-z_][A-Za-z0-9_-]*)+"
 )
+# Whole identifier segments, so prefixed credential names (GITHUB_TOKEN,
+# STRIPE_SECRET_KEY) are caught while fragments (tokenizer) are not.
 _SECRET = re.compile(
-    r"(?i)\b(?:api[_-]?key|api[_-]?token|access[_-]?token|auth[_-]?token|token|secret|"
-    r"password|passwd|private[_-]?key)\b\s*[:=]\s*\S+"
+    r"(?i)(?<![A-Za-z0-9_])(?:[A-Za-z0-9]+[_-])*"
+    r"(?:api[_-]?key|api[_-]?token|api[_-]?secret|access[_-]?token|"
+    r"auth[_-]?token|secret[_-]?key|token|secret|password|passwd|passphrase|"
+    r"private[_-]?key|credential)"
+    r"(?:[_-][A-Za-z0-9]+)*\s*[:=]\s*\S+"
 )
 _SOURCE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js",

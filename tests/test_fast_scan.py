@@ -402,3 +402,27 @@ class FastScanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CredentialShapedEvidenceTest(unittest.TestCase):
+    """Prefixed credential names must be rejected as evidence, matching the
+    graph scanner's redaction coverage."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.module = load_fast_scan()
+
+    def test_rejects_prefixed_credential_assignments(self):
+        for row in (
+            'GITHUB_TOKEN = "ghp_leaked"',
+            'DB_PASSWORD: "hunter2"',
+            'STRIPE_SECRET_KEY = "sk_live_leaked"',
+            'apiKey: "AIzaLeaked"',
+        ):
+            with self.subTest(row=row):
+                self.assertIsNotNone(self.module._SECRET.search(row), row)
+
+    def test_accepts_non_credential_identifiers(self):
+        for row in ('tokenizer = "whitespace"', 'keyboard_layout = "qwerty"'):
+            with self.subTest(row=row):
+                self.assertIsNone(self.module._SECRET.search(row), row)

@@ -10,14 +10,38 @@ def _id(value):
     return value
 
 def _open_dir(parent_fd, name, mode):
+    created = True
     try: os.mkdir(name, mode=mode, dir_fd=parent_fd)
-    except FileExistsError: pass
+    except FileExistsError: created = False
     try:
         fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
     except OSError as error:
         raise ValueError("scan directory is unsafe") from error
-    os.fchmod(fd, mode)
+    # Only stamp the mode on directories this store created; an existing
+    # directory keeps whatever permissions the user chose.
+    if created:
+        os.fchmod(fd, mode)
     return fd
+
+
+def _ensure_self_ignore(base_fd):
+    """Keep receipt payloads (which may embed repository text) out of version
+    control by making the workspace ignore itself."""
+    try:
+        fd = os.open(
+            ".gitignore",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            mode=0o644, dir_fd=base_fd,
+        )
+    except FileExistsError:
+        return
+    except OSError:
+        return
+    try:
+        os.write(fd, b"*\n")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 def _scan_dir(root):
     root = Path(root)
@@ -27,6 +51,7 @@ def _scan_dir(root):
     base_fd = None
     try:
         base_fd = _open_dir(root_fd, ".requirements-impact-refiner", 0o755)
+        _ensure_self_ignore(base_fd)
         return _open_dir(base_fd, "scans", 0o700)
     finally:
         if base_fd is not None: os.close(base_fd)

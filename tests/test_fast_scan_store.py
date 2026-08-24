@@ -58,3 +58,31 @@ class FastScanStoreTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkspaceDirectoryHygieneTest(unittest.TestCase):
+    def setUp(self):
+        self.store = load_store()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.payload = b'{"probe": true}'
+
+    def test_does_not_widen_existing_directory_permissions(self):
+        base = self.root / ".requirements-impact-refiner"
+        base.mkdir(mode=0o700)
+        (base / "scans").mkdir(mode=0o700)
+        self.store.publish_scan_receipt(self.root, "a" * 32, self.payload)
+        self.assertEqual(stat.S_IMODE(base.stat().st_mode), 0o700)
+
+    def test_workspace_ignores_itself_from_version_control(self):
+        self.store.publish_scan_receipt(self.root, "a" * 32, self.payload)
+        ignore = self.root / ".requirements-impact-refiner" / ".gitignore"
+        self.assertEqual(ignore.read_text(), "*\n")
+
+    def test_existing_gitignore_is_not_overwritten(self):
+        base = self.root / ".requirements-impact-refiner"
+        base.mkdir(mode=0o755)
+        (base / ".gitignore").write_text("custom\n")
+        self.store.publish_scan_receipt(self.root, "a" * 32, self.payload)
+        self.assertEqual((base / ".gitignore").read_text(), "custom\n")
