@@ -62,4 +62,3 @@ def score_fast_scan(case, result: Mapping[str, object]):
         if len(str(result.get("display_text", "")).split()) > case.maximum_output_words: findings.append("Fast Scan exceeds 180 words")
         if result.get("uncovered_high_risk_nodes"): findings.append("Fast Scan leaves uncovered high-risk nodes")
     return FastScanScore(case.id, not findings, tuple(sorted(set(findings))))
-
