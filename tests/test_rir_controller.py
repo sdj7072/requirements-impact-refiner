@@ -2078,6 +2078,7 @@ class RirControllerTest(unittest.TestCase):
         config["impact_graph"]["providers"] = ["codegraph", "scip"]
         (self.root / ".requirements-impact-refiner.json").write_text(json.dumps(config), encoding="utf-8")
         draft = CONTROLLER.begin_refinement(self.request(audience_override="technical"))
+        special_label = "<profile || `wire|field`> " + "long-label " * 40
 
         def fake_trace(root, graph_draft, seeds, graph_settings, **kwargs):
             settings = CONTROLLER.GRAPH_COORDINATOR._settings(graph_settings)
@@ -2088,17 +2089,16 @@ class RirControllerTest(unittest.TestCase):
             request_sha = CONTROLLER.GRAPH_COORDINATOR._request_sha256(graph_draft, seeds, settings)
             receipt_id = CONTROLLER.GRAPH_COORDINATOR._trace_identity(root, graph_draft["draft_id"], request_sha, seeds, settings, providers)
             digest = lambda path: hashlib.sha256((root / path).read_bytes()).hexdigest()
-            long_label = "<profile || `wire|field`> " + "long-label " * 40
             receipt = CONTROLLER.GRAPH.GraphReceipt(
                 receipt_id, graph_draft["draft_id"], hashlib.sha256(str(root).encode()).hexdigest(), request_sha, settings, providers,
                 (
-                    CONTROLLER.GRAPH.GraphNode("NODE-001", "api_field", long_label, "api/profile.py", "codegraph", "verified-provider", digest("api/profile.py"), ("interfaces",)),
-                    CONTROLLER.GRAPH.GraphNode("NODE-002", "cache", "desktop cache", "desktop/profile_cache.ts", "codegraph", "verified-provider", digest("desktop/profile_cache.ts"), ("data",)),
-                    CONTROLLER.GRAPH.GraphNode("NODE-003", "event", "event consumer", "events/profile.py", "scip", "verified-provider", digest("events/profile.py"), ("operations",)),
+                    CONTROLLER.GRAPH.GraphNode("NODE-001", "api_field", special_label, "api/profile.py", "codegraph", "verified-provider", digest("api/profile.py"), ("interfaces",)),
+                    CONTROLLER.GRAPH.GraphNode("NODE-002", "cache", "desktop cache", "desktop/profile_cache.ts", "scip", "verified-provider", digest("desktop/profile_cache.ts"), ("data",)),
+                    CONTROLLER.GRAPH.GraphNode("NODE-003", "event", "event consumer", "events/profile.py", "codegraph", "verified-provider", digest("events/profile.py"), ("operations",)),
                 ),
                 (
-                    CONTROLLER.GRAPH.GraphEdge("EDGE-001", "NODE-001", "NODE-002", "references", "desktop/profile_cache.ts", "wire", "verified-provider", "codegraph", digest("desktop/profile_cache.ts")),
-                    CONTROLLER.GRAPH.GraphEdge("EDGE-002", "NODE-001", "NODE-003", "publishes", "events/profile.py", "wire", "verified-provider", "scip", digest("events/profile.py")),
+                    CONTROLLER.GRAPH.GraphEdge("EDGE-001", "NODE-001", "NODE-002", "references", "desktop/profile_cache.ts", "wire", "verified-provider", "scip", digest("desktop/profile_cache.ts")),
+                    CONTROLLER.GRAPH.GraphEdge("EDGE-002", "NODE-001", "NODE-003", "publishes", "events/profile.py", "wire", "verified-provider", "codegraph", digest("events/profile.py")),
                 ),
                 (
                     CONTROLLER.GRAPH.GraphPath("PATH-001", ("NODE-001", "NODE-002"), ("EDGE-001",), 1, ("interfaces", "data")),
@@ -2116,15 +2116,67 @@ class RirControllerTest(unittest.TestCase):
         analysis["impacts"][0]["graph_path_keys"] = ["PATH-001", "PATH-002"]
         analysis["impacts"][0]["evidence_level"] = "unknown"
         result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
-        state = json.loads(result.state_path.read_text(encoding="utf-8"))
-        paths = state["graph_paths"][0]["paths"]
-        self.assertEqual(paths[0]["providers"], ["codegraph"])
-        self.assertEqual(paths[1]["providers"], ["codegraph", "scip"])
-        self.assertEqual(paths[1]["locations"], ["api/profile.py", "events/profile.py"])
-        self.assertIn("&#124;&#124;", result.display_text)
-        self.assertIn("provider codegraph; confidence verified-provider; location api/profile.py", result.display_text)
-        self.assertNotIn("<profile", result.display_text)
-        self.assertLessEqual(len(result.display_text.split()), 450)
+        reloaded_state, reload_errors = CONTROLLER.compact_state.load_state_bytes(
+            result.state_path.read_bytes()
+        )
+        self.assertEqual(reload_errors, [])
+        self.assertIsNotNone(reloaded_state)
+        expected_first_path = {
+            "id": "PATH-001",
+            "labels": [special_label, "desktop cache"],
+            "providers": ["codegraph", "scip"],
+            "confidence": "verified-provider",
+            "locations": ["api/profile.py", "desktop/profile_cache.ts"],
+        }
+        expected_second_path = {
+            "id": "PATH-002",
+            "labels": [special_label, "event consumer"],
+            "providers": ["codegraph"],
+            "confidence": "verified-provider",
+            "locations": ["api/profile.py", "events/profile.py"],
+        }
+        self.assertEqual(
+            reloaded_state["graph_paths"],
+            [
+                {
+                    "impact": "IMP-001",
+                    "paths": [expected_first_path, expected_second_path],
+                }
+            ],
+        )
+        self.assertEqual(
+            reloaded_state["graph_paths"][0]["paths"][1],
+            expected_second_path,
+        )
+
+        rendered_reload = CONTROLLER.impact_renderer.render_compact(
+            reloaded_state
+        ).removesuffix("\n")
+        self.assertEqual(rendered_reload, result.display_text)
+        displayed_path_lines = [
+            line
+            for line in rendered_reload.splitlines()
+            if line.startswith("- `IMP-001`:")
+        ]
+        self.assertEqual(len(displayed_path_lines), 1)
+        displayed_path = displayed_path_lines[0]
+        self.assertIn(
+            "PATH-001: &lt;profile &#124;&#124; "
+            "&#96;wire&#124;field&#96;&gt;",
+            displayed_path,
+        )
+        self.assertIn(
+            "provider codegraph + scip; confidence verified-provider; "
+            "location api/profile.py + desktop/profile_cache.ts",
+            displayed_path,
+        )
+        self.assertNotIn("<profile", rendered_reload)
+        self.assertNotIn("`wire|field`", rendered_reload)
+        self.assertNotRegex(rendered_reload, r"<[^>\n]+>")
+        for line in rendered_reload.splitlines():
+            if line.startswith("|"):
+                self.assertEqual(line.count("|"), 5, line)
+        self.assertLessEqual(len(rendered_reload.split()), 450)
 
     def test_finalize_accepts_supplied_only_unknown_with_rationale_and_frontier(self):
         self.enable_builtin_graph()
