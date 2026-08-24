@@ -25,7 +25,7 @@ Advice and future criteria are not verified evidence. `resolved` requires curren
 
 `detected` is unaddressed; `refining` is being reduced; `mitigated` is reduced; `resolved` is eliminated with evidence; `accepted` is retained by decision; `deferred` is postponed with rationale; `blocked` needs named information/access; `superseded` is replaced but retained for lineage.
 
-`reopened` is a Delta transition, not a state: use it when `resolved`, `accepted`, or `superseded` becomes active again. Same-state transitions, including `blocked`→`blocked`, are `unchanged`. First-report impacts are `new`; never remove a known impact—retain it or mark it superseded.
+A `superseded` impact must name its successor impact or a rationale, and every `Analysis Scope and Limitations` row needs all three cells filled — the validator enforces both. `reopened` is a Delta transition, not a state: use it when `resolved`, `accepted`, or `superseded` becomes active again. Same-state transitions, including `blocked`→`blocked`, are `unchanged`. First-report impacts are `new`; never remove a known impact—retain it or mark it superseded.
 
 ## Uncertainty handling
 
