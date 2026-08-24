@@ -13,6 +13,7 @@ TOP_LEVEL_KEYS = {
     "impacts", "decision_needed", "decisions", "delta", "history",
     "criteria", "unresolved", "scope", "handoff", "summary",
 }
+OPTIONAL_TOP_LEVEL_KEYS = {"graph_paths"}
 OBJECT_FIELDS = {
     "report": {"id", "revision", "previous_sha256", "phase"},
     "original_requirement": {"id", "request", "source"},
@@ -123,7 +124,7 @@ def validate_structure(value: object) -> list[str]:
     if not _mapping(value):
         return ["state must contain a JSON object"]
     errors = [f"missing top-level key {key}" for key in sorted(TOP_LEVEL_KEYS - set(value))]
-    errors.extend(f"unknown top-level key {key}" for key in sorted(set(value) - TOP_LEVEL_KEYS))
+    errors.extend(f"unknown top-level key {key}" for key in sorted(set(value) - TOP_LEVEL_KEYS - OPTIONAL_TOP_LEVEL_KEYS))
     if errors:
         return errors
     if value["schema_version"] != 1:
@@ -168,6 +169,33 @@ def validate_structure(value: object) -> list[str]:
         for category in DELTA_CATEGORIES:
             if category in delta and not _string_list(delta[category]) and delta[category] != []:
                 errors.append(f"delta {category} must be an array of identifiers")
+    if "graph_paths" in value:
+        graph_paths = value["graph_paths"]
+        if not isinstance(graph_paths, list) or len(graph_paths) > 128:
+            errors.append("graph_paths must be a bounded array")
+        else:
+            for index, row in enumerate(graph_paths, start=1):
+                errors.extend(_check_keys(f"graph path row {index}", row, {"impact", "paths"}))
+                if not _mapping(row):
+                    continue
+                paths = row.get("paths")
+                if not isinstance(paths, list) or len(paths) > 128:
+                    errors.append(f"graph path row {index} paths must be a bounded array")
+                    continue
+                for path_index, path in enumerate(paths, start=1):
+                    errors.extend(_check_keys(f"graph path {index}.{path_index}", path, {"id", "labels", "providers", "confidence", "locations"}))
+                    if not _mapping(path):
+                        continue
+                    if not isinstance(path.get("id"), str) or re.fullmatch(r"PATH-\d{3}", path["id"]) is None:
+                        errors.append(f"graph path {index}.{path_index} has invalid id")
+                    if not _string_list(path.get("labels")):
+                        errors.append(f"graph path {index}.{path_index} labels must be non-empty strings")
+                    if not _string_list(path.get("providers")):
+                        errors.append(f"graph path {index}.{path_index} providers must be non-empty strings")
+                    if not _nonempty(path.get("confidence")):
+                        errors.append(f"graph path {index}.{path_index} confidence must be nonempty")
+                    if not isinstance(path.get("locations"), list) or any(not _nonempty(item) for item in path["locations"]):
+                        errors.append(f"graph path {index}.{path_index} locations must be strings")
     return errors
 
 
@@ -375,6 +403,9 @@ def validate_supporting_sections(state: Mapping[str, object]) -> list[str]:
             errors.append(
                 f"handoff remaining risks must name {impact.get('state')} impact {impact['id']}"
             )
+    for row in state.get("graph_paths", []):
+        if row.get("impact") not in known["impact"]:
+            errors.append("graph paths reference unknown impact")
     return errors
 
 

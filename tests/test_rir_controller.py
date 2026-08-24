@@ -2054,6 +2054,11 @@ class RirControllerTest(unittest.TestCase):
         self.assertIn("nodes /", coverage["evidence"])
         self.assertIn(receipt.receipt_id, coverage["confidence"])
         self.assertIn(receipt.receipt_sha256, coverage["confidence"])
+        self.assertIn("graph_paths", state)
+        self.assertEqual(state["graph_paths"][0]["impact"], "IMP-001")
+        self.assertTrue(state["graph_paths"][0]["paths"][0]["labels"])
+        self.assertTrue(state["graph_paths"][0]["paths"][0]["providers"])
+        self.assertIn("PATH-", result.display_text)
         metadata = json.loads(
             result.state_path.with_name("revision-0001.controller.json").read_text(
                 encoding="utf-8"

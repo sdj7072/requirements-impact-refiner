@@ -53,8 +53,9 @@ class ImpactRendererTest(unittest.TestCase):
                 f"NODE-{index * 2 + 2:03d}",
                 f"EDGE-{index + 1:03d}",
             )
+            label = f"<api-{index} data-x='1' || `wire|field`> " + "very-long-label " * 40
             nodes.extend((
-                {"id": start, "label": f"<api-{index} data-x='1'>", "provider": provider, "confidence": "verified-provider", "location": f"api/profile_{index}.py"},
+                {"id": start, "label": label, "provider": provider, "confidence": "verified-provider", "location": f"api/profile_{index}.py"},
                 {"id": end, "label": f"desktop cache {index}", "provider": provider, "confidence": "verified-provider", "location": f"desktop/cache_{index}.ts"},
             ))
             edges.append({"id": edge, "provider": provider, "confidence": "verified-provider", "location": f"desktop/cache_{index}.ts"})
@@ -115,7 +116,7 @@ class ImpactRendererTest(unittest.TestCase):
 
         text = RENDERER.render_compact(state)
 
-        self.assertIn("PATH-001: &lt;api-0 data-x='1'&gt; → desktop cache 0", text)
+        self.assertIn("&lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", text)
         self.assertIn("Impact scan: 8.4 s", text)
         self.assertIn("2 unknown frontiers", text)
         self.assertEqual(text.count("Impact scan:"), 1)
@@ -126,12 +127,15 @@ class ImpactRendererTest(unittest.TestCase):
         technical_state = self.controller_graph_state("technical")
         technical = RENDERER.render_compact(technical_state)
 
-        self.assertIn("&lt;api-0 data-x='1'&gt; → desktop cache 0", simple)
+        self.assertIn("&lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", simple)
         self.assertNotIn("PATH-001", simple)
-        self.assertIn("PATH-001: &lt;api-0 data-x='1'&gt; → desktop cache 0", balanced)
-        self.assertIn("PATH-001: provider codegraph; confidence verified-provider; location api/profile_0.py", technical)
-        provenance = next(row["confidence"] for row in technical_state["scope"] if row["boundary"] == "Graph paths for IMP-001")
-        self.assertIn("PATH-002: provider scip; confidence verified-provider; location api/profile_1.py", provenance)
+        self.assertIn("PATH-001: &lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", balanced)
+        self.assertIn("PATH-001: &lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", technical)
+        self.assertIn("provider codegraph; confidence verified-provider; location api/profile_0.py", technical)
+        structured = technical_state["graph_paths"][0]["paths"]
+        self.assertEqual(structured[1]["providers"], ["scip"])
+        self.assertEqual(structured[1]["locations"][0], "api/profile_1.py")
+        self.assertEqual(CONTROLLER.compact_state.validate_state(technical_state), [])
         self.assertNotIn("provider codegraph + scip", technical)
 
     def test_compact_graph_output_stays_bounded_without_malformed_markdown(self):

@@ -164,6 +164,7 @@ class PackagingTest(unittest.TestCase):
             ".codex-plugin/plugin.json",
             ".mcp.json",
             "schemas/controller-analysis.schema.json",
+            "schemas/compact-state.schema.json",
             "schemas/impact-graph-receipt.schema.json",
             "scripts/launch-rir-mcp",
             "scripts/payload_identity.py",

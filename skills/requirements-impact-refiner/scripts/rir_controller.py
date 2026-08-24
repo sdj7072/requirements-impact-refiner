@@ -2534,6 +2534,22 @@ def _path_provenance(path, nodes, edges) -> str:
     )
 
 
+def _structured_path(path, nodes, edges) -> dict[str, object]:
+    records = [nodes[node] for node in path["nodes"]]
+    records.extend(edges[edge] for edge in path["edges"])
+    return {
+        "id": path["id"],
+        "labels": [nodes[node]["label"] for node in path["nodes"]],
+        "providers": list(dict.fromkeys(
+            row["provider"] for row in records if row.get("provider")
+        )) or ["unavailable"],
+        "confidence": _path_confidence(path, nodes, edges),
+        "locations": list(dict.fromkeys(
+            row["location"] for row in records if row.get("location")
+        )),
+    }
+
+
 def _validate_graph_coverage(
     analysis: Mapping[str, object], context: dict[str, object]
 ) -> None:
@@ -3128,6 +3144,7 @@ def _build_state(draft, analysis, graph_context=None):
     else:
         handoff_workflow = analysis["workflow"]
     scope = list(analysis["scope"])
+    structured_paths = []
     if graph_context is not None:
         receipt = graph_context["receipt"]
         receipt_nodes = {row["id"]: row for row in receipt["nodes"]}
@@ -3136,6 +3153,7 @@ def _build_state(draft, analysis, graph_context=None):
         for row in analysis["impacts"]:
             path_descriptions = []
             path_provenance = []
+            impact_paths = []
             for path_key in graph_context["impact_paths"][row["key"]]:
                 path = receipt_paths[path_key]
                 labels = [receipt_nodes[node]["label"] for node in path["nodes"]]
@@ -3143,6 +3161,13 @@ def _build_state(draft, analysis, graph_context=None):
                 path_provenance.append(
                     f"{path_key}: {_path_provenance(path, receipt_nodes, receipt_edges)}"
                 )
+                impact_paths.append(
+                    _structured_path(path, receipt_nodes, receipt_edges)
+                )
+            if impact_paths:
+                structured_paths.append({
+                    "impact": impact_ids[row["key"]], "paths": impact_paths,
+                })
             rationale = graph_context["rationales"].get(row["key"])
             scope.append({
                 "boundary": f"Graph paths for {impact_ids[row['key']]}",
@@ -3202,6 +3227,8 @@ def _build_state(draft, analysis, graph_context=None):
         },
         "summary": summary,
     }
+    if structured_paths:
+        state["graph_paths"] = structured_paths
     errors = compact_state.validate_state(state)
     if errors:
         raise ValueError("; ".join(errors))

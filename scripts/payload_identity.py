@@ -10,6 +10,7 @@ ROOT_FILES = (
     ".codex-plugin/plugin.json",
     ".mcp.json",
     "schemas/controller-analysis.schema.json",
+    "schemas/compact-state.schema.json",
     "schemas/impact-graph-receipt.schema.json",
     "scripts/compact_state.py",
     "scripts/graph_adapter_ast_grep.py",

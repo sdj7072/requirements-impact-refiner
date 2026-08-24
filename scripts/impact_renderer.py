@@ -264,6 +264,12 @@ def _graph_scope(state):
     return paths, coverage
 
 
+def _structured_graph_paths(state):
+    return {
+        row["impact"]: row["paths"] for row in state.get("graph_paths", [])
+    }
+
+
 def _short(value, limit):
     words = str(value).split()
     return " ".join(words[:limit]) + (" …" if len(words) > limit else "")
@@ -281,6 +287,20 @@ def _compact_path(evidence, confidence, audience):
     if audience == "balanced":
         return evidence
     return f"{evidence} ({confidence})"
+
+
+def _structured_compact_path(path, audience):
+    label = _short(" → ".join(path["labels"]), 24)
+    if audience == "simple":
+        return label
+    if audience == "balanced":
+        return f"{path['id']}: {label}"
+    providers = " + ".join(path["providers"])
+    locations = " + ".join(path["locations"]) or "unavailable"
+    return (
+        f"{path['id']}: {label} (provider {providers}; "
+        f"confidence {path['confidence']}; location {locations})"
+    )
 
 
 def _severity_rank(row):
@@ -307,6 +327,7 @@ def render_compact(state: Mapping[str, object]) -> str:
     if omitted:
         lines.append(f"| — | {omitted} lower-priority impacts remain in the full report. | — | — |")
     graph_paths, graph_coverage = _graph_scope(state)
+    structured_paths = _structured_graph_paths(state)
     remaining = [row for row in state["summary"] if row["status"] in {"accepted", "deferred", "blocked"}]
     tail = []
     if remaining:
@@ -332,14 +353,23 @@ def render_compact(state: Mapping[str, object]) -> str:
     graph_lines = []
     if graph_coverage is not None:
         graph_lines.extend(("", f"**Coverage:** {_text(_coverage_text(graph_coverage))}"))
-    if graph_paths:
+    if graph_paths or structured_paths:
         candidates = []
         for _, row in ranked:
-            path = graph_paths.get(row["impact_id"])
-            if path is None:
-                continue
-            evidence, confidence = path
-            candidates.append(f"- {_identifier(row['impact_id'])}: {_text(_short(_compact_path(evidence, confidence, state['settings']['audience']), 36))}")
+            structured = structured_paths.get(row["impact_id"])
+            if structured:
+                rendered = _structured_compact_path(
+                    structured[0], state["settings"]["audience"]
+                )
+            else:
+                path = graph_paths.get(row["impact_id"])
+                if path is None:
+                    continue
+                evidence, confidence = path
+                rendered = _short(
+                    _compact_path(evidence, confidence, state["settings"]["audience"]), 36
+                )
+            candidates.append(f"- {_identifier(row['impact_id'])}: {_text(rendered)}")
         selected = []
         for candidate in candidates:
             proposal = lines + ["", "**Impact paths:**"] + selected + [candidate] + graph_lines + tail
