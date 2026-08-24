@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "GRAPH-api-mobile-cache-migration",
+      "kind": "positive",
+      "required_seeds": [
+        {
+          "term": "profile.displayName",
+          "location": "api/profile.py"
+        }
+      ],
+      "minimum_path_distance": 3,
+      "maximum_output_words": 180,
+      "maximum_scan_ms": 30000,
+      "controller_required": true
+    },
+    {
+      "id": "GRAPH-auth-role-audit-consumer",
+      "kind": "positive",
+      "required_seeds": [
+        {
+          "term": "authorization.workspace_edit",
+          "location": "auth/authorize.py"
+        }
+      ],
+      "minimum_path_distance": 3,
+      "maximum_output_words": 180,
+      "maximum_scan_ms": 30000,
+      "controller_required": true
+    },
+    {
+      "id": "GRAPH-event-retry-idempotency-side-effect",
+      "kind": "positive",
+      "required_seeds": [
+        {
+          "term": "billing.payment_captured",
+          "location": "events/payment_publisher.py"
+        }
+      ],
+      "minimum_path_distance": 3,
+      "maximum_output_words": 180,
+      "maximum_scan_ms": 30000,
+      "controller_required": true
+    },
+    {
+      "id": "GRAPH-schema-serializer-backfill-export",
+      "kind": "positive",
+      "required_seeds": [
+        {
+          "term": "account.external_id",
+          "location": "schema/account.json"
+        }
+      ],
+      "minimum_path_distance": 3,
+      "maximum_output_words": 180,
+      "maximum_scan_ms": 30000,
+      "controller_required": true
+    },
+    {
+      "id": "GRAPH-config-deploy-worker-health",
+      "kind": "positive",
+      "required_seeds": [
+        {
+          "term": "worker.profile_sync",
+          "location": "config/profile_sync.yaml"
+        }
+      ],
+      "minimum_path_distance": 3,
+      "maximum_output_words": 180,
+      "maximum_scan_ms": 30000,
+      "controller_required": true
+    },
+    {
+      "id": "GRAPH-negative-no-change",
+      "kind": "negative",
+      "required_seeds": [],
+      "minimum_path_distance": 0,
+      "maximum_output_words": 0,
+      "maximum_scan_ms": 0,
+      "controller_required": false
+    }
+  ]
+}
+

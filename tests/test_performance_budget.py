@@ -6,9 +6,11 @@ from pathlib import Path
 
 from evals.harness.models import RunStatus
 from evals.harness.performance import (
+    FastScanPerformanceObservation,
     GraphPerformanceObservation,
     PerformanceObservation,
     evaluate_graph_smoke,
+    evaluate_fast_scan_gate,
     evaluate_smoke_gate,
 )
 
@@ -91,6 +93,34 @@ class PerformanceBudgetTest(unittest.TestCase):
 
     def six_graph_rows(self):
         return tuple(self.graph_observation(case_id) for case_id in GRAPH_IDS)
+
+    def fast_scan_rows(self):
+        return tuple(FastScanPerformanceObservation(
+            case_id=case_id, repetition=1, status=RunStatus.PASS,
+            attempt=1, retry_of=None,
+            scan_duration_ms=None if case_id == "GRAPH-negative-no-change" else 8400,
+            output_words=0 if case_id == "GRAPH-negative-no-change" else 150,
+            controller_calls=() if case_id == "GRAPH-negative-no-change" else ("rir_scan",),
+            scoring_passed=True, exact_provenance=True,
+            uncovered_high_risk_nodes=(), input_tokens=None, output_tokens=None,
+        ) for case_id in GRAPH_IDS)
+
+    def test_fast_scan_gate_enforces_one_call_time_words_and_provenance(self):
+        rows = self.fast_scan_rows()
+        self.assertTrue(evaluate_fast_scan_gate(rows).passed)
+        self.assertIn(
+            "Fast Scan must call only rir_scan once",
+            evaluate_fast_scan_gate(
+                (replace(rows[0], controller_calls=("rir_scan", "rir_begin")),)
+                + rows[1:]
+            ).errors,
+        )
+        self.assertIn(
+            "Fast Scan output exceeds 180 words",
+            evaluate_fast_scan_gate(
+                tuple(replace(row, output_words=181) for row in rows)
+            ).errors,
+        )
 
     def test_baseline_is_literal_and_matches_preserved_measurement(self):
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
