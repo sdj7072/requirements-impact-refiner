@@ -450,7 +450,9 @@ class RirControllerTest(unittest.TestCase):
 
                 def interrupting_unlink(path, **kwargs):
                     nonlocal interrupted
-                    is_quarantine = str(path).endswith(".quarantine")
+                    is_quarantine = str(path).endswith(
+                        ".quarantine"
+                    ) or str(path).endswith(".quarantine.removing")
                     if (
                         not interrupted
                         and phase == "before-quarantine-cleanup"
@@ -514,6 +516,361 @@ class RirControllerTest(unittest.TestCase):
                     if path.name.startswith(f".{draft.draft_id}.")
                 )
                 self.assertEqual(transaction_artifacts, [])
+
+    def test_trace_bind_cleanup_recovers_from_every_durable_artifact_boundary(self):
+        component_kinds = (
+            "replacement",
+            "quarantine",
+            "anchor",
+            "commit",
+            "swap",
+            "manifest",
+            "cleanup-marker",
+        )
+        phases = (("cleanup-marker", "persist"),) + tuple(
+            (kind, boundary)
+            for kind in component_kinds
+            for boundary in ("quarantine", "removal")
+        )
+        for target_kind, boundary in phases:
+            phase = f"after-{target_kind}-{boundary}"
+            with self.subTest(target_kind=target_kind, boundary=boundary):
+                self.enable_builtin_graph()
+                draft = CONTROLLER.begin_refinement(
+                    self.request(request=f"Cleanup boundary {phase}")
+                )
+                request = CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (
+                        CONTROLLER.TraceSeed(
+                            "profile.displayName", "api/profile.py"
+                        ),
+                    ),
+                )
+                with mock.patch.object(
+                    CONTROLLER,
+                    "_bind_trace_receipt",
+                    side_effect=ValueError("stop before binding"),
+                ):
+                    with self.assertRaisesRegex(ValueError, "stop before binding"):
+                        CONTROLLER.trace_impact(request)
+
+                receipt_path = (
+                    self.root
+                    / ".requirements-impact-refiner/graph"
+                    / f"{draft.draft_id}.json"
+                )
+                published = receipt_path.read_bytes()
+                real_write_component = (
+                    CONTROLLER._write_private_transaction_component
+                )
+                real_rename = CONTROLLER.os.rename
+                real_unlink = CONTROLLER.os.unlink
+                interrupted = False
+
+                def component_kind(name):
+                    selected = str(name)
+                    if selected.endswith(".removing"):
+                        selected = selected[:-len(".removing")]
+                    fixed = {
+                        f".{draft.draft_id}.transaction": "manifest",
+                        f".{draft.draft_id}.cleanup": "cleanup-marker",
+                    }
+                    if selected in fixed:
+                        return fixed[selected]
+                    for suffix, kind in (
+                        (".new", "replacement"),
+                        (".quarantine", "quarantine"),
+                        (".anchor", "anchor"),
+                        (".commit", "commit"),
+                        (".swap", "swap"),
+                    ):
+                        if (
+                            selected.startswith(f".{draft.draft_id}.")
+                            and selected.endswith(suffix)
+                        ):
+                            return kind
+                    return None
+
+                def interrupting_write(directory_fd, name, payload, label):
+                    nonlocal interrupted
+                    result = real_write_component(
+                        directory_fd, name, payload, label
+                    )
+                    if (
+                        not interrupted
+                        and boundary == "persist"
+                        and target_kind == "cleanup-marker"
+                        and component_kind(name) == "cleanup-marker"
+                    ):
+                        interrupted = True
+                        CONTROLLER.os.close(result[0])
+                        raise SimulatedProcessInterruption(phase)
+                    return result
+
+                def interrupting_rename(source, destination, **kwargs):
+                    nonlocal interrupted
+                    result = real_rename(source, destination, **kwargs)
+                    if (
+                        not interrupted
+                        and boundary == "quarantine"
+                        and target_kind == component_kind(source)
+                        and str(destination).endswith(".removing")
+                    ):
+                        interrupted = True
+                        raise SimulatedProcessInterruption(phase)
+                    return result
+
+                def interrupting_unlink(path, **kwargs):
+                    nonlocal interrupted
+                    result = real_unlink(path, **kwargs)
+                    if (
+                        not interrupted
+                        and boundary == "removal"
+                        and target_kind == component_kind(path)
+                    ):
+                        interrupted = True
+                        raise SimulatedProcessInterruption(phase)
+                    return result
+
+                with mock.patch.object(
+                    CONTROLLER.GRAPH_COORDINATOR,
+                    "trace_impact",
+                    side_effect=AssertionError(
+                        "cleanup recovery must not republish"
+                    ),
+                ), mock.patch.object(
+                    CONTROLLER,
+                    "_write_private_transaction_component",
+                    side_effect=interrupting_write,
+                ), mock.patch.object(
+                    CONTROLLER.os, "rename", side_effect=interrupting_rename
+                ), mock.patch.object(
+                    CONTROLLER.os, "unlink", side_effect=interrupting_unlink
+                ):
+                    with self.assertRaises(SimulatedProcessInterruption):
+                        CONTROLLER.trace_impact(request)
+
+                self.assertTrue(interrupted)
+                draft_directory = (
+                    self.root / ".requirements-impact-refiner/drafts"
+                )
+                interrupted_artifacts = [
+                    path.name
+                    for path in draft_directory.iterdir()
+                    if path.name.startswith(f".{draft.draft_id}.")
+                ]
+                interrupted_kinds = {
+                    component_kind(name) for name in interrupted_artifacts
+                }
+                canonical_during_cleanup = json.loads(
+                    (
+                        draft_directory / f"{draft.draft_id}.json"
+                    ).read_text(encoding="utf-8")
+                )
+                self.assertIn("graph_receipt", canonical_during_cleanup)
+                if boundary == "removal":
+                    self.assertNotIn(target_kind, interrupted_kinds)
+                if target_kind == "commit" and boundary == "removal":
+                    self.assertIn("swap", interrupted_kinds)
+                    self.assertIn("manifest", interrupted_kinds)
+                    self.assertIn("cleanup-marker", interrupted_kinds)
+                if target_kind == "swap" and boundary == "removal":
+                    self.assertNotIn("commit", interrupted_kinds)
+                    self.assertIn("manifest", interrupted_kinds)
+                    self.assertIn("cleanup-marker", interrupted_kinds)
+                if target_kind == "manifest" and boundary == "removal":
+                    self.assertEqual(interrupted_kinds, {"cleanup-marker"})
+                if (
+                    target_kind == "cleanup-marker"
+                    and boundary == "removal"
+                ):
+                    self.assertEqual(interrupted_artifacts, [])
+                with mock.patch.object(
+                    CONTROLLER.GRAPH_COORDINATOR,
+                    "trace_impact",
+                    side_effect=AssertionError(
+                        "cleanup recovery must not republish"
+                    ),
+                ):
+                    recovered = CONTROLLER.trace_impact(request)
+
+                self.assertEqual(receipt_path.read_bytes(), published)
+                stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+                self.assertEqual(
+                    stored["graph_receipt"]["receipt_id"], recovered.receipt_id
+                )
+                self.assertNotIn("graph_trace_intent", stored)
+                draft_path = (
+                    self.root
+                    / ".requirements-impact-refiner/drafts"
+                    / f"{draft.draft_id}.json"
+                )
+                self.assertEqual(
+                    sorted(
+                        path.name
+                        for path in draft_path.parent.iterdir()
+                        if path.name.startswith(f".{draft.draft_id}.")
+                    ),
+                    [],
+                )
+
+    def test_draft_cleanup_marker_recovery_rejects_cross_draft_and_symlink_state(self):
+        for marker_kind in ("cross-draft", "symlink"):
+            with self.subTest(marker_kind=marker_kind):
+                draft = CONTROLLER.begin_refinement(
+                    self.request(request=f"Foreign cleanup marker {marker_kind}")
+                )
+                draft_path = (
+                    self.root
+                    / ".requirements-impact-refiner/drafts"
+                    / f"{draft.draft_id}.json"
+                )
+                marker_path = draft_path.parent / f".{draft.draft_id}.cleanup"
+                canonical = draft_path.read_bytes()
+                metadata = draft_path.stat()
+                marker = {
+                    "draft_id": "f" * 32,
+                    "kind": "draft-transaction-cleanup",
+                    "manifest_sha256": "a" * 64,
+                    "replacement_dev": metadata.st_dev,
+                    "replacement_ino": metadata.st_ino,
+                    "replacement_sha256": hashlib.sha256(canonical).hexdigest(),
+                    "repo_root_sha256": hashlib.sha256(
+                        str(self.root).encode("utf-8")
+                    ).hexdigest(),
+                    "schema_version": 1,
+                    "transaction_id": "b" * 32,
+                }
+                marker_bytes = json.dumps(
+                    marker,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                outside = self.root / f"cleanup-marker-{marker_kind}"
+                outside.write_bytes(marker_bytes)
+                if marker_kind == "cross-draft":
+                    marker_path.write_bytes(marker_bytes)
+                    marker_path.chmod(0o600)
+                else:
+                    os.symlink(outside, marker_path)
+
+                with self.assertRaisesRegex(
+                    ValueError, "cleanup|transaction.*unsafe|identity"
+                ):
+                    CONTROLLER._recover_private_draft_transaction(
+                        self.root, draft.draft_id
+                    )
+
+                self.assertEqual(draft_path.read_bytes(), canonical)
+                if marker_kind == "cross-draft":
+                    self.assertEqual(marker_path.read_bytes(), marker_bytes)
+                else:
+                    self.assertTrue(marker_path.is_symlink())
+                    self.assertEqual(outside.read_bytes(), marker_bytes)
+
+    def test_pre_manifest_transaction_cleanup_preserves_late_replacements(self):
+        for target_kind in ("replacement", "anchor"):
+            for replacement_kind in ("regular", "symlink"):
+                with self.subTest(
+                    target_kind=target_kind,
+                    replacement_kind=replacement_kind,
+                ):
+                    draft = CONTROLLER.begin_refinement(
+                        self.request(
+                            request=(
+                                f"Pre-manifest {target_kind} {replacement_kind}"
+                            )
+                        )
+                    )
+                    expected = CONTROLLER.load_draft(self.root, draft.draft_id)
+                    replacement = dict(expected)
+                    replacement["graph_trace_intent"] = {
+                        "intent_id": "c" * 32
+                    }
+                    token = "d" * 32
+                    suffix = "new" if target_kind == "replacement" else "anchor"
+                    target_name = f".{draft.draft_id}.{token}.{suffix}"
+                    target_path = (
+                        self.root
+                        / ".requirements-impact-refiner/drafts"
+                        / target_name
+                    )
+                    outside = self.root / (
+                        f"pre-manifest-{target_kind}-{replacement_kind}"
+                    )
+                    outside.write_bytes(b"outside-safe")
+                    foreign = (
+                        f"foreign-{target_kind}-{replacement_kind}".encode("utf-8")
+                    )
+                    real_write = CONTROLLER._write_private_transaction_component
+                    real_rename = CONTROLLER.os.rename
+                    real_unlink = CONTROLLER.os.unlink
+                    inserted = False
+
+                    def fail_manifest(directory_fd, name, payload, label):
+                        if label == "draft transaction manifest":
+                            raise ValueError("injected manifest failure")
+                        return real_write(directory_fd, name, payload, label)
+
+                    def install(directory_fd):
+                        nonlocal inserted
+                        real_unlink(target_name, dir_fd=directory_fd)
+                        self._install_cleanup_replacement(
+                            replacement_kind,
+                            target_name,
+                            directory_fd,
+                            outside,
+                            foreign,
+                        )
+                        inserted = True
+
+                    def replacing_rename(source, destination, **kwargs):
+                        if (
+                            not inserted
+                            and source == target_name
+                            and str(destination).endswith(".removing")
+                        ):
+                            install(kwargs["src_dir_fd"])
+                        return real_rename(source, destination, **kwargs)
+
+                    def replacing_unlink(path, **kwargs):
+                        if not inserted and path == target_name:
+                            install(kwargs["dir_fd"])
+                        return real_unlink(path, **kwargs)
+
+                    with mock.patch.object(
+                        CONTROLLER.secrets, "token_hex", return_value=token
+                    ), mock.patch.object(
+                        CONTROLLER,
+                        "_write_private_transaction_component",
+                        side_effect=fail_manifest,
+                    ), mock.patch.object(
+                        CONTROLLER.os, "rename", side_effect=replacing_rename
+                    ), mock.patch.object(
+                        CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                    ):
+                        with self.assertRaisesRegex(
+                            ValueError, "manifest|cleanup|uncertain"
+                        ):
+                            CONTROLLER._cas_replace_private_draft(
+                                Path(str(expected["repo_root"])),
+                                draft.draft_id,
+                                expected,
+                                replacement,
+                            )
+
+                    self.assertTrue(inserted)
+                    if replacement_kind == "regular":
+                        self.assertEqual(target_path.read_bytes(), foreign)
+                    else:
+                        self.assertTrue(target_path.is_symlink())
+                        self.assertEqual(outside.read_bytes(), b"outside-safe")
+                    self.assertEqual(
+                        CONTROLLER.load_draft(self.root, draft.draft_id), expected
+                    )
 
     def test_trace_intent_write_failure_cannot_publish_and_retry_is_fresh(self):
         self.enable_builtin_graph()
@@ -735,6 +1092,23 @@ class RirControllerTest(unittest.TestCase):
         path.chmod(0o600)
         return graph_dir, path, payload
 
+    def _install_cleanup_replacement(
+        self, replacement_kind, name, directory_fd, outside, payload
+    ):
+        if replacement_kind == "regular":
+            descriptor = os.open(
+                name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=directory_fd,
+            )
+            try:
+                os.write(descriptor, payload)
+            finally:
+                os.close(descriptor)
+        else:
+            os.symlink(outside, name, dir_fd=directory_fd)
+
     def test_stale_cleanup_preserves_regular_replacement_after_preflight_read(self):
         draft_id = "a" * 32
         graph_dir, path, expected = self._private_cleanup_receipt(draft_id)
@@ -824,6 +1198,334 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), foreign)
         self.assertEqual(saved.read_bytes(), expected)
 
+    def test_stale_cleanup_guard_mutation_preserves_regular_and_symlink_replacements(self):
+        for index, replacement_kind in enumerate(("regular", "symlink")):
+            with self.subTest(replacement_kind=replacement_kind):
+                draft_id = str(index + 4) * 32
+                graph_dir, path, expected = self._private_cleanup_receipt(
+                    draft_id, payload=f"exact-{replacement_kind}".encode("utf-8")
+                )
+                outside = self.root / f"guard-outside-{replacement_kind}"
+                outside.write_bytes(b"outside-safe")
+                foreign = f"foreign-{replacement_kind}".encode("utf-8")
+                real_rename = CONTROLLER.os.rename
+                real_unlink = CONTROLLER.os.unlink
+                inserted = False
+                committed = False
+                filename = f"{draft_id}.json"
+
+                def install(directory_fd):
+                    nonlocal inserted
+                    real_unlink(filename, dir_fd=directory_fd)
+                    self._install_cleanup_replacement(
+                        replacement_kind,
+                        filename,
+                        directory_fd,
+                        outside,
+                        foreign,
+                    )
+                    inserted = True
+
+                def replacing_rename(source, destination, **kwargs):
+                    if (
+                        not inserted
+                        and source == filename
+                        and str(destination).endswith(".removing")
+                    ):
+                        install(kwargs["src_dir_fd"])
+                    return real_rename(source, destination, **kwargs)
+
+                def replacing_unlink(selected, **kwargs):
+                    if not inserted and selected == filename:
+                        install(kwargs["dir_fd"])
+                    return real_unlink(selected, **kwargs)
+
+                def mark_committed():
+                    nonlocal committed
+                    committed = True
+
+                with mock.patch.object(
+                    CONTROLLER.os, "rename", side_effect=replacing_rename
+                ), mock.patch.object(
+                    CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "cleanup.*changed|cleanup.*replacement|uncertain"
+                    ):
+                        CONTROLLER._remove_exact_trace_receipt(
+                            self.root,
+                            draft_id,
+                            expected,
+                            commit=mark_committed,
+                        )
+
+                self.assertTrue(inserted)
+                self.assertFalse(committed)
+                if replacement_kind == "regular":
+                    self.assertEqual(path.read_bytes(), foreign)
+                else:
+                    self.assertTrue(path.is_symlink())
+                    self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def test_stale_cleanup_recovery_mutation_preserves_regular_and_symlink_replacements(self):
+        for index, replacement_kind in enumerate(("regular", "symlink")):
+            with self.subTest(replacement_kind=replacement_kind):
+                draft_id = str(index + 6) * 32
+                graph_dir, path, expected = self._private_cleanup_receipt(
+                    draft_id,
+                    payload=f"recover-{replacement_kind}".encode("utf-8"),
+                )
+                intent = {"draft_id": draft_id, "transaction_id": "e" * 32}
+                outside = self.root / f"recovery-outside-{replacement_kind}"
+                outside.write_bytes(b"outside-safe")
+                foreign = f"recovery-foreign-{replacement_kind}".encode("utf-8")
+                real_unlink = CONTROLLER.os.unlink
+                real_rename = CONTROLLER.os.rename
+                interrupted = False
+
+                def interrupt_stale_quarantine(selected, **kwargs):
+                    nonlocal interrupted
+                    if not interrupted and str(selected).endswith(".stale"):
+                        interrupted = True
+                        raise SimulatedProcessInterruption("recovery guard prepared")
+                    return real_unlink(selected, **kwargs)
+
+                def interrupt_stale_quarantine_rename(
+                    source, destination, **kwargs
+                ):
+                    nonlocal interrupted
+                    if (
+                        not interrupted
+                        and str(source).endswith(".stale")
+                        and str(destination).endswith(".removing")
+                    ):
+                        interrupted = True
+                        raise SimulatedProcessInterruption(
+                            "recovery guard prepared"
+                        )
+                    return real_rename(source, destination, **kwargs)
+
+                with mock.patch.object(
+                    CONTROLLER.os,
+                    "unlink",
+                    side_effect=interrupt_stale_quarantine,
+                ), mock.patch.object(
+                    CONTROLLER.os,
+                    "rename",
+                    side_effect=interrupt_stale_quarantine_rename,
+                ):
+                    with self.assertRaises(SimulatedProcessInterruption):
+                        CONTROLLER._remove_exact_trace_receipt(
+                            self.root,
+                            draft_id,
+                            expected,
+                            guard_intent_sha256=(
+                                CONTROLLER._trace_intent_sha256(intent)
+                            ),
+                        )
+
+                self.assertTrue(interrupted)
+                inserted = False
+                filename = f"{draft_id}.json"
+
+                def install(directory_fd):
+                    nonlocal inserted
+                    real_unlink(filename, dir_fd=directory_fd)
+                    self._install_cleanup_replacement(
+                        replacement_kind,
+                        filename,
+                        directory_fd,
+                        outside,
+                        foreign,
+                    )
+                    inserted = True
+
+                def replacing_rename(source, destination, **kwargs):
+                    if (
+                        not inserted
+                        and source == filename
+                        and str(destination).endswith(".removing")
+                    ):
+                        install(kwargs["src_dir_fd"])
+                    return real_rename(source, destination, **kwargs)
+
+                def replacing_unlink(selected, **kwargs):
+                    if not inserted and selected == filename:
+                        install(kwargs["dir_fd"])
+                    return real_unlink(selected, **kwargs)
+
+                with mock.patch.object(
+                    CONTROLLER.os, "rename", side_effect=replacing_rename
+                ), mock.patch.object(
+                    CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "cleanup.*changed|cleanup.*replacement|uncertain"
+                    ):
+                        CONTROLLER._recover_stale_cleanup_guard(
+                            self.root, draft_id, intent
+                        )
+
+                self.assertTrue(inserted)
+                if replacement_kind == "regular":
+                    self.assertEqual(path.read_bytes(), foreign)
+                else:
+                    self.assertTrue(path.is_symlink())
+                    self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def test_transaction_unlink_helper_preserves_exact_mutation_replacements(self):
+        for index, replacement_kind in enumerate(("regular", "symlink")):
+            with self.subTest(replacement_kind=replacement_kind):
+                directory = self.root / f"component-{replacement_kind}"
+                directory.mkdir()
+                name = f"component-{index}.phase"
+                exact = b"exact-transaction-component"
+                selected = directory / name
+                selected.write_bytes(exact)
+                selected.chmod(0o600)
+                outside = self.root / f"component-outside-{replacement_kind}"
+                outside.write_bytes(b"outside-safe")
+                foreign = f"component-foreign-{replacement_kind}".encode("utf-8")
+                flags = os.O_RDONLY | os.O_DIRECTORY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                directory_fd = os.open(directory, flags)
+                component = CONTROLLER._open_optional_transaction_component(
+                    directory_fd, name, 1024, "test transaction component"
+                )
+                self.assertIsNotNone(component)
+                real_rename = CONTROLLER.os.rename
+                real_unlink = CONTROLLER.os.unlink
+                inserted = False
+
+                def install():
+                    nonlocal inserted
+                    real_unlink(name, dir_fd=directory_fd)
+                    self._install_cleanup_replacement(
+                        replacement_kind,
+                        name,
+                        directory_fd,
+                        outside,
+                        foreign,
+                    )
+                    inserted = True
+
+                def replacing_rename(source, destination, **kwargs):
+                    if (
+                        not inserted
+                        and source == name
+                        and str(destination).endswith(".removing")
+                    ):
+                        install()
+                    return real_rename(source, destination, **kwargs)
+
+                def replacing_unlink(path, **kwargs):
+                    if not inserted and path == name:
+                        install()
+                    return real_unlink(path, **kwargs)
+
+                try:
+                    with mock.patch.object(
+                        CONTROLLER.os, "rename", side_effect=replacing_rename
+                    ), mock.patch.object(
+                        CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                    ):
+                        with self.assertRaisesRegex(
+                            ValueError, "changed|replacement|uncertain"
+                        ):
+                            CONTROLLER._unlink_transaction_component(
+                                directory_fd,
+                                name,
+                                component,
+                                exact,
+                                1024,
+                                "test transaction component",
+                            )
+                finally:
+                    os.close(component[0])
+                    os.close(directory_fd)
+
+                self.assertTrue(inserted)
+                if replacement_kind == "regular":
+                    self.assertEqual(selected.read_bytes(), foreign)
+                else:
+                    self.assertTrue(selected.is_symlink())
+                    self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+    def test_transaction_component_write_failure_preserves_cleanup_replacement(self):
+        for index, replacement_kind in enumerate(("regular", "symlink")):
+            with self.subTest(replacement_kind=replacement_kind):
+                directory = self.root / f"write-component-{replacement_kind}"
+                directory.mkdir()
+                name = f"write-component-{index}.phase"
+                exact = b"exact-write-component"
+                selected = directory / name
+                outside = self.root / f"write-outside-{replacement_kind}"
+                outside.write_bytes(b"outside-safe")
+                foreign = f"write-foreign-{replacement_kind}".encode("utf-8")
+                flags = os.O_RDONLY | os.O_DIRECTORY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                directory_fd = os.open(directory, flags)
+                real_rename = CONTROLLER.os.rename
+                real_unlink = CONTROLLER.os.unlink
+                inserted = False
+
+                def install():
+                    nonlocal inserted
+                    real_unlink(name, dir_fd=directory_fd)
+                    self._install_cleanup_replacement(
+                        replacement_kind,
+                        name,
+                        directory_fd,
+                        outside,
+                        foreign,
+                    )
+                    inserted = True
+
+                def replacing_rename(source, destination, **kwargs):
+                    if (
+                        not inserted
+                        and source == name
+                        and str(destination).endswith(".removing")
+                    ):
+                        install()
+                    return real_rename(source, destination, **kwargs)
+
+                def replacing_unlink(path, **kwargs):
+                    if not inserted and path == name:
+                        install()
+                    return real_unlink(path, **kwargs)
+
+                try:
+                    with mock.patch.object(
+                        CONTROLLER.os,
+                        "fsync",
+                        side_effect=OSError("injected component fsync failure"),
+                    ), mock.patch.object(
+                        CONTROLLER.os, "rename", side_effect=replacing_rename
+                    ), mock.patch.object(
+                        CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                    ):
+                        with self.assertRaisesRegex(
+                            ValueError, "persist|cleanup|uncertain"
+                        ):
+                            CONTROLLER._write_private_transaction_component(
+                                directory_fd,
+                                name,
+                                exact,
+                                "test write component",
+                            )
+                finally:
+                    os.close(directory_fd)
+
+                self.assertTrue(inserted)
+                if replacement_kind == "regular":
+                    self.assertEqual(selected.read_bytes(), foreign)
+                else:
+                    self.assertTrue(selected.is_symlink())
+                    self.assertEqual(outside.read_bytes(), b"outside-safe")
+
     def test_stale_cleanup_late_replacements_preserve_intent_and_recover(self):
         for replacement_kind in ("regular", "symlink"):
             with self.subTest(replacement_kind=replacement_kind):
@@ -864,40 +1566,56 @@ class RirControllerTest(unittest.TestCase):
                 outside.write_bytes(b"outside-safe")
                 foreign = b"foreign-late-receipt"
                 real_unlink = CONTROLLER.os.unlink
+                real_rename = CONTROLLER.os.rename
                 inserted = False
 
-                def insert_at_late_window(path, **kwargs):
+                def insert_receipt_replacement(directory_fd):
                     nonlocal inserted
-                    if not inserted and str(path).endswith(".stale"):
-                        inserted = True
+                    inserted = True
+                    try:
+                        os.unlink(
+                            f"{draft.draft_id}.json",
+                            dir_fd=directory_fd,
+                        )
+                    except FileNotFoundError:
+                        pass
+                    if replacement_kind == "regular":
+                        descriptor = os.open(
+                            f"{draft.draft_id}.json",
+                            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                            0o600,
+                            dir_fd=directory_fd,
+                        )
                         try:
-                            os.unlink(
-                                f"{draft.draft_id}.json",
-                                dir_fd=kwargs["dir_fd"],
-                            )
-                        except FileNotFoundError:
-                            pass
-                        if replacement_kind == "regular":
-                            descriptor = os.open(
-                                f"{draft.draft_id}.json",
-                                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                                0o600,
-                                dir_fd=kwargs["dir_fd"],
-                            )
-                            try:
-                                os.write(descriptor, foreign)
-                            finally:
-                                os.close(descriptor)
-                        else:
-                            os.symlink(
-                                outside,
-                                f"{draft.draft_id}.json",
-                                dir_fd=kwargs["dir_fd"],
-                            )
+                            os.write(descriptor, foreign)
+                        finally:
+                            os.close(descriptor)
+                    else:
+                        os.symlink(
+                            outside,
+                            f"{draft.draft_id}.json",
+                            dir_fd=directory_fd,
+                        )
+
+                def insert_at_late_window(path, **kwargs):
+                    if not inserted and str(path).endswith(".stale"):
+                        insert_receipt_replacement(kwargs["dir_fd"])
                     return real_unlink(path, **kwargs)
+
+                def insert_at_late_rename(source, destination, **kwargs):
+                    result = real_rename(source, destination, **kwargs)
+                    if (
+                        not inserted
+                        and str(source).endswith(".stale")
+                        and str(destination).endswith(".removing")
+                    ):
+                        insert_receipt_replacement(kwargs["dst_dir_fd"])
+                    return result
 
                 with mock.patch.object(
                     CONTROLLER.os, "unlink", side_effect=insert_at_late_window
+                ), mock.patch.object(
+                    CONTROLLER.os, "rename", side_effect=insert_at_late_rename
                 ):
                     with self.assertRaisesRegex(
                         ValueError, "cleanup.*replacement|cleanup.*uncertain"
@@ -959,6 +1677,7 @@ class RirControllerTest(unittest.TestCase):
             'FIELD = "profile.displayName"\n', encoding="utf-8"
         )
         real_unlink = CONTROLLER.os.unlink
+        real_rename = CONTROLLER.os.rename
         interrupted = False
 
         def interrupt_before_quarantine_cleanup(path, **kwargs):
@@ -968,10 +1687,25 @@ class RirControllerTest(unittest.TestCase):
                 raise SimulatedProcessInterruption("stale-cleanup-guard")
             return real_unlink(path, **kwargs)
 
+        def interrupt_before_quarantine_rename(source, destination, **kwargs):
+            nonlocal interrupted
+            if (
+                not interrupted
+                and str(source).endswith(".stale")
+                and str(destination).endswith(".removing")
+            ):
+                interrupted = True
+                raise SimulatedProcessInterruption("stale-cleanup-guard")
+            return real_rename(source, destination, **kwargs)
+
         with mock.patch.object(
             CONTROLLER.os,
             "unlink",
             side_effect=interrupt_before_quarantine_cleanup,
+        ), mock.patch.object(
+            CONTROLLER.os,
+            "rename",
+            side_effect=interrupt_before_quarantine_rename,
         ):
             with self.assertRaises(SimulatedProcessInterruption):
                 CONTROLLER.trace_impact(request)
