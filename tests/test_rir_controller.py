@@ -28,6 +28,10 @@ def load_module(name, path):
 CONTROLLER = load_module("rir_controller", SCRIPTS / "rir_controller.py")
 
 
+class SimulatedProcessInterruption(BaseException):
+    pass
+
+
 class RirControllerTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -376,6 +380,141 @@ class RirControllerTest(unittest.TestCase):
             "graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id)
         )
 
+    def test_trace_bind_cas_recovers_from_every_interruption_phase(self):
+        phases = (
+            "after-quarantine-rename",
+            "after-replacement-publication",
+            "before-quarantine-cleanup",
+            "after-quarantine-cleanup",
+        )
+        for phase in phases:
+            with self.subTest(phase=phase):
+                self.enable_builtin_graph()
+                draft = CONTROLLER.begin_refinement(
+                    self.request(request=f"Durable binding {phase}")
+                )
+                request = CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (
+                        CONTROLLER.TraceSeed(
+                            "profile.displayName", "api/profile.py"
+                        ),
+                    ),
+                )
+                with mock.patch.object(
+                    CONTROLLER,
+                    "_bind_trace_receipt",
+                    side_effect=ValueError("stop before binding"),
+                ):
+                    with self.assertRaisesRegex(ValueError, "stop before binding"):
+                        CONTROLLER.trace_impact(request)
+
+                receipt_path = (
+                    self.root
+                    / ".requirements-impact-refiner/graph"
+                    / f"{draft.draft_id}.json"
+                )
+                published = receipt_path.read_bytes()
+                filename = f"{draft.draft_id}.json"
+                real_rename = CONTROLLER.os.rename
+                real_link = CONTROLLER.os.link
+                real_unlink = CONTROLLER.os.unlink
+                interrupted = False
+
+                def interrupting_rename(source, destination, **kwargs):
+                    nonlocal interrupted
+                    result = real_rename(source, destination, **kwargs)
+                    if (
+                        not interrupted
+                        and phase == "after-quarantine-rename"
+                        and source == filename
+                        and str(destination).endswith(".quarantine")
+                    ):
+                        interrupted = True
+                        raise SimulatedProcessInterruption(phase)
+                    return result
+
+                def interrupting_link(source, destination, **kwargs):
+                    nonlocal interrupted
+                    result = real_link(source, destination, **kwargs)
+                    if (
+                        not interrupted
+                        and phase == "after-replacement-publication"
+                        and str(source).endswith(".new")
+                        and destination == filename
+                    ):
+                        interrupted = True
+                        raise SimulatedProcessInterruption(phase)
+                    return result
+
+                def interrupting_unlink(path, **kwargs):
+                    nonlocal interrupted
+                    is_quarantine = str(path).endswith(".quarantine")
+                    if (
+                        not interrupted
+                        and phase == "before-quarantine-cleanup"
+                        and is_quarantine
+                    ):
+                        interrupted = True
+                        raise SimulatedProcessInterruption(phase)
+                    result = real_unlink(path, **kwargs)
+                    if (
+                        not interrupted
+                        and phase == "after-quarantine-cleanup"
+                        and is_quarantine
+                    ):
+                        interrupted = True
+                        raise SimulatedProcessInterruption(phase)
+                    return result
+
+                with mock.patch.object(
+                    CONTROLLER.GRAPH_COORDINATOR,
+                    "trace_impact",
+                    side_effect=AssertionError(
+                        "binding recovery must not republish"
+                    ),
+                ), mock.patch.object(
+                    CONTROLLER.os, "rename", side_effect=interrupting_rename
+                ), mock.patch.object(
+                    CONTROLLER.os, "link", side_effect=interrupting_link
+                ), mock.patch.object(
+                    CONTROLLER.os, "unlink", side_effect=interrupting_unlink
+                ):
+                    with self.assertRaises(SimulatedProcessInterruption):
+                        CONTROLLER.trace_impact(request)
+
+                self.assertTrue(interrupted)
+                with mock.patch.object(
+                    CONTROLLER.GRAPH_COORDINATOR,
+                    "trace_impact",
+                    side_effect=AssertionError(
+                        "binding recovery must not republish"
+                    ),
+                ):
+                    recovered = CONTROLLER.trace_impact(request)
+
+                self.assertEqual(receipt_path.read_bytes(), published)
+                stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+                self.assertEqual(
+                    stored["graph_receipt"]["receipt_id"], recovered.receipt_id
+                )
+                self.assertNotIn("graph_trace_intent", stored)
+                draft_path = (
+                    self.root
+                    / ".requirements-impact-refiner/drafts"
+                    / filename
+                )
+                metadata = draft_path.stat()
+                self.assertEqual(metadata.st_mode & 0o777, 0o600)
+                self.assertEqual(metadata.st_nlink, 1)
+                transaction_artifacts = sorted(
+                    path.name
+                    for path in draft_path.parent.iterdir()
+                    if path.name.startswith(f".{draft.draft_id}.")
+                )
+                self.assertEqual(transaction_artifacts, [])
+
     def test_trace_intent_write_failure_cannot_publish_and_retry_is_fresh(self):
         self.enable_builtin_graph()
         draft = CONTROLLER.begin_refinement(self.request(request="Intent write fault"))
@@ -684,6 +823,193 @@ class RirControllerTest(unittest.TestCase):
 
         self.assertEqual(path.read_bytes(), foreign)
         self.assertEqual(saved.read_bytes(), expected)
+
+    def test_stale_cleanup_late_replacements_preserve_intent_and_recover(self):
+        for replacement_kind in ("regular", "symlink"):
+            with self.subTest(replacement_kind=replacement_kind):
+                self.enable_builtin_graph()
+                draft = CONTROLLER.begin_refinement(
+                    self.request(request=f"Late cleanup {replacement_kind}")
+                )
+                request = CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (
+                        CONTROLLER.TraceSeed(
+                            "profile.displayName", "api/profile.py"
+                        ),
+                    ),
+                )
+                with mock.patch.object(
+                    CONTROLLER,
+                    "_bind_trace_receipt",
+                    side_effect=ValueError("stop after receipt publication"),
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "stop after receipt publication"
+                    ):
+                        CONTROLLER.trace_impact(request)
+
+                stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+                intent = stored["graph_trace_intent"]
+                receipt_path = (
+                    self.root
+                    / ".requirements-impact-refiner/graph"
+                    / f"{draft.draft_id}.json"
+                )
+                (self.root / "desktop" / f"late_{replacement_kind}.py").write_text(
+                    'FIELD = "profile.displayName"\n', encoding="utf-8"
+                )
+                outside = self.root / f"outside-{replacement_kind}"
+                outside.write_bytes(b"outside-safe")
+                foreign = b"foreign-late-receipt"
+                real_unlink = CONTROLLER.os.unlink
+                inserted = False
+
+                def insert_at_late_window(path, **kwargs):
+                    nonlocal inserted
+                    if not inserted and str(path).endswith(".stale"):
+                        inserted = True
+                        try:
+                            os.unlink(
+                                f"{draft.draft_id}.json",
+                                dir_fd=kwargs["dir_fd"],
+                            )
+                        except FileNotFoundError:
+                            pass
+                        if replacement_kind == "regular":
+                            descriptor = os.open(
+                                f"{draft.draft_id}.json",
+                                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                                0o600,
+                                dir_fd=kwargs["dir_fd"],
+                            )
+                            try:
+                                os.write(descriptor, foreign)
+                            finally:
+                                os.close(descriptor)
+                        else:
+                            os.symlink(
+                                outside,
+                                f"{draft.draft_id}.json",
+                                dir_fd=kwargs["dir_fd"],
+                            )
+                    return real_unlink(path, **kwargs)
+
+                with mock.patch.object(
+                    CONTROLLER.os, "unlink", side_effect=insert_at_late_window
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "cleanup.*replacement|cleanup.*uncertain"
+                    ):
+                        CONTROLLER.trace_impact(request)
+
+                self.assertTrue(inserted)
+                after_race = CONTROLLER.load_draft(self.root, draft.draft_id)
+                self.assertEqual(after_race["graph_trace_intent"], intent)
+                self.assertNotIn("graph_receipt", after_race)
+                if replacement_kind == "regular":
+                    self.assertEqual(receipt_path.read_bytes(), foreign)
+                else:
+                    self.assertTrue(receipt_path.is_symlink())
+                    self.assertEqual(outside.read_bytes(), b"outside-safe")
+
+                receipt_path.unlink()
+                with self.assertRaisesRegex(
+                    ValueError, "trace intent source inventory is stale"
+                ):
+                    CONTROLLER.trace_impact(request)
+                self.assertNotIn(
+                    "graph_trace_intent",
+                    CONTROLLER.load_draft(self.root, draft.draft_id),
+                )
+                fresh = CONTROLLER.trace_impact(request)
+                self.assertTrue(any(
+                    node["location"] == f"desktop/late_{replacement_kind}.py"
+                    for node in fresh.compact_graph["nodes"]
+                ))
+
+    def test_stale_cleanup_guard_interruption_recovers_before_receipt_loading(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(
+            self.request(request="Interrupted stale cleanup guard")
+        )
+        request = CONTROLLER.TraceRequest(
+            self.root,
+            draft.draft_id,
+            (
+                CONTROLLER.TraceSeed(
+                    "profile.displayName", "api/profile.py"
+                ),
+            ),
+        )
+        with mock.patch.object(
+            CONTROLLER,
+            "_bind_trace_receipt",
+            side_effect=ValueError("stop after receipt publication"),
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "stop after receipt publication"
+            ):
+                CONTROLLER.trace_impact(request)
+        intent = CONTROLLER.load_draft(
+            self.root, draft.draft_id
+        )["graph_trace_intent"]
+        (self.root / "desktop/interrupted_cleanup.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+        real_unlink = CONTROLLER.os.unlink
+        interrupted = False
+
+        def interrupt_before_quarantine_cleanup(path, **kwargs):
+            nonlocal interrupted
+            if not interrupted and str(path).endswith(".stale"):
+                interrupted = True
+                raise SimulatedProcessInterruption("stale-cleanup-guard")
+            return real_unlink(path, **kwargs)
+
+        with mock.patch.object(
+            CONTROLLER.os,
+            "unlink",
+            side_effect=interrupt_before_quarantine_cleanup,
+        ):
+            with self.assertRaises(SimulatedProcessInterruption):
+                CONTROLLER.trace_impact(request)
+
+        self.assertTrue(interrupted)
+        self.assertEqual(
+            CONTROLLER.load_draft(
+                self.root, draft.draft_id
+            )["graph_trace_intent"],
+            intent,
+        )
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR,
+            "trace_impact",
+            side_effect=AssertionError("guard recovery must not republish"),
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "trace intent source inventory is stale"
+            ):
+                CONTROLLER.trace_impact(request)
+        self.assertNotIn(
+            "graph_trace_intent",
+            CONTROLLER.load_draft(self.root, draft.draft_id),
+        )
+        graph_dir = self.root / ".requirements-impact-refiner/graph"
+        self.assertEqual(
+            sorted(
+                path.name
+                for path in graph_dir.iterdir()
+                if draft.draft_id in path.name
+            ),
+            [],
+        )
+        fresh = CONTROLLER.trace_impact(request)
+        self.assertTrue(any(
+            node["location"] == "desktop/interrupted_cleanup.py"
+            for node in fresh.compact_graph["nodes"]
+        ))
 
     def test_trace_preserves_deadline_and_provider_failure_statuses(self):
         self.enable_builtin_graph()

@@ -525,6 +525,550 @@ def _read_bounded_descriptor(descriptor: int, maximum: int, label: str) -> bytes
     return bytes(payload)
 
 
+_DRAFT_TRANSACTION_KEYS = {
+    "schema_version", "draft_id", "repo_root_sha256", "transaction_id",
+    "expected_sha256", "expected_dev", "expected_ino",
+    "replacement_sha256", "replacement_dev", "replacement_ino",
+}
+_DRAFT_TRANSACTION_MAX_BYTES = 16 * 1024
+
+
+@contextmanager
+def _draft_transaction_lock(directory_fd: int):
+    descriptor = None
+    locked = False
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(".draft-transaction.lock", flags, 0o600, dir_fd=directory_fd)
+    except OSError as error:
+        raise ValueError(f"draft transaction lock is unavailable: {error}") from error
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+        ):
+            raise ValueError("draft transaction lock is unsafe")
+        if fcntl is not None:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise ValueError("draft transaction recovery is busy; retry") from error
+            locked = True
+        yield
+    finally:
+        if descriptor is not None:
+            if locked:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+
+def _write_private_transaction_component(
+    directory_fd: int, name: str, payload: bytes, label: str
+):
+    descriptor = None
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, 0o600, dir_fd=directory_fd)
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(descriptor, payload[offset:])
+        os.fsync(descriptor)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+        ):
+            raise ValueError(f"{label} is unsafe")
+        return descriptor, metadata
+    except BaseException as error:
+        if descriptor is not None:
+            try:
+                metadata = os.fstat(descriptor)
+                current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if _same_inode(current, metadata):
+                    os.unlink(name, dir_fd=directory_fd)
+            except OSError:
+                pass
+            os.close(descriptor)
+        if isinstance(error, OSError):
+            raise ValueError(f"cannot persist {label}: {error}") from error
+        raise
+
+
+def _open_optional_transaction_component(
+    directory_fd: int, name: str, maximum: int, label: str
+):
+    descriptor = None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_fd)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ValueError(f"{label} is unavailable or unsafe: {error}") from error
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ValueError(f"{label} is not a private regular file")
+        payload = _read_bounded_descriptor(descriptor, maximum, label)
+        return descriptor, metadata, payload
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _draft_transaction_phase_payload(
+    draft_id: str, transaction_id: str, phase: str, manifest_sha256: str
+) -> bytes:
+    return _canonical_bytes({
+        "draft_id": draft_id,
+        "manifest_sha256": manifest_sha256,
+        "phase": phase,
+        "schema_version": 1,
+        "transaction_id": transaction_id,
+    })
+
+
+def _validate_transaction_draft_payload(
+    payload: bytes, root: Path, draft_id: str, label: str
+) -> None:
+    try:
+        value = json.loads(payload.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"{label} is not a valid draft: {error}") from error
+    if (
+        not isinstance(value, dict)
+        or value.get("draft_id") != draft_id
+        or value.get("repo_root") != str(root)
+        or _canonical_bytes(value) != payload
+    ):
+        raise ValueError(f"{label} draft identity is invalid")
+
+
+def _same_inode(first, second) -> bool:
+    return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
+
+
+def _unlink_transaction_component(
+    directory_fd: int,
+    name: str,
+    component,
+    expected_payload: bytes,
+    maximum: int,
+    label: str,
+) -> None:
+    if component is None:
+        return
+    descriptor, metadata, payload = component
+    if payload != expected_payload:
+        raise ValueError(f"{label} changed before cleanup")
+    current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    if not _same_inode(current, metadata) or _read_bounded_descriptor(
+        descriptor, maximum, label
+    ) != expected_payload:
+        raise ValueError(f"{label} identity changed before cleanup")
+    os.unlink(name, dir_fd=directory_fd)
+    try:
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    raise ValueError(f"{label} replacement preserved; recovery is uncertain")
+
+
+def _recover_private_draft_transaction_at(
+    root: Path, draft_id: str, directory_fd: int
+) -> None:
+    manifest_name = f".{draft_id}.transaction"
+    manifest_component = _open_optional_transaction_component(
+        directory_fd,
+        manifest_name,
+        _DRAFT_TRANSACTION_MAX_BYTES,
+        "draft transaction manifest",
+    )
+    if manifest_component is None:
+        return
+    opened = [manifest_component[0]]
+    try:
+        manifest_payload = manifest_component[2]
+        try:
+            manifest = json.loads(manifest_payload.decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"draft transaction manifest is invalid: {error}") from error
+        if (
+            not isinstance(manifest, dict)
+            or set(manifest) != _DRAFT_TRANSACTION_KEYS
+            or manifest.get("schema_version") != 1
+            or manifest.get("draft_id") != draft_id
+            or manifest.get("repo_root_sha256")
+            != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+            or not isinstance(manifest.get("transaction_id"), str)
+            or DRAFT_ID_PATTERN.fullmatch(manifest["transaction_id"]) is None
+            or any(
+                not isinstance(manifest.get(key), int) or manifest[key] < 0
+                for key in (
+                    "expected_dev", "expected_ino",
+                    "replacement_dev", "replacement_ino",
+                )
+            )
+            or any(
+                not isinstance(manifest.get(key), str)
+                or re.fullmatch(r"[0-9a-f]{64}", manifest[key]) is None
+                for key in ("expected_sha256", "replacement_sha256")
+            )
+            or _canonical_bytes(manifest) != manifest_payload
+            or manifest_component[1].st_nlink != 1
+        ):
+            raise ValueError("draft transaction manifest identity is invalid")
+
+        transaction_id = manifest["transaction_id"]
+        manifest_sha256 = hashlib.sha256(manifest_payload).hexdigest()
+        filename = f"{draft_id}.json"
+        names = {
+            "anchor": f".{draft_id}.{transaction_id}.anchor",
+            "replacement": f".{draft_id}.{transaction_id}.new",
+            "quarantine": f".{draft_id}.{transaction_id}.quarantine",
+            "swap": f".{draft_id}.{transaction_id}.swap",
+            "commit": f".{draft_id}.{transaction_id}.commit",
+        }
+        swap_payload = _draft_transaction_phase_payload(
+            draft_id, transaction_id, "swap", manifest_sha256
+        )
+        commit_payload = _draft_transaction_phase_payload(
+            draft_id, transaction_id, "commit", manifest_sha256
+        )
+        components = {
+            "canonical": _open_optional_transaction_component(
+                directory_fd, filename, MAX_DRAFT_BYTES,
+                "draft transaction canonical draft",
+            ),
+            "anchor": _open_optional_transaction_component(
+                directory_fd, names["anchor"], MAX_DRAFT_BYTES,
+                "draft transaction expected anchor",
+            ),
+            "replacement": _open_optional_transaction_component(
+                directory_fd, names["replacement"], MAX_DRAFT_BYTES,
+                "draft transaction replacement",
+            ),
+            "quarantine": _open_optional_transaction_component(
+                directory_fd, names["quarantine"], MAX_DRAFT_BYTES,
+                "draft transaction quarantine",
+            ),
+            "swap": _open_optional_transaction_component(
+                directory_fd, names["swap"], 1024,
+                "draft transaction swap phase",
+            ),
+            "commit": _open_optional_transaction_component(
+                directory_fd, names["commit"], 1024,
+                "draft transaction commit phase",
+            ),
+        }
+        opened.extend(
+            component[0] for component in components.values()
+            if component is not None
+        )
+        if components["swap"] is not None and (
+            components["swap"][2] != swap_payload
+            or components["swap"][1].st_nlink != 1
+        ):
+            raise ValueError("draft transaction swap phase identity is invalid")
+        if components["commit"] is not None and (
+            components["commit"][2] != commit_payload
+            or components["commit"][1].st_nlink != 1
+        ):
+            raise ValueError("draft transaction commit phase identity is invalid")
+        if components["commit"] is not None and components["swap"] is None:
+            raise ValueError("draft transaction commit phase has no durable swap phase")
+
+        expected_inode = (manifest["expected_dev"], manifest["expected_ino"])
+        replacement_inode = (
+            manifest["replacement_dev"], manifest["replacement_ino"]
+        )
+        expected_payload = replacement_payload = None
+        canonical_kind = None
+        for name in ("canonical", "anchor", "replacement", "quarantine"):
+            component = components[name]
+            if component is None:
+                continue
+            inode = (component[1].st_dev, component[1].st_ino)
+            digest = hashlib.sha256(component[2]).hexdigest()
+            if inode == expected_inode and digest == manifest["expected_sha256"]:
+                kind = "expected"
+                if expected_payload is None:
+                    expected_payload = component[2]
+                elif expected_payload != component[2]:
+                    raise ValueError("draft transaction expected bytes disagree")
+            elif (
+                inode == replacement_inode
+                and digest == manifest["replacement_sha256"]
+            ):
+                kind = "replacement"
+                if replacement_payload is None:
+                    replacement_payload = component[2]
+                elif replacement_payload != component[2]:
+                    raise ValueError("draft transaction replacement bytes disagree")
+            else:
+                raise ValueError(f"draft transaction {name} identity is invalid")
+            if name in {"anchor", "quarantine"} and kind != "expected":
+                raise ValueError(f"draft transaction {name} is cross-transaction")
+            if name == "replacement" and kind != "replacement":
+                raise ValueError("draft transaction replacement is cross-transaction")
+            if name == "canonical":
+                canonical_kind = kind
+
+        for payload, label in (
+            (expected_payload, "draft transaction expected artifact"),
+            (replacement_payload, "draft transaction replacement artifact"),
+        ):
+            if payload is not None:
+                _validate_transaction_draft_payload(payload, root, draft_id, label)
+
+        expected_links = sum(
+            1
+            for name in ("canonical", "anchor", "quarantine")
+            if components[name] is not None
+            and (components[name][1].st_dev, components[name][1].st_ino)
+            == expected_inode
+        )
+        replacement_links = sum(
+            1
+            for name in ("canonical", "replacement")
+            if components[name] is not None
+            and (components[name][1].st_dev, components[name][1].st_ino)
+            == replacement_inode
+        )
+        for name in ("canonical", "anchor", "replacement", "quarantine"):
+            component = components[name]
+            if component is None:
+                continue
+            inode = (component[1].st_dev, component[1].st_ino)
+            expected_count = (
+                expected_links if inode == expected_inode else replacement_links
+            )
+            if component[1].st_nlink != expected_count:
+                raise ValueError(
+                    f"draft transaction {name} has an unbound hard-link identity"
+                )
+
+        def remove(name: str, payload: bytes, maximum: int, label: str) -> None:
+            _unlink_transaction_component(
+                directory_fd, names[name], components[name], payload, maximum, label
+            )
+            components[name] = None
+
+        def remove_manifest() -> None:
+            _unlink_transaction_component(
+                directory_fd, manifest_name, manifest_component,
+                manifest_payload, _DRAFT_TRANSACTION_MAX_BYTES,
+                "draft transaction manifest",
+            )
+
+        def finish_rollback() -> None:
+            if components["replacement"] is not None:
+                remove(
+                    "replacement", components["replacement"][2], MAX_DRAFT_BYTES,
+                    "draft transaction replacement",
+                )
+            if components["quarantine"] is not None:
+                remove(
+                    "quarantine", components["quarantine"][2], MAX_DRAFT_BYTES,
+                    "draft transaction quarantine",
+                )
+            if components["anchor"] is not None:
+                remove(
+                    "anchor", components["anchor"][2], MAX_DRAFT_BYTES,
+                    "draft transaction expected anchor",
+                )
+            if components["commit"] is not None:
+                remove(
+                    "commit", commit_payload, 1024,
+                    "draft transaction commit phase",
+                )
+            if components["swap"] is not None:
+                remove(
+                    "swap", swap_payload, 1024,
+                    "draft transaction swap phase",
+                )
+            canonical = _open_optional_transaction_component(
+                directory_fd, filename, MAX_DRAFT_BYTES,
+                "restored canonical draft",
+            )
+            if canonical is None:
+                raise ValueError("draft transaction rollback lost canonical draft")
+            opened.append(canonical[0])
+            if (
+                (canonical[1].st_dev, canonical[1].st_ino) != expected_inode
+                or hashlib.sha256(canonical[2]).hexdigest()
+                != manifest["expected_sha256"]
+                or canonical[1].st_nlink != 1
+            ):
+                raise ValueError("draft transaction rollback identity is uncertain")
+            remove_manifest()
+            os.fsync(directory_fd)
+
+        if components["swap"] is None:
+            if canonical_kind != "expected" or components["quarantine"] is not None:
+                raise ValueError("draft transaction prepared phase is inconsistent")
+            finish_rollback()
+            return
+
+        if canonical_kind == "expected":
+            finish_rollback()
+            return
+
+        if canonical_kind is None:
+            if components["replacement"] is not None:
+                replacement = components["replacement"]
+                current = os.stat(
+                    names["replacement"], dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+                if not _same_inode(current, replacement[1]):
+                    raise ValueError("draft transaction replacement changed before recovery")
+                try:
+                    os.link(
+                        names["replacement"], filename,
+                        src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError as error:
+                    raise ValueError(
+                        "competing canonical draft preserved; recovery is uncertain"
+                    ) from error
+                canonical = _open_optional_transaction_component(
+                    directory_fd, filename, MAX_DRAFT_BYTES,
+                    "recovered canonical draft",
+                )
+                if canonical is None:
+                    raise ValueError("replacement publication recovery failed")
+                opened.append(canonical[0])
+                if (
+                    not _same_inode(canonical[1], replacement[1])
+                    or canonical[2] != replacement[2]
+                ):
+                    raise ValueError("replacement publication recovery is uncertain")
+                components["canonical"] = canonical
+                canonical_kind = "replacement"
+                os.fsync(directory_fd)
+            else:
+                source_name = (
+                    "quarantine" if components["quarantine"] is not None
+                    else "anchor" if components["anchor"] is not None
+                    else None
+                )
+                if source_name is None:
+                    raise ValueError("draft transaction has no exact recovery artifact")
+                source = components[source_name]
+                try:
+                    os.link(
+                        names[source_name], filename,
+                        src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError as error:
+                    raise ValueError(
+                        "competing canonical draft preserved; recovery is uncertain"
+                    ) from error
+                restored = _open_optional_transaction_component(
+                    directory_fd, filename, MAX_DRAFT_BYTES,
+                    "restored canonical draft",
+                )
+                if restored is None or not _same_inode(restored[1], source[1]):
+                    raise ValueError("canonical draft restoration is uncertain")
+                opened.append(restored[0])
+                components["canonical"] = restored
+                canonical_kind = "expected"
+                os.fsync(directory_fd)
+                finish_rollback()
+                return
+
+        if canonical_kind != "replacement":
+            raise ValueError("draft transaction canonical phase is invalid")
+        canonical = components["canonical"]
+        if replacement_payload is None:
+            replacement_payload = canonical[2]
+            _validate_transaction_draft_payload(
+                replacement_payload, root, draft_id,
+                "draft transaction replacement artifact",
+            )
+        if components["commit"] is None:
+            commit_fd, commit_info = _write_private_transaction_component(
+                directory_fd, names["commit"], commit_payload,
+                "draft transaction commit phase",
+            )
+            opened.append(commit_fd)
+            components["commit"] = (commit_fd, commit_info, commit_payload)
+            os.fsync(directory_fd)
+        for name, payload, maximum, label in (
+            (
+                "replacement",
+                components["replacement"][2]
+                if components["replacement"] is not None else b"",
+                MAX_DRAFT_BYTES,
+                "draft transaction replacement",
+            ),
+            (
+                "quarantine",
+                components["quarantine"][2]
+                if components["quarantine"] is not None else b"",
+                MAX_DRAFT_BYTES,
+                "draft transaction quarantine",
+            ),
+            (
+                "anchor",
+                components["anchor"][2]
+                if components["anchor"] is not None else b"",
+                MAX_DRAFT_BYTES,
+                "draft transaction expected anchor",
+            ),
+        ):
+            if components[name] is not None:
+                remove(name, payload, maximum, label)
+        final_canonical = _open_optional_transaction_component(
+            directory_fd, filename, MAX_DRAFT_BYTES,
+            "committed canonical draft",
+        )
+        if final_canonical is None:
+            raise ValueError("draft transaction commit lost canonical draft")
+        opened.append(final_canonical[0])
+        if (
+            (final_canonical[1].st_dev, final_canonical[1].st_ino)
+            != replacement_inode
+            or hashlib.sha256(final_canonical[2]).hexdigest()
+            != manifest["replacement_sha256"]
+            or final_canonical[1].st_nlink != 1
+        ):
+            raise ValueError("draft transaction committed identity is uncertain")
+        remove("commit", commit_payload, 1024, "draft transaction commit phase")
+        remove("swap", swap_payload, 1024, "draft transaction swap phase")
+        remove_manifest()
+        os.fsync(directory_fd)
+    finally:
+        for descriptor in reversed(opened):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _recover_private_draft_transaction(root: Path, draft_id: str) -> None:
+    directory_fd = _private_draft_directory_fd(root)
+    try:
+        with _draft_transaction_lock(directory_fd):
+            _recover_private_draft_transaction_at(root, draft_id, directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def _cas_replace_private_draft(
     root: Path,
     draft_id: str,
@@ -532,133 +1076,172 @@ def _cas_replace_private_draft(
     replacement: Mapping[str, object],
 ) -> None:
     directory_fd = _private_draft_directory_fd(root)
-    token = secrets.token_hex(8)
+    token = secrets.token_hex(16)
     filename = f"{draft_id}.json"
     temporary_name = f".{draft_id}.{token}.new"
     anchor_name = f".{draft_id}.{token}.anchor"
     quarantine_name = f".{draft_id}.{token}.quarantine"
-    current_fd = temporary_fd = quarantine_fd = None
-    quarantined = False
-
-    def restore_quarantine() -> bool:
-        nonlocal quarantined
-        if not quarantined:
-            return True
-        try:
-            os.link(
-                quarantine_name, filename,
-                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-                follow_symlinks=False,
-            )
-        except FileExistsError:
-            return False
-        os.unlink(quarantine_name, dir_fd=directory_fd)
-        quarantined = False
-        return True
-
+    manifest_name = f".{draft_id}.transaction"
+    swap_name = f".{draft_id}.{token}.swap"
+    current_fd = temporary_fd = quarantine_fd = manifest_fd = swap_fd = None
+    transaction_durable = False
     try:
-        read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        current_fd = os.open(filename, read_flags, dir_fd=directory_fd)
-        current_info = os.fstat(current_fd)
-        if (
-            not stat.S_ISREG(current_info.st_mode)
-            or stat.S_IMODE(current_info.st_mode) != 0o600
-            or current_info.st_nlink != 1
-        ):
-            raise ValueError("trace transaction draft is not one private regular file")
-        expected_payload = _canonical_bytes(expected)
-        if _read_bounded_descriptor(
-            current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-        ) != expected_payload:
-            raise ValueError("trace transaction changed before receipt binding")
+        with _draft_transaction_lock(directory_fd):
+            _recover_private_draft_transaction_at(root, draft_id, directory_fd)
+            read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            current_fd = os.open(filename, read_flags, dir_fd=directory_fd)
+            current_info = os.fstat(current_fd)
+            expected_payload = _canonical_bytes(expected)
+            replacement_payload = _canonical_bytes(replacement)
+            if (
+                not stat.S_ISREG(current_info.st_mode)
+                or stat.S_IMODE(current_info.st_mode) != 0o600
+                or current_info.st_nlink != 1
+                or _read_bounded_descriptor(
+                    current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
+                ) != expected_payload
+            ):
+                raise ValueError("trace transaction changed before receipt binding")
+            _validate_transaction_draft_payload(
+                expected_payload, root, draft_id, "trace transaction expected"
+            )
+            _validate_transaction_draft_payload(
+                replacement_payload, root, draft_id,
+                "trace transaction replacement",
+            )
 
-        write_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        if hasattr(os, "O_NOFOLLOW"):
-            write_flags |= os.O_NOFOLLOW
-        temporary_fd = os.open(
-            temporary_name, write_flags, 0o600, dir_fd=directory_fd
-        )
-        replacement_payload = _canonical_bytes(replacement)
-        offset = 0
-        while offset < len(replacement_payload):
-            offset += os.write(temporary_fd, replacement_payload[offset:])
-        os.fsync(temporary_fd)
-        os.close(temporary_fd)
-        temporary_fd = None
-
-        os.link(
-            filename, anchor_name,
-            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-            follow_symlinks=False,
-        )
-        anchor_info = os.stat(
-            anchor_name, dir_fd=directory_fd, follow_symlinks=False
-        )
-        if (
-            not stat.S_ISREG(anchor_info.st_mode)
-            or (anchor_info.st_dev, anchor_info.st_ino)
-            != (current_info.st_dev, current_info.st_ino)
-        ):
-            raise ValueError("trace transaction changed before receipt binding")
-
-        os.rename(
-            filename, quarantine_name,
-            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-        )
-        quarantined = True
-        quarantine_fd = os.open(quarantine_name, read_flags, dir_fd=directory_fd)
-        quarantine_info = os.fstat(quarantine_fd)
-        if (
-            (quarantine_info.st_dev, quarantine_info.st_ino)
-            != (current_info.st_dev, current_info.st_ino)
-            or _read_bounded_descriptor(
-                quarantine_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-            ) != expected_payload
-        ):
-            if not restore_quarantine():
-                raise ValueError(
-                    "trace transaction changed and quarantine restoration is uncertain"
-                )
-            raise ValueError("trace transaction changed before receipt binding")
-
-        try:
+            temporary_fd, temporary_info = _write_private_transaction_component(
+                directory_fd, temporary_name, replacement_payload,
+                "draft transaction replacement",
+            )
             os.link(
-                temporary_name, filename,
+                filename, anchor_name,
                 src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
                 follow_symlinks=False,
             )
-        except FileExistsError as error:
-            if not restore_quarantine():
-                raise ValueError(
-                    "competing trace transaction preserved; restoration is uncertain"
-                ) from error
-            raise ValueError("trace transaction changed before receipt binding") from error
-        os.unlink(temporary_name, dir_fd=directory_fd)
-        os.unlink(quarantine_name, dir_fd=directory_fd)
-        quarantined = False
-        os.unlink(anchor_name, dir_fd=directory_fd)
-        os.fsync(directory_fd)
-    except ValueError:
-        if quarantined and not restore_quarantine():
-            raise ValueError(
-                "trace transaction validation failed; quarantine restoration is uncertain"
+            anchor = _open_optional_transaction_component(
+                directory_fd, anchor_name, MAX_DRAFT_BYTES,
+                "draft transaction expected anchor",
             )
-        raise
+            if (
+                anchor is None
+                or not _same_inode(anchor[1], current_info)
+                or anchor[2] != expected_payload
+            ):
+                raise ValueError("trace transaction changed before receipt binding")
+            os.close(anchor[0])
+            manifest = {
+                "schema_version": 1,
+                "draft_id": draft_id,
+                "repo_root_sha256": hashlib.sha256(
+                    str(root).encode("utf-8")
+                ).hexdigest(),
+                "transaction_id": token,
+                "expected_sha256": hashlib.sha256(expected_payload).hexdigest(),
+                "expected_dev": current_info.st_dev,
+                "expected_ino": current_info.st_ino,
+                "replacement_sha256": hashlib.sha256(
+                    replacement_payload
+                ).hexdigest(),
+                "replacement_dev": temporary_info.st_dev,
+                "replacement_ino": temporary_info.st_ino,
+            }
+            manifest_payload = _canonical_bytes(manifest)
+            manifest_fd, _ = _write_private_transaction_component(
+                directory_fd, manifest_name, manifest_payload,
+                "draft transaction manifest",
+            )
+            os.fsync(directory_fd)
+            transaction_durable = True
+            swap_payload = _draft_transaction_phase_payload(
+                draft_id, token, "swap",
+                hashlib.sha256(manifest_payload).hexdigest(),
+            )
+            swap_fd, _ = _write_private_transaction_component(
+                directory_fd, swap_name, swap_payload,
+                "draft transaction swap phase",
+            )
+            os.fsync(directory_fd)
+
+            current_path_info = os.stat(
+                filename, dir_fd=directory_fd, follow_symlinks=False
+            )
+            if (
+                not _same_inode(current_path_info, current_info)
+                or _read_bounded_descriptor(
+                    current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
+                ) != expected_payload
+            ):
+                raise ValueError("trace transaction changed before receipt binding")
+            os.rename(
+                filename, quarantine_name,
+                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+            )
+            quarantine_fd = os.open(
+                quarantine_name, read_flags, dir_fd=directory_fd
+            )
+            quarantine_info = os.fstat(quarantine_fd)
+            if (
+                not _same_inode(quarantine_info, current_info)
+                or _read_bounded_descriptor(
+                    quarantine_fd, MAX_DRAFT_BYTES, "trace transaction draft"
+                ) != expected_payload
+            ):
+                raise ValueError(
+                    "trace transaction changed after durable quarantine"
+                )
+            replacement_path_info = os.stat(
+                temporary_name, dir_fd=directory_fd, follow_symlinks=False
+            )
+            if (
+                not _same_inode(replacement_path_info, temporary_info)
+                or _read_bounded_descriptor(
+                    temporary_fd, MAX_DRAFT_BYTES,
+                    "draft transaction replacement",
+                ) != replacement_payload
+            ):
+                raise ValueError("draft transaction replacement changed")
+            try:
+                os.link(
+                    temporary_name, filename,
+                    src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as error:
+                raise ValueError(
+                    "competing trace transaction preserved; recovery is uncertain"
+                ) from error
+            published = _open_optional_transaction_component(
+                directory_fd, filename, MAX_DRAFT_BYTES,
+                "published transaction draft",
+            )
+            if (
+                published is None
+                or not _same_inode(published[1], temporary_info)
+                or published[2] != replacement_payload
+            ):
+                raise ValueError("published transaction draft identity is uncertain")
+            os.close(published[0])
+            os.fsync(directory_fd)
+            _recover_private_draft_transaction_at(root, draft_id, directory_fd)
+            transaction_durable = False
     except OSError as error:
-        if quarantined and not restore_quarantine():
-            raise ValueError(
-                "trace transaction mutation failed; quarantine restoration is uncertain"
-            ) from error
         raise ValueError(f"cannot compare-and-swap trace transaction: {error}") from error
     finally:
-        for descriptor in (quarantine_fd, temporary_fd, current_fd):
+        for descriptor in (
+            swap_fd, manifest_fd, quarantine_fd, temporary_fd, current_fd
+        ):
             if descriptor is not None:
-                os.close(descriptor)
-        for name in (temporary_name, anchor_name):
-            try:
-                os.unlink(name, dir_fd=directory_fd)
-            except FileNotFoundError:
-                pass
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        if not transaction_durable:
+            for name in (temporary_name, anchor_name, swap_name):
+                try:
+                    os.unlink(name, dir_fd=directory_fd)
+                except FileNotFoundError:
+                    pass
         os.close(directory_fd)
 
 
@@ -999,7 +1582,12 @@ def _read_bound_receipt_bytes(root: Path, draft_id: str) -> bytes:
 
 
 def _remove_exact_trace_receipt(
-    root: Path, draft_id: str, expected_payload: bytes
+    root: Path,
+    draft_id: str,
+    expected_payload: bytes,
+    *,
+    commit=None,
+    guard_intent_sha256=None,
 ) -> None:
     if _read_bound_receipt_bytes(root, draft_id) != expected_payload:
         raise ValueError("stale cleanup target changed before quarantine")
@@ -1007,10 +1595,24 @@ def _remove_exact_trace_receipt(
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     root_fd = os.open(root, flags)
-    base_fd = graph_fd = receipt_fd = quarantine_fd = None
+    base_fd = graph_fd = receipt_fd = quarantine_fd = guard_fd = None
     filename = f"{draft_id}.json"
-    quarantine_name = f".{draft_id}.{secrets.token_hex(8)}.stale"
+    cleanup_id = secrets.token_hex(16)
+    quarantine_name = f".{draft_id}.{cleanup_id}.stale"
     quarantined = False
+    guard_claimed = False
+    guard_info = None
+    guard_payload = _canonical_bytes({
+        "draft_id": draft_id,
+        "kind": "stale-receipt-cleanup-guard",
+        "repo_root_sha256": hashlib.sha256(
+            str(root).encode("utf-8")
+        ).hexdigest(),
+        "receipt_sha256": hashlib.sha256(expected_payload).hexdigest(),
+        "schema_version": 1,
+        "trace_intent_sha256": guard_intent_sha256,
+        "transaction_id": cleanup_id,
+    })
 
     def restore_quarantine() -> bool:
         nonlocal quarantined
@@ -1026,6 +1628,28 @@ def _remove_exact_trace_receipt(
             return False
         os.unlink(quarantine_name, dir_fd=graph_fd)
         quarantined = False
+        return True
+
+    def release_guard() -> bool:
+        nonlocal guard_claimed
+        if not guard_claimed:
+            return True
+        try:
+            current = os.stat(
+                filename, dir_fd=graph_fd, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            return False
+        if (
+            guard_info is None
+            or not _same_inode(current, guard_info)
+            or _read_bounded_descriptor(
+                guard_fd, 1024, "stale cleanup namespace guard"
+            ) != guard_payload
+        ):
+            return False
+        os.unlink(filename, dir_fd=graph_fd)
+        guard_claimed = False
         return True
 
     try:
@@ -1075,6 +1699,12 @@ def _remove_exact_trace_receipt(
             raise ValueError(
                 "stale cleanup replacement preserved; removal is uncertain"
             )
+        guard_fd, guard_info = _write_private_transaction_component(
+            graph_fd, filename, guard_payload,
+            "stale cleanup namespace guard",
+        )
+        guard_claimed = True
+        os.fsync(graph_fd)
         final_info = os.stat(
             quarantine_name, dir_fd=graph_fd, follow_symlinks=False
         )
@@ -1088,13 +1718,28 @@ def _remove_exact_trace_receipt(
         os.unlink(quarantine_name, dir_fd=graph_fd)
         quarantined = False
         os.fsync(graph_fd)
-    except ValueError:
+        if not release_guard():
+            raise ValueError(
+                "stale cleanup late replacement preserved; cleanup is uncertain"
+            )
+        os.fsync(graph_fd)
+        if commit is not None:
+            commit()
+    except ValueError as error:
+        if guard_claimed and not release_guard():
+            raise ValueError(
+                "stale cleanup replacement preserved; cleanup is uncertain"
+            ) from error
         if quarantined and not restore_quarantine():
             raise ValueError(
                 "stale cleanup failed; quarantine restoration is uncertain"
             )
         raise
     except OSError as error:
+        if guard_claimed and not release_guard():
+            raise ValueError(
+                "stale cleanup replacement preserved; cleanup is uncertain"
+            ) from error
         if quarantined and not restore_quarantine():
             raise ValueError(
                 "stale cleanup failed; quarantine restoration is uncertain"
@@ -1102,8 +1747,118 @@ def _remove_exact_trace_receipt(
         raise ValueError(f"stale cleanup target is unsafe: {error}") from error
     finally:
         for descriptor in (
-            quarantine_fd, receipt_fd, graph_fd, base_fd, root_fd
+            guard_fd, quarantine_fd, receipt_fd, graph_fd, base_fd, root_fd
         ):
+            if descriptor is not None:
+                os.close(descriptor)
+
+
+_STALE_CLEANUP_GUARD_KEYS = {
+    "draft_id", "kind", "repo_root_sha256", "receipt_sha256",
+    "schema_version", "trace_intent_sha256", "transaction_id",
+}
+
+
+def _recover_stale_cleanup_guard(
+    root: Path,
+    draft_id: str,
+    intent: Mapping[str, object],
+) -> bool:
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    root_fd = os.open(root, flags)
+    base_fd = graph_fd = None
+    opened = []
+    try:
+        base_fd = _open_existing_directory_at(
+            root_fd, ".requirements-impact-refiner"
+        )
+        try:
+            graph_fd = _open_existing_directory_at(base_fd, "graph")
+        except ValueError as error:
+            if isinstance(error.__cause__, FileNotFoundError):
+                return False
+            raise
+        filename = f"{draft_id}.json"
+        guard = _open_optional_transaction_component(
+            graph_fd,
+            filename,
+            GRAPH.MAX_RECEIPT_BYTES,
+            "stale cleanup namespace guard",
+        )
+        if guard is None:
+            return False
+        opened.append(guard[0])
+        try:
+            value = json.loads(guard[2].decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        if not isinstance(value, dict) or value.get("kind") != (
+            "stale-receipt-cleanup-guard"
+        ):
+            return False
+        if (
+            set(value) != _STALE_CLEANUP_GUARD_KEYS
+            or value.get("schema_version") != 1
+            or value.get("draft_id") != draft_id
+            or value.get("repo_root_sha256")
+            != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+            or value.get("trace_intent_sha256")
+            != _trace_intent_sha256(intent)
+            or not isinstance(value.get("transaction_id"), str)
+            or DRAFT_ID_PATTERN.fullmatch(value["transaction_id"]) is None
+            or not isinstance(value.get("receipt_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["receipt_sha256"])
+            is None
+            or _canonical_bytes(value) != guard[2]
+            or guard[1].st_nlink != 1
+        ):
+            raise ValueError("stale cleanup namespace guard identity is invalid")
+        quarantine_name = (
+            f".{draft_id}.{value['transaction_id']}.stale"
+        )
+        quarantine = _open_optional_transaction_component(
+            graph_fd,
+            quarantine_name,
+            GRAPH.MAX_RECEIPT_BYTES,
+            "stale cleanup recovery quarantine",
+        )
+        if quarantine is not None:
+            opened.append(quarantine[0])
+            if (
+                hashlib.sha256(quarantine[2]).hexdigest()
+                != value["receipt_sha256"]
+                or quarantine[1].st_nlink != 1
+            ):
+                raise ValueError(
+                    "stale cleanup recovery quarantine identity is invalid"
+                )
+            _unlink_transaction_component(
+                graph_fd,
+                quarantine_name,
+                quarantine,
+                quarantine[2],
+                GRAPH.MAX_RECEIPT_BYTES,
+                "stale cleanup recovery quarantine",
+            )
+        _unlink_transaction_component(
+            graph_fd,
+            filename,
+            guard,
+            guard[2],
+            1024,
+            "stale cleanup namespace guard",
+        )
+        os.fsync(graph_fd)
+        return True
+    finally:
+        for descriptor in reversed(opened):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        for descriptor in (graph_fd, base_fd, root_fd):
             if descriptor is not None:
                 os.close(descriptor)
 
@@ -1496,6 +2251,9 @@ def trace_impact(request: TraceRequest) -> TraceResult:
         MAX_TRACE_BYTES,
         "trace input",
     )
+    if DRAFT_ID_PATTERN.fullmatch(request.draft_id) is None:
+        raise ValueError("invalid draft ID")
+    _recover_private_draft_transaction(root, request.draft_id)
     draft = load_draft(root, request.draft_id)
     settings = draft.get("settings")
     graph_settings = settings.get("impact_graph") if isinstance(settings, dict) else None
@@ -1510,6 +2268,7 @@ def trace_impact(request: TraceRequest) -> TraceResult:
         root / ".requirements-impact-refiner" / "graph" / f"{request.draft_id}.json"
     )
     with _report_lock(root, str(draft["report_id"]), deadline=deadline):
+        _recover_private_draft_transaction(root, request.draft_id)
         draft = load_draft(root, request.draft_id)
         if draft.get("consumed") is True:
             raise ValueError("draft is already consumed")
@@ -1532,8 +2291,15 @@ def trace_impact(request: TraceRequest) -> TraceResult:
                 compact_graph=_compact_graph(receipt_value),
                 budget_status=str(receipt_value["budget_status"]),
             )
-        receipt_exists = receipt_path.exists() or receipt_path.is_symlink()
         intent = draft.get("graph_trace_intent")
+        if intent is not None:
+            intent = _validate_trace_intent(
+                root, draft, normalized_seeds, graph_settings, intent
+            )
+            _recover_stale_cleanup_guard(
+                root, request.draft_id, intent
+            )
+        receipt_exists = receipt_path.exists() or receipt_path.is_symlink()
         source_inventory = None
         if intent is None:
             if receipt_exists:
@@ -1552,10 +2318,6 @@ def trace_impact(request: TraceRequest) -> TraceResult:
                 root, request.draft_id, draft, updated
             )
             draft = updated
-        else:
-            intent = _validate_trace_intent(
-                root, draft, normalized_seeds, graph_settings, intent
-            )
         if receipt_exists:
             validated = _validate_persisted_trace_receipt(
                 root, draft, normalized_seeds, graph_settings, intent
@@ -1570,9 +2332,12 @@ def trace_impact(request: TraceRequest) -> TraceResult:
                 if "recovery source inventory is stale" not in str(error):
                     raise
                 _remove_exact_trace_receipt(
-                    root, request.draft_id, validated[1]
+                    root,
+                    request.draft_id,
+                    validated[1],
+                    commit=lambda: _clear_trace_intent(root, draft, intent),
+                    guard_intent_sha256=_trace_intent_sha256(intent),
                 )
-                _clear_trace_intent(root, draft, intent)
                 raise
             return _bind_trace_receipt(
                 root, draft, normalized_seeds, graph_settings, intent, *validated
