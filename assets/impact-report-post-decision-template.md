@@ -82,7 +82,6 @@ List only ledger impacts whose state is `deferred` or `blocked`; keep `detected`
 
 | Impact ID | State | Information gap or rationale | Linked decision | Next owner |
 | --- | --- | --- | --- | --- |
-| `IMP-###` | `deferred` / `blocked` | Name the gap or rationale. | `DEC-###` / none | Name the next owner. |
 
 ## Analysis Scope and Limitations
 
@@ -94,4 +93,4 @@ List only ledger impacts whose state is `deferred` or `blocked`; keep `detected`
 
 | Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
 | --- | --- | --- | --- | --- |
-| `REQ-###` | `INV-###`, `IMP-###`, `DEC-###` | Name deferred and accepted impacts, or none. | `AC-###` | Name the selected planning workflow, or Not ready when blocked. |
+| `REQ-###` | `INV-###`, `IMP-###`, `DEC-###` | Name every `accepted` or `deferred` impact by its `IMP-###` ID, or none. | `AC-###` | Name the selected planning workflow; must be exactly Not ready while any impact is `blocked`. |

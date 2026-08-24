@@ -813,6 +813,21 @@ class ValidateImpactReportTest(unittest.TestCase):
 
         self.assertEqual(VALIDATOR.validate_report(report), [])
 
+    def test_code_formatted_critical_severity_still_requires_ac_reference(self):
+        report = VALID_REPORT.replace(
+            "| interfaces | critical | accepted |",
+            "| interfaces | `critical` | accepted |",
+            1,
+        ).replace(
+            "| INV-001 | DEC-001 | AC-001 |",
+            "| INV-001 | DEC-001 |  |",
+            1,
+        )
+
+        self.assertIn(
+            EXPECTED_ERRORS["critical_without_ac"], VALIDATOR.validate_report(report)
+        )
+
     def test_rejects_duplicate_unresolved_impact_rows(self):
         report = VALID_REPORT.replace(
             "| critical | accepted | verified |",
@@ -953,3 +968,46 @@ class ValidateImpactReportTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShippedTemplateStructureTest(unittest.TestCase):
+    """The shipped templates, with placeholders filled, must not teach
+    structural violations that survive a faithful copy."""
+
+    STRUCTURAL_FRAGMENTS = (
+        "must be new, not",
+        "more than once",
+        "requires a revision description",
+        "requires distinct options",
+        "requires one focused question",
+        "requires a nonempty trade-off",
+        "unresolved impact",
+        "duplicate section",
+        "invalid table schema",
+    )
+
+    def structural_errors(self, template_name):
+        template = (
+            ROOT
+            / "skills"
+            / "requirements-impact-refiner"
+            / "assets"
+            / template_name
+        ).read_text()
+        filled = template.replace("###", "001")
+        errors = VALIDATOR.validate_report(filled)
+        return [
+            error
+            for error in errors
+            if any(fragment in error for fragment in self.STRUCTURAL_FRAGMENTS)
+        ]
+
+    def test_pre_decision_template_has_no_structural_errors(self):
+        self.assertEqual(
+            self.structural_errors("impact-report-pre-decision-template.md"), []
+        )
+
+    def test_post_decision_template_has_no_structural_errors(self):
+        self.assertEqual(
+            self.structural_errors("impact-report-post-decision-template.md"), []
+        )

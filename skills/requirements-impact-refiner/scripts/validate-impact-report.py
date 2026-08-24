@@ -438,7 +438,7 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
             errors.append(f"resolved impact {impact_id} requires evidence")
         if state == "accepted" and not decision_refs:
             errors.append(f"accepted impact {impact_id} requires DEC reference")
-        if row.get("Severity", "").lower() == "critical" and not ac_refs:
+        if enum_value(row.get("Severity", "")).lower() == "critical" and not ac_refs:
             errors.append(f"critical impact {impact_id} requires AC reference")
     if not has_requirement_relationship:
         errors.append("report requires at least one impact with REQ relationship")

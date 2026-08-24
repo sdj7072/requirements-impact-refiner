@@ -48,16 +48,18 @@ For a later revision, preserve the Report ID, increment Revision by one, and rep
 
 | Question | Option | Impact IDs | Trade-off |
 | --- | --- | --- | --- |
-|  |  | `IMP-###` |  |
-|  |  | `IMP-###` |  |
+| State the single focused question. | Option A: name the first approach. | `IMP-###` | State this option's trade-off. |
+| State the single focused question. | Option B: name the second approach. | `IMP-###` | State this option's trade-off. |
 
 ## Impact Delta
+
+Revision 1 lists every ledger impact under `new` exactly once. Later revisions place each current or predecessor impact in exactly one category.
 
 | Category | Impact IDs |
 | --- | --- |
 | resolved | none |
 | mitigated | none |
-| unchanged | `IMP-###` |
+| unchanged | none |
 | accepted | none |
 | deferred | none |
 | blocked | none |
@@ -69,7 +71,7 @@ For a later revision, preserve the Report ID, increment Revision by one, and rep
 
 | Requirement ID | Revision | Decision | Superseded impacts | Change summary |
 | --- | --- | --- | --- | --- |
-| `REQ-###` |  | the pending decision | none | Initial refinement. |
+| `REQ-###` | Request plus supplied constraints only. | the pending decision | none | Initial refinement. |
 
 ## Acceptance and Regression Criteria
 
