@@ -412,7 +412,11 @@ def _promoted_scan(root, request, settings):
         _payload_sha256(),
     )
     if prepared.scan_id != request.scan_id:
-        raise ValueError("Fast Scan request identity does not match")
+        raise ValueError(
+            "Fast Scan request identity does not match: the change request "
+            "text, repository evidence rows, audience, graph settings, and "
+            "repository contents must all equal the original rir_scan call"
+        )
     payload = fast_scan_store.load_scan_receipt_bytes(root, request.scan_id)
     value = json.loads(payload)
     errors = fast_scan.validate_fast_scan_receipt(value)

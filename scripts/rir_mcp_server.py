@@ -197,7 +197,7 @@ def _validate_schema(value, schema, label):
         if "maxLength" in schema and len(value) > schema["maxLength"]:
             raise ValueError(f"{label} is too long")
         pattern = schema.get("pattern")
-        if pattern is not None and re.search(pattern, value) is None:
+        if pattern is not None and re.fullmatch(pattern, value) is None:
             raise ValueError(f"{label} has an invalid format")
 
 

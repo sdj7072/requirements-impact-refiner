@@ -468,3 +468,21 @@ class RirMcpServerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SchemaPatternAnchoringTest(unittest.TestCase):
+    """Pattern validation must consume the whole value: a trailing newline
+    slipped past re.search because $ matches before it."""
+
+    def test_newline_smuggled_id_is_rejected_at_the_schema_layer(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("_srv_schema", SERVER)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        schema = {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+        module._validate_schema("0" * 32, schema, "scan_id")
+        with self.assertRaises(ValueError):
+            module._validate_schema("0" * 32 + "\n", schema, "scan_id")
