@@ -180,6 +180,17 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
 
     def test_installed_alias_payload_is_sealed_and_matches_the_canonical_release_bytes(self):
         """Catch an alias cache that evaluates different functional bytes than v0.3.1."""
+        commit_present = subprocess.run(
+            ["git", "cat-file", "-e", f"{CANONICAL_RELEASE_COMMIT}^{{commit}}"],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        if commit_present.returncode != 0:
+            self.skipTest(
+                "canonical release commit unavailable in this clone "
+                "(shallow or partial checkout); sealed-byte comparison "
+                "requires full history"
+            )
         payload = load_json(INSTALLED_PAYLOAD)
         paths = [row["path"] for row in payload["inventory"]]
         basis_inventory = commit_payload_inventory(CANONICAL_RELEASE_COMMIT, paths)
