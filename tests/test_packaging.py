@@ -166,6 +166,7 @@ class PackagingTest(unittest.TestCase):
             "schemas/controller-analysis.schema.json",
             "schemas/compact-state.schema.json",
             "schemas/impact-graph-receipt.schema.json",
+            "schemas/fast-impact-scan.schema.json",
             "scripts/launch-rir-mcp",
             "scripts/payload_identity.py",
             "scripts/rir-controller.py",
@@ -174,6 +175,7 @@ class PackagingTest(unittest.TestCase):
             "scripts/compact_state.py",
             "scripts/impact_graph.py",
             "scripts/graph_builtin.py",
+            "scripts/fast_scan.py",
             "scripts/graph_cache.py",
             "scripts/graph_providers.py",
             "scripts/graph_coordinator.py",
@@ -359,6 +361,18 @@ class PackagingTest(unittest.TestCase):
         canonical = ROOT / "skills" / "requirements-impact-refiner"
         self.assertTrue((canonical / "scripts" / "impact_graph.py").is_file())
         self.assertTrue((canonical / "schemas" / "impact-graph-receipt.schema.json").is_file())
+
+    def test_distribution_contains_fast_scan_contract(self):
+        canonical = ROOT / "skills" / "requirements-impact-refiner"
+        script = canonical / "scripts" / "fast_scan.py"
+        schema = canonical / "schemas" / "fast-impact-scan.schema.json"
+        self.assertTrue(script.is_file())
+        self.assertTrue(schema.is_file())
+        self.assertEqual(script.read_bytes(), (ROOT / "scripts/fast_scan.py").read_bytes())
+        self.assertEqual(
+            schema.read_bytes(),
+            (ROOT / "schemas/fast-impact-scan.schema.json").read_bytes(),
+        )
 
     def test_distribution_contains_graph_scanner_and_cache(self):
         canonical = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
