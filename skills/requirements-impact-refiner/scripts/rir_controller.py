@@ -1809,9 +1809,56 @@ def _cas_replace_private_draft(
             )
 
 
+# Compact delivery exists to fit a model turn: bound every list and
+# disclose exactly what was dropped — a silent cap would read as full
+# coverage when it is not.
+COMPACT_MAX_NODES = 48
+COMPACT_MAX_PATHS = 16
+COMPACT_MAX_FRONTIER = 16
+_COMPACT_RISK_ORDER = (
+    "authorization/privacy", "interfaces", "data", "state/concurrency",
+    "compatibility", "operations", "regression", "functionality",
+    "legal/policy",
+)
+_COMPACT_RISK_RANK = {name: index for index, name in enumerate(_COMPACT_RISK_ORDER)}
+
+
+def _compact_node_rank(row: Mapping[str, object]) -> tuple[int, str]:
+    domains = row.get("risk_domains", ())
+    best = min(
+        (_COMPACT_RISK_RANK.get(domain, 99) for domain in domains), default=99
+    )
+    return (best, str(row["id"]))
+
+
+def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list, dict]:
+    paths = list(receipt["paths"])[:COMPACT_MAX_PATHS]
+    frontier = list(receipt["frontier"])[:COMPACT_MAX_FRONTIER]
+    required = {node_id for row in paths for node_id in row["nodes"]}
+    required.update(row["node"] for row in frontier)
+    by_id = {row["id"]: row for row in receipt["nodes"]}
+    selected = [row for row in receipt["nodes"] if row["id"] in required]
+    if len(selected) < COMPACT_MAX_NODES:
+        remaining = sorted(
+            (row for row in receipt["nodes"] if row["id"] not in required),
+            key=_compact_node_rank,
+        )
+        selected.extend(remaining[: COMPACT_MAX_NODES - len(selected)])
+    selected.sort(key=lambda row: str(row["id"]))
+    truncated = {
+        "nodes": max(0, len(receipt["nodes"]) - len(selected)),
+        "paths": max(0, len(receipt["paths"]) - len(paths)),
+        "frontier": max(0, len(receipt["frontier"]) - len(frontier)),
+    }
+    return selected, paths, frontier, truncated
+
+
 def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
+    selected_nodes, selected_paths, selected_frontier, truncated = (
+        _compact_selection(receipt)
+    )
     return {
         "providers": [
             {
@@ -1826,7 +1873,7 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
                 "location": row["location"], "confidence": row["confidence"],
                 "risk_domains": list(row["risk_domains"]),
             }
-            for row in receipt["nodes"]
+            for row in selected_nodes
         ],
         "paths": [
             {
@@ -1848,7 +1895,7 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
                 "distance": row["distance"],
                 "risk_domains": list(row["risk_domains"]),
             }
-            for row in receipt["paths"]
+            for row in selected_paths
         ],
         "frontier": [
             {
@@ -1856,7 +1903,7 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
                 "reason": row["reason"],
                 "risk_domains": list(row["risk_domains"]),
             }
-            for row in receipt["frontier"]
+            for row in selected_frontier
         ],
         "summary": {
             "nodes": len(receipt["nodes"]), "edges": len(receipt["edges"]),
@@ -1864,6 +1911,7 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
             "unknown_frontiers": len(receipt["frontier"]),
             "timings_ms": dict(receipt["timings_ms"]),
             "budget_status": receipt["budget_status"],
+            "truncated": truncated,
         },
     }
 

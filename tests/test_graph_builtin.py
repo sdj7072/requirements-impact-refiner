@@ -579,3 +579,40 @@ class ImportEdgeProvenanceTest(unittest.TestCase):
             for edge in import_edges:
                 self.assertEqual(edge.location, "consumer.py")
                 self.assertEqual(edge.source_sha256, expected)
+
+
+class RiskDomainTokenizationTest(unittest.TestCase):
+    """Risk keywords must match whole identifier tokens: an npm author field
+    or a JSX role attribute must not classify a file as an authorization
+    risk and escalate the scan to critical."""
+
+    def domains(self, location, text=""):
+        return BUILTIN._risk_domains(location, text)
+
+    def test_author_and_role_attribute_are_not_authorization(self):
+        self.assertNotIn(
+            "authorization/privacy", self.domains("src/greet.py", "# author: alice")
+        )
+        self.assertNotIn(
+            "authorization/privacy",
+            self.domains("package.json", '{"author": "Alice", "license": "MIT"}'),
+        )
+        self.assertNotIn(
+            "authorization/privacy",
+            self.domains("src/button.jsx", '<div role="button" tokenizer="x">'),
+        )
+
+    def test_true_authorization_signals_still_match(self):
+        self.assertIn("authorization/privacy", self.domains("auth/authorize.py"))
+        self.assertIn(
+            "authorization/privacy", self.domains("src/session.py", "OAUTH_TOKEN = load()")
+        )
+        self.assertIn(
+            "authorization/privacy", self.domains("src/roles.py", "DEFAULT_ROLE = 'member'")
+        )
+
+    def test_substring_families_do_not_leak(self):
+        self.assertNotIn("interfaces", self.domains("src/rapid.py", "rapidity = 1"))
+        self.assertNotIn(
+            "state/concurrency", self.domains("src/statement.py", "statement = parse()")
+        )

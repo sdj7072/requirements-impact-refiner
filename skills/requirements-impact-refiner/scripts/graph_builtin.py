@@ -146,23 +146,41 @@ def _empty_result(status="closed"):
     return BuiltInScanResult((), (), (), (), {}, {}, 0, 0, status)
 
 
+# Risk keywords match whole identifier tokens (camel boundaries split),
+# never substrings: an npm author field, a JSX role attribute, or a
+# tokenizer must not classify a file as an authorization risk and
+# escalate the scan to critical.
+_RISK_DOMAIN_PATTERNS = {
+    "authorization/privacy": re.compile(
+        r"auth(?:z|n|orization|oriz\w+|entic\w+)?|oauth|permissions?|"
+        r"privacy|tokens?|credentials?|roles|acl|rbac"
+    ),
+    "interfaces": re.compile(r"apis?|schemas?|dtos?|interfaces?"),
+    "data": re.compile(r"data|database|db|migrations?|serializ\w*"),
+    "state/concurrency": re.compile(
+        r"cached?|caches|states?|stateful|locks?|locking|locked|"
+        r"concurr\w*|mutex"
+    ),
+    "compatibility": re.compile(r"mobile|desktop|compat\w*|migrations?"),
+    "operations": re.compile(
+        r"events?|deploy\w*|configs?|configuration|queues?"
+    ),
+    "regression": re.compile(
+        r"tests?|testing|conftest|fixtures?|migrations?"
+    ),
+}
+_CAMEL_BOUNDARY = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
+
+
 def _risk_domains(location: str | None, text: str = "") -> tuple[str, ...]:
-    haystack = ((location or "") + " " + text).lower()
+    haystack = _CAMEL_BOUNDARY.sub(" ", (location or "") + " " + text).lower()
+    tokens = {token for token in re.split(r"[^a-z0-9]+", haystack) if token}
     domains = set()
-    if any(term in haystack for term in ("auth", "permission", "privacy", "token", "role")):
-        domains.add("authorization/privacy")
-    if any(term in haystack for term in ("api", "schema", "dto", "interface")):
-        domains.add("interfaces")
-    if any(term in haystack for term in ("data", "database", "migration", "serialize")):
-        domains.add("data")
-    if any(term in haystack for term in ("cache", "state", "lock", "concurr")):
-        domains.add("state/concurrency")
-    if any(term in haystack for term in ("mobile", "desktop", "compat", "migration")):
-        domains.add("compatibility")
-    if any(term in haystack for term in ("event", "deploy", "config", "queue")):
-        domains.add("operations")
-    if any(term in haystack for term in ("test", "fixture", "migration")):
-        domains.add("regression")
+    for domain, pattern in _RISK_DOMAIN_PATTERNS.items():
+        if any(pattern.fullmatch(token) for token in tokens):
+            domains.add(domain)
     if not domains:
         domains.add("functionality")
     return tuple(sorted(domains, key=lambda item: (_RISK_RANK[item], item)))
