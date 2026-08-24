@@ -20,7 +20,7 @@ SEALED_V031_EVIDENCE = {
     "model / reasoning": "gpt-5.6-sol / high",
     "runtime outcomes": "85/85 pass; 85 attempt 1 selections; no retries",
     "mechanical score": "84/85; one failure: POS-cache repetition 2",
-    "human adjudication": "400/400 passed; every adjudication quote is bound to its selected final output",
+    "adjudication": "400/400 passed; model-scored, quote-bound to sealed outputs, no independent human sign-off",
     "release status": "not verified; one mechanical verification blocker",
     "Claude probe": "2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked",
 }

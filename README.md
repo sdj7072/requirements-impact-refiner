@@ -157,7 +157,7 @@ Compatibility claims below are limited to preserved evaluation evidence. The his
 | Claude Code with Spec Kit | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; Spec Kit behavioral compatibility remains blocked. |
 | Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | No named or configured generic harness executable was available. |
 
-The historical Codex standalone result remains **7/17** and is not evidence of support. The sealed Codex-with-Superpowers v0.3.1 evidence supersedes the obsolete one-run result: all 85 selected runtime outputs passed, while one deterministic mechanical check prevents verification. The final report, controller, scorecard, manifest, raw transcripts, and quote-bound adjudications are preserved in [`evals/results/installed-v0.3.1/report.md`](evals/results/installed-v0.3.1/report.md) and [`evals/results/installed-v0.3.1/adjudication.json`](evals/results/installed-v0.3.1/adjudication.json).
+The historical Codex standalone result remains **7/17** and is not evidence of support. The 7/17 and 84/85 figures are not comparable: they use different case sets (four integration adapters versus three lineage cases), different scoring functions (a narrative model judge versus the deterministic validator), and different skill generations (v0.1 versus v0.3.1). The sealed Codex-with-Superpowers v0.3.1 evidence supersedes the obsolete one-run result: all 85 selected runtime outputs passed, while one deterministic mechanical check prevents verification. The final report, controller, scorecard, manifest, raw transcripts, and quote-bound adjudications are preserved in [`evals/results/installed-v0.3.1/report.md`](evals/results/installed-v0.3.1/report.md) and [`evals/results/installed-v0.3.1/adjudication.json`](evals/results/installed-v0.3.1/adjudication.json).
 
 ### Sealed v0.3.1 evaluation evidence
 
@@ -172,11 +172,11 @@ This table records the immutable final evaluation evidence. It does not promote 
 | model / reasoning | gpt-5.6-sol / high |
 | runtime outcomes | 85/85 pass; 85 attempt 1 selections; no retries |
 | mechanical score | 84/85; one failure: POS-cache repetition 2 |
-| human adjudication | 400/400 passed; every adjudication quote is bound to its selected final output |
+| adjudication | 400/400 passed; model-scored, quote-bound to sealed outputs, no independent human sign-off |
 | release status | not verified; one mechanical verification blocker |
 | Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-The exact plugin identifier is `requirements-impact-refiner@requirements-impact-refiner-v031-eval`. It is an isolated local evaluation-only marketplace alias, not a public install ID or support claim; its wrapper marketplace file is intentionally excluded because its top-level name differs, while every functional payload component is byte-matched in the sealed [installed payload](evals/results/installed-v0.3.1/installed-payload.json) inventory. The v0.3.1 manifest digest is `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d`; the raw transcript inventory remains byte-preserved and secret-scanned. The lone mechanical failure records exactly a malformed Impact Ledger row and unknown `IMP-002` references in `POS-cache` repetition 2. The 400 human adjudications all pass and their quotes are each verified as substrings of the selected final output. Claude evidence is structural-only and does not change its blocked behavioral-compatibility status.
+The exact plugin identifier is `requirements-impact-refiner@requirements-impact-refiner-v031-eval`. It is an isolated local evaluation-only marketplace alias, not a public install ID or support claim; its wrapper marketplace file is intentionally excluded because its top-level name differs, while every functional payload component is byte-matched in the sealed [installed payload](evals/results/installed-v0.3.1/installed-payload.json) inventory. The v0.3.1 manifest digest is `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d`; the raw transcript inventory remains byte-preserved and secret-scanned. The lone mechanical failure records exactly a malformed Impact Ledger row and unknown `IMP-002` references in `POS-cache` repetition 2. All 400 adjudications pass; they were scored by a model, every quote is verified as a substring of the selected final output, and no independent human sign-off exists. Claude evidence is structural-only and does not change its blocked behavioral-compatibility status.
 
 ## 7. Comparison and Non-Goals
 
@@ -190,7 +190,7 @@ Repository access, search, and tests improve confidence, but supplied files may 
 
 The core evaluation is **24/25**, not 25/25. The single known stochastic failure in `POS-payments-5` embedded reconcile-before-retry mechanics before the user selected a retry policy. The final checklist addresses the pattern, but the allowed correction rounds were exhausted, so the limitation remains disclosed. The separate workflow-integration final composition is **30/30**. These scores come from the recorded Codex harness and must not be generalized to untested clients.
 
-The broader release record does not infer client support. Codex standalone strictly failed at **7/17**. Codex with Superpowers completed the full five-repetition, 85-final v0.3.1 batch, but remains `not verified` because the `POS-cache` repetition-2 mechanical failure is a release blocker despite the 85/85 runtime and 400/400 adjudication counts.
+The broader release record does not infer client support. Codex standalone strictly failed at **7/17**. Codex with Superpowers completed the full five-repetition, 85-final v0.3.1 batch, but remains `not verified` because the `POS-cache` repetition-2 mechanical failure is a release blocker despite the 85/85 runtime and 400/400 adjudication counts. External provider adapters accept detect-only contracts defined by this project, not the current upstream output formats of those tools, so naming a provider is not a claim of out-of-the-box interoperability.
 
 The skill can miss impacts outside the inspected scope. Users should keep unresolved, deferred, blocked, and accepted risks visible through planning and validate critical behavior with appropriate human review and tests.
 

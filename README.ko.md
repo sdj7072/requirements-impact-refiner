@@ -172,11 +172,11 @@ Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다
 | model / reasoning | gpt-5.6-sol / high |
 | runtime outcomes | 85/85 pass; 85 attempt 1 selections; no retries |
 | mechanical score | 84/85; one failure: POS-cache repetition 2 |
-| human adjudication | 400/400 passed; every adjudication quote is bound to its selected final output |
+| adjudication | 400/400 passed; model-scored, quote-bound to sealed outputs, no independent human sign-off |
 | release status | not verified; one mechanical verification blocker |
 | Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-정확한 플러그인 식별자는 `requirements-impact-refiner@requirements-impact-refiner-v031-eval`입니다. 이는 isolated local evaluation-only marketplace 별칭이며 not a public install ID or support claim입니다. 상위 marketplace 이름이 의도적으로 다르므로 wrapper 파일만 제외했고, 모든 기능 payload 구성요소의 바이트는 봉인된 [installed payload](evals/results/installed-v0.3.1/installed-payload.json) 인벤토리에서 일치합니다. v0.3.1 manifest digest는 `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d`이며 raw transcript 인벤토리는 바이트 보존 및 비밀정보 검사를 유지합니다. 유일한 기계 실패는 `POS-cache` 반복 2에서 잘못된 Impact Ledger 행과 알 수 없는 `IMP-002` 참조를 정확히 기록합니다. 400건의 사람 adjudication은 모두 통과했고 각 인용문이 선택된 최종 출력의 부분 문자열인지 확인했습니다. Claude 증거는 structural-only이며 차단된 동작 호환성 상태를 바꾸지 않습니다.
+정확한 플러그인 식별자는 `requirements-impact-refiner@requirements-impact-refiner-v031-eval`입니다. 이는 isolated local evaluation-only marketplace 별칭이며 not a public install ID or support claim입니다. 상위 marketplace 이름이 의도적으로 다르므로 wrapper 파일만 제외했고, 모든 기능 payload 구성요소의 바이트는 봉인된 [installed payload](evals/results/installed-v0.3.1/installed-payload.json) 인벤토리에서 일치합니다. v0.3.1 manifest digest는 `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d`이며 raw transcript 인벤토리는 바이트 보존 및 비밀정보 검사를 유지합니다. 유일한 기계 실패는 `POS-cache` 반복 2에서 잘못된 Impact Ledger 행과 알 수 없는 `IMP-002` 참조를 정확히 기록합니다. 400건의 adjudication은 모두 통과했으며 모델이 채점했고, 각 인용문이 선택된 최종 출력의 부분 문자열인지 확인했으며, 독립적인 사람의 승인 기록은 없습니다. Claude 증거는 structural-only이며 차단된 동작 호환성 상태를 바꾸지 않습니다.
 
 ## 7. 비교와 비목표
 
@@ -190,7 +190,7 @@ Superpowers는 아이디어 구상, 계획, 실행, 디버깅, 리뷰의 오케�
 
 핵심 평가는 25/25가 아니라 **24/25**입니다. 알려진 단일 확률적 실패 `POS-payments-5`는 사용자가 재시도 정책을 고르기 전에 reconcile-before-retry 방식을 요구사항에 포함했습니다. 최종 체크리스트가 이 패턴을 다루지만 허용된 수정 라운드를 모두 사용했으므로 한계를 그대로 공개합니다. 별도의 워크플로 연동 최종 구성은 **30/30**입니다. 이 점수는 기록된 Codex 평가 도구의 결과이며 테스트하지 않은 클라이언트로 일반화하면 안 됩니다.
 
-더 넓은 출시 기록은 클라이언트 지원을 추론하지 않습니다. Codex standalone은 엄격 평가 **7/17**에 실패했습니다. Codex with Superpowers는 전체 5회 반복, 85개 최종 v0.3.1 배치를 완료했지만 85/85 런타임 및 400/400 adjudication 수치에도 불구하고 `POS-cache` 반복 2의 기계 실패가 출시 차단 요인이므로 계속 `not verified`입니다.
+더 넓은 출시 기록은 클라이언트 지원을 추론하지 않습니다. Codex standalone은 엄격 평가 **7/17**에 실패했습니다. 7/17과 84/85는 비교할 수 없는 수치입니다: 케이스 집합(통합 어댑터 4개 대 계보 케이스 3개), 채점 함수(서사형 모델 판정 대 결정론적 검증기), 스킬 세대(v0.1 대 v0.3.1)가 서로 다릅니다. Codex with Superpowers는 전체 5회 반복, 85개 최종 v0.3.1 배치를 완료했지만 85/85 런타임 및 400/400 adjudication 수치에도 불구하고 `POS-cache` 반복 2의 기계 실패가 출시 차단 요인이므로 계속 `not verified`입니다. 외부 공급자 어댑터는 이 프로젝트가 정의한 detect-only 계약만 받으며 해당 도구들의 현재 업스트림 출력 형식을 받지 않으므로, 공급자 이름을 나열한 것이 그대로 연동된다는 주장은 아닙니다.
 
 스킬은 검사 범위 밖의 영향을 놓칠 수 있습니다. 해결되지 않거나 `deferred`, `blocked`, `accepted`된 위험을 계획 과정에서도 유지하고, 중요한 동작은 적절한 사람의 검토와 테스트로 검증해야 합니다.
 

@@ -172,11 +172,11 @@ Revision 1 の基準報告では両方の影響を `new` とします。次の�
 | model / reasoning | gpt-5.6-sol / high |
 | runtime outcomes | 85/85 pass; 85 attempt 1 selections; no retries |
 | mechanical score | 84/85; one failure: POS-cache repetition 2 |
-| human adjudication | 400/400 passed; every adjudication quote is bound to its selected final output |
+| adjudication | 400/400 passed; model-scored, quote-bound to sealed outputs, no independent human sign-off |
 | release status | not verified; one mechanical verification blocker |
 | Claude probe | 2.1.228 (Claude Code) / RIR 0.3.1; structural-only, behavioral compatibility remains blocked |
 
-正確なプラグイン識別子は `requirements-impact-refiner@requirements-impact-refiner-v031-eval` です。これは isolated local evaluation-only marketplace の別名であり、not a public install ID or support claim です。最上位 marketplace 名は意図的に異なるため wrapper ファイルだけを除外し、すべての機能 payload コンポーネントのバイトは封印済み [installed payload](evals/results/installed-v0.3.1/installed-payload.json) インベントリで一致しています。v0.3.1 manifest digest は `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d` であり、raw transcript のインベントリはバイト保存と秘密情報スキャンを維持します。唯一の機械的失敗は `POS-cache` repetition 2 の不正な Impact Ledger 行と unknown `IMP-002` 参照を正確に記録します。400 件の人手 adjudication はすべて合格し、各引用が選択された最終出力の部分文字列であることを確認しています。Claude の証拠は structural-only であり、blocked の動作互換性状態を変更しません。
+正確なプラグイン識別子は `requirements-impact-refiner@requirements-impact-refiner-v031-eval` です。これは isolated local evaluation-only marketplace の別名であり、not a public install ID or support claim です。最上位 marketplace 名は意図的に異なるため wrapper ファイルだけを除外し、すべての機能 payload コンポーネントのバイトは封印済み [installed payload](evals/results/installed-v0.3.1/installed-payload.json) インベントリで一致しています。v0.3.1 manifest digest は `8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d` であり、raw transcript のインベントリはバイト保存と秘密情報スキャンを維持します。唯一の機械的失敗は `POS-cache` repetition 2 の不正な Impact Ledger 行と unknown `IMP-002` 参照を正確に記録します。400 件の adjudication はすべて合格し、モデルが採点し、各引用が選択された最終出力の部分文字列であることを確認しており、独立した人間による承認記録はありません。Claude の証拠は structural-only であり、blocked の動作互換性状態を変更しません。
 
 ## 7. 比較と非目標
 
@@ -190,7 +190,7 @@ Superpowers はブレインストーミング、計画、実行、デバッグ�
 
 中核評価は 25/25 ではなく **24/25** です。既知の単一確率的失敗 `POS-payments-5` は、ユーザーがリトライ方針を選ぶ前に reconcile-before-retry の仕組みを要求へ埋め込みました。最終チェックリストはこのパターンに対処しますが、許可された修正ラウンドを使い切ったため制限を開示しています。別のワークフロー統合最終構成は **30/30** です。これらは記録済み Codex ハーネスの結果であり、未試験クライアントへ一般化してはいけません。
 
-より広いリリース記録はクライアントサポートを推論しません。Codex standalone は厳格評価 **7/17** に失敗しました。Codex with Superpowers は全 5 回反復、85 final の v0.3.1 バッチを完了しましたが、85/85 のランタイムと 400/400 の adjudication 件数にもかかわらず、`POS-cache` repetition 2 の機械的失敗がリリースブロッカーであるため、引き続き `not verified` です。
+より広いリリース記録はクライアントサポートを推論しません。Codex standalone は厳格評価 **7/17** に失敗しました。7/17 と 84/85 は比較できない数値です: ケース集合(統合アダプター 4 件対系譜ケース 3 件)、採点関数(叙述的なモデル判定対決定論的バリデーター)、スキル世代(v0.1 対 v0.3.1)がそれぞれ異なります。Codex with Superpowers は全 5 回反復、85 final の v0.3.1 バッチを完了しましたが、85/85 のランタイムと 400/400 の adjudication 件数にもかかわらず、`POS-cache` repetition 2 の機械的失敗がリリースブロッカーであるため、引き続き `not verified` です。外部プロバイダーアダプターは本プロジェクトが定義した detect-only 契約のみを受け付け、各ツールの現在のアップストリーム出力形式は受け付けないため、プロバイダー名の列挙はそのまま相互運用できるという主張ではありません。
 
 スキルは調査範囲外の影響を見逃す可能性があります。未解決、`deferred`、`blocked`、`accepted` のリスクを計画中も可視化し、重要な動作は適切な人手レビューとテストで検証してください。
 
