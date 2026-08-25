@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ast
 import hashlib
 import importlib.util
 import os
@@ -515,6 +516,74 @@ def _import_modules(text: str) -> frozenset[str]:
     return frozenset(modules)
 
 
+class PythonStructure:
+    """Genuine structure parsed from the stdlib ast module: import module
+    specifiers, defined names, and loaded names. None when the source does
+    not parse — the scan then falls back to lexical evidence honestly."""
+
+    __slots__ = ("modules", "defs", "uses")
+
+    def __init__(self, modules, defs, uses):
+        self.modules = modules
+        self.defs = defs
+        self.uses = uses
+
+
+def _python_structure(text: str):
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        return None
+    specifiers = []
+    defs = set()
+    loads = set()
+    stores = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            specifiers.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            # Relative imports resolve within the repository too; a bare
+            # "from . import x" names its submodules directly.
+            if node.module:
+                specifiers.append(node.module)
+            elif node.level:
+                specifiers.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load):
+                loads.add(node.id)
+            else:
+                stores.add(node.id)
+    # The definition surface is the module's top level — functions, classes,
+    # and module constants. Function locals are not cross-file API and made
+    # every shared variable name (result, payload) a false structural edge.
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defs.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target_node in node.targets:
+                if isinstance(target_node, ast.Name):
+                    defs.add(target_node.id)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name):
+                defs.add(node.target.id)
+    # A name the file itself binds anywhere is a local use, not evidence of
+    # depending on another file's definition.
+    uses = loads - stores
+    modules = set()
+    for specifier in specifiers:
+        parts = [part for part in specifier.split(".") if part]
+        for value in ([parts[-1], "".join(parts)] if parts else []):
+            collapsed = re.sub(r"[^a-z0-9]", "", value.lower())
+            if len(collapsed) >= 3:
+                modules.add(collapsed)
+    minimum = 3
+    return PythonStructure(
+        frozenset(modules),
+        frozenset(name for name in defs if len(name) >= minimum),
+        frozenset(name for name in uses if len(name) >= minimum),
+    )
+
+
 def _terms(text: str) -> frozenset[str]:
     return frozenset(_term_categories(text))
 
@@ -646,15 +715,20 @@ def _module_resolves_to_target(target: str, modules: frozenset[str]) -> bool:
 
 
 def _edge_kind(
-    target: str, modules: frozenset[str], evidence: str
+    target: str, modules: frozenset[str], evidence: str, basis: str
 ) -> tuple[str, str]:
     if _is_test_path(target):
         # A test-shaped filename alone is a lexical coincidence; structural
-        # confidence additionally requires the evidence to name the target.
-        resolves = _import_resolves_to_target(target, evidence)
-        return "tests", "structural-inferred" if resolves else "lexical"
-    if _module_resolves_to_target(target, modules):
+        # confidence requires a structural basis or evidence naming the
+        # target.
+        structural = basis != "lexical" or _import_resolves_to_target(
+            target, evidence
+        )
+        return "tests", "structural-inferred" if structural else "lexical"
+    if basis == "import":
         return "imports", "structural-inferred"
+    if basis == "defuse":
+        return "references", "structural-inferred"
     return "references", "lexical"
 
 
@@ -692,7 +766,7 @@ def scan_repository(
 
     skipped: dict[str, str] = {}
     traversal_errors: list[str] = []
-    documents: dict[str, tuple[str, frozenset[str], str, Mapping[str, frozenset[str]], frozenset[str]]] = {}
+    documents: dict[str, tuple] = {}
     sensitive_literals = set()
     bytes_scanned = 0
     files_scanned = 0
@@ -728,9 +802,16 @@ def scan_repository(
         safe_text, found_sensitive = _redact_sensitive_literals(text)
         sensitive_literals.update(found_sensitive)
         categories = _term_categories(safe_text)
+        structure = (
+            _python_structure(safe_text) if relative.endswith(".py") else None
+        )
+        modules = (
+            structure.modules if structure is not None
+            else _import_modules(safe_text)
+        )
         documents[relative] = (
             safe_text, frozenset(categories), hashlib.sha256(payload).hexdigest(),
-            categories, _import_modules(safe_text),
+            categories, modules, structure,
         )
 
     if expired():
@@ -769,29 +850,62 @@ def scan_repository(
     locations = sorted(documents)
     for source in locations:
         source_terms = documents[source][1]
+        source_modules = documents[source][4]
+        source_structure = documents[source][5]
         for target in locations:
             if expired():
                 return deadline_result()
             if source == target:
                 continue
+            # 1) A parsed or declared import resolving to the target file is
+            #    structural evidence and needs no token co-occurrence. A
+            #    python import can only land on a python file — a document
+            #    whose stem merely contains the module name is not a module.
+            plausible_import_target = (
+                not source.endswith(".py") or target.endswith(".py")
+            )
+            if plausible_import_target and _module_resolves_to_target(
+                target, source_modules
+            ):
+                stem = target.lower().rsplit("/", 1)[-1].split(".", 1)[0]
+                relationships.append(
+                    (source, target, stem, source_modules, "import")
+                )
+                continue
+            # 2) Using a name the target genuinely defines (both sides
+            #    parsed) is structural; string mentions never reach here
+            #    because ast defs/uses exclude literals.
+            target_structure = documents[target][5]
+            if source_structure is not None and target_structure is not None:
+                used_defs = source_structure.uses & target_structure.defs
+                if used_defs:
+                    evidence = min(
+                        used_defs, key=lambda value: (-len(value), value)
+                    )
+                    relationships.append(
+                        (source, target, evidence, source_modules, "defuse")
+                    )
+                    continue
+            # 3) Shared-token co-occurrence stays lexical.
             shared = source_terms & documents[target][1]
             if shared:
                 # min under (-len, value) == longest token, ties lexicographic
                 # — identical pick to the previous full sort, without paying
                 # an O(k log k) sort for every ordered file pair.
                 evidence = min(shared, key=lambda value: (-len(value), value))
-                modules = documents[source][4]
-                relationships.append((source, target, evidence, modules))
+                relationships.append(
+                    (source, target, evidence, source_modules, "lexical")
+                )
 
     reachable = set(seed_locations)
     reachable.update(
-        location for location, (_, terms, _, _, _) in documents.items()
+        location for location, (_, terms, *_rest) in documents.items()
         if terms & seed_terms
     )
     changed = True
     while changed and not expired():
         changed = False
-        for source, target, _, _ in relationships:
+        for source, target, _, _, _ in relationships:
             if expired():
                 exhausted = True
                 break
@@ -853,7 +967,7 @@ def scan_repository(
             risk = _risk_domains(seed.location, seed.term)
             node = GraphNode(node_id, "symbol", label, seed.location, "builtin", "lexical", None, risk)
         else:
-            text, _, digest, _, _ = documents[location]
+            text, _, digest, *_rest = documents[location]
             risk = _risk_domains(location, text)
             label = next((
                 _safe_graph_text(seed.term, sensitive_literals)
@@ -875,13 +989,19 @@ def scan_repository(
         node_risks[node.id] = node.risk_domains
 
     edge_candidates = []
-    for source, target, evidence, modules in relationships:
+    for source, target, evidence, modules, basis in relationships:
         if expired():
             return deadline_result(nodes)
         if source in location_ids and target in location_ids:
-            kind, confidence = _edge_kind(target, modules, evidence)
+            kind, confidence = _edge_kind(target, modules, evidence, basis)
             edge_candidates.append((source, target, kind, confidence, evidence))
-    edge_candidates.sort(key=lambda item: (location_ids[item[0]], location_ids[item[1]], item[2], item[4]))
+    # Structural evidence outranks lexical co-occurrence when the edge cap
+    # bites: a large repository must not lose exactly the edges the scan
+    # exists to find. Ordering stays deterministic within each tier.
+    edge_candidates.sort(key=lambda item: (
+        0 if item[3] == "structural-inferred" else 1,
+        location_ids[item[0]], location_ids[item[1]], item[2], item[4],
+    ))
     if len(edge_candidates) > limits.max_edges:
         exhausted = True
     edge_candidates = edge_candidates[:limits.max_edges]

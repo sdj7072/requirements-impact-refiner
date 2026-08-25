@@ -844,3 +844,114 @@ class RiskDomainTokenizationTest(unittest.TestCase):
         self.assertNotIn(
             "state/concurrency", self.domains("src/statement.py", "statement = parse()")
         )
+
+
+class PythonAstStructureTest(unittest.TestCase):
+    """Python files get genuine structural analysis from the stdlib ast
+    module: real import edges without token co-occurrence, def/use reference
+    edges at structural confidence, and honest lexical fallback for string
+    mentions and unparseable sources."""
+
+    def edge_map(self, files, seed_term, seed_location):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative, content in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),)
+            )
+            locations = {node.id: node.location for node in result.nodes}
+            return {
+                (locations[edge.source], locations[edge.target]):
+                (edge.kind, edge.confidence)
+                for edge in result.edges
+            }
+
+    def test_import_edge_exists_without_any_shared_token(self):
+        directions = self.edge_map(
+            {
+                "app.py": "import blobstore\nvalue = 1\n",
+                "blobstore.py": "class Storage:\n    pass\n",
+            },
+            "Storage",
+            "app.py",
+        )
+        self.assertEqual(
+            directions.get(("app.py", "blobstore.py")),
+            ("imports", "structural-inferred"),
+        )
+
+    def test_use_of_defined_name_is_structural_reference(self):
+        directions = self.edge_map(
+            {
+                "runner.py": "result = parse_config()\n",
+                "loader.py": "def parse_config():\n    return {}\n",
+            },
+            "parse_config",
+            "runner.py",
+        )
+        self.assertEqual(
+            directions.get(("runner.py", "loader.py")),
+            ("references", "structural-inferred"),
+        )
+
+    def test_string_mention_of_name_stays_lexical(self):
+        directions = self.edge_map(
+            {
+                "runner.py": "result = parse_config()\n",
+                "notes.py": 'DOC = "call parse_config for setup"\n',
+            },
+            "parse_config",
+            "runner.py",
+        )
+        self.assertEqual(
+            directions.get(("runner.py", "notes.py")),
+            ("references", "lexical"),
+        )
+
+    def test_unparseable_python_falls_back_to_lexical(self):
+        directions = self.edge_map(
+            {
+                "runner.py": "result = parse_config()\n",
+                "broken.py": "def broken(:\n    parse_config\n",
+            },
+            "parse_config",
+            "runner.py",
+        )
+        self.assertEqual(
+            directions.get(("runner.py", "broken.py")),
+            ("references", "lexical"),
+        )
+
+
+class StructuralEdgeSurvivalTest(unittest.TestCase):
+    """When the edge cap bites, structural edges must survive ahead of
+    lexical co-occurrence noise — otherwise a large repository silently
+    loses exactly the evidence the scan exists to find."""
+
+    def test_import_edge_survives_lexical_flood(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for i in range(46):
+                (root / f"noise_{i:02d}.py").write_text(
+                    'SHARED = "common_marker_token"\n', encoding="utf-8"
+                )
+            (root / "app.py").write_text(
+                'import blobstore\nSHARED = "common_marker_token"\n',
+                encoding="utf-8",
+            )
+            (root / "blobstore.py").write_text(
+                "class Storage:\n    pass\n", encoding="utf-8"
+            )
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("Storage", "app.py"),)
+            )
+            locations = {node.id: node.location for node in result.nodes}
+            kinds = {
+                (locations[edge.source], locations[edge.target]): edge.kind
+                for edge in result.edges
+            }
+            self.assertGreaterEqual(len(result.edges), 999)
+            self.assertEqual(kinds.get(("app.py", "blobstore.py")), "imports")
