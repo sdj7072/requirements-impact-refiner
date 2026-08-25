@@ -6,6 +6,36 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+
+
+def _json_depth(text: str) -> int:
+    """Peak bracket nesting outside strings. CPython 3.13 no longer raises
+    RecursionError from json.loads at hostile depths, so the bound must be
+    explicit rather than borrowed from the interpreter."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > peak:
+                peak = depth
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
+
+
+_MAX_JSON_DEPTH = 64
 import os
 from pathlib import Path
 import re
@@ -103,8 +133,12 @@ def _metadata(root):
     if payload is None:
         raise ValueError("Joern graph metadata is unreadable")
     try:
-        value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        _decoded = payload.decode("utf-8")
+        if _json_depth(_decoded) > _MAX_JSON_DEPTH:
+            raise ValueError("json nesting depth exceeded")
+        value = json.loads(_decoded)
+    except (UnicodeDecodeError, json.JSONDecodeError,
+            RecursionError, ValueError) as error:
         raise ValueError("Joern graph metadata must be UTF-8 JSON") from error
     if not isinstance(value, dict) or set(value) != {"schemaVersion", "projectRoot", "sourceFingerprint", "createdBy"} or value["schemaVersion"] != 1:
         raise ValueError("Joern graph metadata shape is unsupported")

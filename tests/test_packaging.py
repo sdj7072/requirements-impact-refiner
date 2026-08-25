@@ -583,3 +583,33 @@ class PackagingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MirrorGuardCoverageTest(unittest.TestCase):
+    """Every shipped script and resource in the skill directory must have a
+    byte-identical root mirror, and the JSON depth bound must exist wherever
+    untrusted JSON is parsed — the interpreter no longer supplies one."""
+
+    def test_all_skill_scripts_have_byte_identical_root_mirrors(self):
+        skill_scripts = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+        for path in sorted(skill_scripts.iterdir()):
+            if path.name == "__pycache__":
+                continue
+            with self.subTest(script=path.name):
+                mirror = ROOT / "scripts" / path.name
+                self.assertTrue(mirror.is_file(), mirror)
+                self.assertEqual(
+                    mirror.read_bytes(), path.read_bytes(), path.name
+                )
+
+    def test_untrusted_json_parsers_carry_an_explicit_depth_bound(self):
+        consumers = (
+            "rir_mcp_server.py", "rir-controller.py", "fast_scan_store.py",
+            "graph_providers.py", "graph_adapter_joern.py",
+            "graph_adapter_ast_grep.py",
+        )
+        for name in consumers:
+            with self.subTest(script=name):
+                text = (ROOT / "scripts" / name).read_text()
+                self.assertIn("_MAX_JSON_DEPTH", text, name)
+                self.assertIn("_json_depth(", text, name)

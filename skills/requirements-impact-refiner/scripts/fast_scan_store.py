@@ -4,6 +4,36 @@ from pathlib import Path
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX = 4 * 1024 * 1024
 
+def _json_depth(text: str) -> int:
+    """Peak bracket nesting outside strings. CPython 3.13 no longer raises
+    RecursionError from json.loads at hostile depths, so the bound must be
+    explicit rather than borrowed from the interpreter."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > peak:
+                peak = depth
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
+
+
+_MAX_JSON_DEPTH = 64
+
+
 def _id(value):
     if not isinstance(value, str) or _ID.fullmatch(value) is None:
         raise ValueError("scan_id must be 32 lowercase hex characters")
@@ -122,7 +152,11 @@ def load_scan_receipt_bytes(root, scan_id):
         after = os.fstat(fd)
         if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
             raise ValueError("scan receipt changed while reading")
-        try: value = json.loads(payload.decode("utf-8"))
+        try:
+            decoded = payload.decode("utf-8")
+            if _json_depth(decoded) > _MAX_JSON_DEPTH:
+                raise ValueError("scan receipt is invalid")
+            value = json.loads(decoded)
         except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
             raise ValueError("scan receipt is invalid") from error
         if not isinstance(value, dict) or value.get("scan_id") != scan_id:

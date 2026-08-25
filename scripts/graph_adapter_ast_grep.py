@@ -4,6 +4,36 @@
 from __future__ import annotations
 
 import hashlib
+
+
+def _json_depth(text: str) -> int:
+    """Peak bracket nesting outside strings. CPython 3.13 no longer raises
+    RecursionError from json.loads at hostile depths, so the bound must be
+    explicit rather than borrowed from the interpreter."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > peak:
+                peak = depth
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
+
+
+_MAX_JSON_DEPTH = 64
 import importlib.util
 import os
 from pathlib import Path, PurePosixPath
@@ -387,6 +417,8 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                     continue
                 try:
                     import json
+                    if _json_depth(line) > _MAX_JSON_DEPTH:
+                        raise ValueError("json nesting depth exceeded")
                     row = json.loads(line)
                     required = {"text", "range", "file", "lines", "charCount", "language", "metaVariables"}
                     if not isinstance(row, dict) or set(row) != required:

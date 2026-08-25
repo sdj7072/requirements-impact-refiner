@@ -14,6 +14,36 @@ import shutil
 import signal
 import stat
 import subprocess
+
+
+def _json_depth(text: str) -> int:
+    """Peak bracket nesting outside strings. CPython 3.13 no longer raises
+    RecursionError from json.loads at hostile depths, so the bound must be
+    explicit rather than borrowed from the interpreter."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > peak:
+                peak = depth
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
+
+
+_MAX_JSON_DEPTH = 64
 import tempfile
 import time
 from types import MappingProxyType
@@ -796,8 +826,14 @@ def run_provider(
         detail = "provider process failed or exceeded an output bound"
     elif expect_json:
         try:
+            _stdout_text = (
+                stdout if isinstance(stdout, str)
+                else stdout.decode("utf-8", "replace")
+            )
+            if _json_depth(_stdout_text) > _MAX_JSON_DEPTH:
+                raise ValueError("json nesting depth exceeded")
             parsed = json.loads(stdout)
-        except (json.JSONDecodeError, RecursionError):
+        except (json.JSONDecodeError, RecursionError, ValueError):
             status = "failed"
             detail = "provider output must contain valid JSON"
     return ProviderQuery(

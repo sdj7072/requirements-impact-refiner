@@ -9,6 +9,36 @@ import sys
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _json_depth(text: str) -> int:
+    """Peak bracket nesting outside strings. CPython 3.13 no longer raises
+    RecursionError from json.loads at hostile depths, so the bound must be
+    explicit rather than borrowed from the interpreter."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > peak:
+                peak = depth
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
+
+
+_MAX_JSON_DEPTH = 64
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -468,8 +498,12 @@ def main():
             response = _error(None, -32700, "request exceeds 2 MiB")
         else:
             try:
-                message = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+                decoded = raw.decode("utf-8")
+                if _json_depth(decoded) > _MAX_JSON_DEPTH:
+                    raise ValueError("json nesting depth exceeded")
+                message = json.loads(decoded)
+            except (UnicodeDecodeError, json.JSONDecodeError,
+                    RecursionError, ValueError):
                 response = _error(None, -32700, "parse error")
             else:
                 response = handle(message)

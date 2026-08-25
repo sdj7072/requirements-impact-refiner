@@ -4,6 +4,36 @@ from __future__ import annotations
 
 import argparse
 import json
+
+
+def _json_depth(text: str) -> int:
+    """Peak bracket nesting outside strings. CPython 3.13 no longer raises
+    RecursionError from json.loads at hostile depths, so the bound must be
+    explicit rather than borrowed from the interpreter."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > peak:
+                peak = depth
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
+
+
+_MAX_JSON_DEPTH = 64
 import os
 import stat
 import sys
@@ -71,8 +101,11 @@ def _read_object(path: Path, maximum: int, label: str):
             unit = "256 KiB" if maximum == rir_controller.MAX_BEGIN_BYTES else "2 MiB"
             raise ValueError(f"{label} exceeds {unit}")
         text = raw.decode("utf-8")
+        if _json_depth(text) > _MAX_JSON_DEPTH:
+            raise json.JSONDecodeError("json nesting depth exceeded", text, 0)
         value = json.loads(text)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError,
+            RecursionError) as error:
         raise OSError(f"cannot read input: {error}") from error
     finally:
         if descriptor is not None:
