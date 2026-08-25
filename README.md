@@ -80,8 +80,10 @@ When the plugin is enabled, [`using-requirements-impact-refiner`](skills/using-r
 Every report now starts with a user-facing `Change Impact Summary`: which feature changes, what can go wrong, who or what is affected, when it happens, and how to prevent or check it. Its audience defaults to `balanced`. Set a repository preference in `.requirements-impact-refiner.json`:
 
 ```json
-{"audience":"balanced","delivery":"compact"}
+{"audience":"balanced","delivery":"compact","flow":"report"}
 ```
+
+The `flow` setting shapes the answer: the default `report` delivers the complete impact report directly (the scan runs internally to seed it, stopping early only on `needs_input`), while `ask` returns the one-line scan summary plus a confirmation question before detailed refinement.
 
 Allowed audience values are `simple`, `balanced`, and `technical`. Delivery defaults to compact; request `delivery: full` or set `"delivery":"full"` to return the complete canonical report inline. Compact mode persists append-only JSON and Markdown and returns the short summary plus artifact paths. If persistence is unavailable, the skill uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
 

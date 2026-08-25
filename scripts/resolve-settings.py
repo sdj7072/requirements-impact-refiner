@@ -10,6 +10,7 @@ from pathlib import Path
 
 AUDIENCES = ("simple", "balanced", "technical")
 DELIVERIES = ("compact", "full")
+FLOWS = ("report", "ask")
 CONFIG_NAME = ".requirements-impact-refiner.json"
 GRAPH_DEFAULTS = {
     "enabled": True,
@@ -39,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--audience", choices=AUDIENCES)
     parser.add_argument("--delivery", choices=DELIVERIES)
+    parser.add_argument("--flow", choices=FLOWS)
     return parser
 
 
@@ -52,7 +54,7 @@ def load_repository_config(project_root: Path) -> dict[str, object]:
         raise ValueError(f"cannot read {CONFIG_NAME}: {error}") from error
     if not isinstance(value, dict):
         raise ValueError(f"{CONFIG_NAME} must contain a JSON object")
-    unknown = sorted(set(value) - {"audience", "delivery", "impact_graph"})
+    unknown = sorted(set(value) - {"audience", "delivery", "flow", "impact_graph"})
     if unknown:
         raise ValueError(f"unsupported setting(s): {', '.join(unknown)}")
     return value
@@ -114,6 +116,7 @@ def resolve(
     project_root: Path,
     audience_override: str | None,
     delivery_override: str | None,
+    flow_override: str | None = None,
 ) -> dict[str, object]:
     config = load_repository_config(project_root)
     audience, audience_source = resolve_value(
@@ -122,12 +125,19 @@ def resolve(
     delivery, delivery_source = resolve_value(
         "delivery", delivery_override, config, DELIVERIES, "compact"
     )
+    # The default flow answers with the impact report itself; the scan
+    # summary plus a refinement question is an explicit opt-in ("ask").
+    flow, flow_source = resolve_value(
+        "flow", flow_override, config, FLOWS, "report"
+    )
     impact_graph, warning = resolve_graph_settings(config)
     resolved: dict[str, object] = {
         "audience": audience,
         "audience_source": audience_source,
         "delivery": delivery,
         "delivery_source": delivery_source,
+        "flow": flow,
+        "flow_source": flow_source,
         "impact_graph": impact_graph,
     }
     if warning is not None:
@@ -138,7 +148,7 @@ def resolve(
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        settings = resolve(args.project_root, args.audience, args.delivery)
+        settings = resolve(args.project_root, args.audience, args.delivery, args.flow)
     except ValueError as error:
         print(error, file=sys.stderr)
         return 2

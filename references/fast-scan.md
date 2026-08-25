@@ -1,6 +1,6 @@
-# Fast Scan
+# Fast Scan (ask flow)
 
-Use this reference for the default one-call impact preview.
+Use this reference only when the resolved `flow` is `ask`. In the default report flow the scan is internal and its display text is never the user-facing answer.
 
 Call `rir_scan` once with `repo_root`, the user's exact change request, supplied evidence, and presentation mode. Return `display_text` verbatim. Do not rewrite paths, risks, provenance, candidates, frontier, timing, or cache status.
 

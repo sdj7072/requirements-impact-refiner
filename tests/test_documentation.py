@@ -111,8 +111,11 @@ class DocumentationTest(unittest.TestCase):
         recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)", route)
         self.assertEqual(recipe.groups(), (
             "Call `rir_scan` once with the change and supplied evidence.",
-            "Return `display_text` verbatim.",
-            "Stop; the renderer-owned question already asks whether to refine.",
+            "`needs_input`: relay its question verbatim and stop.",
+            "Report flow: hide `display_text`, continue below. Ask flow: "
+            "Return `display_text` verbatim. Stop; the renderer-owned "
+            "question already asks whether to refine "
+            "([Fast Scan](references/fast-scan.md)).",
         ))
 
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):

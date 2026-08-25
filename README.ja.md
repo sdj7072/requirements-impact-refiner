@@ -80,8 +80,10 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 各報告書の先頭には、利用者向けの `Change Impact Summary` が表示されます。変更される機能、起こり得る問題、影響を受ける機能や利用者、発生条件、予防または確認方法を示します。既定値は `balanced` で、リポジトリルートの `.requirements-impact-refiner.json` で設定できます。
 
 ```json
-{"audience":"balanced","delivery":"compact"}
+{"audience":"balanced","delivery":"compact","flow":"report"}
 ```
+
+`flow` 設定は応答の形を決めます: 既定の `report` は完全な影響レポートを直接返し(スキャンはシード用に内部でのみ実行され、`needs_input` の場合のみ早期停止)、`ask` は 1 行のスキャン要約と確認の質問を先に返してから詳細精緻化に進みます。
 
 audience は `simple`, `balanced`, `technical` を指定できます。delivery の既定値は compact です。完全な正規報告をインラインで返すには `delivery: full` を依頼するか `"delivery":"full"` を設定します。Compact モードは append-only JSON と Markdown を保存し、短い要約とパスだけを返します。保存できない場合は明示した `full-inline` fallback を使います。現在の依頼がリポジトリ設定より優先されます。これは Codex や Claude 専用画面ではなくクロスクライアントのスキル設定です。
 

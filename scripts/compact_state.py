@@ -52,7 +52,7 @@ AUDIENCES = {"simple", "balanced", "technical"}
 DELIVERIES = {"compact", "full"}
 SETTING_SOURCES = {"request", "repository", "default"}
 SETTING_FIELDS = {"audience", "audience_source", "delivery", "delivery_source"}
-OPTIONAL_SETTING_FIELDS = {"impact_graph", "warnings"}
+OPTIONAL_SETTING_FIELDS = {"impact_graph", "warnings", "flow", "flow_source"}
 GRAPH_SETTING_FIELDS = {
     "enabled", "max_seconds", "target_seconds", "providers", "install_policy", "deep",
 }

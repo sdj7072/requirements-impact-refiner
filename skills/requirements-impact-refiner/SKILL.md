@@ -9,20 +9,18 @@ metadata:
 
 # Requirements Impact Refiner
 
-Use after bootstrap for concrete pre-planning changes; not ideation, debugging, code review, or generic PRDs.
+Use after bootstrap for pre-planning changes; not ideation, debugging, code review, or generic PRDs. `flow` (`resolve-settings.py`) defaults to `report`.
 
 ## Default Fast Scan
 
 1. Call `rir_scan` once with the change and supplied evidence.
-2. Return `display_text` verbatim.
-3. Stop; the renderer-owned question already asks whether to refine.
-
-Do not invent paths, rerun providers, or hide frontiers. Resolve links from this `SKILL.md` directory. Read [Fast Scan](references/fast-scan.md) only for fallback or technical detail.
+2. `needs_input`: relay its question verbatim and stop.
+3. Report flow: hide `display_text`, continue below. Ask flow: Return `display_text` verbatim. Stop; the renderer-owned question already asks whether to refine ([Fast Scan](references/fast-scan.md)).
 
 ## Detailed refinement
 
-After yes, read [Controller workflow](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), or [spec-kit](references/integration-spec-kit.md). Promoted scans skip trace.
+After yes (ask) or immediately (report), read [Controller workflow](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), [spec-kit](references/integration-spec-kit.md). Promoted scans skip trace; return the full canonical report inline. Resolve links from this `SKILL.md` directory.
 
 ## Fallbacks
 
-CLI fallback uses `scripts/rir-controller.py`. `full-inline` must disclose unavailable persistence and promotion.
+CLI fallback uses `scripts/rir-controller.py`; `full-inline` must disclose unavailable persistence and promotion.

@@ -80,8 +80,10 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 이제 모든 보고서 앞에는 사용자 친화적인 `Change Impact Summary`가 붙습니다. 어떤 기능이 바뀌는지, 어떤 문제가 생길 수 있는지, 누구 또는 어떤 기능이 영향을 받는지, 언제 발생하는지, 어떻게 예방하거나 확인할지를 보여줍니다. 기본 대상은 `balanced`이며 저장소 루트의 `.requirements-impact-refiner.json`에서 설정할 수 있습니다.
 
 ```json
-{"audience":"balanced","delivery":"compact"}
+{"audience":"balanced","delivery":"compact","flow":"report"}
 ```
+
+`flow` 설정은 응답의 형태를 결정합니다: 기본값 `report`는 완전한 영향도 보고서를 곧바로 전달하고(스캔은 내부에서 시드용으로만 실행되며 `needs_input`일 때만 조기 정지), `ask`는 한 줄 스캔 요약과 확인 질문을 먼저 반환한 뒤 상세 정제로 진입합니다.
 
 audience 허용값은 `simple`, `balanced`, `technical`입니다. delivery 기본값은 compact이며, 전체 기준 보고서를 인라인으로 받으려면 `delivery: full`을 요청하거나 `"delivery":"full"`을 설정합니다. Compact 모드는 append-only JSON과 Markdown을 저장하고 짧은 요약과 경로만 반환합니다. 저장할 수 없으면 이를 밝히고 `full-inline` fallback을 사용합니다. 현재 요청이 저장소 설정보다 우선합니다. 이는 Codex나 Claude 전용 설정 화면이 아닌 크로스 클라이언트 스킬 설정입니다.
 
