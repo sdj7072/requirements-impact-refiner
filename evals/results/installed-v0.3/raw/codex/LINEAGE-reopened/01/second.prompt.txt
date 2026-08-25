@@ -1,5 +1,0 @@
-Continue the same profile-field report. New repository evidence shows a second client serializes the field directly, so reassess the earlier resolution.
-
-Repository evidence:
-- the prior report text is supplied verbatim
-- desktop/ProfileCache.swift serializes profile.displayName

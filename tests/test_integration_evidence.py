@@ -25,6 +25,10 @@ def evidence_manifest() -> str:
     return "\n".join(rows) + "\n"
 
 
+@unittest.skipUnless(
+    EVIDENCE_ROOT.exists(),
+    "raw evaluation evidence lives on the evidence-v031 branch",
+)
 class IntegrationEvidenceTest(unittest.TestCase):
     def test_canonical_integration_inventory_and_checksums(self):
         for directory, expected_count in EXPECTED_COUNTS.items():

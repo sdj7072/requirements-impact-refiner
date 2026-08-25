@@ -1,3 +1,0 @@
-The workspace is empty, so the approved specification/impact report isn’t available to decompose.
-
-Please paste the approved report or provide its file/repository location. I’ll convert it directly into ordered, implementation-ready coding tasks without repeating impact refinement.

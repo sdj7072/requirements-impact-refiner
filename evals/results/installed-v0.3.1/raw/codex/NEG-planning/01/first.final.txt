@@ -1,3 +1,0 @@
-The workspace is empty, so I can’t locate the approved specification or impact report to derive coding tasks.
-
-Please paste the approved report/specification or add it to the repository and provide its path. I’ll preserve its decisions and produce ordered, implementation-ready tasks with affected files, acceptance criteria, dependencies, and verification steps.

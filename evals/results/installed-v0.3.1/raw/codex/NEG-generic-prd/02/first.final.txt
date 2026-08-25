@@ -1,3 +1,0 @@
-I’m missing the product idea: nothing follows “Repository evidence,” and the workspace is empty with no repository.
-
-Please paste the product idea or repository evidence. A one-sentence concept is enough—I can infer assumptions and produce the complete PRD from it.

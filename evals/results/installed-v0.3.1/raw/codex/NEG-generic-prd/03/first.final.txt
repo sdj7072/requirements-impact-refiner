@@ -1,3 +1,0 @@
-I’m missing the product idea and repository evidence—the workspace is empty, and no evidence followed the heading.
-
-Please send the product idea plus any relevant notes, links, user feedback, requirements, or repository files. I’ll then produce a complete PRD with goals, personas, scope, user stories, requirements, UX flows, metrics, risks, dependencies, rollout, and acceptance criteria.

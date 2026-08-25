@@ -1,3 +1,0 @@
-I can’t review the PR yet because the promised diff is not present. The workspace is empty and not a Git repository.
-
-Please paste/attach the complete diff, or provide the GitHub repository and PR number.

@@ -1,3 +1,0 @@
-I’m missing the product idea needed to write the PRD. The “Repository evidence” section is blank, and the repository contains no files.
-
-Please send the product idea—ideally a short description of the target users, problem, and proposed solution. I can infer the remaining details and produce a complete PRD.

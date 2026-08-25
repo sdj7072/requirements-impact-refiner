@@ -1,1 +1,0 @@
-{"authenticated": null, "available": true, "capabilities": ["structural-probes", "version", "doctor", "plugin-validate", "marketplace-list", "plugin-list"], "client": "claude", "enabled_plugins": ["requirements-impact-refiner@requirements-impact-refiner"], "plugin_version": "0.3.1", "reason": null, "version": "2.1.228 (Claude Code)"}

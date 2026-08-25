@@ -1,5 +1,0 @@
-Configured marketplaces:
-
-  ❯ requirements-impact-refiner
-    Source: GitHub (sdj7072/requirements-impact-refiner)
-

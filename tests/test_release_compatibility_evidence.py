@@ -28,6 +28,10 @@ def evidence_manifest() -> str:
     return "\n".join(rows) + "\n"
 
 
+@unittest.skipUnless(
+    EVIDENCE_ROOT.exists(),
+    "raw evaluation evidence lives on the evidence-v031 branch",
+)
 class ReleaseCompatibilityEvidenceTest(unittest.TestCase):
     def test_v03_state_machine_ledger_is_bounded_and_auditable(self):
         text = STATE_MACHINE_V03.read_text(encoding="utf-8")

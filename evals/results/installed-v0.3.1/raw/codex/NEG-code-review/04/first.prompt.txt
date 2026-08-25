@@ -1,4 +1,0 @@
-Review this pull request for correctness.
-
-Repository evidence:
-- a complete diff is supplied

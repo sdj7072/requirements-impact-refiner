@@ -1,6 +1,0 @@
-Cache the dashboard response for one hour.
-
-Repository evidence:
-- dashboard results depend on tenant_id
-- role changes invalidate permission_cache only
-- dashboard writes publish dashboard.updated

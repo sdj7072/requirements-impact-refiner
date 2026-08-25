@@ -1,6 +1,0 @@
-Sync offline edits when the app reconnects.
-
-Repository evidence:
-- records carry an updated_at timestamp
-- server deletions create tombstones for 24 hours
-- the client queue preserves local creation order only

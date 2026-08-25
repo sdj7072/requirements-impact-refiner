@@ -1,3 +1,0 @@
-I can’t determine the cause yet: the workspace is empty, and “only fails in CI” is insufficient to distinguish timing, ordering, resource, timezone, dependency, or environment issues.
-
-Please provide the repository/test plus one CI failure log (including stack trace and job configuration). A passing local log or CI rerun history would also help identify the intermittent condition.

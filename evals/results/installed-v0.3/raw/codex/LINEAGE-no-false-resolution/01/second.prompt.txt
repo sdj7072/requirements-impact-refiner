@@ -1,5 +1,0 @@
-Continue the same webhook report. A stakeholder says the risk is probably acceptable, but provides no repository evidence or approved decision.
-
-Repository evidence:
-- the prior report text is supplied verbatim
-- no approval record or idempotency evidence exists

@@ -1,3 +1,0 @@
-I can’t review the PR yet: the supplied message contains no diff, PR URL, or repository files, and the workspace is empty.
-
-Please attach/paste the diff or provide the PR URL and repository name.

@@ -1,6 +1,0 @@
-Let workspace members edit every project.
-
-Repository evidence:
-- authorizeProjectEdit currently permits owner and admin roles
-- workspace invitations default to member
-- project edits emit an actor-role audit event

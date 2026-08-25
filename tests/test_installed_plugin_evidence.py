@@ -71,6 +71,10 @@ def thread_started_ids(path):
     )
 
 
+@unittest.skipUnless(
+    RAW_ROOT.exists(),
+    "raw evaluation evidence lives on the evidence-v031 branch",
+)
 class InstalledPluginEvidenceTest(unittest.TestCase):
     def test_manifest_digest_pins_the_sealed_inventory_after_regeneration(self):
         """Catch a regenerated manifest even when it matches altered raw files."""

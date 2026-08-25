@@ -30,6 +30,10 @@ def evidence_manifest() -> str:
     return "\n".join(rows) + "\n"
 
 
+@unittest.skipUnless(
+    EVIDENCE_ROOT.exists(),
+    "raw evaluation evidence lives on the evidence-v031 branch",
+)
 class WithSkillEvidenceTest(unittest.TestCase):
     def test_core_raw_evidence_disables_git_text_and_whitespace_conversion(self):
         paths = sorted(

@@ -1,4 +1,0 @@
-Turn this approved specification into coding tasks.
-
-Repository evidence:
-- the impact report is already approved

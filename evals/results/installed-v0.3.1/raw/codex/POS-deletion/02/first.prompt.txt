@@ -1,6 +1,0 @@
-Delete an account immediately.
-
-Repository evidence:
-- invoice.account_id uses RESTRICT
-- privacy.md requires a 30-day finance retention period
-- account cleanup is consumed by a background worker
