@@ -79,6 +79,51 @@ class _ControllerContract(Protocol):
     def trace_impact(self, request: object) -> object: ...
 
 
+class _PriorImpact(TypedDict):
+    id: str
+    requirement: str
+    category: str
+    severity: str
+    state: str
+    evidence_level: str
+    evidence: str
+    invariants: list[str]
+    decisions: list[str]
+    criteria: list[str]
+
+
+class _PriorDecision(TypedDict):
+    id: str
+    choice: str
+    requirement: str
+    accepted_impacts: list[str]
+    rationale: str
+
+
+class _PriorSummary(TypedDict):
+    impact_id: str
+    changed_feature: str
+    possible_issue: str
+    affected: str
+    trigger: str
+    severity: str
+    prevention: str
+    status: str
+
+
+class _PriorState(TypedDict):
+    impacts: list[_PriorImpact]
+    decisions: list[_PriorDecision]
+    summary: list[_PriorSummary]
+
+
+class _PriorKeyMap(TypedDict):
+    invariants: dict[str, str]
+    impacts: dict[str, str]
+    decisions: dict[str, str]
+    criteria: dict[str, str]
+
+
 class _BeginResult(Protocol):
     draft_id: str
     draft_path: Path
@@ -86,8 +131,8 @@ class _BeginResult(Protocol):
     revision: int
     previous_sha256: str
     settings: Mapping[str, object]
-    prior_state: Mapping[str, object] | None
-    prior_key_map: Mapping[str, object] | None
+    prior_state: _PriorState | None
+    prior_key_map: _PriorKeyMap | None
     scan_id: str | None
     graph_receipt_id: str | None
 
@@ -131,6 +176,10 @@ class _TraceResult(Protocol):
     budget_status: str
     request_sha256: str
     seeds: Sequence[_TraceSeedResult]
+
+
+class _ControllerContractError(RuntimeError):
+    """A validated MCP request received an invalid controller sibling result."""
 
 
 def _callables(value: object, names: tuple[str, ...]) -> bool:
@@ -391,6 +440,97 @@ def _is_finalize_arguments(value: object) -> TypeGuard[FinalizeArguments]:
     )
 
 
+def _is_json_value(value: object, depth: int = 0) -> bool:
+    if depth > _MAX_JSON_DEPTH:
+        return False
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_value(item, depth + 1) for item in value)
+    if isinstance(value, Mapping):
+        return all(
+            isinstance(key, str) and _is_json_value(item, depth + 1) for key, item in value.items()
+        )
+    return False
+
+
+def _is_string_mapping(value: object) -> TypeGuard[dict[str, str]]:
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
+
+
+def _is_prior_key_map(value: object) -> TypeGuard[_PriorKeyMap]:
+    return (
+        _exact_keys(value, frozenset({"invariants", "impacts", "decisions", "criteria"}))
+        and isinstance(value, dict)
+        and all(
+            _is_string_mapping(value[name])
+            for name in ("invariants", "impacts", "decisions", "criteria")
+        )
+    )
+
+
+def _is_prior_impact(value: object) -> TypeGuard[_PriorImpact]:
+    string_fields = (
+        "id",
+        "requirement",
+        "category",
+        "severity",
+        "state",
+        "evidence_level",
+        "evidence",
+    )
+    list_fields = ("invariants", "decisions", "criteria")
+    return (
+        _exact_keys(value, frozenset({*string_fields, *list_fields}))
+        and isinstance(value, dict)
+        and all(isinstance(value[name], str) for name in string_fields)
+        and all(_is_string_list(value[name]) for name in list_fields)
+    )
+
+
+def _is_prior_decision(value: object) -> TypeGuard[_PriorDecision]:
+    string_fields = ("id", "choice", "requirement", "rationale")
+    return (
+        _exact_keys(value, frozenset({*string_fields, "accepted_impacts"}))
+        and isinstance(value, dict)
+        and all(isinstance(value[name], str) for name in string_fields)
+        and _is_string_list(value["accepted_impacts"])
+    )
+
+
+def _is_prior_summary(value: object) -> TypeGuard[_PriorSummary]:
+    fields = (
+        "impact_id",
+        "changed_feature",
+        "possible_issue",
+        "affected",
+        "trigger",
+        "severity",
+        "prevention",
+        "status",
+    )
+    return (
+        _exact_keys(value, frozenset(fields))
+        and isinstance(value, dict)
+        and all(isinstance(value[name], str) for name in fields)
+    )
+
+
+def _is_prior_state(value: object) -> TypeGuard[_PriorState]:
+    return (
+        isinstance(value, dict)
+        and _is_json_value(value)
+        and isinstance(value.get("impacts"), list)
+        and all(_is_prior_impact(row) for row in value["impacts"])
+        and isinstance(value.get("decisions"), list)
+        and all(_is_prior_decision(row) for row in value["decisions"])
+        and isinstance(value.get("summary"), list)
+        and all(_is_prior_summary(row) for row in value["summary"])
+    )
+
+
 def _is_begin_result(value: object) -> TypeGuard[_BeginResult]:
     revision = getattr(value, "revision", None)
     return (
@@ -401,17 +541,18 @@ def _is_begin_result(value: object) -> TypeGuard[_BeginResult]:
         and not isinstance(revision, bool)
         and isinstance(getattr(value, "previous_sha256", None), str)
         and _string_key_mapping(getattr(value, "settings", None))
+        and _is_json_value(getattr(value, "settings", None))
         and all(
             hasattr(value, name)
             for name in ("prior_state", "prior_key_map", "scan_id", "graph_receipt_id")
         )
         and (
             getattr(value, "prior_state", None) is None
-            or _string_key_mapping(getattr(value, "prior_state", None))
+            or _is_prior_state(getattr(value, "prior_state", None))
         )
         and (
             getattr(value, "prior_key_map", None) is None
-            or _string_key_mapping(getattr(value, "prior_key_map", None))
+            or _is_prior_key_map(getattr(value, "prior_key_map", None))
         )
         and _is_optional_string(getattr(value, "scan_id", None))
         and _is_optional_string(getattr(value, "graph_receipt_id", None))
@@ -446,7 +587,7 @@ def _mapping_sequence(value: object) -> bool:
     return (
         isinstance(value, Sequence)
         and not isinstance(value, (str, bytes))
-        and all(_string_key_mapping(item) for item in value)
+        and all(_string_key_mapping(item) and _is_json_value(item) for item in value)
     )
 
 
@@ -491,6 +632,7 @@ def _is_trace_result(value: object) -> TypeGuard[_TraceResult]:
         )
         and isinstance(getattr(value, "receipt_path", None), Path)
         and _string_key_mapping(getattr(value, "compact_graph", None))
+        and _is_json_value(getattr(value, "compact_graph", None))
         and isinstance(seeds, Sequence)
         and not isinstance(seeds, (str, bytes))
         and all(_is_trace_seed_result(seed) for seed in seeds)
@@ -714,76 +856,78 @@ def _begin(arguments: object) -> dict[str, object]:
         )
     )
     if not _is_begin_result(result):
-        raise ValueError("controller begin result contract is incomplete")
+        raise _ControllerContractError("controller begin result contract is incomplete")
     root = Path(arguments["repo_root"]).resolve()
-    prior_state = result.prior_state if isinstance(result.prior_state, dict) else {}
-    prior_key_map = result.prior_key_map if isinstance(result.prior_key_map, dict) else {}
-    decision_keys = {
-        identifier: key for key, identifier in prior_key_map.get("decisions", {}).items()
-    }
-    impact_keys = {identifier: key for key, identifier in prior_key_map.get("impacts", {}).items()}
-    invariant_keys = {
-        identifier: key for key, identifier in prior_key_map.get("invariants", {}).items()
-    }
-    criterion_keys = {
-        identifier: key for key, identifier in prior_key_map.get("criteria", {}).items()
-    }
-    summaries = {
-        row.get("impact_id"): row for row in prior_state.get("summary", []) if isinstance(row, dict)
-    }
+    prior_state = result.prior_state
+    prior_key_map = result.prior_key_map
+    key_maps = (
+        {
+            "invariants": {},
+            "impacts": {},
+            "decisions": {},
+            "criteria": {},
+        }
+        if prior_key_map is None
+        else prior_key_map
+    )
+    decision_keys = {identifier: key for key, identifier in key_maps["decisions"].items()}
+    impact_keys = {identifier: key for key, identifier in key_maps["impacts"].items()}
+    invariant_keys = {identifier: key for key, identifier in key_maps["invariants"].items()}
+    criterion_keys = {identifier: key for key, identifier in key_maps["criteria"].items()}
+    summary_rows = [] if prior_state is None else prior_state["summary"]
+    impact_rows = [] if prior_state is None else prior_state["impacts"]
+    decision_rows = [] if prior_state is None else prior_state["decisions"]
+    summaries = {summary_row["impact_id"]: summary_row for summary_row in summary_rows}
     carry_forward_impacts = []
-    for row in prior_state.get("impacts", []):
-        if not isinstance(row, dict) or row.get("id") not in impact_keys:
+    for impact_row in impact_rows:
+        if impact_row["id"] not in impact_keys:
             continue
         identifiers = (
-            list(row.get("invariants", []))
-            + list(row.get("decisions", []))
-            + list(row.get("criteria", []))
+            list(impact_row["invariants"])
+            + list(impact_row["decisions"])
+            + list(impact_row["criteria"])
         )
         if not all(
             identifier in {**invariant_keys, **decision_keys, **criterion_keys}
             for identifier in identifiers
         ):
             continue
-        summary = summaries.get(row["id"])
-        if not isinstance(summary, dict):
+        summary = summaries.get(impact_row["id"])
+        if summary is None:
             continue
         carry_forward_impacts.append(
             {
-                "key": impact_keys[row["id"]],
-                "category": row["category"],
-                "severity": row["severity"],
-                "state": row["state"],
-                "evidence_level": row["evidence_level"],
-                "evidence": row["evidence"],
-                "invariant_keys": [invariant_keys[value] for value in row.get("invariants", [])],
-                "decision_keys": [decision_keys[value] for value in row.get("decisions", [])],
-                "criterion_keys": [criterion_keys[value] for value in row.get("criteria", [])],
+                "key": impact_keys[impact_row["id"]],
+                "category": impact_row["category"],
+                "severity": impact_row["severity"],
+                "state": impact_row["state"],
+                "evidence_level": impact_row["evidence_level"],
+                "evidence": impact_row["evidence"],
+                "invariant_keys": [invariant_keys[value] for value in impact_row["invariants"]],
+                "decision_keys": [decision_keys[value] for value in impact_row["decisions"]],
+                "criterion_keys": [criterion_keys[value] for value in impact_row["criteria"]],
                 "summary": {
-                    key: summary[key]
-                    for key in (
-                        "changed_feature",
-                        "possible_issue",
-                        "affected",
-                        "trigger",
-                        "prevention",
-                    )
+                    "changed_feature": summary["changed_feature"],
+                    "possible_issue": summary["possible_issue"],
+                    "affected": summary["affected"],
+                    "trigger": summary["trigger"],
+                    "prevention": summary["prevention"],
                 },
             }
         )
     carry_forward_decisions = []
-    for row in prior_state.get("decisions", []):
-        if not isinstance(row, dict) or row.get("id") not in decision_keys:
+    for decision_row in decision_rows:
+        if decision_row["id"] not in decision_keys:
             continue
-        accepted = row.get("accepted_impacts", [])
+        accepted = decision_row["accepted_impacts"]
         if not all(identifier in impact_keys for identifier in accepted):
             continue
         carry_forward_decisions.append(
             {
-                "key": decision_keys[row["id"]],
-                "choice": row["choice"],
+                "key": decision_keys[decision_row["id"]],
+                "choice": decision_row["choice"],
                 "accepted_impact_keys": [impact_keys[identifier] for identifier in accepted],
-                "rationale": row["rationale"],
+                "rationale": decision_row["rationale"],
             }
         )
     structured = {
@@ -850,7 +994,7 @@ def _finalize(arguments: object) -> dict[str, object]:
         )
     )
     if not _is_finalize_result(result):
-        raise ValueError("controller finalize result contract is incomplete")
+        raise _ControllerContractError("controller finalize result contract is incomplete")
     root = Path(arguments["repo_root"]).resolve()
     structured = {
         "status": result.status,
@@ -882,7 +1026,7 @@ def _scan(arguments: object) -> dict[str, object]:
         )
     )
     if not _is_scan_result(result):
-        raise ValueError("controller scan result contract is incomplete")
+        raise _ControllerContractError("controller scan result contract is incomplete")
     structured = {
         "status": result.status,
         "scan_id": result.scan_id,
@@ -918,7 +1062,7 @@ def _trace(arguments: object) -> dict[str, object]:
         )
     )
     if not _is_trace_result(result):
-        raise ValueError("controller trace result contract is incomplete")
+        raise _ControllerContractError("controller trace result contract is incomplete")
     root = Path(arguments["repo_root"]).resolve()
     structured = {
         "receipt_id": result.receipt_id,
@@ -975,6 +1119,8 @@ def handle(message: object) -> dict[str, object] | None:
             result = _finalize(arguments)
         else:
             return _error(identifier, -32602, "unknown tool")
+    except _ControllerContractError:
+        return _error(identifier, -32603, "controller operation failed")
     except (TypeError, ValueError) as error:
         return _error(identifier, -32602, error)
     except Exception:

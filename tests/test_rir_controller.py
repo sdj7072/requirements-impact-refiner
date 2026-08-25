@@ -393,8 +393,7 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(CONTROLLER.GRAPH.validate_receipt(receipt), ())
         self.assertFalse(CONTROLLER._is_receipt_payload(receipt))
 
-    def test_trace_rejects_nonmapping_draft_settings_with_stable_error(self):
-        self.enable_builtin_graph()
+    def test_finalize_rejects_nonmapping_draft_settings_with_stable_error(self):
         for index, malformed in enumerate((None, "not-settings")):
             with self.subTest(malformed=malformed):
                 draft = CONTROLLER.begin_refinement(
@@ -405,11 +404,11 @@ class RirControllerTest(unittest.TestCase):
                 draft.draft_path.write_bytes(CONTROLLER._canonical_bytes(stored))
 
                 with self.assertRaisesRegex(ValueError, "^draft graph settings are invalid$"):
-                    CONTROLLER.trace_impact(
-                        CONTROLLER.TraceRequest(
+                    CONTROLLER.finalize_refinement(
+                        CONTROLLER.FinalizeRequest(
                             self.root,
                             draft.draft_id,
-                            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                            self.fixture("controller-analysis-pre-decision.json"),
                         )
                     )
 

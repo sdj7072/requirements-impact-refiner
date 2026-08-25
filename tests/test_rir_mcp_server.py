@@ -60,17 +60,125 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertFalse(module._is_trace_seed({"term": "profile.displayName"}))
         self.assertTrue(module._is_trace_seed({"term": "profile.displayName", "location": None}))
 
-    def test_malformed_controller_results_fail_closed_before_field_access(self):
+    def test_malformed_controller_results_are_internal_handle_failures(self):
         module = self.load_server_module("_rir_mcp_result_guard")
-        with mock.patch.object(module.rir_controller, "scan_impact", return_value=object()):
-            with self.assertRaisesRegex(
-                ValueError, "controller scan result contract is incomplete"
-            ):
-                module._scan(
-                    {
-                        "repo_root": str(ROOT),
-                        "change_request": "Change the profile contract",
-                    }
+        analysis = json.loads(
+            (FIXTURES / "controller-analysis-pre-decision.json").read_text(encoding="utf-8")
+        )
+        cases = (
+            (
+                "rir_scan",
+                "scan_impact",
+                {"repo_root": str(ROOT), "change_request": "Change the profile contract"},
+            ),
+            (
+                "rir_begin",
+                "begin_refinement",
+                {
+                    "repo_root": str(ROOT),
+                    "request": "Change the profile contract",
+                    "repository_evidence": [],
+                    "adapter": "generic",
+                },
+            ),
+            (
+                "rir_trace_impact",
+                "trace_impact",
+                {
+                    "repo_root": str(ROOT),
+                    "draft_id": "0" * 32,
+                    "seeds": [{"term": "profile.displayName", "location": None}],
+                },
+            ),
+            (
+                "rir_finalize",
+                "finalize_refinement",
+                {
+                    "repo_root": str(ROOT),
+                    "draft_id": "0" * 32,
+                    "analysis": analysis,
+                },
+            ),
+        )
+        for identifier, (name, operation, arguments) in enumerate(cases, start=1):
+            with self.subTest(name=name):
+                with mock.patch.object(module.rir_controller, operation, return_value=object()):
+                    reply = module.handle(
+                        request(
+                            identifier,
+                            "tools/call",
+                            {"name": name, "arguments": arguments},
+                        )
+                    )
+                self.assertEqual(
+                    reply["error"],
+                    {"code": -32603, "message": "controller operation failed"},
+                )
+
+        malformed = module.handle(
+            request(
+                9,
+                "tools/call",
+                {"name": "rir_scan", "arguments": {"repo_root": str(ROOT)}},
+            )
+        )
+        self.assertEqual(malformed["error"]["code"], -32602)
+
+    def test_nested_begin_result_shapes_fail_closed_as_internal_errors(self):
+        module = self.load_server_module("_rir_mcp_nested_begin_result_guard")
+        valid_key_map = {
+            "invariants": {},
+            "impacts": {},
+            "decisions": {},
+            "criteria": {},
+        }
+        malformed_values = (
+            (
+                None,
+                {
+                    **valid_key_map,
+                    "decisions": object(),
+                },
+            ),
+            ({"impacts": [], "decisions": [], "summary": "not-a-list"}, valid_key_map),
+            (
+                {"impacts": [], "decisions": [], "summary": [{"impact_id": 7}]},
+                valid_key_map,
+            ),
+        )
+        arguments = {
+            "repo_root": str(ROOT),
+            "request": "Change the profile contract",
+            "repository_evidence": [],
+            "adapter": "generic",
+        }
+        for index, (prior_state, prior_key_map) in enumerate(malformed_values, start=1):
+            with self.subTest(index=index):
+                result = types.SimpleNamespace(
+                    draft_id="0" * 32,
+                    draft_path=ROOT / "draft.json",
+                    report_id="RPT-001",
+                    revision=1,
+                    previous_sha256="none",
+                    settings={"audience": "balanced", "delivery": "compact"},
+                    prior_state=prior_state,
+                    prior_key_map=prior_key_map,
+                    scan_id=None,
+                    graph_receipt_id=None,
+                )
+                with mock.patch.object(
+                    module.rir_controller, "begin_refinement", return_value=result
+                ):
+                    reply = module.handle(
+                        request(
+                            index,
+                            "tools/call",
+                            {"name": "rir_begin", "arguments": arguments},
+                        )
+                    )
+                self.assertEqual(
+                    reply["error"],
+                    {"code": -32603, "message": "controller operation failed"},
                 )
 
         malformed_trace = types.SimpleNamespace(
