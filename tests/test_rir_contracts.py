@@ -1,7 +1,10 @@
 import dataclasses
+import importlib
 import importlib.util
 import json
+import os
 import pickle
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -59,7 +62,13 @@ class RirContractsTest(unittest.TestCase):
             for name, module in sys.modules.items()
             if name == "rir_contracts" or name.startswith(prefix)
         }
-        controller_names = ("collision_root_controller", "collision_skill_controller")
+        controller_names = (
+            "collision_root_controller_one",
+            "collision_root_controller_two",
+            "collision_root_controller_three",
+            "collision_skill_controller_one",
+            "collision_skill_controller_two",
+        )
         try:
             for name in preserved:
                 sys.modules.pop(name, None)
@@ -83,14 +92,18 @@ class RirContractsTest(unittest.TestCase):
                     encoding="utf-8",
                 )
                 conflict = load_module("rir_contracts", conflict_path)
-                root_facade = load_module(controller_names[0], SCRIPTS / "rir_controller.py")
+                first_root = load_module(controller_names[0], SCRIPTS / "rir_controller.py")
+                second_root = load_module(controller_names[1], SCRIPTS / "rir_controller.py")
                 skill_scripts = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
-                skill_facade = load_module(controller_names[1], skill_scripts / "rir_controller.py")
+                first_skill = load_module(controller_names[3], skill_scripts / "rir_controller.py")
+                second_skill = load_module(controller_names[4], skill_scripts / "rir_controller.py")
 
                 self.assertIs(sys.modules["rir_contracts"], conflict)
+                self.assertIs(first_root.CONTRACTS, second_root.CONTRACTS)
+                self.assertIs(first_skill.CONTRACTS, second_skill.CONTRACTS)
                 for facade, expected_path in (
-                    (root_facade, SCRIPTS / "rir_contracts.py"),
-                    (skill_facade, skill_scripts / "rir_contracts.py"),
+                    (first_root, SCRIPTS / "rir_contracts.py"),
+                    (first_skill, skill_scripts / "rir_contracts.py"),
                 ):
                     with self.subTest(path=expected_path):
                         self.assertEqual(
@@ -110,14 +123,20 @@ class RirContractsTest(unittest.TestCase):
                                 getattr(facade, facade_name),
                                 getattr(facade.CONTRACTS, contract_name),
                             )
-                self.assertIsNot(root_facade.BeginRequest, conflict.BeginRequest)
-                self.assertIsNot(skill_facade.BeginRequest, conflict.BeginRequest)
-                self.assertIsNot(root_facade.BeginRequest, skill_facade.BeginRequest)
-                for facade in (root_facade, skill_facade):
+                self.assertIsNot(first_root.BeginRequest, conflict.BeginRequest)
+                self.assertIsNot(first_skill.BeginRequest, conflict.BeginRequest)
+                self.assertIsNot(first_root.BeginRequest, first_skill.BeginRequest)
+                for facade in (first_root, first_skill):
                     request = facade.BeginRequest(Path(temporary), "change", (), "generic")
                     restored = pickle.loads(pickle.dumps(request))
                     self.assertIs(type(restored), facade.BeginRequest)
                     self.assertEqual(restored, request)
+
+                later_canonical = load_module("rir_contracts", SCRIPTS / "rir_contracts.py")
+                third_root = load_module(controller_names[2], SCRIPTS / "rir_controller.py")
+                self.assertIs(sys.modules["rir_contracts"], later_canonical)
+                self.assertIs(third_root.CONTRACTS, first_root.CONTRACTS)
+                self.assertIsNot(third_root.CONTRACTS, later_canonical)
         finally:
             for name in tuple(sys.modules):
                 if name == "rir_contracts" or name.startswith(prefix):
@@ -153,6 +172,14 @@ class RirContractsTest(unittest.TestCase):
                 == (SCRIPTS / "rir_contracts.py").resolve()
             }
             self.assertEqual(registered, {id(preloaded)})
+            local_names = {
+                name
+                for name, module in sys.modules.items()
+                if (name == "rir_contracts" or name.startswith(prefix))
+                and Path(getattr(module, "__file__", "/missing")).resolve()
+                == (SCRIPTS / "rir_contracts.py").resolve()
+            }
+            self.assertEqual(local_names, {"rir_contracts"})
         finally:
             for name in tuple(sys.modules):
                 if name == "rir_contracts" or name.startswith(prefix):
@@ -193,6 +220,98 @@ class RirContractsTest(unittest.TestCase):
             sys.modules.update(preserved)
             sys.modules.pop("incomplete_contract_controller", None)
             sys.modules.pop("unsafe_contract_controller", None)
+
+    def test_controller_first_canonical_import_and_second_facade_share_one_module(self):
+        prefix = "_rir_controller_contracts_"
+        preserved = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "rir_contracts" or name.startswith(prefix)
+        }
+        controller_names = ("canonical_controller_one", "canonical_controller_two")
+        try:
+            for name in preserved:
+                sys.modules.pop(name, None)
+            first = load_module(controller_names[0], SCRIPTS / "rir_controller.py")
+            imported = importlib.import_module("rir_contracts")
+            second = load_module(controller_names[1], SCRIPTS / "rir_controller.py")
+
+            self.assertIs(first.CONTRACTS, imported)
+            self.assertIs(second.CONTRACTS, imported)
+            for name in CONTRACT_NAMES:
+                self.assertIs(getattr(first, name), getattr(imported, name))
+                self.assertIs(getattr(second, name), getattr(imported, name))
+            for facade_name, contract_name in (
+                ("canonical_bytes", "canonical_bytes"),
+                ("bounded_bytes", "bounded_bytes"),
+                ("validate_analysis", "validate_analysis"),
+                ("_canonical_bytes", "canonical_bytes"),
+                ("_bounded", "bounded_bytes"),
+                ("_validate_analysis", "validate_analysis"),
+            ):
+                self.assertIs(getattr(first, facade_name), getattr(imported, contract_name))
+                self.assertIs(getattr(second, facade_name), getattr(imported, contract_name))
+            local_names = {
+                name
+                for name, module in sys.modules.items()
+                if (name == "rir_contracts" or name.startswith(prefix))
+                and Path(getattr(module, "__file__", "/missing")).resolve()
+                == (SCRIPTS / "rir_contracts.py").resolve()
+            }
+            self.assertEqual(local_names, {"rir_contracts"})
+        finally:
+            for name in tuple(sys.modules):
+                if name == "rir_contracts" or name.startswith(prefix):
+                    sys.modules.pop(name, None)
+            sys.modules.update(preserved)
+            for name in controller_names:
+                sys.modules.pop(name, None)
+
+    def test_clean_controller_contract_pickle_roundtrip_across_interpreters(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pickle_path = Path(temporary) / "request.pickle"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(SCRIPTS)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            produced = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import pickle, sys; from pathlib import Path; "
+                        "import rir_controller; "
+                        "value = rir_controller.BeginRequest(Path.cwd(), 'change', (), 'generic'); "
+                        "assert type(value).__module__ == 'rir_contracts'; "
+                        "pickle.dump(value, open(sys.argv[1], 'wb'))"
+                    ),
+                    str(pickle_path),
+                ],
+                cwd=temporary,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(produced.returncode, 0, produced.stderr)
+
+            consumed = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import pickle, sys; import rir_controller, rir_contracts; "
+                        "value = pickle.load(open(sys.argv[1], 'rb')); "
+                        "assert type(value) is rir_contracts.BeginRequest; "
+                        "assert rir_controller.BeginRequest is rir_contracts.BeginRequest; "
+                        "assert type(value).__module__ == 'rir_contracts'"
+                    ),
+                    str(pickle_path),
+                ],
+                cwd=temporary,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(consumed.returncode, 0, consumed.stderr)
 
     def test_contract_dataclasses_keep_field_order_defaults_and_frozen_semantics(self):
         fixture = self.fixture("rir-controller-facade-v05.json")["public_dataclasses"]

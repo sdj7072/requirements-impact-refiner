@@ -18,8 +18,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
-from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict, cast
+from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict
 
 if TYPE_CHECKING:
     from graph_builtin import ScanSeed as ScanSeedType
@@ -134,6 +133,23 @@ def _module_uses_sibling(value: object, expected: Path) -> bool:
     return isinstance(module_file, str) and _regular_module_path(Path(module_file)) == expected
 
 
+def _load_registered_contracts(module_name: str, expected: Path) -> _ControllerContractsContract:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed controller contracts sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed controller contracts sibling") from error
+    if not _is_controller_contracts_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("controller contracts sibling contract is incomplete")
+    return module
+
+
 def _load_controller_contracts() -> _ControllerContractsContract:
     sibling = SCRIPT_DIR / "rir_contracts.py"
     expected = _regular_module_path(sibling)
@@ -143,34 +159,28 @@ def _load_controller_contracts() -> _ControllerContractsContract:
         "_rir_controller_contracts_"
         + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
     )
-    candidates = (sys.modules.get("rir_contracts"), sys.modules.get(module_name))
-    for candidate in candidates:
-        if _module_uses_sibling(candidate, expected) and _is_controller_contracts_contract(
-            candidate
-        ):
-            sys.modules[module_name] = cast(ModuleType, candidate)
-            return candidate
-    previous = sys.modules.get(module_name)
-    specification = importlib.util.spec_from_file_location(module_name, expected)
-    if specification is None or specification.loader is None:
-        raise ImportError("cannot load fixed controller contracts sibling")
-    module = importlib.util.module_from_spec(specification)
-    sys.modules[module_name] = module
-    try:
-        specification.loader.exec_module(module)
-    except Exception as error:
-        if previous is None:
-            sys.modules.pop(module_name, None)
-        else:
-            sys.modules[module_name] = previous
-        raise ImportError("cannot load fixed controller contracts sibling") from error
-    if not _is_controller_contracts_contract(module):
-        if previous is None:
-            sys.modules.pop(module_name, None)
-        else:
-            sys.modules[module_name] = previous
-        raise ImportError("controller contracts sibling contract is incomplete")
-    return module
+    if "rir_contracts" not in sys.modules:
+        return _load_registered_contracts("rir_contracts", expected)
+    canonical = sys.modules.get("rir_contracts")
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    if _module_uses_sibling(canonical, expected):
+        if not _is_controller_contracts_contract(canonical):
+            raise ImportError("controller contracts sibling contract is incomplete")
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("controller contracts sibling is unsafe")
+        if not _is_controller_contracts_contract(hashed):
+            raise ImportError("controller contracts sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("controller contracts sibling is unsafe")
+        if not _is_controller_contracts_contract(hashed):
+            raise ImportError("controller contracts sibling contract is incomplete")
+        return hashed
+    return _load_registered_contracts(module_name, expected)
 
 
 CONTRACTS = _load_controller_contracts()
