@@ -60,7 +60,11 @@ def main(argv=None):
                 for error in errors:
                     print(error, file=sys.stderr)
                 return 1
-            rendered = impact_renderer.render_markdown(state) if args.format == "markdown" else impact_renderer.render_compact(state)
+            rendered = (
+                impact_renderer.render_markdown(state)
+                if args.format == "markdown"
+                else impact_renderer.render_compact(state)
+            )
     except (OSError, UnicodeDecodeError) as error:
         print(f"cannot read input: {error}", file=sys.stderr)
         return 2

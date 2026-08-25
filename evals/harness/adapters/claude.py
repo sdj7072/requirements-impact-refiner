@@ -2,14 +2,14 @@
 
 import json
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Optional
 
-from .base import ClientAdapter
 from ..evidence import PotentialSecretError, record_run
 from ..models import ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
 from ..process import run_command
-
+from .base import ClientAdapter
 
 _ENVIRONMENT_LABEL = "Claude Code structural inspection"
 _COMMAND_NAMES = (
@@ -45,9 +45,9 @@ class ClaudeAdapter(ClientAdapter):
             if quarantine_root is None
             else Path(quarantine_root)
         )
-        self.structural_results: Tuple[CommandResult, ...] = ()
+        self.structural_results: tuple[CommandResult, ...] = ()
 
-    def structural_commands(self, root: Path) -> Tuple[Tuple[str, ...], ...]:
+    def structural_commands(self, root: Path) -> tuple[tuple[str, ...], ...]:
         """Return the complete, non-interactive structural command inventory."""
         Path(root)
         return (
@@ -88,7 +88,7 @@ class ClaudeAdapter(ClientAdapter):
             reason = "potential secret exposure"
         except (OSError, ValueError) as error:
             status = RunStatus.INVALID_EVIDENCE
-            reason = "evidence recording failed: %s" % error
+            reason = f"evidence recording failed: {error}"
         return RunResult(
             case_id=request.case.id,
             repetition=request.repetition,
@@ -106,7 +106,7 @@ class ClaudeAdapter(ClientAdapter):
             retry_of=request.retry_of,
         )
 
-    def _probe_with_commands(self) -> tuple[ClientProbe, Tuple[CommandResult, ...]]:
+    def _probe_with_commands(self) -> tuple[ClientProbe, tuple[CommandResult, ...]]:
         commands = self.structural_commands(self.cwd)
         results = []
         for index, command in enumerate(commands):
@@ -127,12 +127,10 @@ class ClaudeAdapter(ClientAdapter):
         enabled = self._enabled_plugins(plugin_entries)
         plugin_version = self._requirements_impact_refiner_version(plugin_entries)
         version_text = version.stdout.strip() if version is not None else None
-        available = bool(
-            version is not None and not version.timed_out and version.returncode == 0
-        )
+        available = bool(version is not None and not version.timed_out and version.returncode == 0)
         capabilities = ["structural-probes"]
         for name, result in zip(_COMMAND_NAMES, results):
-            capabilities.append(name if self._succeeded(result) else "%s-blocked" % name)
+            capabilities.append(name if self._succeeded(result) else f"{name}-blocked")
         reason = None if available else self._unavailable_reason(version)
         return (
             ClientProbe(
@@ -165,7 +163,7 @@ class ClaudeAdapter(ClientAdapter):
         return "claude --version returned nonzero exit"
 
     @staticmethod
-    def _plugin_entries(payload: str) -> Optional[Tuple[dict[str, Any], ...]]:
+    def _plugin_entries(payload: str) -> Optional[tuple[dict[str, Any], ...]]:
         try:
             decoded: Any = json.loads(payload)
         except json.JSONDecodeError:
@@ -182,7 +180,7 @@ class ClaudeAdapter(ClientAdapter):
         return tuple(entries)
 
     @staticmethod
-    def _enabled_plugins(entries: Optional[Sequence[dict[str, Any]]]) -> Tuple[str, ...]:
+    def _enabled_plugins(entries: Optional[Sequence[dict[str, Any]]]) -> tuple[str, ...]:
         if entries is None:
             return ()
         enabled = []
@@ -215,8 +213,8 @@ class ClaudeAdapter(ClientAdapter):
     def _probe_artifacts(commands: Sequence[CommandResult]) -> dict[str, str]:
         artifacts = {}
         for name, command in zip(_COMMAND_NAMES, commands):
-            artifacts["%s.stdout.txt" % name] = command.stdout
-            artifacts["%s.stderr.txt" % name] = command.stderr
+            artifacts[f"{name}.stdout.txt"] = command.stdout
+            artifacts[f"{name}.stderr.txt"] = command.stderr
         return artifacts
 
     @staticmethod

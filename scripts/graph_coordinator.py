@@ -3,19 +3,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
 
 
 def _load_sibling(filename, module_name):
@@ -54,13 +54,18 @@ _HEX64 = re.compile(r"[0-9a-f]{64}")
 # Canonical FrontierEntry has no severity field. Boundary-crossing domains at
 # the front of this table are the coordinator's deterministic high/critical tier.
 _RISK_ORDER = (
-    "authorization/privacy", "legal/policy", "data", "interfaces", "operations",
-    "state/concurrency", "regression", "compatibility", "functionality",
+    "authorization/privacy",
+    "legal/policy",
+    "data",
+    "interfaces",
+    "operations",
+    "state/concurrency",
+    "regression",
+    "compatibility",
+    "functionality",
 )
 _RISK_RANK = {name: index for index, name in enumerate(_RISK_ORDER)}
-_PROVIDER_RANK = {
-    name: index for index, name in enumerate(PROVIDERS.PROVIDER_PRIORITY)
-}
+_PROVIDER_RANK = {name: index for index, name in enumerate(PROVIDERS.PROVIDER_PRIORITY)}
 _CONTROL = (".requirements-impact-refiner", "graph")
 _CACHE_POINTER = (".requirements-impact-refiner", "cache", "graph", "v1", "current")
 
@@ -75,14 +80,10 @@ class SourceInventory:
         normalized = CACHE._source_digests(self.digests)
         if not isinstance(self.complete, bool):
             raise TypeError("source inventory completeness must be boolean")
-        if (
-            (self.complete and self.reason is not None)
-            or (
-                not self.complete
-                and self.reason
-                not in {"deadline", "collection-limit", "traversal",
-                        "unreadable-source"}
-            )
+        if (self.complete and self.reason is not None) or (
+            not self.complete
+            and self.reason
+            not in {"deadline", "collection-limit", "traversal", "unreadable-source"}
         ):
             raise ValueError("source inventory reason is invalid")
         object.__setattr__(self, "digests", MappingProxyType(normalized))
@@ -122,11 +123,17 @@ def _json_default(value):
 
 
 def _request_sha256(draft, seeds, settings) -> str:
-    payload = json.dumps({
-        "draft": draft,
-        "seeds": [{"term": item.term, "location": item.location} for item in seeds],
-        "settings": settings.to_mapping(),
-    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default)
+    payload = json.dumps(
+        {
+            "draft": draft,
+            "seeds": [{"term": item.term, "location": item.location} for item in seeds],
+            "settings": settings.to_mapping(),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=_json_default,
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -135,24 +142,24 @@ def _repo_identity(root: Path) -> str:
 
 
 def _basic_provider_inventory(probes):
-    return tuple(sorted((
-        (probe.name, probe.version, probe.executable_sha256)
-        for probe in probes
-    )))
+    return tuple(sorted((probe.name, probe.version, probe.executable_sha256) for probe in probes))
 
 
 def _trace_identity(root, draft_id, request_sha256, seeds, settings, probes):
-    payload = json.dumps({
-        "repo_root_sha256": _repo_identity(root),
-        "draft_id": draft_id,
-        "request_sha256": request_sha256,
-        "seeds": [
-            {"term": seed.term, "location": seed.location} for seed in seeds
-        ],
-        "settings": settings.to_mapping(),
-        "providers": _basic_provider_inventory(probes),
-        "builtin": ("builtin", "builtin-v1"),
-    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload = json.dumps(
+        {
+            "repo_root_sha256": _repo_identity(root),
+            "draft_id": draft_id,
+            "request_sha256": request_sha256,
+            "seeds": [{"term": seed.term, "location": seed.location} for seed in seeds],
+            "settings": settings.to_mapping(),
+            "providers": _basic_provider_inventory(probes),
+            "builtin": ("builtin", "builtin-v1"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
@@ -164,34 +171,22 @@ _SEED_RISK_PATTERNS = {
         r"auth(?:z|n|orization|oriz\w+|entic\w+)?|oauth|permissions?|"
         r"privacy|roles|access|acl|rbac"
     ),
-    "legal/policy": re.compile(
-        r"legal|licenses?|licensing|policy|policies|compliance|terms"
-    ),
-    "data": re.compile(
-        r"schemas?|database|db|cached?|caches|persist\w*|profiles?|data"
-    ),
+    "legal/policy": re.compile(r"legal|licenses?|licensing|policy|policies|compliance|terms"),
+    "data": re.compile(r"schemas?|database|db|cached?|caches|persist\w*|profiles?|data"),
     "interfaces": re.compile(r"apis?|contracts?|events?|clients?"),
-    "operations": re.compile(
-        r"deploy\w*|configs?|configuration|workers?|health|operations?"
-    ),
+    "operations": re.compile(r"deploy\w*|configs?|configuration|workers?|health|operations?"),
     "state/concurrency": re.compile(
         r"states?|stateful|concurr\w*|locks?|locking|locked|races?|"
         r"retry|retries|idempot\w*|mutex"
     ),
     "regression": re.compile(r"regressions?|tests?|testing|conftest|fixtures?"),
-    "compatibility": re.compile(
-        r"compatibility|compat|backward|legacy|migrations?"
-    ),
+    "compatibility": re.compile(r"compatibility|compat|backward|legacy|migrations?"),
 }
-_SEED_CAMEL_BOUNDARY = re.compile(
-    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
-)
+_SEED_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _risk_domains(seed: ScanSeed) -> tuple:
-    haystack = _SEED_CAMEL_BOUNDARY.sub(
-        " ", seed.term + " " + (seed.location or "")
-    ).lower()
+    haystack = _SEED_CAMEL_BOUNDARY.sub(" ", seed.term + " " + (seed.location or "")).lower()
     tokens = {token for token in re.split(r"[^a-z0-9]+", haystack) if token}
     domains = set()
     for domain, pattern in _SEED_RISK_PATTERNS.items():
@@ -206,45 +201,62 @@ def _seed_key(seed: ScanSeed):
     domains = _risk_domains(seed)
     return (
         min((_RISK_RANK.get(domain, 99) for domain in domains), default=99),
-        seed.location or "", seed.term,
+        seed.location or "",
+        seed.term,
     )
 
 
 def _provider_status(probe: ProviderProbe):
     return GRAPH.ProviderStatus(
-        probe.name, probe.status, probe.confidence, probe.version,
+        probe.name,
+        probe.status,
+        probe.confidence,
+        probe.version,
         probe.executable_sha256,
     )
 
 
 def _builtin_status():
     return GRAPH.ProviderStatus(
-        "builtin", "ready", "structural-inferred", "builtin-v1", None,
+        "builtin",
+        "ready",
+        "structural-inferred",
+        "builtin-v1",
+        None,
     )
 
 
 def _placeholder(seed: ScanSeed, index: int):
     return GRAPH.GraphNode(
-        "NODE-%03d" % index, "symbol", seed.term[:GRAPH.MAX_STRING_LENGTH],
-        seed.location, "builtin", "lexical", None, _risk_domains(seed),
+        "NODE-%03d" % index,
+        "symbol",
+        seed.term[: GRAPH.MAX_STRING_LENGTH],
+        seed.location,
+        "builtin",
+        "lexical",
+        None,
+        _risk_domains(seed),
     )
 
 
 def _frontier(identifier, node, reason, domains):
-    return GRAPH.FrontierEntry(identifier, node, reason[:GRAPH.MAX_STRING_LENGTH], domains)
+    return GRAPH.FrontierEntry(identifier, node, reason[: GRAPH.MAX_STRING_LENGTH], domains)
 
 
 def _frontier_sort(item):
     return (
         min((_RISK_RANK.get(domain, 99) for domain in item.risk_domains), default=99),
-        item.node, item.reason, item.id,
+        item.node,
+        item.reason,
+        item.id,
     )
 
 
 def _path_sort(item):
     return (
         min((_RISK_RANK.get(domain, 99) for domain in item.risk_domains), default=99),
-        item.distance, item.id,
+        item.distance,
+        item.id,
     )
 
 
@@ -252,7 +264,7 @@ def _adapter(name):
     configured = ADAPTERS.get(name)
     if configured is not None:
         return configured
-    filename = "graph_adapter_%s.py" % name.replace("-", "_")
+    filename = "graph_adapter_{}.py".format(name.replace("-", "_"))
     path = Path(__file__).with_name(filename)
     if not path.is_file():
         return None
@@ -282,25 +294,52 @@ def _current_cache_key(root: Path):
 
 def _receipt_from_mapping(value):
     """Construct public canonical types only after GraphCache validated the mapping."""
-    settings = GraphSettings(**{
-        **value["settings"], "providers": tuple(value["settings"]["providers"]),
-    })
+    settings = GraphSettings(
+        **{
+            **value["settings"],
+            "providers": tuple(value["settings"]["providers"]),
+        }
+    )
     return GRAPH.GraphReceipt(
-        value["receipt_id"], value["draft_id"], value["repo_root_sha256"],
-        value["request_sha256"], settings,
+        value["receipt_id"],
+        value["draft_id"],
+        value["repo_root_sha256"],
+        value["request_sha256"],
+        settings,
         tuple(GRAPH.ProviderStatus(**row) for row in value["providers"]),
-        tuple(GRAPH.GraphNode(**{
-            **row, "risk_domains": tuple(row["risk_domains"]),
-        }) for row in value["nodes"]),
+        tuple(
+            GRAPH.GraphNode(
+                **{
+                    **row,
+                    "risk_domains": tuple(row["risk_domains"]),
+                }
+            )
+            for row in value["nodes"]
+        ),
         tuple(GRAPH.GraphEdge(**row) for row in value["edges"]),
-        tuple(GRAPH.GraphPath(**{
-            **row, "nodes": tuple(row["nodes"]), "edges": tuple(row["edges"]),
-            "risk_domains": tuple(row["risk_domains"]),
-        }) for row in value["paths"]),
-        tuple(GRAPH.FrontierEntry(**{
-            **row, "risk_domains": tuple(row["risk_domains"]),
-        }) for row in value["frontier"]),
-        value["timings_ms"], value["budget_status"], value["cache"],
+        tuple(
+            GRAPH.GraphPath(
+                **{
+                    **row,
+                    "nodes": tuple(row["nodes"]),
+                    "edges": tuple(row["edges"]),
+                    "risk_domains": tuple(row["risk_domains"]),
+                }
+            )
+            for row in value["paths"]
+        ),
+        tuple(
+            GRAPH.FrontierEntry(
+                **{
+                    **row,
+                    "risk_domains": tuple(row["risk_domains"]),
+                }
+            )
+            for row in value["frontier"]
+        ),
+        value["timings_ms"],
+        value["budget_status"],
+        value["cache"],
     )
 
 
@@ -310,15 +349,18 @@ def _provider_inventory_matches(receipt, probes) -> bool:
         for item in receipt.get("providers", ())
         if item.get("name") != "builtin"
     }
-    current = {
-        item.name: (item.version, item.executable_sha256)
-        for item in probes
-    }
+    current = {item.name: (item.version, item.executable_sha256) for item in probes}
     return cached == current
 
 
 def _cached_trace_matches(
-    receipt, trace_identity, draft_id, root, request_sha256, settings, probes,
+    receipt,
+    trace_identity,
+    draft_id,
+    root,
+    request_sha256,
+    settings,
+    probes,
 ):
     return (
         receipt.get("receipt_id") == trace_identity
@@ -331,14 +373,26 @@ def _cached_trace_matches(
 
 
 def _load_cache(
-    root, source_digests, probes, trace_identity, draft_id, request_sha256, settings,
+    root,
+    source_digests,
+    probes,
+    trace_identity,
+    draft_id,
+    request_sha256,
+    settings,
 ):
     key = _current_cache_key(root)
     if key is None:
         return CACHE.CacheResult("miss", "0" * 64, None, ())
     result = CACHE.load(root, key, source_digests)
     if result.receipt is not None and not _cached_trace_matches(
-        result.receipt, trace_identity, draft_id, root, request_sha256, settings, probes,
+        result.receipt,
+        trace_identity,
+        draft_id,
+        root,
+        request_sha256,
+        settings,
+        probes,
     ):
         return CACHE.CacheResult("miss", "0" * 64, None, ())
     return result
@@ -353,14 +407,20 @@ def _collect_source_digests(root: Path, deadline: Deadline):
     total_bytes = 0
     if deadline.expired():
         return SourceInventory({}, False, "deadline")
-    for path, relative in BUILTIN._walk_files(
-        root, deadline.expired, skipped, traversal_errors,
+    for _path, relative in BUILTIN._walk_files(
+        root,
+        deadline.expired,
+        skipped,
+        traversal_errors,
     ):
         if deadline.expired():
             return SourceInventory(digests, False, "deadline")
         remaining = 8_000_000 - total_bytes
         payload, reason = BUILTIN._read_regular_file(
-            root, relative, BUILTIN.DEFAULT_MAX_FILE_BYTES, remaining,
+            root,
+            relative,
+            BUILTIN.DEFAULT_MAX_FILE_BYTES,
+            remaining,
             read_allowed=files < 500,
         )
         if reason is not None or payload is None:
@@ -391,7 +451,13 @@ def _normalize_candidate_node(row, result):
     if not isinstance(row, Mapping):
         raise ValueError("provider node must be an object")
     required = {
-        "key", "kind", "label", "location", "confidence", "source_sha256", "risk_domains",
+        "key",
+        "kind",
+        "label",
+        "location",
+        "confidence",
+        "source_sha256",
+        "risk_domains",
     }
     if set(row) != required:
         raise ValueError("provider node shape is unsupported")
@@ -425,7 +491,13 @@ def _normalize_candidate_edge(row, result):
     if not isinstance(row, Mapping):
         raise ValueError("provider edge must be an object")
     required = {
-        "source", "target", "kind", "location", "evidence", "confidence", "source_sha256",
+        "source",
+        "target",
+        "kind",
+        "location",
+        "evidence",
+        "confidence",
+        "source_sha256",
     }
     if set(row) != required:
         raise ValueError("provider edge shape is unsupported")
@@ -448,8 +520,13 @@ def _normalize_candidate_edge(row, result):
     if not evidence:
         raise ValueError("provider edge evidence is required")
     return (
-        row["source"], row["target"], row["kind"], location, evidence,
-        confidence, source_digest,
+        row["source"],
+        row["target"],
+        row["kind"],
+        location,
+        evidence,
+        confidence,
+        source_digest,
     )
 
 
@@ -478,7 +555,11 @@ def _validate_provider_result(result) -> None:
             raise ValueError("provider frontier must be an object")
         if set(row) != {"node", "reason", "risk_domains"}:
             raise ValueError("provider frontier shape is unsupported")
-        if row["node"] not in keys or not isinstance(row["reason"], str) or not row["reason"].strip():
+        if (
+            row["node"] not in keys
+            or not isinstance(row["reason"], str)
+            or not row["reason"].strip()
+        ):
             raise ValueError("provider frontier is invalid")
         if any(domain not in GRAPH.RISK_DOMAINS for domain in row["risk_domains"]):
             raise ValueError("provider frontier risk domain is invalid")
@@ -489,9 +570,7 @@ def _merge_provider_results(base, results):
     edges = list(base.edges)
     paths = list(base.paths)
     frontier = list(base.frontier)
-    identity = {
-        (node.kind, node.label, node.location): node.id for node in nodes
-    }
+    identity = {(node.kind, node.label, node.location): node.id for node in nodes}
     edge_pairs = {}
     for edge in edges:
         edge_pairs.setdefault((edge.source, edge.target), set()).add(edge.kind)
@@ -500,7 +579,10 @@ def _merge_provider_results(base, results):
     for result in results:
         if result.status != "ready":
             continue
-        if any(not isinstance(value, str) or not _HEX64.fullmatch(value) for value in result.raw_receipt_sha256):
+        if any(
+            not isinstance(value, str) or not _HEX64.fullmatch(value)
+            for value in result.raw_receipt_sha256
+        ):
             continue
         local = {}
         try:
@@ -513,10 +595,18 @@ def _merge_provider_results(base, results):
                         compacted = True
                         continue
                     node_id = "NODE-%03d" % (len(nodes) + 1)
-                    nodes.append(GRAPH.GraphNode(
-                        node_id, kind, label, location, result.provider,
-                        confidence, source, domains,
-                    ))
+                    nodes.append(
+                        GRAPH.GraphNode(
+                            node_id,
+                            kind,
+                            label,
+                            location,
+                            result.provider,
+                            confidence,
+                            source,
+                            domains,
+                        )
+                    )
                     identity[(kind, label, location)] = node_id
                 local[key] = node_id
             for row in result.edges:
@@ -531,15 +621,27 @@ def _merge_provider_results(base, results):
                 if prior and kind not in prior:
                     disagreements.append((target, tuple(sorted(prior | {kind}))))
                 signature = (source, target, kind, result.provider)
-                if any((edge.source, edge.target, edge.kind, edge.provider) == signature for edge in edges):
+                if any(
+                    (edge.source, edge.target, edge.kind, edge.provider) == signature
+                    for edge in edges
+                ):
                     continue
                 if len(edges) >= min(GRAPH.MAX_EDGES, 999):
                     compacted = True
                     continue
-                edges.append(GRAPH.GraphEdge(
-                    "EDGE-%03d" % (len(edges) + 1), source, target, kind,
-                    location, evidence, confidence, result.provider, digest,
-                ))
+                edges.append(
+                    GRAPH.GraphEdge(
+                        "EDGE-%03d" % (len(edges) + 1),
+                        source,
+                        target,
+                        kind,
+                        location,
+                        evidence,
+                        confidence,
+                        result.provider,
+                        digest,
+                    )
+                )
                 prior.add(kind)
         except (TypeError, ValueError):
             compacted = True
@@ -551,32 +653,40 @@ def _merge_provider_results(base, results):
             node = local.get(row.get("node"))
             reason = row.get("reason")
             domains = tuple(row.get("risk_domains", ()))
-            if node and isinstance(reason, str) and all(item in GRAPH.RISK_DOMAINS for item in domains):
+            if (
+                node
+                and isinstance(reason, str)
+                and all(item in GRAPH.RISK_DOMAINS for item in domains)
+            ):
                 frontier.append(_frontier("FRONTIER-000", node, reason, domains))
     for node, kinds in disagreements:
         domains = next(item.risk_domains for item in nodes if item.id == node)
-        frontier.append(_frontier(
-            "FRONTIER-000", node,
-            "provider disagreement: " + " versus ".join(kinds), domains,
-        ))
+        frontier.append(
+            _frontier(
+                "FRONTIER-000",
+                node,
+                "provider disagreement: " + " versus ".join(kinds),
+                domains,
+            )
+        )
     if compacted and nodes:
-        frontier.append(_frontier(
-            "FRONTIER-000", nodes[-1].id,
-            "provider output compacted at the graph receipt limit",
-            nodes[-1].risk_domains,
-        ))
+        frontier.append(
+            _frontier(
+                "FRONTIER-000",
+                nodes[-1].id,
+                "provider output compacted at the graph receipt limit",
+                nodes[-1].risk_domains,
+            )
+        )
     covered_edges = {edge_id for path in paths for edge_id in path.edges}
     node_risks = {node.id: node.risk_domains for node in nodes}
     provider_edges = sorted(
-        (
-            edge for edge in edges
-            if edge.provider != "builtin" and edge.id not in covered_edges
-        ),
+        (edge for edge in edges if edge.provider != "builtin" and edge.id not in covered_edges),
         key=lambda edge: (
-            min((
-                _RISK_RANK.get(domain, 99)
-                for domain in node_risks.get(edge.target, ())
-            ), default=99),
+            min(
+                (_RISK_RANK.get(domain, 99) for domain in node_risks.get(edge.target, ())),
+                default=99,
+            ),
             edge.id,
         ),
     )
@@ -587,10 +697,15 @@ def _merge_provider_results(base, results):
         domains = set(node_risks.get(edge.source, ()))
         domains.update(node_risks.get(edge.target, ()))
         ordered = tuple(sorted(domains, key=lambda item: (_RISK_RANK.get(item, 99), item)))
-        paths.append(GRAPH.GraphPath(
-            "PATH-%03d" % (len(paths) + 1), (edge.source, edge.target),
-            (edge.id,), 1, ordered,
-        ))
+        paths.append(
+            GRAPH.GraphPath(
+                "PATH-%03d" % (len(paths) + 1),
+                (edge.source, edge.target),
+                (edge.id,),
+                1,
+                ordered,
+            )
+        )
     adjacency = {}
     provider_sources = set()
     provider_targets = set()
@@ -603,10 +718,7 @@ def _merge_provider_results(base, results):
     roots = sorted(
         provider_sources - provider_targets or provider_sources,
         key=lambda node_id: (
-            min((
-                _RISK_RANK.get(domain, 99)
-                for domain in node_risks.get(node_id, ())
-            ), default=99),
+            min((_RISK_RANK.get(domain, 99) for domain in node_risks.get(node_id, ())), default=99),
             node_id,
         ),
     )
@@ -620,25 +732,34 @@ def _merge_provider_results(base, results):
             compacted = True
             break
         if len(path_edges) >= 2 and path_edges not in known_paths:
-            domains = {
-                domain for node_id in path_nodes
-                for domain in node_risks.get(node_id, ())
-            }
-            ordered = tuple(sorted(
-                domains, key=lambda item: (_RISK_RANK.get(item, 99), item),
-            ))
-            paths.append(GRAPH.GraphPath(
-                "PATH-%03d" % (len(paths) + 1), path_nodes, path_edges,
-                len(path_edges), ordered,
-            ))
+            domains = {domain for node_id in path_nodes for domain in node_risks.get(node_id, ())}
+            ordered = tuple(
+                sorted(
+                    domains,
+                    key=lambda item: (_RISK_RANK.get(item, 99), item),
+                )
+            )
+            paths.append(
+                GRAPH.GraphPath(
+                    "PATH-%03d" % (len(paths) + 1),
+                    path_nodes,
+                    path_edges,
+                    len(path_edges),
+                    ordered,
+                )
+            )
             known_paths.add(path_edges)
         if len(path_edges) >= 6:
             continue
         for target, edge_id in reversed(adjacency.get(current, ())):
             if target not in path_nodes:
-                pending.append((
-                    target, path_nodes + (target,), path_edges + (edge_id,),
-                ))
+                pending.append(
+                    (
+                        target,
+                        (*path_nodes, target),
+                        (*path_edges, edge_id),
+                    )
+                )
     if pending and len(paths) >= min(GRAPH.MAX_PATHS, 999):
         compacted = True
     return nodes, edges, paths, frontier, compacted or bool(disagreements)
@@ -655,20 +776,47 @@ def _renumber_frontier(frontier):
         unique.append(item)
         if len(unique) >= min(GRAPH.MAX_FRONTIER, 999):
             break
-    return tuple(GRAPH.FrontierEntry(
-        "FRONTIER-%03d" % index, item.node, item.reason, item.risk_domains,
-    ) for index, item in enumerate(unique, start=1))
+    return tuple(
+        GRAPH.FrontierEntry(
+            "FRONTIER-%03d" % index,
+            item.node,
+            item.reason,
+            item.risk_domains,
+        )
+        for index, item in enumerate(unique, start=1)
+    )
 
 
 def _receipt(
-    *, receipt_id, draft_id, root, request_sha256, settings, providers, nodes, edges, paths,
-    frontier, timings, status, cache,
+    *,
+    receipt_id,
+    draft_id,
+    root,
+    request_sha256,
+    settings,
+    providers,
+    nodes,
+    edges,
+    paths,
+    frontier,
+    timings,
+    status,
+    cache,
 ):
     value = GRAPH.GraphReceipt(
-        receipt_id, draft_id, _repo_identity(root), request_sha256, settings,
-        tuple(providers), tuple(nodes), tuple(edges),
-        tuple(sorted(paths, key=_path_sort)), _renumber_frontier(frontier),
-        timings, status, cache,
+        receipt_id,
+        draft_id,
+        _repo_identity(root),
+        request_sha256,
+        settings,
+        tuple(providers),
+        tuple(nodes),
+        tuple(edges),
+        tuple(sorted(paths, key=_path_sort)),
+        _renumber_frontier(frontier),
+        timings,
+        status,
+        cache,
     )
     GRAPH.canonical_receipt_bytes(value)
     return value
@@ -697,7 +845,9 @@ def _persist_receipt(root: Path, receipt) -> Path:
         raise ValueError("graph receipt path must be a regular file")
     payload = GRAPH.canonical_receipt_bytes(receipt)
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".%s." % receipt.draft_id, suffix=".tmp", dir=str(directory),
+        prefix=f".{receipt.draft_id}.",
+        suffix=".tmp",
+        dir=str(directory),
     )
     temporary = Path(temporary_name)
     try:
@@ -779,19 +929,31 @@ def _unavailable_frontier(nodes, probes, provider_results):
     unavailable.extend(result.provider for result in provider_results if result.status != "ready")
     if not unavailable:
         return []
-    node = min(nodes, key=lambda item: (
-        min((_RISK_RANK.get(domain, 99) for domain in item.risk_domains), default=99),
-        item.id,
-    ))
-    return [_frontier(
-        "FRONTIER-000", node.id,
-        "provider unavailable; built-in fallback used: " + ", ".join(sorted(set(unavailable))),
-        node.risk_domains,
-    )]
+    node = min(
+        nodes,
+        key=lambda item: (
+            min((_RISK_RANK.get(domain, 99) for domain in item.risk_domains), default=99),
+            item.id,
+        ),
+    )
+    return [
+        _frontier(
+            "FRONTIER-000",
+            node.id,
+            "provider unavailable; built-in fallback used: " + ", ".join(sorted(set(unavailable))),
+            node.risk_domains,
+        )
+    ]
 
 
 def trace_impact(
-    repo_root, draft, seeds, settings, clock=time, runner=None, deadline=None,
+    repo_root,
+    draft,
+    seeds,
+    settings,
+    clock=time,
+    runner=None,
+    deadline=None,
     source_inventory=None,
 ):
     """Return and privately persist one bounded canonical graph receipt."""
@@ -816,25 +978,53 @@ def trace_impact(
     root = root_input.resolve() if workspace else root_input.absolute()
     if not workspace:
         trace_identity = _trace_identity(
-            root, draft_id, request_sha256, normalized_seeds, settings, (),
+            root,
+            draft_id,
+            request_sha256,
+            normalized_seeds,
+            settings,
+            (),
         )
         nodes = [_placeholder(seed, index) for index, seed in enumerate(normalized_seeds, start=1)]
         if not nodes:
-            nodes = [GRAPH.GraphNode(
-                "NODE-001", "file", "workspace unavailable", None, "builtin",
-                "lexical", None, ("functionality",),
-            )]
-        frontier = [_frontier(
-            "FRONTIER-001", node.id,
-            "supplied-only evidence; workspace unavailable", node.risk_domains,
-        ) for node in nodes[:GRAPH.MAX_FRONTIER]]
+            nodes = [
+                GRAPH.GraphNode(
+                    "NODE-001",
+                    "file",
+                    "workspace unavailable",
+                    None,
+                    "builtin",
+                    "lexical",
+                    None,
+                    ("functionality",),
+                )
+            ]
+        frontier = [
+            _frontier(
+                "FRONTIER-001",
+                node.id,
+                "supplied-only evidence; workspace unavailable",
+                node.risk_domains,
+            )
+            for node in nodes[: GRAPH.MAX_FRONTIER]
+        ]
         return _receipt(
-            receipt_id=trace_identity, draft_id=draft_id, root=root,
+            receipt_id=trace_identity,
+            draft_id=draft_id,
+            root=root,
             request_sha256=request_sha256,
-            settings=settings, providers=(_builtin_status(),), nodes=nodes, edges=(),
-            paths=(), frontier=frontier, timings={"total": deadline.elapsed_ms()},
-            status="no_workspace", cache={
-                "status": "miss", "key": "0" * 64, "invalidated_nodes": [],
+            settings=settings,
+            providers=(_builtin_status(),),
+            nodes=nodes,
+            edges=(),
+            paths=(),
+            frontier=frontier,
+            timings={"total": deadline.elapsed_ms()},
+            status="no_workspace",
+            cache={
+                "status": "miss",
+                "key": "0" * 64,
+                "invalidated_nodes": [],
             },
         )
 
@@ -842,19 +1032,39 @@ def trace_impact(
     probes = ()
     if settings.enabled and requested and not deadline.expired():
         probes = discover_providers(
-            root, requested, deadline, runner=runner, deep=settings.deep,
+            root,
+            requested,
+            deadline,
+            runner=runner,
+            deep=settings.deep,
         )
-        probes = tuple(sorted(probes, key=lambda item: (
-            _PROVIDER_RANK.get(item.name, 99), item.name,
-        )))
+        probes = tuple(
+            sorted(
+                probes,
+                key=lambda item: (
+                    _PROVIDER_RANK.get(item.name, 99),
+                    item.name,
+                ),
+            )
+        )
 
     trace_identity = _trace_identity(
-        root, draft_id, request_sha256, normalized_seeds, settings, probes,
+        root,
+        draft_id,
+        request_sha256,
+        normalized_seeds,
+        settings,
+        probes,
     )
     cache_result = (
         _load_cache(
-            root, source_inventory.digests, probes, trace_identity, draft_id,
-            request_sha256, settings,
+            root,
+            source_inventory.digests,
+            probes,
+            trace_identity,
+            draft_id,
+            request_sha256,
+            settings,
         )
         if source_inventory.complete and not deadline.expired()
         else CACHE.CacheResult("miss", "0" * 64, None, ())
@@ -865,7 +1075,8 @@ def trace_impact(
             cached,
             timings_ms={**dict(cached.timings_ms), "total": deadline.elapsed_ms()},
             cache={
-                "status": "hit", "key": cache_result.key,
+                "status": "hit",
+                "key": cache_result.key,
                 "invalidated_nodes": [],
             },
         )
@@ -878,34 +1089,50 @@ def trace_impact(
     prepared_adapters = {}
     for probe in probes:
         if deadline.expired():
-            prepared_probes.append(replace(
-                probe, status="timed_out", confidence="lexical",
-                detail="shared deadline exhausted before provider probe",
-            ))
+            prepared_probes.append(
+                replace(
+                    probe,
+                    status="timed_out",
+                    confidence="lexical",
+                    detail="shared deadline exhausted before provider probe",
+                )
+            )
             continue
         if probe.status != "ready":
             prepared_probes.append(probe)
             continue
         adapter = _adapter(probe.name)
         if adapter is None:
-            prepared_probes.append(replace(
-                probe, status="unsupported", confidence="lexical",
-                detail="provider adapter is unavailable",
-            ))
+            prepared_probes.append(
+                replace(
+                    probe,
+                    status="unsupported",
+                    confidence="lexical",
+                    detail="provider adapter is unavailable",
+                )
+            )
             continue
         try:
             specific = adapter.probe(
-                ProviderSpec(probe.name, probe.executable), root, deadline, runner,
+                ProviderSpec(probe.name, probe.executable),
+                root,
+                deadline,
+                runner,
             )
             if not isinstance(specific, ProviderProbe) or specific.name != probe.name:
                 raise ValueError("provider adapter returned an invalid probe")
             specific = replace(
-                specific, executable=probe.executable, version=probe.version,
-                executable_sha256=probe.executable_sha256, repo_root=root,
+                specific,
+                executable=probe.executable,
+                version=probe.version,
+                executable_sha256=probe.executable_sha256,
+                repo_root=root,
             )
         except Exception as error:
             specific = replace(
-                probe, status="failed", confidence="lexical",
+                probe,
+                status="failed",
+                confidence="lexical",
                 detail=str(error)[:512],
             )
         prepared_probes.append(specific)
@@ -919,7 +1146,8 @@ def trace_impact(
             for remaining in range(index, len(final_probes)):
                 if final_probes[remaining].status == "ready":
                     final_probes[remaining] = replace(
-                        final_probes[remaining], status="timed_out",
+                        final_probes[remaining],
+                        status="timed_out",
                         confidence="lexical",
                         detail="shared deadline exhausted before provider query",
                     )
@@ -934,12 +1162,17 @@ def trace_impact(
             _validate_provider_result(result)
         except Exception as error:
             result = ProviderResult(
-                probe.name, "failed", "lexical", detail=str(error)[:512],
+                probe.name,
+                "failed",
+                "lexical",
+                detail=str(error)[:512],
             )
         provider_results.append(result)
         if result.status != "ready":
             final_probes[index] = replace(
-                probe, status=result.status, confidence=result.confidence,
+                probe,
+                status=result.status,
+                confidence=result.confidence,
                 detail=result.detail,
             )
 
@@ -948,7 +1181,10 @@ def trace_impact(
     else:
         remaining = min(settings.max_seconds, max(0, int(deadline.remaining())))
         scan = BUILTIN.scan_repository(
-            root, normalized_seeds, ScanLimits(max_seconds=remaining), clock,
+            root,
+            normalized_seeds,
+            ScanLimits(max_seconds=remaining),
+            clock,
         )
     nodes, edges, paths, frontier, limited = _merge_provider_results(scan, provider_results)
     frontier.extend(_unavailable_frontier(nodes, final_probes, provider_results))
@@ -957,31 +1193,39 @@ def trace_impact(
         # visible even when provider-unavailable entries already exist,
         # because promotion treats a frontier made solely of those
         # disclosures as complete built-in coverage.
-        frontier.append(_frontier(
-            "FRONTIER-000", nodes[0].id,
-            "graph coverage remains incomplete: provider results were "
-            "compacted or disagreed",
-            nodes[0].risk_domains,
-        ))
+        frontier.append(
+            _frontier(
+                "FRONTIER-000",
+                nodes[0].id,
+                "graph coverage remains incomplete: provider results were compacted or disagreed",
+                nodes[0].risk_domains,
+            )
+        )
     if not source_inventory.complete:
         if not nodes and normalized_seeds:
             nodes = [_placeholder(normalized_seeds[0], 1)]
         if nodes:
-            frontier.append(_frontier(
-                "FRONTIER-000", nodes[0].id,
-                "source inventory incomplete: " + str(source_inventory.reason),
-                nodes[0].risk_domains,
-            ))
+            frontier.append(
+                _frontier(
+                    "FRONTIER-000",
+                    nodes[0].id,
+                    "source inventory incomplete: " + str(source_inventory.reason),
+                    nodes[0].risk_domains,
+                )
+            )
     supplied_only_ids = {
         node.id for node in nodes if node.location is None and node.provider == "builtin"
     }
     for node_id in sorted(supplied_only_ids):
         node = next(item for item in nodes if item.id == node_id)
-        frontier.append(_frontier(
-            "FRONTIER-000", node.id,
-            "supplied-only evidence requires repository verification",
-            node.risk_domains,
-        ))
+        frontier.append(
+            _frontier(
+                "FRONTIER-000",
+                node.id,
+                "supplied-only evidence requires repository verification",
+                node.risk_domains,
+            )
+        )
     if (
         deadline.expired()
         or scan.budget_status == "budget_exhausted"
@@ -991,33 +1235,44 @@ def trace_impact(
         if not nodes and normalized_seeds:
             nodes = [_placeholder(normalized_seeds[0], 1)]
         if nodes and not frontier:
-            ranked = min(nodes, key=lambda item: (
-                min((_RISK_RANK.get(domain, 99) for domain in item.risk_domains), default=99),
-                item.id,
-            ))
-            frontier.append(_frontier(
-                "FRONTIER-000", ranked.id, "shared graph deadline exhausted",
-                ranked.risk_domains,
-            ))
+            ranked = min(
+                nodes,
+                key=lambda item: (
+                    min((_RISK_RANK.get(domain, 99) for domain in item.risk_domains), default=99),
+                    item.id,
+                ),
+            )
+            frontier.append(
+                _frontier(
+                    "FRONTIER-000",
+                    ranked.id,
+                    "shared graph deadline exhausted",
+                    ranked.risk_domains,
+                )
+            )
     elif (
         scan.budget_status == "provider_limited"
         or not source_inventory.complete
-        or frontier or limited
+        or frontier
+        or limited
     ):
         status = "provider_limited"
     else:
         status = "closed"
     if status != "closed" and not frontier and nodes:
-        frontier.append(_frontier(
-            "FRONTIER-000", nodes[0].id, "graph coverage remains incomplete",
-            nodes[0].risk_domains,
-        ))
+        frontier.append(
+            _frontier(
+                "FRONTIER-000",
+                nodes[0].id,
+                "graph coverage remains incomplete",
+                nodes[0].risk_domains,
+            )
+        )
 
     providers = [_provider_status(item) for item in final_probes]
     providers.append(_builtin_status())
     invalidated = tuple(
-        item for item in cache_result.invalidated_nodes
-        if any(node.id == item for node in nodes)
+        item for item in cache_result.invalidated_nodes if any(node.id == item for node in nodes)
     )
     interim_cache = {
         "status": cache_result.status,
@@ -1025,23 +1280,36 @@ def trace_impact(
         "invalidated_nodes": list(invalidated),
     }
     receipt = _receipt(
-        receipt_id=trace_identity, draft_id=draft_id, root=root,
+        receipt_id=trace_identity,
+        draft_id=draft_id,
+        root=root,
         request_sha256=request_sha256,
-        settings=settings, providers=providers, nodes=nodes, edges=edges, paths=paths,
-        frontier=frontier, timings={"total": deadline.elapsed_ms()}, status=status,
+        settings=settings,
+        providers=providers,
+        nodes=nodes,
+        edges=edges,
+        paths=paths,
+        frontier=frontier,
+        timings={"total": deadline.elapsed_ms()},
+        status=status,
         cache=interim_cache,
     )
     try:
         published = CACHE.publish(
-            root, receipt, source_inventory.digests,
+            root,
+            receipt,
+            source_inventory.digests,
             inventory_complete=source_inventory.complete,
             inventory_reason=source_inventory.reason,
         )
-        receipt = replace(receipt, cache={
-            "status": cache_result.status,
-            "key": published.key,
-            "invalidated_nodes": list(invalidated),
-        })
+        receipt = replace(
+            receipt,
+            cache={
+                "status": cache_result.status,
+                "key": published.key,
+                "invalidated_nodes": list(invalidated),
+            },
+        )
         GRAPH.canonical_receipt_bytes(receipt)
     except ValueError:
         pass
@@ -1050,7 +1318,17 @@ def trace_impact(
 
 
 __all__ = [
-    "Deadline", "GraphSettings", "ProviderProbe", "ProviderQuery", "ProviderResult",
-    "ProviderSpec", "ScanLimits", "ScanSeed", "SourceInventory", "discover_providers", "receipt_sha256",
-    "run_provider", "trace_impact",
+    "Deadline",
+    "GraphSettings",
+    "ProviderProbe",
+    "ProviderQuery",
+    "ProviderResult",
+    "ProviderSpec",
+    "ScanLimits",
+    "ScanSeed",
+    "SourceInventory",
+    "discover_providers",
+    "receipt_sha256",
+    "run_provider",
+    "trace_impact",
 ]

@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_SCRIPTS = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -39,9 +38,7 @@ class ImpactRendererTest(unittest.TestCase):
 
     def controller_graph_state(self, audience="technical", count=2):
         analysis = json.loads(
-            (FIXTURES / "controller-analysis-pre-decision.json").read_text(
-                encoding="utf-8"
-            )
+            (FIXTURES / "controller-analysis-pre-decision.json").read_text(encoding="utf-8")
         )
         providers = ("codegraph", "scip")
         nodes, edges, paths = [], [], []
@@ -54,28 +51,71 @@ class ImpactRendererTest(unittest.TestCase):
                 f"EDGE-{index + 1:03d}",
             )
             label = f"<api-{index} data-x='1' || `wire|field`> " + "very-long-label " * 40
-            nodes.extend((
-                {"id": start, "label": label, "provider": provider, "confidence": "verified-provider", "location": f"api/profile_{index}.py"},
-                {"id": end, "label": f"desktop cache {index}", "provider": provider, "confidence": "verified-provider", "location": f"desktop/cache_{index}.ts"},
-            ))
-            edges.append({"id": edge, "provider": provider, "confidence": "verified-provider", "location": f"desktop/cache_{index}.ts"})
+            nodes.extend(
+                (
+                    {
+                        "id": start,
+                        "label": label,
+                        "provider": provider,
+                        "confidence": "verified-provider",
+                        "location": f"api/profile_{index}.py",
+                    },
+                    {
+                        "id": end,
+                        "label": f"desktop cache {index}",
+                        "provider": provider,
+                        "confidence": "verified-provider",
+                        "location": f"desktop/cache_{index}.ts",
+                    },
+                )
+            )
+            edges.append(
+                {
+                    "id": edge,
+                    "provider": provider,
+                    "confidence": "verified-provider",
+                    "location": f"desktop/cache_{index}.ts",
+                }
+            )
             paths.append({"id": path_id, "nodes": [start, end], "edges": [edge]})
         key = analysis["impacts"][0]["key"]
         analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in paths]
         settings = {
-            "audience": audience, "audience_source": "request",
-            "delivery": "compact", "delivery_source": "default",
-            "impact_graph": {"enabled": True, "max_seconds": 30, "target_seconds": 10, "providers": ["auto"], "install_policy": "never", "deep": False},
+            "audience": audience,
+            "audience_source": "request",
+            "delivery": "compact",
+            "delivery_source": "default",
+            "impact_graph": {
+                "enabled": True,
+                "max_seconds": 30,
+                "target_seconds": 10,
+                "providers": ["auto"],
+                "install_policy": "never",
+                "deep": False,
+            },
         }
         state, _ = CONTROLLER._build_state(
-            {"request": "Change profile", "settings": settings, "adapter": "generic", "prior_state": None, "prior_key_map": {}, "report_id": "RPT-001", "revision": 1, "previous_sha256": "none"},
+            {
+                "request": "Change profile",
+                "settings": settings,
+                "adapter": "generic",
+                "prior_state": None,
+                "prior_key_map": {},
+                "report_id": "RPT-001",
+                "revision": 1,
+                "previous_sha256": "none",
+            },
             analysis,
             {
                 "receipt": {
-                    "nodes": nodes, "edges": edges, "paths": paths,
+                    "nodes": nodes,
+                    "edges": edges,
+                    "paths": paths,
                     "providers": [{"name": name, "status": "ready"} for name in providers],
-                    "timings_ms": {"total": 8400}, "frontier": [{"id": "FRONTIER-001"}, {"id": "FRONTIER-002"}],
-                    "budget_status": "provider_limited", "receipt_id": "a" * 32,
+                    "timings_ms": {"total": 8400},
+                    "frontier": [{"id": "FRONTIER-001"}, {"id": "FRONTIER-002"}],
+                    "budget_status": "provider_limited",
+                    "receipt_id": "a" * 32,
                 },
                 "impact_paths": {key: [row["id"] for row in paths]},
                 "rationales": {key: None},
@@ -94,9 +134,7 @@ class ImpactRendererTest(unittest.TestCase):
         self.assertEqual(first.encode("utf-8"), second.encode("utf-8"))
         self.assertEqual(
             first,
-            (FIXTURES / "compact-state-post-decision.md").read_text(
-                encoding="utf-8"
-            ),
+            (FIXTURES / "compact-state-post-decision.md").read_text(encoding="utf-8"),
         )
         self.assertEqual(RENDERER.validate_rendered_markdown(first), [])
 
@@ -129,9 +167,15 @@ class ImpactRendererTest(unittest.TestCase):
 
         self.assertIn("&lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", simple)
         self.assertNotIn("PATH-001", simple)
-        self.assertIn("PATH-001: &lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", balanced)
-        self.assertIn("PATH-001: &lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", technical)
-        self.assertIn("provider codegraph; confidence verified-provider; location api/profile_0.py", technical)
+        self.assertIn(
+            "PATH-001: &lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", balanced
+        )
+        self.assertIn(
+            "PATH-001: &lt;api-0 data-x='1' &#124;&#124; &#96;wire&#124;field&#96;&gt;", technical
+        )
+        self.assertIn(
+            "provider codegraph; confidence verified-provider; location api/profile_0.py", technical
+        )
         structured = technical_state["graph_paths"][0]["paths"]
         self.assertEqual(structured[1]["providers"], ["scip"])
         self.assertEqual(structured[1]["locations"][0], "api/profile_1.py")
@@ -140,9 +184,7 @@ class ImpactRendererTest(unittest.TestCase):
 
     def test_compact_graph_output_stays_bounded_without_malformed_markdown(self):
         for audience in ("simple", "balanced", "technical"):
-            rendered = RENDERER.render_compact(
-                self.controller_graph_state(audience, count=32)
-            )
+            rendered = RENDERER.render_compact(self.controller_graph_state(audience, count=32))
             self.assertLessEqual(len(rendered.split()), 450, audience)
             self.assertIn("Impact scan: 8.4 s", rendered)
             self.assertIn("2 unknown frontiers", rendered)
@@ -153,9 +195,7 @@ class ImpactRendererTest(unittest.TestCase):
                     self.assertEqual(line.count("|"), 5)
 
     def test_existing_markdown_converts_without_semantic_loss(self):
-        markdown = (FIXTURES / "compact-state-post-decision.md").read_text(
-            encoding="utf-8"
-        )
+        markdown = (FIXTURES / "compact-state-post-decision.md").read_text(encoding="utf-8")
 
         state, errors = RENDERER.state_from_markdown(markdown)
 
@@ -184,21 +224,48 @@ class ImpactRendererTest(unittest.TestCase):
             state_path = root / "state.json"
             report_path = root / "report.md"
             roundtrip_path = root / "roundtrip.json"
-            state_path.write_text(
-                json.dumps(self.fixture(), ensure_ascii=False), encoding="utf-8"
-            )
+            state_path.write_text(json.dumps(self.fixture(), ensure_ascii=False), encoding="utf-8")
 
             first = subprocess.run(
-                [sys.executable, str(CLI), str(state_path), "--format", "markdown", "--output", str(report_path)],
-                text=True, capture_output=True, check=False,
+                [
+                    sys.executable,
+                    str(CLI),
+                    str(state_path),
+                    "--format",
+                    "markdown",
+                    "--output",
+                    str(report_path),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
             )
             second = subprocess.run(
-                [sys.executable, str(CLI), str(state_path), "--format", "markdown", "--output", str(report_path)],
-                text=True, capture_output=True, check=False,
+                [
+                    sys.executable,
+                    str(CLI),
+                    str(state_path),
+                    "--format",
+                    "markdown",
+                    "--output",
+                    str(report_path),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
             )
             converted = subprocess.run(
-                [sys.executable, str(CLI), "--from-markdown", str(report_path), "--output", str(roundtrip_path)],
-                text=True, capture_output=True, check=False,
+                [
+                    sys.executable,
+                    str(CLI),
+                    "--from-markdown",
+                    str(report_path),
+                    "--output",
+                    str(roundtrip_path),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
             )
 
             self.assertEqual(first.returncode, 0, first.stderr)

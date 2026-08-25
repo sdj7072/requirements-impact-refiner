@@ -2,14 +2,12 @@ import copy
 import hashlib
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
@@ -77,36 +75,23 @@ class ReportStoreTest(unittest.TestCase):
 
     def test_retry_resumes_matching_partial_revision_artifacts(self):
         state_bytes = self.state_bytes()
-        report_dir = (
-            self.root
-            / ".requirements-impact-refiner"
-            / "reports"
-            / "RPT-001"
-        )
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
         report_dir.mkdir(parents=True)
         (report_dir / "revision-0001.json").write_bytes(state_bytes)
 
-        published = STORE.publish_revision(
-            self.root, state_bytes, resume_partial=True
-        )
+        published = STORE.publish_revision(self.root, state_bytes, resume_partial=True)
 
         self.assertTrue(published.pointer_path.is_file())
         self.assertTrue(published.markdown_path.is_file())
 
     def test_failed_atomic_claim_leaves_no_partial_final_artifact(self):
-        report_dir = (
-            self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
-        )
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
         with mock.patch.object(STORE.os, "link", side_effect=OSError("fault")):
             with self.assertRaises(STORE.ReportStoreUnavailable):
-                STORE.publish_revision(
-                    self.root, self.state_bytes(), resume_partial=True
-                )
+                STORE.publish_revision(self.root, self.state_bytes(), resume_partial=True)
 
         self.assertFalse((report_dir / "revision-0001.json").exists())
-        published = STORE.publish_revision(
-            self.root, self.state_bytes(), resume_partial=True
-        )
+        published = STORE.publish_revision(self.root, self.state_bytes(), resume_partial=True)
         self.assertTrue(published.pointer_path.is_file())
 
     def test_revision_two_hashes_exact_selected_markdown_bytes(self):
@@ -152,9 +137,7 @@ class ReportStoreTest(unittest.TestCase):
 
         outside = self.root / "outside"
         outside.mkdir()
-        (self.root / ".requirements-impact-refiner").symlink_to(
-            outside, target_is_directory=True
-        )
+        (self.root / ".requirements-impact-refiner").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(STORE.UnsafeReportPath):
             STORE.publish_revision(self.root, self.state_bytes())
 

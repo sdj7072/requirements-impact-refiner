@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = "requirements-impact-refiner"
 
@@ -26,9 +25,7 @@ class MarketplaceDistributionTest(unittest.TestCase):
             {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
         )
         self.assertEqual(entry["category"], "Developer Tools")
-        plugin_manifest = (
-            ROOT / entry["source"]["path"] / ".codex-plugin/plugin.json"
-        )
+        plugin_manifest = ROOT / entry["source"]["path"] / ".codex-plugin/plugin.json"
         self.assertTrue(plugin_manifest.is_file())
 
     def test_claude_marketplace_resolves_the_root_plugin(self):
@@ -82,9 +79,7 @@ class GenericInstallerTest(unittest.TestCase):
                 path.relative_to(source) for path in source.rglob("*") if path.is_file()
             )
             installed_files = sorted(
-                path.relative_to(installed)
-                for path in installed.rglob("*")
-                if path.is_file()
+                path.relative_to(installed) for path in installed.rglob("*") if path.is_file()
             )
             self.assertEqual(installed_files, source_files)
             for relative_path in source_files:

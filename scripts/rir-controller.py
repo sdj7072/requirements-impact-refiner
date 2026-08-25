@@ -39,13 +39,11 @@ import stat
 import sys
 from pathlib import Path
 
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import rir_controller
-
 
 BEGIN_KEYS = {
     "request",
@@ -104,8 +102,7 @@ def _read_object(path: Path, maximum: int, label: str):
         if _json_depth(text) > _MAX_JSON_DEPTH:
             raise json.JSONDecodeError("json nesting depth exceeded", text, 0)
         value = json.loads(text)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError,
-            RecursionError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise OSError(f"cannot read input: {error}") from error
     finally:
         if descriptor is not None:
@@ -160,9 +157,7 @@ def _begin(args) -> int:
 
 
 def _finalize(args) -> int:
-    analysis = _read_object(
-        args.input, rir_controller.MAX_FINALIZE_BYTES, "finalize input"
-    )
+    analysis = _read_object(args.input, rir_controller.MAX_FINALIZE_BYTES, "finalize input")
     result = rir_controller.finalize_refinement(
         rir_controller.FinalizeRequest(
             repo_root=args.repo_root,
@@ -185,17 +180,23 @@ def _scan(args) -> int:
     evidence = value.get("evidence", [])
     if not isinstance(evidence, list):
         raise ValueError("scan evidence must be an array")
-    result = rir_controller.scan_impact(rir_controller.ScanRequest(
-        args.repo_root, value["change_request"], tuple(evidence),
-        value.get("presentation"),
-    ))
+    result = rir_controller.scan_impact(
+        rir_controller.ScanRequest(
+            args.repo_root,
+            value["change_request"],
+            tuple(evidence),
+            value.get("presentation"),
+        )
+    )
     if args.json:
         payload = {
-            "status": result.status, "scan_id": result.scan_id,
+            "status": result.status,
+            "scan_id": result.scan_id,
             "receipt_id": result.receipt_id,
             "receipt_sha256": result.receipt_sha256,
             "display_text": result.display_text,
-            "risk_level": result.risk_level, "paths": list(result.paths),
+            "risk_level": result.risk_level,
+            "paths": list(result.paths),
             "frontier": list(result.frontier),
             "candidates": list(result.candidates),
             "elapsed_ms": result.elapsed_ms,

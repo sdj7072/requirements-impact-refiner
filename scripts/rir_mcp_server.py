@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
 import sys
-
+from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -42,16 +41,13 @@ _MAX_JSON_DEPTH = 64
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import rir_controller
 import payload_identity
-
+import rir_controller
 
 MAX_LINE_BYTES = 2 * 1024 * 1024
 PROTOCOL_VERSION = "2025-06-18"
 ANALYSIS_SCHEMA = json.loads(
-    (SCRIPT_DIR.parent / "schemas" / "controller-analysis.schema.json").read_text(
-        encoding="utf-8"
-    )
+    (SCRIPT_DIR.parent / "schemas" / "controller-analysis.schema.json").read_text(encoding="utf-8")
 )
 INSTALLED_PAYLOAD_SHA256 = payload_identity.payload_sha256(SCRIPT_DIR.parent)
 
@@ -77,12 +73,17 @@ def _expand_schema(schema, root):
 EXPANDED_ANALYSIS_SCHEMA = _expand_schema(ANALYSIS_SCHEMA, ANALYSIS_SCHEMA)
 
 SCAN_SCHEMA = {
-    "type": "object", "additionalProperties": False,
+    "type": "object",
+    "additionalProperties": False,
     "required": ["repo_root", "change_request"],
     "properties": {
         "repo_root": {"type": "string", "minLength": 1},
         "change_request": {"type": "string", "minLength": 1, "maxLength": 4096},
-        "evidence": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+        "evidence": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string", "minLength": 1, "maxLength": 4096},
+        },
         "presentation": {"enum": ["simple", "balanced", "technical"]},
     },
 }
@@ -94,9 +95,16 @@ BEGIN_SCHEMA = {
     "properties": {
         "repo_root": {"type": "string", "minLength": 1},
         "request": {"type": "string", "minLength": 1, "maxLength": 262144},
-        "repository_evidence": {"type": "array", "maxItems": 128, "items": {"type": "string", "minLength": 1, "maxLength": 65536}},
+        "repository_evidence": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {"type": "string", "minLength": 1, "maxLength": 65536},
+        },
         "adapter": {"enum": ["generic", "superpowers", "claude-feature-dev", "spec-kit"]},
-        "audience_override": {"type": ["string", "null"], "enum": ["simple", "balanced", "technical", None]},
+        "audience_override": {
+            "type": ["string", "null"],
+            "enum": ["simple", "balanced", "technical", None],
+        },
         "delivery_override": {"type": ["string", "null"], "enum": ["compact", "full", None]},
         "scan_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{32}$"},
     },
@@ -109,7 +117,9 @@ TRACE_SCHEMA = {
         "repo_root": {"type": "string", "minLength": 1},
         "draft_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
         "seeds": {
-            "type": "array", "minItems": 1, "maxItems": 128,
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -139,7 +149,11 @@ FINALIZE_SCHEMA = {
     },
 }
 TOOLS = [
-    {"name": "rir_scan", "description": "Run one bounded local, network-free Fast Scan without automatic detailed refinement.", "inputSchema": SCAN_SCHEMA},
+    {
+        "name": "rir_scan",
+        "description": "Run one bounded local, network-free Fast Scan without automatic detailed refinement.",
+        "inputSchema": SCAN_SCHEMA,
+    },
     {
         "name": "rir_begin",
         "description": "Create a local, network-free, repository-bound impact-refinement draft before analysis; data stays in the isolated workspace.",
@@ -159,7 +173,11 @@ TOOLS = [
 
 
 def _error(identifier, code, message):
-    return {"jsonrpc": "2.0", "id": identifier, "error": {"code": code, "message": str(message)[:1024]}}
+    return {
+        "jsonrpc": "2.0",
+        "id": identifier,
+        "error": {"code": code, "message": str(message)[:1024]},
+    }
 
 
 def _result(identifier, result):
@@ -202,7 +220,11 @@ def _validate_schema(value, schema, label):
     if isinstance(value, dict):
         properties = schema.get("properties", {})
         missing = sorted(set(schema.get("required", [])) - set(value))
-        unknown = sorted(set(value) - set(properties)) if schema.get("additionalProperties") is False else []
+        unknown = (
+            sorted(set(value) - set(properties))
+            if schema.get("additionalProperties") is False
+            else []
+        )
         if missing:
             raise ValueError(f"{label} is missing {missing[0]}")
         if unknown:
@@ -248,25 +270,17 @@ def _begin(arguments):
     prior_state = result.prior_state if isinstance(result.prior_state, dict) else {}
     prior_key_map = result.prior_key_map if isinstance(result.prior_key_map, dict) else {}
     decision_keys = {
-        identifier: key
-        for key, identifier in prior_key_map.get("decisions", {}).items()
+        identifier: key for key, identifier in prior_key_map.get("decisions", {}).items()
     }
-    impact_keys = {
-        identifier: key
-        for key, identifier in prior_key_map.get("impacts", {}).items()
-    }
+    impact_keys = {identifier: key for key, identifier in prior_key_map.get("impacts", {}).items()}
     invariant_keys = {
-        identifier: key
-        for key, identifier in prior_key_map.get("invariants", {}).items()
+        identifier: key for key, identifier in prior_key_map.get("invariants", {}).items()
     }
     criterion_keys = {
-        identifier: key
-        for key, identifier in prior_key_map.get("criteria", {}).items()
+        identifier: key for key, identifier in prior_key_map.get("criteria", {}).items()
     }
     summaries = {
-        row.get("impact_id"): row
-        for row in prior_state.get("summary", [])
-        if isinstance(row, dict)
+        row.get("impact_id"): row for row in prior_state.get("summary", []) if isinstance(row, dict)
     }
     carry_forward_impacts = []
     for row in prior_state.get("impacts", []):
@@ -285,21 +299,29 @@ def _begin(arguments):
         summary = summaries.get(row["id"])
         if not isinstance(summary, dict):
             continue
-        carry_forward_impacts.append({
-            "key": impact_keys[row["id"]],
-            "category": row["category"],
-            "severity": row["severity"],
-            "state": row["state"],
-            "evidence_level": row["evidence_level"],
-            "evidence": row["evidence"],
-            "invariant_keys": [invariant_keys[value] for value in row.get("invariants", [])],
-            "decision_keys": [decision_keys[value] for value in row.get("decisions", [])],
-            "criterion_keys": [criterion_keys[value] for value in row.get("criteria", [])],
-            "summary": {
-                key: summary[key]
-                for key in ("changed_feature", "possible_issue", "affected", "trigger", "prevention")
-            },
-        })
+        carry_forward_impacts.append(
+            {
+                "key": impact_keys[row["id"]],
+                "category": row["category"],
+                "severity": row["severity"],
+                "state": row["state"],
+                "evidence_level": row["evidence_level"],
+                "evidence": row["evidence"],
+                "invariant_keys": [invariant_keys[value] for value in row.get("invariants", [])],
+                "decision_keys": [decision_keys[value] for value in row.get("decisions", [])],
+                "criterion_keys": [criterion_keys[value] for value in row.get("criteria", [])],
+                "summary": {
+                    key: summary[key]
+                    for key in (
+                        "changed_feature",
+                        "possible_issue",
+                        "affected",
+                        "trigger",
+                        "prevention",
+                    )
+                },
+            }
+        )
     carry_forward_decisions = []
     for row in prior_state.get("decisions", []):
         if not isinstance(row, dict) or row.get("id") not in decision_keys:
@@ -307,12 +329,14 @@ def _begin(arguments):
         accepted = row.get("accepted_impacts", [])
         if not all(identifier in impact_keys for identifier in accepted):
             continue
-        carry_forward_decisions.append({
-            "key": decision_keys[row["id"]],
-            "choice": row["choice"],
-            "accepted_impact_keys": [impact_keys[identifier] for identifier in accepted],
-            "rationale": row["rationale"],
-        })
+        carry_forward_decisions.append(
+            {
+                "key": decision_keys[row["id"]],
+                "choice": row["choice"],
+                "accepted_impact_keys": [impact_keys[identifier] for identifier in accepted],
+                "rationale": row["rationale"],
+            }
+        )
     structured = {
         "draft_id": result.draft_id,
         "draft_path": result.draft_path.relative_to(root).as_posix(),
@@ -323,9 +347,7 @@ def _begin(arguments):
         "prior_state": result.prior_state,
         "prior_key_map": result.prior_key_map,
         "analysis_guidance": {
-            "recommended_phase": (
-                "post-decision" if carry_forward_decisions else None
-            ),
+            "recommended_phase": ("post-decision" if carry_forward_decisions else None),
             "carry_forward_decisions": carry_forward_decisions,
             "carry_forward_impacts": carry_forward_impacts,
         },
@@ -358,7 +380,9 @@ def _begin(arguments):
         "graph_receipt_id": result.graph_receipt_id,
     }
     return {
-        "content": [{"type": "text", "text": json.dumps(structured, ensure_ascii=False, sort_keys=True)}],
+        "content": [
+            {"type": "text", "text": json.dumps(structured, ensure_ascii=False, sort_keys=True)}
+        ],
         "structuredContent": structured,
         "isError": False,
     }
@@ -394,22 +418,33 @@ def _finalize(arguments):
 
 def _scan(arguments):
     _validate_arguments(arguments, SCAN_SCHEMA, "rir_scan")
-    result = rir_controller.scan_impact(rir_controller.ScanRequest(
-        Path(arguments["repo_root"]), arguments["change_request"],
-        tuple(arguments.get("evidence", [])), arguments.get("presentation"),
-    ))
+    result = rir_controller.scan_impact(
+        rir_controller.ScanRequest(
+            Path(arguments["repo_root"]),
+            arguments["change_request"],
+            tuple(arguments.get("evidence", [])),
+            arguments.get("presentation"),
+        )
+    )
     structured = {
-        "status": result.status, "scan_id": result.scan_id,
+        "status": result.status,
+        "scan_id": result.scan_id,
         "receipt_id": result.receipt_id,
         "receipt_sha256": result.receipt_sha256,
         "display_text": result.display_text,
         "risk_level": result.risk_level,
-        "paths": list(result.paths), "frontier": list(result.frontier),
-        "candidates": list(result.candidates), "elapsed_ms": result.elapsed_ms,
-        "cache_status": result.cache_status, "can_promote": result.can_promote,
+        "paths": list(result.paths),
+        "frontier": list(result.frontier),
+        "candidates": list(result.candidates),
+        "elapsed_ms": result.elapsed_ms,
+        "cache_status": result.cache_status,
+        "can_promote": result.can_promote,
     }
-    return {"content": [{"type": "text", "text": result.display_text}],
-            "structuredContent": structured, "isError": False}
+    return {
+        "content": [{"type": "text", "text": result.display_text}],
+        "structuredContent": structured,
+        "isError": False,
+    }
 
 
 def _trace(arguments):
@@ -419,8 +454,7 @@ def _trace(arguments):
             repo_root=Path(arguments["repo_root"]),
             draft_id=arguments["draft_id"],
             seeds=tuple(
-                rir_controller.TraceSeed(row["term"], row["location"])
-                for row in arguments["seeds"]
+                rir_controller.TraceSeed(row["term"], row["location"]) for row in arguments["seeds"]
             ),
         )
     )
@@ -432,16 +466,15 @@ def _trace(arguments):
         "compact_graph": result.compact_graph,
         "budget_status": result.budget_status,
         "request_sha256": result.request_sha256,
-        "seeds": [
-            {"term": seed.term, "location": seed.location}
-            for seed in result.seeds
-        ],
+        "seeds": [{"term": seed.term, "location": seed.location} for seed in result.seeds],
     }
     return {
-        "content": [{
-            "type": "text",
-            "text": json.dumps(structured, ensure_ascii=False, sort_keys=True),
-        }],
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(structured, ensure_ascii=False, sort_keys=True),
+            }
+        ],
         "structuredContent": structured,
         "isError": False,
     }
@@ -456,11 +489,14 @@ def handle(message):
     if identifier is None:
         return None
     if method == "initialize":
-        return _result(identifier, {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "requirements-impact-refiner", "version": "0.4.0"},
-        })
+        return _result(
+            identifier,
+            {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "requirements-impact-refiner", "version": "0.4.0"},
+            },
+        )
     if method == "tools/list":
         return _result(identifier, {"tools": TOOLS})
     if method != "tools/call" or not isinstance(params, dict):
@@ -502,8 +538,7 @@ def main():
                 if _json_depth(decoded) > _MAX_JSON_DEPTH:
                     raise ValueError("json nesting depth exceeded")
                 message = json.loads(decoded)
-            except (UnicodeDecodeError, json.JSONDecodeError,
-                    RecursionError, ValueError):
+            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
                 response = _error(None, -32700, "parse error")
             else:
                 response = handle(message)

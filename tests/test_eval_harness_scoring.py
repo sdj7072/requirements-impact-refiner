@@ -13,7 +13,7 @@ from evals.harness.models import (
 from evals.harness.reporting import render_report, summarize
 from evals.harness.scoring import score_mechanical, validate_adjudications
 from tests.test_report_lineage import next_report, report_with_state
-from tests.test_validate_impact_report import PRE_DECISION_REPORT, VALID_REPORT
+from tests.test_validate_impact_report import VALID_REPORT
 
 
 def case(case_id, kind="positive", transition=None):
@@ -46,8 +46,7 @@ def result(
     reasoning="high",
 ):
     enabled_composition = enabled_composition or (
-        "%s %s plugins=%s"
-        % (client, client_version, ",".join(enabled_plugins))
+        "{} {} plugins={}".format(client, client_version, ",".join(enabled_plugins))
     )
     return RunResult(
         case_id=case_id,
@@ -87,8 +86,7 @@ REPORT_METADATA = {
     "repetitions": 5,
 }
 SUPERPOWERS_HANDOFF_MARKER = (
-    "superpowers:after-approved-brainstorming;impact-refinement;"
-    "manual-handoff-before-writing-plans"
+    "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans"
 )
 
 
@@ -104,10 +102,7 @@ def complete_matrix():
     for specification in CANONICAL_CASES:
         for repetition in range(1, 6):
             rubrics = specification.must_detect + specification.must_not_do
-            quotes = [
-                "[%s/%02d %s]" % (specification.id, repetition, rubric)
-                for rubric in rubrics
-            ]
+            quotes = ["[%s/%02d %s]" % (specification.id, repetition, rubric) for rubric in rubrics]
             runs.append(
                 result(
                     specification.id,
@@ -186,13 +181,11 @@ class EvalHarnessScoringTest(unittest.TestCase):
         for name, mutated in mutations.items():
             with self.subTest(name=name):
                 errors = validate_adjudications(
-                    (mutated,) + adjudications[1:], CANONICAL_CASES, runs
+                    (mutated, *adjudications[1:]), CANONICAL_CASES, runs
                 )
                 self.assertTrue(errors)
 
-        errors = validate_adjudications(
-            adjudications + (adjudications[0],), CANONICAL_CASES, runs
-        )
+        errors = validate_adjudications((*adjudications, adjudications[0]), CANONICAL_CASES, runs)
         self.assertTrue(any("duplicate adjudication" in error for error in errors))
         errors = validate_adjudications(adjudications[1:], CANONICAL_CASES, runs)
         self.assertTrue(any("missing adjudication" in error for error in errors))
@@ -256,7 +249,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
                     result(
                         "INT-superpowers",
                         RunStatus.PASS,
-                        "%s; refinement exits before writing-plans." % phrase,
+                        f"{phrase}; refinement exits before writing-plans.",
                     ),
                 )
                 self.assertFalse(score.passed)
@@ -328,7 +321,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
                     result(
                         "INT-superpowers",
                         RunStatus.PASS,
-                        "%s; refinement exits before writing-plans." % phrase,
+                        f"{phrase}; refinement exits before writing-plans.",
                     ),
                 )
                 self.assertFalse(score.passed)
@@ -356,9 +349,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
 
     def test_canonical_superpowers_forbidden_workflow_requires_quoted_adjudication(self):
         """The exact marker is mechanical; every canonical forbidden action remains human-scored."""
-        specification = next(
-            case for case in CANONICAL_CASES if case.id == "INT-superpowers"
-        )
+        specification = next(case for case in CANONICAL_CASES if case.id == "INT-superpowers")
         rubric = "invoke writing-plans automatically"
         quote = "The adapter automatically invokes writing-plans."
         rubrics = specification.must_detect + specification.must_not_do
@@ -368,10 +359,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
                 RunStatus.PASS,
                 superpowers_report(
                     statement="\n".join(
-                        [
-                            "[INT-superpowers/%02d %s]" % (repetition, item)
-                            for item in rubrics
-                        ]
+                        ["[INT-superpowers/%02d %s]" % (repetition, item) for item in rubrics]
                         + [quote]
                     )
                 ),
@@ -385,9 +373,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
                 repetition,
                 item,
                 item != rubric,
-                quote
-                if item == rubric
-                else "[INT-superpowers/%02d %s]" % (repetition, item),
+                quote if item == rubric else "[INT-superpowers/%02d %s]" % (repetition, item),
                 "The quoted response contradicts the manual-handoff contract."
                 if item == rubric
                 else "The quote directly supports the required rubric.",
@@ -396,16 +382,12 @@ class EvalHarnessScoringTest(unittest.TestCase):
             for item in rubrics
         )
 
-        self.assertTrue(
-            all(score_mechanical(specification, run).passed for run in runs)
-        )
+        self.assertTrue(all(score_mechanical(specification, run).passed for run in runs))
         self.assertEqual(validate_adjudications(rows, (specification,), runs), [])
         missing_forbidden = tuple(
             row for row in rows if row.rubric not in specification.must_not_do
         )
-        missing_errors = validate_adjudications(
-            missing_forbidden, (specification,), runs
-        )
+        missing_errors = validate_adjudications(missing_forbidden, (specification,), runs)
         self.assertEqual(
             sum("missing adjudication" in error for error in missing_errors),
             len(specification.must_not_do) * 5,
@@ -413,17 +395,14 @@ class EvalHarnessScoringTest(unittest.TestCase):
 
         matrix_runs, matrix_scores, matrix_rows = complete_matrix()
         integration_keys = {(run.case_id, run.repetition) for run in runs}
-        matrix_runs = tuple(
-            run
-            for run in matrix_runs
-            if (run.case_id, run.repetition) not in integration_keys
-        ) + runs
-        matrix_rows = tuple(
-            row for row in matrix_rows if row.case_id != "INT-superpowers"
-        ) + rows
-        rendered = render_report(
-            matrix_runs, REPORT_METADATA, matrix_scores, matrix_rows
+        matrix_runs = (
+            tuple(
+                run for run in matrix_runs if (run.case_id, run.repetition) not in integration_keys
+            )
+            + runs
         )
+        matrix_rows = tuple(row for row in matrix_rows if row.case_id != "INT-superpowers") + rows
+        rendered = render_report(matrix_runs, REPORT_METADATA, matrix_scores, matrix_rows)
         self.assertIn("status: not verified", rendered)
 
     def test_lineage_uses_exact_previous_bytes_for_canonical_validation(self):
@@ -444,9 +423,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
 
         self.assertTrue(exact.passed, exact.findings)
         self.assertFalse(changed.passed)
-        self.assertIn(
-            "Previous SHA-256 does not match predecessor bytes", changed.findings
-        )
+        self.assertIn("Previous SHA-256 does not match predecessor bytes", changed.findings)
 
     def test_lineage_rejects_non_utf8_previous_bytes_without_replacement(self):
         """Replacement decoding could validate bytes other than the sealed predecessor."""
@@ -514,8 +491,12 @@ class EvalHarnessScoringTest(unittest.TestCase):
         mutations = {
             "empty scores": (runs, (), adjudications),
             "empty adjudications": (runs, scores, ()),
-            "duplicate repetition": (runs[:-1] + (replace(runs[-1], repetition=1),), scores, adjudications),
-            "wrong client": (replace(runs[0], client="claude"),) + runs[1:],
+            "duplicate repetition": (
+                (*runs[:-1], replace(runs[-1], repetition=1)),
+                scores,
+                adjudications,
+            ),
+            "wrong client": (replace(runs[0], client="claude"), *runs[1:]),
             "wrong composition": (
                 replace(
                     runs[0],
@@ -524,16 +505,29 @@ class EvalHarnessScoringTest(unittest.TestCase):
                         for key, value in runs[0].metadata
                     ),
                 ),
-            ) + runs[1:],
+                *runs[1:],
+            ),
             "missing run": (runs[:-1], scores[:-1], adjudications),
-            "partial result": (replace(runs[0], status=RunStatus.PARTIAL),) + runs[1:],
-            "failed mechanical score": (runs, (replace(scores[0], passed=False),) + scores[1:], adjudications),
-            "failed adjudication": (runs, scores, (replace(adjudications[0], passed=False),) + adjudications[1:]),
+            "partial result": (replace(runs[0], status=RunStatus.PARTIAL), *runs[1:]),
+            "failed mechanical score": (
+                runs,
+                (replace(scores[0], passed=False), *scores[1:]),
+                adjudications,
+            ),
+            "failed adjudication": (
+                runs,
+                scores,
+                (replace(adjudications[0], passed=False), *adjudications[1:]),
+            ),
         }
         for name, mutation in mutations.items():
             with self.subTest(name=name):
                 if name in {"wrong client", "wrong composition", "partial result"}:
-                    mutated_runs, mutated_scores, mutated_adjudications = mutation, scores, adjudications
+                    mutated_runs, mutated_scores, mutated_adjudications = (
+                        mutation,
+                        scores,
+                        adjudications,
+                    )
                 else:
                     mutated_runs, mutated_scores, mutated_adjudications = mutation
                 rendered = render_report(
@@ -576,7 +570,7 @@ class EvalHarnessScoringTest(unittest.TestCase):
                     ),
                 )
                 rendered = render_report(
-                    (mutated,) + runs[1:], REPORT_METADATA, scores, adjudications
+                    (mutated, *runs[1:]), REPORT_METADATA, scores, adjudications
                 )
                 self.assertIn("status: not verified", rendered)
 
@@ -606,14 +600,12 @@ class EvalHarnessScoringTest(unittest.TestCase):
             runs[0],
             metadata=tuple(pair for pair in runs[0].metadata if pair[0] != "model"),
         )
-        duplicate = replace(
-            runs[0], metadata=runs[0].metadata + (("model", "gpt-5.6-sol"),)
-        )
+        duplicate = replace(runs[0], metadata=(*runs[0].metadata, ("model", "gpt-5.6-sol")))
 
         for name, mutated in (("missing", missing), ("duplicate", duplicate)):
             with self.subTest(name=name):
                 rendered = render_report(
-                    (mutated,) + runs[1:], REPORT_METADATA, scores, adjudications
+                    (mutated, *runs[1:]), REPORT_METADATA, scores, adjudications
                 )
                 self.assertIn("status: not verified", rendered)
 

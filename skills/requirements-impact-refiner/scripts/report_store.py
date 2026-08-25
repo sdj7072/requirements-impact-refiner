@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import tempfile
-
+from dataclasses import dataclass
+from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -18,7 +17,6 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import compact_state
 import impact_renderer
-
 
 REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 REPORT_ROOT = Path(".requirements-impact-refiner/reports")
@@ -208,7 +206,7 @@ def _write_or_verify(path: Path, payload: bytes, *, resume_partial: bool) -> Non
                 f"cannot verify existing artifact {path.name}: {error}"
             ) from error
         if existing != payload:
-            raise FileExistsError(path)
+            raise FileExistsError(path) from None
 
 
 def _replace_pointer(pointer_path: Path, payload: bytes) -> None:
@@ -257,9 +255,7 @@ def publish_revision(
             if current.markdown_path.read_bytes() != markdown_bytes:
                 raise FileExistsError(markdown_path)
         except OSError as error:
-            raise ReportStoreUnavailable(
-                f"cannot verify published revision: {error}"
-            ) from error
+            raise ReportStoreUnavailable(f"cannot verify published revision: {error}") from error
         return current
     if revision == 1:
         if current is not None:

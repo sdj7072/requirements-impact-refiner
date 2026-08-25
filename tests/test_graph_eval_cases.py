@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "evals" / "graph-cases.json"
 EXPECTED_IDS = (
@@ -41,10 +40,13 @@ class GraphEvalCasesTest(unittest.TestCase):
             self.assertEqual(case.allowed_providers, ("builtin",))
             self.assertIsInstance(case.unknown_frontier_expected, bool)
             self.assertEqual(
-                case.compact_output_phrases, ("Impact scan:", "Impact paths:"),
+                case.compact_output_phrases,
+                ("Impact scan:", "Impact paths:"),
             )
             self.assertEqual(len(case.fixture_files), 4)
-            self.assertTrue(all(path and not path.startswith("/") for path, _ in case.fixture_files))
+            self.assertTrue(
+                all(path and not path.startswith("/") for path, _ in case.fixture_files)
+            )
         negative = cases[-1]
         self.assertEqual(negative.required_nodes, ())
         self.assertEqual(negative.fixture_files, ())
@@ -97,9 +99,7 @@ class GraphEvalCasesTest(unittest.TestCase):
                     observed = by_location[required.location]
                     self.assertEqual(observed.label, required.label)
                     self.assertEqual(observed.kind, required.kind)
-                    self.assertTrue(
-                        set(required.risk_domains).issubset(observed.risk_domains)
-                    )
+                    self.assertTrue(set(required.risk_domains).issubset(observed.risk_domains))
                 found = False
                 for graph_path in result.paths:
                     locations = tuple(nodes[key].location for key in graph_path.nodes)
@@ -107,8 +107,14 @@ class GraphEvalCasesTest(unittest.TestCase):
                     location_iter = iter(locations)
                     edge_iter = iter(edge_types)
                     if (
-                        all(any(value == candidate for candidate in location_iter) for value in required_locations)
-                        and all(any(value == candidate for candidate in edge_iter) for value in case.required_edge_types)
+                        all(
+                            any(value == candidate for candidate in location_iter)
+                            for value in required_locations
+                        )
+                        and all(
+                            any(value == candidate for candidate in edge_iter)
+                            for value in case.required_edge_types
+                        )
                         and graph_path.distance >= case.minimum_path_distance
                     ):
                         found = True

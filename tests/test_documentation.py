@@ -1,12 +1,11 @@
+import json
 import re
 import shlex
-import json
 import unittest
 from pathlib import Path
 
 from evals.harness.catalog import load_all, select_suite
 from evals.harness.run import build_parser
-
 
 ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.ko.md", "README.ja.md"]
@@ -40,19 +39,13 @@ PRE_LIVE_COMPATIBILITY = {
 def headings(path):
     text = path.read_text(encoding="utf-8")
     return [
-        re.sub(r"^#+\s+", "", line).strip()
-        for line in text.splitlines()
-        if line.startswith("## ")
+        re.sub(r"^#+\s+", "", line).strip() for line in text.splitlines() if line.startswith("## ")
     ]
 
 
 def compatibility_identity_rows(path):
     lines = path.read_text(encoding="utf-8").splitlines()
-    start = next(
-        index
-        for index, line in enumerate(lines)
-        if re.match(r"^## 6\.", line)
-    )
+    start = next(index for index, line in enumerate(lines) if re.match(r"^## 6\.", line))
     header = next(
         index
         for index in range(start + 1, len(lines))
@@ -109,11 +102,14 @@ class DocumentationTest(unittest.TestCase):
         self.assertIn("CLI fallback", body)
         self.assertIn("full-inline", body)
         recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)", route)
-        self.assertEqual(recipe.groups(), (
-            "Call `rir_scan` once with the change and supplied evidence.",
-            "Return `display_text` verbatim.",
-            "Stop; the renderer-owned question already asks whether to refine.",
-        ))
+        self.assertEqual(
+            recipe.groups(),
+            (
+                "Call `rir_scan` once with the change and supplied evidence.",
+                "Return `display_text` verbatim.",
+                "Stop; the renderer-owned question already asks whether to refine.",
+            ),
+        )
 
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
         required = (
@@ -138,12 +134,23 @@ class DocumentationTest(unittest.TestCase):
         canonical = (ROOT / "README.md").read_text(encoding="utf-8")
         graph_setting = re.findall(r'\{"impact_graph":.*\}', canonical)[0]
         commands = next(
-            block for block in re.findall(r"```sh\n(.*?)\n```", canonical, re.DOTALL)
+            block
+            for block in re.findall(r"```sh\n(.*?)\n```", canonical, re.DOTALL)
             if "trace --repo-root REPO" in block and "--graph-receipt-id RECEIPT_ID" in block
         )
-        self.assertEqual(json.loads(graph_setting), {
-            "impact_graph": {"enabled": True, "max_seconds": 30, "target_seconds": 10, "providers": ["auto"], "install_policy": "never", "deep": False}
-        })
+        self.assertEqual(
+            json.loads(graph_setting),
+            {
+                "impact_graph": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["auto"],
+                    "install_policy": "never",
+                    "deep": False,
+                }
+            },
+        )
         for name in READMES[1:]:
             text = (ROOT / name).read_text(encoding="utf-8")
             self.assertIn(graph_setting, text)

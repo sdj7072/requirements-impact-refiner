@@ -1,8 +1,15 @@
 """Private atomic persistence for Fast Scan receipts."""
-import json, os, re, secrets, stat
+
+import json
+import os
+import re
+import secrets
+import stat
 from pathlib import Path
+
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX = 4 * 1024 * 1024
+
 
 def _json_depth(text: str) -> int:
     """Peak bracket nesting outside strings. CPython 3.13 no longer raises
@@ -39,12 +46,17 @@ def _id(value):
         raise ValueError("scan_id must be 32 lowercase hex characters")
     return value
 
+
 def _open_dir(parent_fd, name, mode):
     created = True
-    try: os.mkdir(name, mode=mode, dir_fd=parent_fd)
-    except FileExistsError: created = False
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        os.mkdir(name, mode=mode, dir_fd=parent_fd)
+    except FileExistsError:
+        created = False
+    try:
+        fd = os.open(
+            name, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd
+        )
     except OSError as error:
         raise ValueError("scan directory is unsafe") from error
     # Only stamp the mode on directories this store created; an existing
@@ -62,7 +74,8 @@ def _ensure_self_ignore(base_fd):
         fd = os.open(
             ".gitignore",
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-            mode=0o644, dir_fd=base_fd,
+            mode=0o644,
+            dir_fd=base_fd,
         )
     except FileExistsError:
         try:
@@ -95,6 +108,7 @@ def _ensure_self_ignore(base_fd):
     finally:
         os.close(fd)
 
+
 def _scan_dir(root):
     root = Path(root)
     if root.is_symlink() or not root.is_dir():
@@ -106,8 +120,10 @@ def _scan_dir(root):
         _ensure_self_ignore(base_fd)
         return _open_dir(base_fd, "scans", 0o700)
     finally:
-        if base_fd is not None: os.close(base_fd)
+        if base_fd is not None:
+            os.close(base_fd)
         os.close(root_fd)
+
 
 def publish_scan_receipt(root, scan_id, payload):
     scan_id = _id(scan_id)
@@ -117,40 +133,66 @@ def publish_scan_receipt(root, scan_id, payload):
     temporary = "." + scan_id + "." + secrets.token_hex(8) + ".tmp"
     fd = None
     try:
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=directory_fd)
+        fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
         offset = 0
-        while offset < len(payload): offset += os.write(fd, payload[offset:])
-        os.fsync(fd); os.close(fd); fd = None
+        while offset < len(payload):
+            offset += os.write(fd, payload[offset:])
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
         try:
-            os.link(temporary, scan_id + ".json", src_dir_fd=directory_fd, dst_dir_fd=directory_fd, follow_symlinks=False)
+            os.link(
+                temporary,
+                scan_id + ".json",
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
         except FileExistsError as error:
             raise ValueError("scan receipt already exists") from error
         os.fsync(directory_fd)
         os.unlink(temporary, dir_fd=directory_fd)
         os.fsync(directory_fd)
     finally:
-        if fd is not None: os.close(fd)
-        try: os.unlink(temporary, dir_fd=directory_fd)
-        except FileNotFoundError: pass
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(temporary, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
         os.close(directory_fd)
     return Path(root).resolve() / ".requirements-impact-refiner" / "scans" / (scan_id + ".json")
+
 
 def load_scan_receipt_bytes(root, scan_id):
     scan_id = _id(scan_id)
     directory_fd = _scan_dir(root)
     fd = None
     try:
-        fd = os.open(scan_id + ".json", os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
+        fd = os.open(
+            scan_id + ".json", os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd
+        )
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or before.st_size > _MAX:
             raise ValueError("scan receipt is invalid")
         payload = b""
         while len(payload) < before.st_size:
             chunk = os.read(fd, before.st_size - len(payload))
-            if not chunk: raise ValueError("scan receipt changed while reading")
+            if not chunk:
+                raise ValueError("scan receipt changed while reading")
             payload += chunk
         after = os.fstat(fd)
-        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
             raise ValueError("scan receipt changed while reading")
         try:
             decoded = payload.decode("utf-8")
@@ -161,9 +203,13 @@ def load_scan_receipt_bytes(root, scan_id):
             raise ValueError("scan receipt is invalid") from error
         if not isinstance(value, dict) or value.get("scan_id") != scan_id:
             raise ValueError("scan receipt is invalid")
-        canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-        if canonical != payload: raise ValueError("scan receipt is not canonical")
+        canonical = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        if canonical != payload:
+            raise ValueError("scan receipt is not canonical")
         return payload
     finally:
-        if fd is not None: os.close(fd)
+        if fd is not None:
+            os.close(fd)
         os.close(directory_fd)

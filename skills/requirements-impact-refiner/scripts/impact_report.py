@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import re
-from typing import Mapping, Sequence
-
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 RPT_PATTERN = re.compile(r"RPT-\d{3}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
@@ -50,8 +49,7 @@ STATE_TO_DELTA = {
     "superseded": "superseded",
 }
 SUPERPOWERS_HANDOFF_MARKER = (
-    "superpowers:after-approved-brainstorming;impact-refinement;"
-    "manual-handoff-before-writing-plans"
+    "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans"
 )
 
 
@@ -78,9 +76,7 @@ def strip_fenced_blocks(text: str) -> str:
     fence: str | None = None
     for line in text.splitlines():
         stripped = line.strip()
-        if fence is None and (
-            stripped.startswith("```") or stripped.startswith("~~~")
-        ):
+        if fence is None and (stripped.startswith("```") or stripped.startswith("~~~")):
             fence = stripped[:3]
             lines.append("")
             continue
@@ -157,11 +153,7 @@ def evidence_beyond_acceptance_targets(value: str) -> bool:
 
 
 def references(value: str, prefix: str) -> set[str]:
-    return {
-        token
-        for token in ENTITY_PATTERN.findall(value)
-        if token.startswith(prefix)
-    }
+    return {token for token in ENTITY_PATTERN.findall(value) if token.startswith(prefix)}
 
 
 def entity_id(row: Mapping[str, str], column: str, fallback: str) -> str:
@@ -198,9 +190,7 @@ def parse_metadata(
 
 def parse_report(text: str) -> tuple[ParsedReport, list[str]]:
     sections = markdown_sections(text)
-    tables = {
-        name: parse_section_table(section) for name, section in sections.items()
-    }
+    tables = {name: parse_section_table(section) for name, section in sections.items()}
     metadata, errors = parse_metadata(tables.get("Report State", ()))
     return ParsedReport(text, metadata, sections, tables), sorted(set(errors))
 
@@ -224,9 +214,7 @@ def validate_baseline(report: ParsedReport) -> list[str]:
     for category, impact_ids in delta.items():
         if category != "new":
             for impact_id in sorted(impact_ids):
-                errors.append(
-                    f"revision 1 impact {impact_id} must be new, not {category}"
-                )
+                errors.append(f"revision 1 impact {impact_id} must be new, not {category}")
     return errors
 
 
@@ -245,17 +233,13 @@ def validate_evidence_bases(report: ParsedReport) -> list[str]:
                 errors.append(
                     f"{label} {identifier} evidence level {level} requires an evidence basis"
                 )
-            elif level in EVIDENCE_LEVELS and not evidence_beyond_acceptance_targets(
-                evidence
-            ):
+            elif level in EVIDENCE_LEVELS and not evidence_beyond_acceptance_targets(evidence):
                 basis = {
                     "verified": "a direct evidence citation",
                     "inferred": "an inference basis",
                     "unknown": "a named information gap",
                 }[level]
-                errors.append(
-                    f"{label} {identifier} evidence level {level} requires {basis}"
-                )
+                errors.append(f"{label} {identifier} evidence level {level} requires {basis}")
     for row in report.tables.get("Current Behavior", ()):
         identifier = entity_id(row, "Invariant ID", "unknown invariant")
         if not present(row.get("Current behavior", "")):
@@ -279,13 +263,10 @@ def validate_impact_semantics(report: ParsedReport) -> list[str]:
             errors.append(f"impact {impact_id} requires severity")
         elif severity not in SEVERITIES:
             errors.append(f"impact {impact_id} has invalid severity {severity}")
-        if state != "superseded" and not references(
-            row.get("Acceptance Criteria", ""), "AC-"
-        ):
+        if state != "superseded" and not references(row.get("Acceptance Criteria", ""), "AC-"):
             errors.append(f"impact {impact_id} requires acceptance criteria")
         if state == "superseded" and not (
-            present(evidence)
-            or references(row.get("Decision", ""), "DEC-")
+            present(evidence) or references(row.get("Decision", ""), "DEC-")
         ):
             errors.append(f"superseded impact {impact_id} requires successor or rationale")
         if state == "resolved" and not evidence_beyond_acceptance_targets(evidence):
@@ -310,9 +291,7 @@ def validate_relationship_semantics(report: ParsedReport) -> list[str]:
     for row in report.tables.get("Preserved Invariants", ()):
         invariant_id = entity_id(row, "Invariant ID", "unknown invariant")
         if not references(row.get("Must preserve for requirement", ""), "REQ-"):
-            errors.append(
-                f"preserved invariant {invariant_id} requires a requirement link"
-            )
+            errors.append(f"preserved invariant {invariant_id} requires a requirement link")
         if not references(row.get("Affected impacts", ""), "IMP-"):
             errors.append(f"preserved invariant {invariant_id} requires affected impacts")
         if not present(row.get("Evidence", "")):
@@ -326,21 +305,15 @@ def validate_relationship_semantics(report: ParsedReport) -> list[str]:
         if not references(row.get("Invariant", ""), "INV-"):
             errors.append(f"criterion {criterion_id} requires an invariant link")
         if not present(row.get("Observable criterion", "")):
-            errors.append(
-                f"criterion {criterion_id} requires a nonempty observable criterion"
-            )
+            errors.append(f"criterion {criterion_id} requires a nonempty observable criterion")
         if not present(row.get("Evidence/test", "")):
             errors.append(f"criterion {criterion_id} requires evidence or test")
     for row in report.tables.get("Requirement Revision History", ()):
         requirement_id = entity_id(row, "Requirement ID", "unknown requirement")
         if not present(row.get("Revision", "")):
-            errors.append(
-                f"requirement history {requirement_id} requires a revision description"
-            )
+            errors.append(f"requirement history {requirement_id} requires a revision description")
         if not present(row.get("Change summary", "")):
-            errors.append(
-                f"requirement history {requirement_id} requires a change summary"
-            )
+            errors.append(f"requirement history {requirement_id} requires a change summary")
     for row in report.tables.get("Unresolved, Deferred, and Blocked Items", ()):
         impact_id = entity_id(row, "Impact ID", "unknown impact")
         if not present(row.get("Information gap or rationale", "")):
@@ -394,10 +367,7 @@ def validate_handoff_semantics(report: ParsedReport) -> list[str]:
         entity_id(impact, "ID", "unknown impact"): unquote(impact.get("State", "")).lower()
         for impact in impact_rows
     }
-    if (
-        any(state == "blocked" for state in states.values())
-        and workflow not in not_ready_workflows
-    ):
+    if any(state == "blocked" for state in states.values()) and workflow not in not_ready_workflows:
         errors.append("blocked impacts require Planning Handoff workflow Not ready")
     remaining = references(row.get("Remaining risks", ""), "IMP-")
     for impact_id, state in states.items():
@@ -453,9 +423,7 @@ def calculate_delta(
             category = "unchanged"
         else:
             if current_state not in STATE_TO_DELTA:
-                raise ValueError(
-                    f"invalid impact state {current_state} for {impact_id}"
-                )
+                raise ValueError(f"invalid impact state {current_state} for {impact_id}")
             category = STATE_TO_DELTA[current_state]
         result[category].append(impact_id)
     for ids in result.values():
@@ -483,8 +451,7 @@ def validate_lineage(
         errors.append("Previous SHA-256 does not match predecessor bytes")
     missing = sorted(set(impact_states(previous)) - set(impact_states(current)))
     errors.extend(
-        f"impact {impact_id} disappeared; retain it or mark it superseded"
-        for impact_id in missing
+        f"impact {impact_id} disappeared; retain it or mark it superseded" for impact_id in missing
     )
     return errors
 

@@ -5,7 +5,6 @@ import sys
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "impact_graph.py"
@@ -36,14 +35,14 @@ class ImpactGraphTest(unittest.TestCase):
         value = fixture()
         value["providers"][0]["status"] = "installed"
 
-        self.assertIn("provider builtin has invalid status installed", GRAPH.validate_receipt(value))
+        self.assertIn(
+            "provider builtin has invalid status installed", GRAPH.validate_receipt(value)
+        )
 
     def test_receipt_rejects_non_object_rows_and_empty_or_duplicate_providers(self):
         value = fixture()
         value["providers"] = [42]
-        self.assertIn(
-            "providers row 1 must be an object", GRAPH.validate_receipt(value)
-        )
+        self.assertIn("providers row 1 must be an object", GRAPH.validate_receipt(value))
 
         value = fixture()
         value["settings"]["providers"] = []
@@ -112,8 +111,13 @@ class ImpactGraphTest(unittest.TestCase):
             repo_root_sha256="2" * 64,
             request_sha256="3" * 64,
             settings=settings,
-            providers=[], nodes=[], edges=[], paths=[], frontier=[],
-            timings_ms={"total": 0}, budget_status="closed",
+            providers=[],
+            nodes=[],
+            edges=[],
+            paths=[],
+            frontier=[],
+            timings_ms={"total": 0},
+            budget_status="closed",
             cache={"status": "miss", "key": "4" * 64, "invalidated_nodes": []},
         )
         self.assertEqual(settings.providers, ("auto",))
@@ -131,10 +135,14 @@ class ImpactGraphTest(unittest.TestCase):
         value = fixture()
         value["nodes"] = [
             {
-                "id": f"NODE-{index:03d}", "kind": "symbol",
-                "label": "x" * GRAPH.MAX_STRING_LENGTH, "location": "api/profile.py",
-                "provider": "builtin", "confidence": "verified-source",
-                "source_sha256": "d" * 64, "risk_domains": ["interfaces"],
+                "id": f"NODE-{index:03d}",
+                "kind": "symbol",
+                "label": "x" * GRAPH.MAX_STRING_LENGTH,
+                "location": "api/profile.py",
+                "provider": "builtin",
+                "confidence": "verified-source",
+                "source_sha256": "d" * 64,
+                "risk_domains": ["interfaces"],
             }
             for index in range(GRAPH.MAX_NODES)
         ]

@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from contextlib import contextmanager
 import ctypes
 import errno
 import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import stat
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Mapping, Optional, Tuple
+from pathlib import Path
 
 try:
     import fcntl
@@ -37,7 +37,6 @@ import impact_renderer
 import payload_identity
 import report_store
 
-
 MAX_BEGIN_BYTES = 256 * 1024
 MAX_TRACE_BYTES = 256 * 1024
 MAX_FINALIZE_BYTES = 2 * 1024 * 1024
@@ -48,17 +47,34 @@ DRAFT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 LOCAL_KEY_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 ADAPTERS = {"generic", "superpowers", "claude-feature-dev", "spec-kit"}
 SUPERPOWERS_HANDOFF_MARKER = (
-    "superpowers:after-approved-brainstorming;impact-refinement;"
-    "manual-handoff-before-writing-plans"
+    "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans"
 )
 ANALYSIS_KEYS = {
-    "phase", "refined_requirement", "invariants", "impacts",
-    "decision_needed", "decisions", "criteria", "unresolved", "scope",
+    "phase",
+    "refined_requirement",
+    "invariants",
+    "impacts",
+    "decision_needed",
+    "decisions",
+    "criteria",
+    "unresolved",
+    "scope",
     "workflow",
 }
 ROW_KEYS = {
     "invariants": {"key", "behavior", "evidence_level", "evidence"},
-    "impacts": {"key", "category", "severity", "state", "evidence_level", "evidence", "invariant_keys", "decision_keys", "criterion_keys", "summary"},
+    "impacts": {
+        "key",
+        "category",
+        "severity",
+        "state",
+        "evidence_level",
+        "evidence",
+        "invariant_keys",
+        "decision_keys",
+        "criterion_keys",
+        "summary",
+    },
     "decisions": {"key", "choice", "accepted_impact_keys", "rationale"},
     "criteria": {"key", "impact_key", "invariant_key", "criterion", "evidence"},
     "unresolved": {"impact_key", "state", "rationale", "decision_key", "owner"},
@@ -67,13 +83,19 @@ ROW_KEYS = {
 IMPACT_OPTIONAL_KEYS = {"graph_path_keys", "coverage_rationale"}
 SUMMARY_KEYS = {"changed_feature", "possible_issue", "affected", "trigger", "prevention"}
 HIGH_RISK_DOMAINS = {
-    "authorization/privacy", "legal/policy", "data", "interfaces", "operations",
+    "authorization/privacy",
+    "legal/policy",
+    "data",
+    "interfaces",
+    "operations",
     "state/concurrency",
 }
 EVIDENCE_RANK = {"verified": 0, "inferred": 1, "unknown": 2}
 GRAPH_CONFIDENCE_RANK = {
-    "verified-provider": 0, "verified-source": 1,
-    "structural-inferred": 2, "lexical": 3,
+    "verified-provider": 0,
+    "verified-source": 1,
+    "structural-inferred": 2,
+    "lexical": 3,
 }
 
 
@@ -90,9 +112,10 @@ SETTINGS = _load_settings_module()
 
 def _load_graph_coordinator():
     path = SCRIPT_DIR / "graph_coordinator.py"
-    module_name = "_rir_controller_graph_coordinator_" + hashlib.sha256(
-        str(path).encode("utf-8")
-    ).hexdigest()[:16]
+    module_name = (
+        "_rir_controller_graph_coordinator_"
+        + hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:16]
+    )
     loaded = sys.modules.get(module_name)
     if loaded is not None:
         return loaded
@@ -114,11 +137,11 @@ TraceSeed = GRAPH_COORDINATOR.ScanSeed
 class BeginRequest:
     repo_root: Path
     request: str
-    repository_evidence: Tuple[str, ...]
+    repository_evidence: tuple[str, ...]
     adapter: str
-    audience_override: Optional[str] = None
-    delivery_override: Optional[str] = None
-    scan_id: Optional[str] = None
+    audience_override: str | None = None
+    delivery_override: str | None = None
+    scan_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -129,18 +152,18 @@ class DraftResult:
     revision: int
     previous_sha256: str
     settings: Mapping[str, str]
-    prior_state: Optional[Mapping[str, object]]
-    prior_key_map: Optional[Mapping[str, object]]
-    scan_id: Optional[str] = None
-    graph_receipt_id: Optional[str] = None
+    prior_state: Mapping[str, object] | None
+    prior_key_map: Mapping[str, object] | None
+    scan_id: str | None = None
+    graph_receipt_id: str | None = None
 
 
 @dataclass(frozen=True)
 class ScanRequest:
     repo_root: Path
     change_request: str
-    evidence: Tuple[str, ...]
-    audience_override: Optional[str] = None
+    evidence: tuple[str, ...]
+    audience_override: str | None = None
 
 
 ScanResult = fast_scan.FastScanResult
@@ -150,7 +173,7 @@ ScanResult = fast_scan.FastScanResult
 class TraceRequest:
     repo_root: Path
     draft_id: str
-    seeds: Tuple[TraceSeed, ...]
+    seeds: tuple[TraceSeed, ...]
 
 
 @dataclass(frozen=True)
@@ -161,7 +184,7 @@ class TraceResult:
     compact_graph: Mapping[str, object]
     budget_status: str
     request_sha256: str
-    seeds: Tuple[TraceSeed, ...]
+    seeds: tuple[TraceSeed, ...]
 
 
 @dataclass(frozen=True)
@@ -169,7 +192,7 @@ class FinalizeRequest:
     repo_root: Path
     draft_id: str
     analysis: Mapping[str, object]
-    graph_receipt_id: Optional[str] = None
+    graph_receipt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -186,8 +209,7 @@ class FinalizeResult:
 
 def _canonical_bytes(value: object) -> bytes:
     return (
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        + "\n"
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode("utf-8")
 
 
@@ -280,7 +302,8 @@ def _next_report_id(root: Path) -> str:
     existing = set()
     if reports.is_dir() and not reports.is_symlink():
         existing = {
-            path.name for path in reports.iterdir()
+            path.name
+            for path in reports.iterdir()
             if path.is_dir() and re.fullmatch(r"RPT-\d{3}", path.name)
         }
     for number in range(1, 1000):
@@ -344,27 +367,22 @@ def _controller_metadata_path(report_id: str, revision: int, root: Path) -> Path
     return report_dir / f"revision-{revision:04d}.controller.json"
 
 
-def _load_controller_metadata(current) -> Optional[dict[str, object]]:
-    path = current.state_path.with_name(
-        f"revision-{current.revision:04d}.controller.json"
-    )
+def _load_controller_metadata(current) -> dict[str, object] | None:
+    path = current.state_path.with_name(f"revision-{current.revision:04d}.controller.json")
     if not path.exists():
         return None
     if path.is_symlink() or not path.is_file():
         raise ValueError("controller lineage metadata is unsafe")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        current_state_sha256 = hashlib.sha256(
-            current.state_path.read_bytes()
-        ).hexdigest()
+        current_state_sha256 = hashlib.sha256(current.state_path.read_bytes()).hexdigest()
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"controller lineage metadata is invalid: {error}") from error
     if (
         not isinstance(payload, dict)
         or payload.get("report_id") != current.report_id
         or payload.get("revision") != current.revision
-        or payload.get("state_sha256")
-        != current_state_sha256
+        or payload.get("state_sha256") != current_state_sha256
         or not isinstance(payload.get("key_map"), dict)
     ):
         raise ValueError("controller lineage metadata identity is invalid")
@@ -405,7 +423,9 @@ def _promoted_scan(root, request, settings):
         raise ValueError("invalid Fast Scan ID")
     prepared = fast_scan.prepare_fast_scan_identity(
         fast_scan.FastScanRequest(
-            root, request.request, request.repository_evidence,
+            root,
+            request.request,
+            request.repository_evidence,
             settings["audience"],
         ),
         settings["impact_graph"],
@@ -453,8 +473,7 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
     if not isinstance(request.request, str) or not request.request.strip():
         raise ValueError("request must be nonempty")
     if not isinstance(request.repository_evidence, tuple) or any(
-        not isinstance(item, str) or not item.strip()
-        for item in request.repository_evidence
+        not isinstance(item, str) or not item.strip() for item in request.repository_evidence
     ):
         raise ValueError("repository_evidence must contain nonempty strings")
     _bounded(
@@ -462,9 +481,7 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         MAX_BEGIN_BYTES,
         "begin input",
     )
-    settings = SETTINGS.resolve(
-        root, request.audience_override, request.delivery_override
-    )
+    settings = SETTINGS.resolve(root, request.audience_override, request.delivery_override)
     promotion = _promoted_scan(root, request, settings)
     current_lineage = _current_lineage(root)
     if current_lineage is None:
@@ -511,9 +528,7 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         prior_state=prior_state,
         prior_key_map=prior_key_map,
         scan_id=None if promotion is None else promotion["scan_id"],
-        graph_receipt_id=(
-            None if promotion is None else promotion["receipt_id"]
-        ),
+        graph_receipt_id=(None if promotion is None else promotion["receipt_id"]),
     )
 
 
@@ -554,9 +569,20 @@ def load_draft(repo_root: Path, draft_id: str) -> dict[str, object]:
 
 def _graph_draft_identity(draft: Mapping[str, object]) -> dict[str, object]:
     keys = (
-        "schema_version", "draft_id", "repo_root", "request", "request_sha256",
-        "repository_evidence", "adapter", "settings", "report_id", "revision",
-        "previous_sha256", "prior_state", "prior_key_map", "created_at",
+        "schema_version",
+        "draft_id",
+        "repo_root",
+        "request",
+        "request_sha256",
+        "repository_evidence",
+        "adapter",
+        "settings",
+        "report_id",
+        "revision",
+        "previous_sha256",
+        "prior_state",
+        "prior_key_map",
+        "created_at",
     )
     try:
         identity = {key: draft[key] for key in keys}
@@ -565,16 +591,13 @@ def _graph_draft_identity(draft: Mapping[str, object]) -> dict[str, object]:
     request = identity["request"]
     if (
         not isinstance(request, str)
-        or identity["request_sha256"]
-        != hashlib.sha256(request.encode("utf-8")).hexdigest()
+        or identity["request_sha256"] != hashlib.sha256(request.encode("utf-8")).hexdigest()
     ):
         raise ValueError("draft request identity is invalid")
     return identity
 
 
-def _replace_private_draft(
-    root: Path, draft_id: str, value: Mapping[str, object]
-) -> None:
+def _replace_private_draft(root: Path, draft_id: str, value: Mapping[str, object]) -> None:
     directory_fd = _private_draft_directory_fd(root)
     temporary_name = f".{draft_id}.{secrets.token_hex(8)}.tmp"
     descriptor = None
@@ -591,8 +614,10 @@ def _replace_private_draft(
         os.close(descriptor)
         descriptor = None
         os.replace(
-            temporary_name, f"{draft_id}.json",
-            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+            temporary_name,
+            f"{draft_id}.json",
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
         )
         os.fsync(directory_fd)
     except OSError as error:
@@ -611,9 +636,7 @@ def _read_bounded_descriptor(descriptor: int, maximum: int, label: str) -> bytes
     os.lseek(descriptor, 0, os.SEEK_SET)
     payload = bytearray()
     while len(payload) <= maximum:
-        chunk = os.read(
-            descriptor, min(64 * 1024, maximum + 1 - len(payload))
-        )
+        chunk = os.read(descriptor, min(64 * 1024, maximum + 1 - len(payload)))
         if not chunk:
             break
         payload.extend(chunk)
@@ -623,9 +646,16 @@ def _read_bounded_descriptor(descriptor: int, maximum: int, label: str) -> bytes
 
 
 _DRAFT_TRANSACTION_KEYS = {
-    "schema_version", "draft_id", "repo_root_sha256", "transaction_id",
-    "expected_sha256", "expected_dev", "expected_ino",
-    "replacement_sha256", "replacement_dev", "replacement_ino",
+    "schema_version",
+    "draft_id",
+    "repo_root_sha256",
+    "transaction_id",
+    "expected_sha256",
+    "expected_dev",
+    "expected_ino",
+    "replacement_sha256",
+    "replacement_dev",
+    "replacement_ino",
 }
 _DRAFT_TRANSACTION_MAX_BYTES = 16 * 1024
 
@@ -663,9 +693,7 @@ def _draft_transaction_lock(directory_fd: int):
             os.close(descriptor)
 
 
-def _write_private_transaction_component(
-    directory_fd: int, name: str, payload: bytes, label: str
-):
+def _write_private_transaction_component(directory_fd: int, name: str, payload: bytes, label: str):
     descriptor = None
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
@@ -689,9 +717,7 @@ def _write_private_transaction_component(
         if descriptor is not None:
             try:
                 metadata = os.fstat(descriptor)
-                actual_payload = _read_bounded_descriptor(
-                    descriptor, max(len(payload), 1), label
-                )
+                actual_payload = _read_bounded_descriptor(descriptor, max(len(payload), 1), label)
                 _unlink_transaction_component(
                     directory_fd,
                     name,
@@ -712,9 +738,7 @@ def _write_private_transaction_component(
         raise
 
 
-def _open_optional_transaction_component(
-    directory_fd: int, name: str, maximum: int, label: str
-):
+def _open_optional_transaction_component(directory_fd: int, name: str, maximum: int, label: str):
     descriptor = None
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -725,10 +749,7 @@ def _open_optional_transaction_component(
         raise ValueError(f"{label} is unavailable or unsafe: {error}") from error
     try:
         metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-        ):
+        if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
             raise ValueError(f"{label} is not a private regular file")
         payload = _read_bounded_descriptor(descriptor, maximum, label)
         return descriptor, metadata, payload
@@ -741,13 +762,9 @@ def _transaction_removing_name(name: str) -> str:
     return f"{name}.removing"
 
 
-def _open_transaction_component_for_cleanup(
-    directory_fd: int, name: str, maximum: int, label: str
-):
+def _open_transaction_component_for_cleanup(directory_fd: int, name: str, maximum: int, label: str):
     removing_name = _transaction_removing_name(name)
-    original = _open_optional_transaction_component(
-        directory_fd, name, maximum, label
-    )
+    original = _open_optional_transaction_component(directory_fd, name, maximum, label)
     try:
         removing = _open_optional_transaction_component(
             directory_fd,
@@ -762,9 +779,7 @@ def _open_transaction_component_for_cleanup(
     if original is not None and removing is not None:
         os.close(original[0])
         os.close(removing[0])
-        raise ValueError(
-            f"{label} and its removal quarantine both exist; recovery is uncertain"
-        )
+        raise ValueError(f"{label} and its removal quarantine both exist; recovery is uncertain")
     if removing is not None:
         return removing, removing_name
     return original, name
@@ -773,19 +788,27 @@ def _open_transaction_component_for_cleanup(
 def _draft_transaction_phase_payload(
     draft_id: str, transaction_id: str, phase: str, manifest_sha256: str
 ) -> bytes:
-    return _canonical_bytes({
-        "draft_id": draft_id,
-        "manifest_sha256": manifest_sha256,
-        "phase": phase,
-        "schema_version": 1,
-        "transaction_id": transaction_id,
-    })
+    return _canonical_bytes(
+        {
+            "draft_id": draft_id,
+            "manifest_sha256": manifest_sha256,
+            "phase": phase,
+            "schema_version": 1,
+            "transaction_id": transaction_id,
+        }
+    )
 
 
 _DRAFT_CLEANUP_KEYS = {
-    "draft_id", "kind", "manifest_sha256", "replacement_dev",
-    "replacement_ino", "replacement_sha256", "repo_root_sha256",
-    "schema_version", "transaction_id",
+    "draft_id",
+    "kind",
+    "manifest_sha256",
+    "replacement_dev",
+    "replacement_ino",
+    "replacement_sha256",
+    "repo_root_sha256",
+    "schema_version",
+    "transaction_id",
 }
 
 
@@ -795,19 +818,19 @@ def _draft_transaction_cleanup_payload(
     manifest: Mapping[str, object],
     manifest_payload: bytes,
 ) -> bytes:
-    return _canonical_bytes({
-        "draft_id": draft_id,
-        "kind": "draft-transaction-cleanup",
-        "manifest_sha256": hashlib.sha256(manifest_payload).hexdigest(),
-        "replacement_dev": manifest["replacement_dev"],
-        "replacement_ino": manifest["replacement_ino"],
-        "replacement_sha256": manifest["replacement_sha256"],
-        "repo_root_sha256": hashlib.sha256(
-            str(root).encode("utf-8")
-        ).hexdigest(),
-        "schema_version": 1,
-        "transaction_id": manifest["transaction_id"],
-    })
+    return _canonical_bytes(
+        {
+            "draft_id": draft_id,
+            "kind": "draft-transaction-cleanup",
+            "manifest_sha256": hashlib.sha256(manifest_payload).hexdigest(),
+            "replacement_dev": manifest["replacement_dev"],
+            "replacement_ino": manifest["replacement_ino"],
+            "replacement_sha256": manifest["replacement_sha256"],
+            "repo_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
+            "schema_version": 1,
+            "transaction_id": manifest["transaction_id"],
+        }
+    )
 
 
 def _validate_draft_transaction_cleanup(
@@ -816,13 +839,11 @@ def _validate_draft_transaction_cleanup(
     cleanup_component,
     canonical_component,
     *,
-    manifest: Optional[Mapping[str, object]] = None,
-    manifest_payload: Optional[bytes] = None,
+    manifest: Mapping[str, object] | None = None,
+    manifest_payload: bytes | None = None,
 ) -> Mapping[str, object]:
     try:
-        cleanup = json.loads(
-            cleanup_component[2].decode("utf-8", errors="strict")
-        )
+        cleanup = json.loads(cleanup_component[2].decode("utf-8", errors="strict"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"draft transaction cleanup phase is invalid: {error}") from error
     if (
@@ -831,8 +852,7 @@ def _validate_draft_transaction_cleanup(
         or cleanup.get("schema_version") != 1
         or cleanup.get("kind") != "draft-transaction-cleanup"
         or cleanup.get("draft_id") != draft_id
-        or cleanup.get("repo_root_sha256")
-        != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+        or cleanup.get("repo_root_sha256") != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
         or not isinstance(cleanup.get("transaction_id"), str)
         or DRAFT_ID_PATTERN.fullmatch(cleanup["transaction_id"]) is None
         or any(
@@ -850,13 +870,9 @@ def _validate_draft_transaction_cleanup(
         raise ValueError("draft transaction cleanup phase identity is invalid")
     if manifest is not None:
         if manifest_payload is None or cleanup_component[2] != (
-            _draft_transaction_cleanup_payload(
-                root, draft_id, manifest, manifest_payload
-            )
+            _draft_transaction_cleanup_payload(root, draft_id, manifest, manifest_payload)
         ):
-            raise ValueError(
-                "draft transaction cleanup phase does not match its manifest"
-            )
+            raise ValueError("draft transaction cleanup phase does not match its manifest")
     if canonical_component is None:
         raise ValueError("draft transaction cleanup phase lost canonical draft")
     canonical_info = canonical_component[1]
@@ -867,12 +883,9 @@ def _validate_draft_transaction_cleanup(
         or canonical_info.st_nlink != 1
         or (canonical_info.st_dev, canonical_info.st_ino)
         != (cleanup["replacement_dev"], cleanup["replacement_ino"])
-        or hashlib.sha256(canonical_payload).hexdigest()
-        != cleanup["replacement_sha256"]
+        or hashlib.sha256(canonical_payload).hexdigest() != cleanup["replacement_sha256"]
     ):
-        raise ValueError(
-            "draft transaction cleanup canonical identity is invalid"
-        )
+        raise ValueError("draft transaction cleanup canonical identity is invalid")
     _validate_transaction_draft_payload(
         canonical_payload,
         root,
@@ -928,9 +941,7 @@ def _rename_noreplace(directory_fd: int, source: str, destination: str) -> None:
         try:
             operation = library.renameat2
         except AttributeError as error:
-            raise OSError(
-                errno.ENOTSUP, "atomic no-replace rename is unavailable"
-            ) from error
+            raise OSError(errno.ENOTSUP, "atomic no-replace rename is unavailable") from error
         operation.argtypes = (
             ctypes.c_int,
             ctypes.c_char_p,
@@ -956,9 +967,7 @@ def _rename_noreplace(directory_fd: int, source: str, destination: str) -> None:
     raise OSError(error_number, os.strerror(error_number), source)
 
 
-def _restore_quarantined_path(
-    directory_fd: int, quarantine_name: str, original_name: str
-) -> bool:
+def _restore_quarantined_path(directory_fd: int, quarantine_name: str, original_name: str) -> bool:
     try:
         os.link(
             quarantine_name,
@@ -970,12 +979,8 @@ def _restore_quarantined_path(
     except (FileExistsError, OSError):
         return False
     try:
-        quarantine_info = os.stat(
-            quarantine_name, dir_fd=directory_fd, follow_symlinks=False
-        )
-        restored_info = os.stat(
-            original_name, dir_fd=directory_fd, follow_symlinks=False
-        )
+        quarantine_info = os.stat(quarantine_name, dir_fd=directory_fd, follow_symlinks=False)
+        restored_info = os.stat(original_name, dir_fd=directory_fd, follow_symlinks=False)
         if not _same_inode(quarantine_info, restored_info):
             return False
         os.unlink(quarantine_name, dir_fd=directory_fd)
@@ -992,7 +997,7 @@ def _unlink_transaction_component(
     maximum: int,
     label: str,
     *,
-    selected_name: Optional[str] = None,
+    selected_name: str | None = None,
 ) -> None:
     if component is None:
         return
@@ -1004,15 +1009,12 @@ def _unlink_transaction_component(
     if payload != expected_payload:
         raise ValueError(f"{label} changed before cleanup")
     try:
-        current = os.stat(
-            selected, dir_fd=directory_fd, follow_symlinks=False
-        )
+        current = os.stat(selected, dir_fd=directory_fd, follow_symlinks=False)
     except OSError as error:
         raise ValueError(f"{label} is unavailable before cleanup: {error}") from error
     if (
         not _same_inode(current, metadata)
-        or _read_bounded_descriptor(descriptor, maximum, label)
-        != expected_payload
+        or _read_bounded_descriptor(descriptor, maximum, label) != expected_payload
     ):
         raise ValueError(f"{label} identity changed before cleanup")
 
@@ -1037,9 +1039,7 @@ def _unlink_transaction_component(
     except ValueError as error:
         restored = _restore_quarantined_path(directory_fd, selected, name)
         qualifier = "restored" if restored else "restoration is uncertain"
-        raise ValueError(
-            f"{label} replacement was quarantined and {qualifier}"
-        ) from error
+        raise ValueError(f"{label} replacement was quarantined and {qualifier}") from error
     if quarantined is None:
         raise ValueError(f"{label} removal quarantine disappeared")
     quarantine_fd = quarantined[0]
@@ -1047,69 +1047,52 @@ def _unlink_transaction_component(
         if (
             not _same_inode(quarantined[1], metadata)
             or quarantined[2] != expected_payload
-            or _read_bounded_descriptor(descriptor, maximum, label)
-            != expected_payload
+            or _read_bounded_descriptor(descriptor, maximum, label) != expected_payload
         ):
             restored = _restore_quarantined_path(directory_fd, selected, name)
             qualifier = "restored" if restored else "restoration is uncertain"
-            raise ValueError(
-                f"{label} replacement was quarantined and {qualifier}"
-            )
+            raise ValueError(f"{label} replacement was quarantined and {qualifier}")
         try:
             os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
         except FileNotFoundError:
             pass
         except OSError as error:
-            raise ValueError(
-                f"{label} canonical cleanup namespace is unsafe: {error}"
-            ) from error
+            raise ValueError(f"{label} canonical cleanup namespace is unsafe: {error}") from error
         else:
-            raise ValueError(
-                f"{label} replacement preserved; recovery is uncertain"
-            )
+            raise ValueError(f"{label} replacement preserved; recovery is uncertain")
         os.unlink(selected, dir_fd=directory_fd)
         try:
             os.stat(selected, dir_fd=directory_fd, follow_symlinks=False)
         except FileNotFoundError:
             pass
         else:
-            raise ValueError(
-                f"{label} quarantine replacement preserved; recovery is uncertain"
-            )
+            raise ValueError(f"{label} quarantine replacement preserved; recovery is uncertain")
         try:
             os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
         except FileNotFoundError:
             pass
         else:
-            raise ValueError(
-                f"{label} late replacement preserved; recovery is uncertain"
-            )
+            raise ValueError(f"{label} late replacement preserved; recovery is uncertain")
         os.fsync(directory_fd)
     finally:
         os.close(quarantine_fd)
 
 
-def _recover_private_draft_transaction_at(
-    root: Path, draft_id: str, directory_fd: int
-) -> None:
+def _recover_private_draft_transaction_at(root: Path, draft_id: str, directory_fd: int) -> None:
     manifest_name = f".{draft_id}.transaction"
     cleanup_name = f".{draft_id}.cleanup"
-    manifest_component, manifest_selected_name = (
-        _open_transaction_component_for_cleanup(
-            directory_fd,
-            manifest_name,
-            _DRAFT_TRANSACTION_MAX_BYTES,
-            "draft transaction manifest",
-        )
+    manifest_component, manifest_selected_name = _open_transaction_component_for_cleanup(
+        directory_fd,
+        manifest_name,
+        _DRAFT_TRANSACTION_MAX_BYTES,
+        "draft transaction manifest",
     )
     try:
-        cleanup_component, cleanup_selected_name = (
-            _open_transaction_component_for_cleanup(
-                directory_fd,
-                cleanup_name,
-                _DRAFT_TRANSACTION_MAX_BYTES,
-                "draft transaction cleanup phase",
-            )
+        cleanup_component, cleanup_selected_name = _open_transaction_component_for_cleanup(
+            directory_fd,
+            cleanup_name,
+            _DRAFT_TRANSACTION_MAX_BYTES,
+            "draft transaction cleanup phase",
         )
     except BaseException:
         if manifest_component is not None:
@@ -1129,9 +1112,7 @@ def _recover_private_draft_transaction_at(
         if canonical is not None:
             opened.append(canonical[0])
         try:
-            _validate_draft_transaction_cleanup(
-                root, draft_id, cleanup_component, canonical
-            )
+            _validate_draft_transaction_cleanup(root, draft_id, cleanup_component, canonical)
             _unlink_transaction_component(
                 directory_fd,
                 cleanup_name,
@@ -1170,8 +1151,10 @@ def _recover_private_draft_transaction_at(
             or any(
                 not isinstance(manifest.get(key), int) or manifest[key] < 0
                 for key in (
-                    "expected_dev", "expected_ino",
-                    "replacement_dev", "replacement_ino",
+                    "expected_dev",
+                    "expected_ino",
+                    "replacement_dev",
+                    "replacement_ino",
                 )
             )
             or any(
@@ -1202,7 +1185,9 @@ def _recover_private_draft_transaction_at(
         )
         components = {
             "canonical": _open_optional_transaction_component(
-                directory_fd, filename, MAX_DRAFT_BYTES,
+                directory_fd,
+                filename,
+                MAX_DRAFT_BYTES,
                 "draft transaction canonical draft",
             )
         }
@@ -1227,13 +1212,11 @@ def _recover_private_draft_transaction_at(
             if component is not None:
                 opened.append(component[0])
         if components["swap"] is not None and (
-            components["swap"][2] != swap_payload
-            or components["swap"][1].st_nlink != 1
+            components["swap"][2] != swap_payload or components["swap"][1].st_nlink != 1
         ):
             raise ValueError("draft transaction swap phase identity is invalid")
         if components["commit"] is not None and (
-            components["commit"][2] != commit_payload
-            or components["commit"][1].st_nlink != 1
+            components["commit"][2] != commit_payload or components["commit"][1].st_nlink != 1
         ):
             raise ValueError("draft transaction commit phase identity is invalid")
         if (
@@ -1244,9 +1227,7 @@ def _recover_private_draft_transaction_at(
             raise ValueError("draft transaction commit phase has no durable swap phase")
 
         expected_inode = (manifest["expected_dev"], manifest["expected_ino"])
-        replacement_inode = (
-            manifest["replacement_dev"], manifest["replacement_ino"]
-        )
+        replacement_inode = (manifest["replacement_dev"], manifest["replacement_ino"])
         expected_payload = replacement_payload = None
         canonical_kind = None
         for name in ("canonical", "anchor", "replacement", "quarantine"):
@@ -1261,10 +1242,7 @@ def _recover_private_draft_transaction_at(
                     expected_payload = component[2]
                 elif expected_payload != component[2]:
                     raise ValueError("draft transaction expected bytes disagree")
-            elif (
-                inode == replacement_inode
-                and digest == manifest["replacement_sha256"]
-            ):
+            elif inode == replacement_inode and digest == manifest["replacement_sha256"]:
                 kind = "replacement"
                 if replacement_payload is None:
                     replacement_payload = component[2]
@@ -1290,28 +1268,22 @@ def _recover_private_draft_transaction_at(
             1
             for name in ("canonical", "anchor", "quarantine")
             if components[name] is not None
-            and (components[name][1].st_dev, components[name][1].st_ino)
-            == expected_inode
+            and (components[name][1].st_dev, components[name][1].st_ino) == expected_inode
         )
         replacement_links = sum(
             1
             for name in ("canonical", "replacement")
             if components[name] is not None
-            and (components[name][1].st_dev, components[name][1].st_ino)
-            == replacement_inode
+            and (components[name][1].st_dev, components[name][1].st_ino) == replacement_inode
         )
         for name in ("canonical", "anchor", "replacement", "quarantine"):
             component = components[name]
             if component is None:
                 continue
             inode = (component[1].st_dev, component[1].st_ino)
-            expected_count = (
-                expected_links if inode == expected_inode else replacement_links
-            )
+            expected_count = expected_links if inode == expected_inode else replacement_links
             if component[1].st_nlink != expected_count:
-                raise ValueError(
-                    f"draft transaction {name} has an unbound hard-link identity"
-                )
+                raise ValueError(f"draft transaction {name} has an unbound hard-link identity")
 
         def remove(name: str, payload: bytes, maximum: int, label: str) -> None:
             _unlink_transaction_component(
@@ -1327,8 +1299,11 @@ def _recover_private_draft_transaction_at(
 
         def remove_manifest() -> None:
             _unlink_transaction_component(
-                directory_fd, manifest_name, manifest_component,
-                manifest_payload, _DRAFT_TRANSACTION_MAX_BYTES,
+                directory_fd,
+                manifest_name,
+                manifest_component,
+                manifest_payload,
+                _DRAFT_TRANSACTION_MAX_BYTES,
                 "draft transaction manifest",
                 selected_name=manifest_selected_name,
             )
@@ -1349,31 +1324,43 @@ def _recover_private_draft_transaction_at(
         def finish_rollback() -> None:
             if components["replacement"] is not None:
                 remove(
-                    "replacement", components["replacement"][2], MAX_DRAFT_BYTES,
+                    "replacement",
+                    components["replacement"][2],
+                    MAX_DRAFT_BYTES,
                     "draft transaction replacement",
                 )
             if components["quarantine"] is not None:
                 remove(
-                    "quarantine", components["quarantine"][2], MAX_DRAFT_BYTES,
+                    "quarantine",
+                    components["quarantine"][2],
+                    MAX_DRAFT_BYTES,
                     "draft transaction quarantine",
                 )
             if components["anchor"] is not None:
                 remove(
-                    "anchor", components["anchor"][2], MAX_DRAFT_BYTES,
+                    "anchor",
+                    components["anchor"][2],
+                    MAX_DRAFT_BYTES,
                     "draft transaction expected anchor",
                 )
             if components["commit"] is not None:
                 remove(
-                    "commit", commit_payload, 1024,
+                    "commit",
+                    commit_payload,
+                    1024,
                     "draft transaction commit phase",
                 )
             if components["swap"] is not None:
                 remove(
-                    "swap", swap_payload, 1024,
+                    "swap",
+                    swap_payload,
+                    1024,
                     "draft transaction swap phase",
                 )
             canonical = _open_optional_transaction_component(
-                directory_fd, filename, MAX_DRAFT_BYTES,
+                directory_fd,
+                filename,
+                MAX_DRAFT_BYTES,
                 "restored canonical draft",
             )
             if canonical is None:
@@ -1381,8 +1368,7 @@ def _recover_private_draft_transaction_at(
             opened.append(canonical[0])
             if (
                 (canonical[1].st_dev, canonical[1].st_ino) != expected_inode
-                or hashlib.sha256(canonical[2]).hexdigest()
-                != manifest["expected_sha256"]
+                or hashlib.sha256(canonical[2]).hexdigest() != manifest["expected_sha256"]
                 or canonical[1].st_nlink != 1
             ):
                 raise ValueError("draft transaction rollback identity is uncertain")
@@ -1399,20 +1385,21 @@ def _recover_private_draft_transaction_at(
                 manifest_payload=manifest_payload,
             )
             if canonical_kind != "replacement" or any(
-                components[name] is not None
-                for name in ("replacement", "quarantine", "anchor")
+                components[name] is not None for name in ("replacement", "quarantine", "anchor")
             ):
-                raise ValueError(
-                    "draft transaction cleanup phase artifacts are inconsistent"
-                )
+                raise ValueError("draft transaction cleanup phase artifacts are inconsistent")
             if components["commit"] is not None:
                 remove(
-                    "commit", commit_payload, 1024,
+                    "commit",
+                    commit_payload,
+                    1024,
                     "draft transaction commit phase",
                 )
             if components["swap"] is not None:
                 remove(
-                    "swap", swap_payload, 1024,
+                    "swap",
+                    swap_payload,
+                    1024,
                     "draft transaction swap phase",
                 )
             remove_manifest()
@@ -1434,15 +1421,18 @@ def _recover_private_draft_transaction_at(
             if components["replacement"] is not None:
                 replacement = components["replacement"]
                 current = os.stat(
-                    component_paths["replacement"], dir_fd=directory_fd,
+                    component_paths["replacement"],
+                    dir_fd=directory_fd,
                     follow_symlinks=False,
                 )
                 if not _same_inode(current, replacement[1]):
                     raise ValueError("draft transaction replacement changed before recovery")
                 try:
                     os.link(
-                        component_paths["replacement"], filename,
-                        src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                        component_paths["replacement"],
+                        filename,
+                        src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd,
                         follow_symlinks=False,
                     )
                 except FileExistsError as error:
@@ -1450,24 +1440,25 @@ def _recover_private_draft_transaction_at(
                         "competing canonical draft preserved; recovery is uncertain"
                     ) from error
                 canonical = _open_optional_transaction_component(
-                    directory_fd, filename, MAX_DRAFT_BYTES,
+                    directory_fd,
+                    filename,
+                    MAX_DRAFT_BYTES,
                     "recovered canonical draft",
                 )
                 if canonical is None:
                     raise ValueError("replacement publication recovery failed")
                 opened.append(canonical[0])
-                if (
-                    not _same_inode(canonical[1], replacement[1])
-                    or canonical[2] != replacement[2]
-                ):
+                if not _same_inode(canonical[1], replacement[1]) or canonical[2] != replacement[2]:
                     raise ValueError("replacement publication recovery is uncertain")
                 components["canonical"] = canonical
                 canonical_kind = "replacement"
                 os.fsync(directory_fd)
             else:
                 source_name = (
-                    "quarantine" if components["quarantine"] is not None
-                    else "anchor" if components["anchor"] is not None
+                    "quarantine"
+                    if components["quarantine"] is not None
+                    else "anchor"
+                    if components["anchor"] is not None
                     else None
                 )
                 if source_name is None:
@@ -1475,8 +1466,10 @@ def _recover_private_draft_transaction_at(
                 source = components[source_name]
                 try:
                     os.link(
-                        component_paths[source_name], filename,
-                        src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                        component_paths[source_name],
+                        filename,
+                        src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd,
                         follow_symlinks=False,
                     )
                 except FileExistsError as error:
@@ -1484,7 +1477,9 @@ def _recover_private_draft_transaction_at(
                         "competing canonical draft preserved; recovery is uncertain"
                     ) from error
                 restored = _open_optional_transaction_component(
-                    directory_fd, filename, MAX_DRAFT_BYTES,
+                    directory_fd,
+                    filename,
+                    MAX_DRAFT_BYTES,
                     "restored canonical draft",
                 )
                 if restored is None or not _same_inode(restored[1], source[1]):
@@ -1502,12 +1497,16 @@ def _recover_private_draft_transaction_at(
         if replacement_payload is None:
             replacement_payload = canonical[2]
             _validate_transaction_draft_payload(
-                replacement_payload, root, draft_id,
+                replacement_payload,
+                root,
+                draft_id,
                 "draft transaction replacement artifact",
             )
         if components["commit"] is None:
             commit_fd, commit_info = _write_private_transaction_component(
-                directory_fd, names["commit"], commit_payload,
+                directory_fd,
+                names["commit"],
+                commit_payload,
                 "draft transaction commit phase",
             )
             opened.append(commit_fd)
@@ -1516,22 +1515,19 @@ def _recover_private_draft_transaction_at(
         for name, payload, maximum, label in (
             (
                 "replacement",
-                components["replacement"][2]
-                if components["replacement"] is not None else b"",
+                components["replacement"][2] if components["replacement"] is not None else b"",
                 MAX_DRAFT_BYTES,
                 "draft transaction replacement",
             ),
             (
                 "quarantine",
-                components["quarantine"][2]
-                if components["quarantine"] is not None else b"",
+                components["quarantine"][2] if components["quarantine"] is not None else b"",
                 MAX_DRAFT_BYTES,
                 "draft transaction quarantine",
             ),
             (
                 "anchor",
-                components["anchor"][2]
-                if components["anchor"] is not None else b"",
+                components["anchor"][2] if components["anchor"] is not None else b"",
                 MAX_DRAFT_BYTES,
                 "draft transaction expected anchor",
             ),
@@ -1539,17 +1535,17 @@ def _recover_private_draft_transaction_at(
             if components[name] is not None:
                 remove(name, payload, maximum, label)
         final_canonical = _open_optional_transaction_component(
-            directory_fd, filename, MAX_DRAFT_BYTES,
+            directory_fd,
+            filename,
+            MAX_DRAFT_BYTES,
             "committed canonical draft",
         )
         if final_canonical is None:
             raise ValueError("draft transaction commit lost canonical draft")
         opened.append(final_canonical[0])
         if (
-            (final_canonical[1].st_dev, final_canonical[1].st_ino)
-            != replacement_inode
-            or hashlib.sha256(final_canonical[2]).hexdigest()
-            != manifest["replacement_sha256"]
+            (final_canonical[1].st_dev, final_canonical[1].st_ino) != replacement_inode
+            or hashlib.sha256(final_canonical[2]).hexdigest() != manifest["replacement_sha256"]
             or final_canonical[1].st_nlink != 1
         ):
             raise ValueError("draft transaction committed identity is uncertain")
@@ -1618,30 +1614,37 @@ def _cas_replace_private_draft(
                 not stat.S_ISREG(current_info.st_mode)
                 or stat.S_IMODE(current_info.st_mode) != 0o600
                 or current_info.st_nlink != 1
-                or _read_bounded_descriptor(
-                    current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-                ) != expected_payload
+                or _read_bounded_descriptor(current_fd, MAX_DRAFT_BYTES, "trace transaction draft")
+                != expected_payload
             ):
                 raise ValueError("trace transaction changed before receipt binding")
             _validate_transaction_draft_payload(
                 expected_payload, root, draft_id, "trace transaction expected"
             )
             _validate_transaction_draft_payload(
-                replacement_payload, root, draft_id,
+                replacement_payload,
+                root,
+                draft_id,
                 "trace transaction replacement",
             )
 
             temporary_fd, temporary_info = _write_private_transaction_component(
-                directory_fd, temporary_name, replacement_payload,
+                directory_fd,
+                temporary_name,
+                replacement_payload,
                 "draft transaction replacement",
             )
             os.link(
-                filename, anchor_name,
-                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                filename,
+                anchor_name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
                 follow_symlinks=False,
             )
             anchor = _open_optional_transaction_component(
-                directory_fd, anchor_name, MAX_DRAFT_BYTES,
+                directory_fd,
+                anchor_name,
+                MAX_DRAFT_BYTES,
                 "draft transaction expected anchor",
             )
             if (
@@ -1654,75 +1657,75 @@ def _cas_replace_private_draft(
             manifest = {
                 "schema_version": 1,
                 "draft_id": draft_id,
-                "repo_root_sha256": hashlib.sha256(
-                    str(root).encode("utf-8")
-                ).hexdigest(),
+                "repo_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
                 "transaction_id": token,
                 "expected_sha256": hashlib.sha256(expected_payload).hexdigest(),
                 "expected_dev": current_info.st_dev,
                 "expected_ino": current_info.st_ino,
-                "replacement_sha256": hashlib.sha256(
-                    replacement_payload
-                ).hexdigest(),
+                "replacement_sha256": hashlib.sha256(replacement_payload).hexdigest(),
                 "replacement_dev": temporary_info.st_dev,
                 "replacement_ino": temporary_info.st_ino,
             }
             manifest_payload = _canonical_bytes(manifest)
             manifest_fd, _ = _write_private_transaction_component(
-                directory_fd, manifest_name, manifest_payload,
+                directory_fd,
+                manifest_name,
+                manifest_payload,
                 "draft transaction manifest",
             )
             os.fsync(directory_fd)
             transaction_durable = True
             swap_payload = _draft_transaction_phase_payload(
-                draft_id, token, "swap",
+                draft_id,
+                token,
+                "swap",
                 hashlib.sha256(manifest_payload).hexdigest(),
             )
             swap_fd, _ = _write_private_transaction_component(
-                directory_fd, swap_name, swap_payload,
+                directory_fd,
+                swap_name,
+                swap_payload,
                 "draft transaction swap phase",
             )
             os.fsync(directory_fd)
 
-            current_path_info = os.stat(
-                filename, dir_fd=directory_fd, follow_symlinks=False
-            )
+            current_path_info = os.stat(filename, dir_fd=directory_fd, follow_symlinks=False)
             if (
                 not _same_inode(current_path_info, current_info)
-                or _read_bounded_descriptor(
-                    current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-                ) != expected_payload
+                or _read_bounded_descriptor(current_fd, MAX_DRAFT_BYTES, "trace transaction draft")
+                != expected_payload
             ):
                 raise ValueError("trace transaction changed before receipt binding")
             _rename_noreplace(directory_fd, filename, quarantine_name)
-            quarantine_fd = os.open(
-                quarantine_name, read_flags, dir_fd=directory_fd
-            )
+            quarantine_fd = os.open(quarantine_name, read_flags, dir_fd=directory_fd)
             quarantine_info = os.fstat(quarantine_fd)
             if (
                 not _same_inode(quarantine_info, current_info)
                 or _read_bounded_descriptor(
                     quarantine_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-                ) != expected_payload
-            ):
-                raise ValueError(
-                    "trace transaction changed after durable quarantine"
                 )
+                != expected_payload
+            ):
+                raise ValueError("trace transaction changed after durable quarantine")
             replacement_path_info = os.stat(
                 temporary_name, dir_fd=directory_fd, follow_symlinks=False
             )
             if (
                 not _same_inode(replacement_path_info, temporary_info)
                 or _read_bounded_descriptor(
-                    temporary_fd, MAX_DRAFT_BYTES,
+                    temporary_fd,
+                    MAX_DRAFT_BYTES,
                     "draft transaction replacement",
-                ) != replacement_payload
+                )
+                != replacement_payload
             ):
                 raise ValueError("draft transaction replacement changed")
             try:
                 os.link(
-                    temporary_name, filename,
-                    src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                    temporary_name,
+                    filename,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
                     follow_symlinks=False,
                 )
             except FileExistsError as error:
@@ -1730,7 +1733,9 @@ def _cas_replace_private_draft(
                     "competing trace transaction preserved; recovery is uncertain"
                 ) from error
             published = _open_optional_transaction_component(
-                directory_fd, filename, MAX_DRAFT_BYTES,
+                directory_fd,
+                filename,
+                MAX_DRAFT_BYTES,
                 "published transaction draft",
             )
             if (
@@ -1808,8 +1813,7 @@ def _cas_replace_private_draft(
         os.close(directory_fd)
         if cleanup_error is not None:
             raise ValueError(
-                f"pre-manifest draft transaction cleanup is uncertain: "
-                f"{cleanup_error}"
+                f"pre-manifest draft transaction cleanup is uncertain: {cleanup_error}"
             )
 
 
@@ -1821,8 +1825,14 @@ COMPACT_MAX_PATHS = 16
 COMPACT_MAX_FRONTIER = 16
 COMPACT_MAX_BYTES = 24_000
 _COMPACT_RISK_ORDER = (
-    "authorization/privacy", "interfaces", "data", "state/concurrency",
-    "compatibility", "operations", "regression", "functionality",
+    "authorization/privacy",
+    "interfaces",
+    "data",
+    "state/concurrency",
+    "compatibility",
+    "operations",
+    "regression",
+    "functionality",
     "legal/policy",
 )
 _COMPACT_RISK_RANK = {name: index for index, name in enumerate(_COMPACT_RISK_ORDER)}
@@ -1830,9 +1840,7 @@ _COMPACT_RISK_RANK = {name: index for index, name in enumerate(_COMPACT_RISK_ORD
 
 def _compact_node_rank(row: Mapping[str, object]) -> tuple[int, str]:
     domains = row.get("risk_domains", ())
-    best = min(
-        (_COMPACT_RISK_RANK.get(domain, 99) for domain in domains), default=99
-    )
+    best = min((_COMPACT_RISK_RANK.get(domain, 99) for domain in domains), default=99)
     return (best, str(row["id"]))
 
 
@@ -1876,9 +1884,14 @@ def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list,
 
 
 def _compact_size(value: Mapping[str, object]) -> int:
-    return len(json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode("utf-8"))
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
 
 
 def _enforce_compact_byte_budget(compact: dict[str, object]) -> None:
@@ -1891,16 +1904,16 @@ def _enforce_compact_byte_budget(compact: dict[str, object]) -> None:
     summary = compact["summary"]
     truncated = summary["truncated"]
     while _compact_size(compact) > COMPACT_MAX_BYTES:
-        referenced = {
-            node["key"]
-            for path in compact["paths"]
-            for node in path["nodes"]
-        }
+        referenced = {node["key"] for path in compact["paths"] for node in path["nodes"]}
         referenced.update(row["node_key"] for row in compact["frontier"])
-        removable = next((
-            index for index in range(len(compact["nodes"]) - 1, -1, -1)
-            if compact["nodes"][index]["key"] not in referenced
-        ), None)
+        removable = next(
+            (
+                index
+                for index in range(len(compact["nodes"]) - 1, -1, -1)
+                if compact["nodes"][index]["key"] not in referenced
+            ),
+            None,
+        )
         if removable is not None:
             compact["nodes"].pop(removable)
             truncated["nodes"] += 1
@@ -1923,21 +1936,24 @@ def _enforce_compact_byte_budget(compact: dict[str, object]) -> None:
 def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
-    selected_nodes, selected_paths, selected_frontier, truncated = (
-        _compact_selection(receipt)
-    )
+    selected_nodes, selected_paths, selected_frontier, truncated = _compact_selection(receipt)
     compact = {
         "providers": [
             {
-                "name": row["name"], "status": row["status"],
-                "confidence": row["confidence"], "version": row["version"],
+                "name": row["name"],
+                "status": row["status"],
+                "confidence": row["confidence"],
+                "version": row["version"],
             }
             for row in receipt["providers"]
         ],
         "nodes": [
             {
-                "key": row["id"], "kind": row["kind"], "label": row["label"],
-                "location": row["location"], "confidence": row["confidence"],
+                "key": row["id"],
+                "kind": row["kind"],
+                "label": row["label"],
+                "location": row["location"],
+                "confidence": row["confidence"],
                 "risk_domains": list(row["risk_domains"]),
             }
             for row in selected_nodes
@@ -1947,14 +1963,16 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
                 "key": row["id"],
                 "nodes": [
                     {
-                        "key": node_id, "label": nodes[node_id]["label"],
+                        "key": node_id,
+                        "label": nodes[node_id]["label"],
                         "location": nodes[node_id]["location"],
                     }
                     for node_id in row["nodes"]
                 ],
                 "edges": [
                     {
-                        "key": edge_id, "kind": edges[edge_id]["kind"],
+                        "key": edge_id,
+                        "kind": edges[edge_id]["kind"],
                         "confidence": edges[edge_id]["confidence"],
                     }
                     for edge_id in row["edges"]
@@ -1966,14 +1984,16 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
         ],
         "frontier": [
             {
-                "key": row["id"], "node_key": row["node"],
+                "key": row["id"],
+                "node_key": row["node"],
                 "reason": row["reason"],
                 "risk_domains": list(row["risk_domains"]),
             }
             for row in selected_frontier
         ],
         "summary": {
-            "nodes": len(receipt["nodes"]), "edges": len(receipt["edges"]),
+            "nodes": len(receipt["nodes"]),
+            "edges": len(receipt["edges"]),
             "paths": len(receipt["paths"]),
             "unknown_frontiers": len(receipt["frontier"]),
             "timings_ms": dict(receipt["timings_ms"]),
@@ -1987,21 +2007,16 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
 
 def _source_inventory_sha256(source_digests: Mapping[str, str]) -> str:
     payload = json.dumps(
-        dict(source_digests), ensure_ascii=False, sort_keys=True,
-        separators=(",", ":")
+        dict(source_digests), ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
 def _receipt_source_inventory(
     root: Path, receipt: Mapping[str, object]
-) -> tuple[str, dict[str, str], str, bool, Optional[str]]:
+) -> tuple[str, dict[str, str], str, bool, str | None]:
     key = receipt.get("cache", {}).get("key")
-    if (
-        not isinstance(key, str)
-        or re.fullmatch(r"[0-9a-f]{64}", key) is None
-        or key == "0" * 64
-    ):
+    if not isinstance(key, str) or re.fullmatch(r"[0-9a-f]{64}", key) is None or key == "0" * 64:
         raise ValueError("graph receipt has no verifiable source inventory cache")
     cache_dir = GRAPH_COORDINATOR.CACHE._cache_directory(root, False)
     if cache_dir is None:
@@ -2010,22 +2025,16 @@ def _receipt_source_inventory(
     if artifact is None:
         raise ValueError("graph source inventory cache is invalid")
     try:
-        source_digests = GRAPH_COORDINATOR.CACHE._source_digests(
-            artifact["source_digests"]
-        )
+        source_digests = GRAPH_COORDINATOR.CACHE._source_digests(artifact["source_digests"])
         identity = artifact["identity"]
-        cached_receipt, _ = GRAPH_COORDINATOR.CACHE._normalize_receipt(
-            artifact["receipt"]
-        )
+        cached_receipt, _ = GRAPH_COORDINATOR.CACHE._normalize_receipt(artifact["receipt"])
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("graph source inventory cache is invalid") from error
     if (
         not isinstance(identity, dict)
         or set(identity) != GRAPH_COORDINATOR.CACHE._IDENTITY_FIELDS
         or identity.get("source_digests") != source_digests
-        or hashlib.sha256(
-            GRAPH_COORDINATOR.CACHE._canonical_json(identity)
-        ).hexdigest() != key
+        or hashlib.sha256(GRAPH_COORDINATOR.CACHE._canonical_json(identity)).hexdigest() != key
     ):
         raise ValueError("graph source inventory cache identity is invalid")
     complete = identity.get("source_inventory_complete")
@@ -2037,8 +2046,7 @@ def _receipt_source_inventory(
             not complete
             and reason not in {"deadline", "collection-limit", "traversal", "unreadable-source"}
         )
-        or identity.get("repo_root_sha256")
-        != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+        or identity.get("repo_root_sha256") != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
         or identity.get("settings") != receipt.get("settings")
         or identity.get("providers") != receipt.get("providers")
         or any(
@@ -2048,15 +2056,26 @@ def _receipt_source_inventory(
     ):
         raise ValueError("graph source inventory cache identity is invalid")
     stable_fields = (
-        "receipt_id", "draft_id", "repo_root_sha256", "request_sha256",
-        "settings", "providers", "nodes", "edges", "paths", "frontier",
+        "receipt_id",
+        "draft_id",
+        "repo_root_sha256",
+        "request_sha256",
+        "settings",
+        "providers",
+        "nodes",
+        "edges",
+        "paths",
+        "frontier",
         "budget_status",
     )
     if any(cached_receipt.get(name) != receipt.get(name) for name in stable_fields):
         raise ValueError("graph source inventory cache does not match receipt")
     return (
-        key, source_digests, _source_inventory_sha256(source_digests),
-        complete, reason,
+        key,
+        source_digests,
+        _source_inventory_sha256(source_digests),
+        complete,
+        reason,
     )
 
 
@@ -2065,7 +2084,7 @@ def _verify_source_inventory(
     graph_settings: Mapping[str, object],
     expected_digests: Mapping[str, str],
     expected_complete: bool,
-    expected_reason: Optional[str],
+    expected_reason: str | None,
     receipt: Mapping[str, object],
     *,
     deadline=None,
@@ -2073,29 +2092,29 @@ def _verify_source_inventory(
 ) -> None:
     expected = GRAPH_COORDINATOR.CACHE._source_digests(expected_digests)
     if deadline is None:
-        deadline = GRAPH_COORDINATOR.Deadline(
-            time, int(graph_settings["max_seconds"])
-        )
+        deadline = GRAPH_COORDINATOR.Deadline(time, int(graph_settings["max_seconds"]))
     current = GRAPH_COORDINATOR._collect_source_digests(root, deadline)
     if expected_complete:
         stale = not current.complete or dict(current.digests) != expected
     else:
         if receipt.get("budget_status") == "closed" or not receipt.get("frontier"):
-            raise ValueError(
-                "incomplete source inventory requires a visible unknown frontier"
-            )
-        stale = any(
-            current.digests.get(path) != digest
-            for path, digest in expected.items()
-        )
+            raise ValueError("incomplete source inventory requires a visible unknown frontier")
+        stale = any(current.digests.get(path) != digest for path, digest in expected.items())
     if stale:
         raise ValueError(stale_message)
 
 
 TRACE_INTENT_KEYS = {
-    "schema_version", "intent_id", "draft_id", "repo_root_sha256",
-    "request_sha256", "settings", "seeds", "source_inventory_sha256",
-    "source_inventory_complete", "source_inventory_reason",
+    "schema_version",
+    "intent_id",
+    "draft_id",
+    "repo_root_sha256",
+    "request_sha256",
+    "settings",
+    "seeds",
+    "source_inventory_sha256",
+    "source_inventory_complete",
+    "source_inventory_reason",
 }
 
 
@@ -2119,7 +2138,7 @@ def _trace_intent_sha256(intent: Mapping[str, object]) -> str:
 def _new_trace_intent(
     root: Path,
     draft: Mapping[str, object],
-    seeds: Tuple[TraceSeed, ...],
+    seeds: tuple[TraceSeed, ...],
     graph_settings: Mapping[str, object],
     source_inventory,
 ) -> dict[str, object]:
@@ -2127,21 +2146,16 @@ def _new_trace_intent(
         "schema_version": 1,
         "intent_id": secrets.token_hex(16),
         "draft_id": draft["draft_id"],
-        "repo_root_sha256": hashlib.sha256(
-            str(root).encode("utf-8")
-        ).hexdigest(),
+        "repo_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
         "settings": dict(graph_settings),
-        "seeds": [
-            {"term": seed.term, "location": seed.location} for seed in seeds
-        ],
-        "source_inventory_sha256": _source_inventory_sha256(
-            source_inventory.digests
-        ),
+        "seeds": [{"term": seed.term, "location": seed.location} for seed in seeds],
+        "source_inventory_sha256": _source_inventory_sha256(source_inventory.digests),
         "source_inventory_complete": source_inventory.complete,
         "source_inventory_reason": source_inventory.reason,
     }
     intent["request_sha256"] = GRAPH_COORDINATOR._request_sha256(
-        _graph_trace_draft_identity(draft, intent), seeds,
+        _graph_trace_draft_identity(draft, intent),
+        seeds,
         GRAPH_COORDINATOR._settings(graph_settings),
     )
     return intent
@@ -2150,22 +2164,19 @@ def _new_trace_intent(
 def _validate_trace_intent(
     root: Path,
     draft: Mapping[str, object],
-    seeds: Tuple[TraceSeed, ...],
+    seeds: tuple[TraceSeed, ...],
     graph_settings: Mapping[str, object],
     intent: object,
 ) -> dict[str, object]:
     if not isinstance(intent, dict) or set(intent) != TRACE_INTENT_KEYS:
         raise ValueError("pre-publication trace intent is invalid")
-    expected_seeds = [
-        {"term": seed.term, "location": seed.location} for seed in seeds
-    ]
+    expected_seeds = [{"term": seed.term, "location": seed.location} for seed in seeds]
     if (
         intent.get("schema_version") != 1
         or not isinstance(intent.get("intent_id"), str)
         or DRAFT_ID_PATTERN.fullmatch(intent["intent_id"]) is None
         or intent.get("draft_id") != draft.get("draft_id")
-        or intent.get("repo_root_sha256")
-        != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+        or intent.get("repo_root_sha256") != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
         or intent.get("settings") != graph_settings
         or intent.get("seeds") != expected_seeds
         or not isinstance(intent.get("source_inventory_complete"), bool)
@@ -2179,13 +2190,12 @@ def _validate_trace_intent(
             not in {"deadline", "collection-limit", "traversal", "unreadable-source"}
         )
         or not isinstance(intent.get("source_inventory_sha256"), str)
-        or re.fullmatch(
-            r"[0-9a-f]{64}", intent["source_inventory_sha256"]
-        ) is None
+        or re.fullmatch(r"[0-9a-f]{64}", intent["source_inventory_sha256"]) is None
     ):
         raise ValueError("pre-publication trace intent identity is invalid")
     expected_request = GRAPH_COORDINATOR._request_sha256(
-        _graph_trace_draft_identity(draft, intent), seeds,
+        _graph_trace_draft_identity(draft, intent),
+        seeds,
         GRAPH_COORDINATOR._settings(graph_settings),
     )
     if intent.get("request_sha256") != expected_request:
@@ -2284,17 +2294,17 @@ def _remove_exact_trace_receipt(
     quarantine_info = None
     guard_claimed = False
     guard_info = None
-    guard_payload = _canonical_bytes({
-        "draft_id": draft_id,
-        "kind": "stale-receipt-cleanup-guard",
-        "repo_root_sha256": hashlib.sha256(
-            str(root).encode("utf-8")
-        ).hexdigest(),
-        "receipt_sha256": hashlib.sha256(expected_payload).hexdigest(),
-        "schema_version": 1,
-        "trace_intent_sha256": guard_intent_sha256,
-        "transaction_id": cleanup_id,
-    })
+    guard_payload = _canonical_bytes(
+        {
+            "draft_id": draft_id,
+            "kind": "stale-receipt-cleanup-guard",
+            "repo_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
+            "receipt_sha256": hashlib.sha256(expected_payload).hexdigest(),
+            "schema_version": 1,
+            "trace_intent_sha256": guard_intent_sha256,
+            "transaction_id": cleanup_id,
+        }
+    )
 
     def restore_quarantine() -> bool:
         nonlocal quarantined
@@ -2316,8 +2326,10 @@ def _remove_exact_trace_receipt(
                     return False
                 opened_here = component[0]
             os.link(
-                quarantine_name, filename,
-                src_dir_fd=graph_fd, dst_dir_fd=graph_fd,
+                quarantine_name,
+                filename,
+                src_dir_fd=graph_fd,
+                dst_dir_fd=graph_fd,
                 follow_symlinks=False,
             )
         except FileExistsError:
@@ -2344,17 +2356,14 @@ def _remove_exact_trace_receipt(
         if not guard_claimed:
             return True
         try:
-            current = os.stat(
-                filename, dir_fd=graph_fd, follow_symlinks=False
-            )
+            current = os.stat(filename, dir_fd=graph_fd, follow_symlinks=False)
         except FileNotFoundError:
             return False
         if (
             guard_info is None
             or not _same_inode(current, guard_info)
-            or _read_bounded_descriptor(
-                guard_fd, 1024, "stale cleanup namespace guard"
-            ) != guard_payload
+            or _read_bounded_descriptor(guard_fd, 1024, "stale cleanup namespace guard")
+            != guard_payload
         ):
             return False
         try:
@@ -2372,9 +2381,7 @@ def _remove_exact_trace_receipt(
         return True
 
     try:
-        base_fd = _open_existing_directory_at(
-            root_fd, ".requirements-impact-refiner"
-        )
+        base_fd = _open_existing_directory_at(root_fd, ".requirements-impact-refiner")
         graph_fd = _open_existing_directory_at(base_fd, "graph")
         read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         receipt_fd = os.open(filename, read_flags, dir_fd=graph_fd)
@@ -2385,7 +2392,8 @@ def _remove_exact_trace_receipt(
             or receipt_info.st_nlink != 1
             or _read_bounded_descriptor(
                 receipt_fd, GRAPH.MAX_RECEIPT_BYTES, "stale cleanup receipt"
-            ) != expected_payload
+            )
+            != expected_payload
         ):
             raise ValueError("stale cleanup target changed or is unsafe")
 
@@ -2393,18 +2401,16 @@ def _remove_exact_trace_receipt(
         quarantined = True
         quarantine_fd = os.open(quarantine_name, read_flags, dir_fd=graph_fd)
         quarantine_info = os.fstat(quarantine_fd)
-        if (
-            (quarantine_info.st_dev, quarantine_info.st_ino)
-            != (receipt_info.st_dev, receipt_info.st_ino)
-            or _read_bounded_descriptor(
-                quarantine_fd, GRAPH.MAX_RECEIPT_BYTES,
-                "stale cleanup quarantine",
-            ) != expected_payload
-        ):
+        if (quarantine_info.st_dev, quarantine_info.st_ino) != (
+            receipt_info.st_dev,
+            receipt_info.st_ino,
+        ) or _read_bounded_descriptor(
+            quarantine_fd,
+            GRAPH.MAX_RECEIPT_BYTES,
+            "stale cleanup quarantine",
+        ) != expected_payload:
             if not restore_quarantine():
-                raise ValueError(
-                    "stale cleanup quarantine changed; restoration is uncertain"
-                )
+                raise ValueError("stale cleanup quarantine changed; restoration is uncertain")
             raise ValueError("stale cleanup quarantine changed before removal")
 
         try:
@@ -2412,25 +2418,18 @@ def _remove_exact_trace_receipt(
         except FileNotFoundError:
             pass
         else:
-            raise ValueError(
-                "stale cleanup replacement preserved; removal is uncertain"
-            )
+            raise ValueError("stale cleanup replacement preserved; removal is uncertain")
         guard_fd, guard_info = _write_private_transaction_component(
-            graph_fd, filename, guard_payload,
+            graph_fd,
+            filename,
+            guard_payload,
             "stale cleanup namespace guard",
         )
         guard_claimed = True
         os.fsync(graph_fd)
-        final_info = os.stat(
-            quarantine_name, dir_fd=graph_fd, follow_symlinks=False
-        )
-        if (
-            (final_info.st_dev, final_info.st_ino)
-            != (receipt_info.st_dev, receipt_info.st_ino)
-        ):
-            raise ValueError(
-                "stale cleanup quarantine identity is uncertain"
-            )
+        final_info = os.stat(quarantine_name, dir_fd=graph_fd, follow_symlinks=False)
+        if (final_info.st_dev, final_info.st_ino) != (receipt_info.st_dev, receipt_info.st_ino):
+            raise ValueError("stale cleanup quarantine identity is uncertain")
         _unlink_transaction_component(
             graph_fd,
             quarantine_name,
@@ -2442,43 +2441,36 @@ def _remove_exact_trace_receipt(
         quarantined = False
         os.fsync(graph_fd)
         if not release_guard():
-            raise ValueError(
-                "stale cleanup late replacement preserved; cleanup is uncertain"
-            )
+            raise ValueError("stale cleanup late replacement preserved; cleanup is uncertain")
         os.fsync(graph_fd)
         if commit is not None:
             commit()
     except ValueError as error:
         if guard_claimed and not release_guard():
-            raise ValueError(
-                "stale cleanup replacement preserved; cleanup is uncertain"
-            ) from error
+            raise ValueError("stale cleanup replacement preserved; cleanup is uncertain") from error
         if quarantined and not restore_quarantine():
-            raise ValueError(
-                "stale cleanup failed; quarantine restoration is uncertain"
-            )
+            raise ValueError("stale cleanup failed; quarantine restoration is uncertain") from error
         raise
     except OSError as error:
         if guard_claimed and not release_guard():
-            raise ValueError(
-                "stale cleanup replacement preserved; cleanup is uncertain"
-            ) from error
+            raise ValueError("stale cleanup replacement preserved; cleanup is uncertain") from error
         if quarantined and not restore_quarantine():
-            raise ValueError(
-                "stale cleanup failed; quarantine restoration is uncertain"
-            ) from error
+            raise ValueError("stale cleanup failed; quarantine restoration is uncertain") from error
         raise ValueError(f"stale cleanup target is unsafe: {error}") from error
     finally:
-        for descriptor in (
-            guard_fd, quarantine_fd, receipt_fd, graph_fd, base_fd, root_fd
-        ):
+        for descriptor in (guard_fd, quarantine_fd, receipt_fd, graph_fd, base_fd, root_fd):
             if descriptor is not None:
                 os.close(descriptor)
 
 
 _STALE_CLEANUP_GUARD_KEYS = {
-    "draft_id", "kind", "repo_root_sha256", "receipt_sha256",
-    "schema_version", "trace_intent_sha256", "transaction_id",
+    "draft_id",
+    "kind",
+    "repo_root_sha256",
+    "receipt_sha256",
+    "schema_version",
+    "trace_intent_sha256",
+    "transaction_id",
 }
 
 
@@ -2494,9 +2486,7 @@ def _recover_stale_cleanup_guard(
     base_fd = graph_fd = None
     opened = []
     try:
-        base_fd = _open_existing_directory_at(
-            root_fd, ".requirements-impact-refiner"
-        )
+        base_fd = _open_existing_directory_at(root_fd, ".requirements-impact-refiner")
         try:
             graph_fd = _open_existing_directory_at(base_fd, "graph")
         except ValueError as error:
@@ -2517,9 +2507,7 @@ def _recover_stale_cleanup_guard(
             value = json.loads(guard[2].decode("utf-8", errors="strict"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return False
-        if not isinstance(value, dict) or value.get("kind") != (
-            "stale-receipt-cleanup-guard"
-        ):
+        if not isinstance(value, dict) or value.get("kind") != ("stale-receipt-cleanup-guard"):
             return False
         if (
             set(value) != _STALE_CLEANUP_GUARD_KEYS
@@ -2527,38 +2515,29 @@ def _recover_stale_cleanup_guard(
             or value.get("draft_id") != draft_id
             or value.get("repo_root_sha256")
             != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-            or value.get("trace_intent_sha256")
-            != _trace_intent_sha256(intent)
+            or value.get("trace_intent_sha256") != _trace_intent_sha256(intent)
             or not isinstance(value.get("transaction_id"), str)
             or DRAFT_ID_PATTERN.fullmatch(value["transaction_id"]) is None
             or not isinstance(value.get("receipt_sha256"), str)
-            or re.fullmatch(r"[0-9a-f]{64}", value["receipt_sha256"])
-            is None
+            or re.fullmatch(r"[0-9a-f]{64}", value["receipt_sha256"]) is None
             or _canonical_bytes(value) != guard[2]
             or guard[1].st_nlink != 1
         ):
             raise ValueError("stale cleanup namespace guard identity is invalid")
-        quarantine_name = (
-            f".{draft_id}.{value['transaction_id']}.stale"
-        )
-        quarantine, quarantine_selected_name = (
-            _open_transaction_component_for_cleanup(
+        quarantine_name = f".{draft_id}.{value['transaction_id']}.stale"
+        quarantine, quarantine_selected_name = _open_transaction_component_for_cleanup(
             graph_fd,
             quarantine_name,
             GRAPH.MAX_RECEIPT_BYTES,
             "stale cleanup recovery quarantine",
-            )
         )
         if quarantine is not None:
             opened.append(quarantine[0])
             if (
-                hashlib.sha256(quarantine[2]).hexdigest()
-                != value["receipt_sha256"]
+                hashlib.sha256(quarantine[2]).hexdigest() != value["receipt_sha256"]
                 or quarantine[1].st_nlink != 1
             ):
-                raise ValueError(
-                    "stale cleanup recovery quarantine identity is invalid"
-                )
+                raise ValueError("stale cleanup recovery quarantine identity is invalid")
             _unlink_transaction_component(
                 graph_fd,
                 quarantine_name,
@@ -2598,9 +2577,7 @@ def _clear_trace_intent(
         raise ValueError("trace intent changed before cleanup")
     updated = dict(current)
     updated.pop("graph_trace_intent", None)
-    _cas_replace_private_draft(
-        root, str(draft["draft_id"]), current, updated
-    )
+    _cas_replace_private_draft(root, str(draft["draft_id"]), current, updated)
     return updated
 
 
@@ -2658,16 +2635,23 @@ def _verify_receipt_sources(root: Path, receipt: Mapping[str, object]) -> None:
 def _load_graph_context(
     root: Path,
     draft: Mapping[str, object],
-    selected_receipt_id: Optional[str],
+    selected_receipt_id: str | None,
     *,
     deadline=None,
 ) -> dict[str, object]:
     binding = draft.get("graph_receipt")
     if not isinstance(binding, dict) or set(binding) != {
-        "receipt_id", "sha256", "request_sha256", "settings", "seeds",
-        "cache_key", "source_inventory_sha256",
-        "source_inventory_complete", "source_inventory_reason",
-        "trace_intent_id", "trace_intent_sha256",
+        "receipt_id",
+        "sha256",
+        "request_sha256",
+        "settings",
+        "seeds",
+        "cache_key",
+        "source_inventory_sha256",
+        "source_inventory_complete",
+        "source_inventory_reason",
+        "trace_intent_id",
+        "trace_intent_sha256",
     }:
         raise ValueError("graph receipt is required for this draft")
     if (
@@ -2692,9 +2676,7 @@ def _load_graph_context(
         except (TypeError, ValueError) as error:
             raise ValueError("graph receipt seed identity is invalid") from error
     intent = _intent_from_binding(root, draft, binding)
-    _validate_trace_intent(
-        root, draft, tuple(seeds), graph_settings, intent
-    )
+    _validate_trace_intent(root, draft, tuple(seeds), graph_settings, intent)
     if binding.get("trace_intent_sha256") != _trace_intent_sha256(intent):
         raise ValueError("graph receipt trace intent digest is invalid")
     payload = _read_bound_receipt_bytes(root, str(draft["draft_id"]))
@@ -2708,19 +2690,28 @@ def _load_graph_context(
         raise ValueError("graph receipt digest is tampered")
     expected_root = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
     expected_request = GRAPH_COORDINATOR._request_sha256(
-        _graph_trace_draft_identity(draft, intent), tuple(seeds),
+        _graph_trace_draft_identity(draft, intent),
+        tuple(seeds),
         GRAPH_COORDINATOR._settings(graph_settings),
     )
     identity_providers = tuple(
         GRAPH.ProviderStatus(
-            row["name"], row["status"], row["confidence"],
-            row["version"], row["executable_sha256"],
+            row["name"],
+            row["status"],
+            row["confidence"],
+            row["version"],
+            row["executable_sha256"],
         )
-        for row in receipt["providers"] if row["name"] != "builtin"
+        for row in receipt["providers"]
+        if row["name"] != "builtin"
     )
     expected_receipt_id = GRAPH_COORDINATOR._trace_identity(
-        root, str(draft["draft_id"]), expected_request, tuple(seeds),
-        GRAPH_COORDINATOR._settings(graph_settings), identity_providers,
+        root,
+        str(draft["draft_id"]),
+        expected_request,
+        tuple(seeds),
+        GRAPH_COORDINATOR._settings(graph_settings),
+        identity_providers,
     )
     if (
         receipt["receipt_id"] != selected_receipt_id
@@ -2734,8 +2725,11 @@ def _load_graph_context(
     ):
         raise ValueError("graph receipt identity does not match draft request and settings")
     (
-        cache_key, source_digests, source_inventory_sha256,
-        source_inventory_complete, source_inventory_reason,
+        cache_key,
+        source_digests,
+        source_inventory_sha256,
+        source_inventory_complete,
+        source_inventory_reason,
     ) = _receipt_source_inventory(root, receipt)
     if (
         binding.get("cache_key") != cache_key
@@ -2746,26 +2740,38 @@ def _load_graph_context(
         raise ValueError("graph source inventory cache does not match binding")
     _verify_receipt_sources(root, receipt)
     _verify_source_inventory(
-        root, graph_settings, source_digests, source_inventory_complete,
-        source_inventory_reason, receipt, deadline=deadline,
+        root,
+        graph_settings,
+        source_digests,
+        source_inventory_complete,
+        source_inventory_reason,
+        receipt,
+        deadline=deadline,
     )
     return {"receipt": receipt, "sha256": digest, "binding": binding}
 
 
 def _load_promoted_scan_context(
-    root: Path, draft: Mapping[str, object], selected_receipt_id: Optional[str]
+    root: Path, draft: Mapping[str, object], selected_receipt_id: str | None
 ) -> dict[str, object]:
     binding = draft.get("promoted_scan")
     if not isinstance(binding, dict) or set(binding) != {
-        "scan_id", "sha256", "receipt_id", "receipt_sha256",
+        "scan_id",
+        "sha256",
+        "receipt_id",
+        "receipt_sha256",
     }:
         raise ValueError("promoted Fast Scan binding is invalid")
     if selected_receipt_id != binding["receipt_id"]:
         raise ValueError("Fast Scan graph receipt does not match draft")
     request = BeginRequest(
-        root, draft["request"], tuple(draft["repository_evidence"]),
-        draft["adapter"], draft["settings"]["audience"],
-        draft["settings"]["delivery"], binding["scan_id"],
+        root,
+        draft["request"],
+        tuple(draft["repository_evidence"]),
+        draft["adapter"],
+        draft["settings"]["audience"],
+        draft["settings"]["delivery"],
+        binding["scan_id"],
     )
     promotion = _promoted_scan(root, request, draft["settings"])
     if promotion != binding:
@@ -2791,12 +2797,8 @@ def _path_confidence(path, nodes, edges) -> str:
 def _path_provenance(path, nodes, edges) -> str:
     records = [nodes[node] for node in path["nodes"]]
     records.extend(edges[edge] for edge in path["edges"])
-    providers = list(dict.fromkeys(
-        row.get("provider") for row in records if row.get("provider")
-    ))
-    locations = list(dict.fromkeys(
-        row.get("location") for row in records if row.get("location")
-    ))
+    providers = list(dict.fromkeys(row.get("provider") for row in records if row.get("provider")))
+    locations = list(dict.fromkeys(row.get("location") for row in records if row.get("location")))
     provider = " + ".join(providers) if providers else "unavailable"
     location = " + ".join(locations) if locations else "unavailable"
     return (
@@ -2811,19 +2813,14 @@ def _structured_path(path, nodes, edges) -> dict[str, object]:
     return {
         "id": path["id"],
         "labels": [nodes[node]["label"] for node in path["nodes"]],
-        "providers": list(dict.fromkeys(
-            row["provider"] for row in records if row.get("provider")
-        )) or ["unavailable"],
+        "providers": list(dict.fromkeys(row["provider"] for row in records if row.get("provider")))
+        or ["unavailable"],
         "confidence": _path_confidence(path, nodes, edges),
-        "locations": list(dict.fromkeys(
-            row["location"] for row in records if row.get("location")
-        )),
+        "locations": list(dict.fromkeys(row["location"] for row in records if row.get("location"))),
     }
 
 
-def _validate_graph_coverage(
-    analysis: Mapping[str, object], context: dict[str, object]
-) -> None:
+def _validate_graph_coverage(analysis: Mapping[str, object], context: dict[str, object]) -> None:
     receipt = context["receipt"]
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
@@ -2865,13 +2862,13 @@ def _validate_graph_coverage(
                 raise ValueError("resolved impact cannot rely on unknown graph evidence")
             impact_confidences[impact["key"]] = "unknown"
             continue
-        confidences = [
-            _path_confidence(path, nodes, edges) for path in selected_paths
-        ]
+        confidences = [_path_confidence(path, nodes, edges) for path in selected_paths]
         strongest = min(confidences, key=lambda value: GRAPH_CONFIDENCE_RANK[value])
         allowed_evidence = (
-            "verified" if GRAPH_CONFIDENCE_RANK[strongest] <= 1
-            else "inferred" if strongest == "structural-inferred"
+            "verified"
+            if GRAPH_CONFIDENCE_RANK[strongest] <= 1
+            else "inferred"
+            if strongest == "structural-inferred"
             else "unknown"
         )
         if EVIDENCE_RANK.get(impact.get("evidence_level"), -1) < EVIDENCE_RANK[allowed_evidence]:
@@ -2916,10 +2913,10 @@ def _validate_graph_coverage(
 def _validate_persisted_trace_receipt(
     root: Path,
     draft: Mapping[str, object],
-    normalized_seeds: Tuple[TraceSeed, ...],
+    normalized_seeds: tuple[TraceSeed, ...],
     graph_settings: Mapping[str, object],
     intent: Mapping[str, object],
-    expected_payload: Optional[bytes] = None,
+    expected_payload: bytes | None = None,
 ):
     stored = _read_bound_receipt_bytes(root, str(draft["draft_id"]))
     if expected_payload is not None and stored != expected_payload:
@@ -2937,14 +2934,22 @@ def _validate_persisted_trace_receipt(
     expected_root_sha256 = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
     identity_providers = tuple(
         GRAPH.ProviderStatus(
-            row["name"], row["status"], row["confidence"],
-            row["version"], row["executable_sha256"],
+            row["name"],
+            row["status"],
+            row["confidence"],
+            row["version"],
+            row["executable_sha256"],
         )
-        for row in receipt_value["providers"] if row["name"] != "builtin"
+        for row in receipt_value["providers"]
+        if row["name"] != "builtin"
     )
     expected_receipt_id = GRAPH_COORDINATOR._trace_identity(
-        root, str(draft["draft_id"]), expected_request_sha256,
-        normalized_seeds, settings, identity_providers,
+        root,
+        str(draft["draft_id"]),
+        expected_request_sha256,
+        normalized_seeds,
+        settings,
+        identity_providers,
     )
     if (
         receipt_value["draft_id"] != draft["draft_id"]
@@ -2962,14 +2967,17 @@ def _validate_persisted_trace_receipt(
     ):
         raise ValueError("trace intent does not match receipt source inventory")
     return (
-        receipt_value, stored, expected_request_sha256, *inventory,
+        receipt_value,
+        stored,
+        expected_request_sha256,
+        *inventory,
     )
 
 
 def _bind_trace_receipt(
     root: Path,
     draft: Mapping[str, object],
-    normalized_seeds: Tuple[TraceSeed, ...],
+    normalized_seeds: tuple[TraceSeed, ...],
     graph_settings: Mapping[str, object],
     intent: Mapping[str, object],
     receipt_value: Mapping[str, object],
@@ -2979,7 +2987,7 @@ def _bind_trace_receipt(
     source_digests: Mapping[str, str],
     source_inventory_sha256: str,
     source_inventory_complete: bool,
-    source_inventory_reason: Optional[str],
+    source_inventory_reason: str | None,
 ) -> TraceResult:
     updated = dict(draft)
     digest = hashlib.sha256(stored).hexdigest()
@@ -2995,21 +3003,15 @@ def _bind_trace_receipt(
         "source_inventory_reason": source_inventory_reason,
         "trace_intent_id": intent["intent_id"],
         "trace_intent_sha256": _trace_intent_sha256(intent),
-        "seeds": [
-            {"term": seed.term, "location": seed.location}
-            for seed in normalized_seeds
-        ],
+        "seeds": [{"term": seed.term, "location": seed.location} for seed in normalized_seeds],
     }
-    _cas_replace_private_draft(
-        root, str(draft["draft_id"]), draft, updated
-    )
-    receipt_path = (
-        root / ".requirements-impact-refiner" / "graph"
-        / f"{draft['draft_id']}.json"
-    )
+    _cas_replace_private_draft(root, str(draft["draft_id"]), draft, updated)
+    receipt_path = root / ".requirements-impact-refiner" / "graph" / f"{draft['draft_id']}.json"
     return TraceResult(
-        receipt_id=str(receipt_value["receipt_id"]), receipt_path=receipt_path,
-        receipt_sha256=digest, compact_graph=_compact_graph(receipt_value),
+        receipt_id=str(receipt_value["receipt_id"]),
+        receipt_path=receipt_path,
+        receipt_sha256=digest,
+        compact_graph=_compact_graph(receipt_value),
         budget_status=str(receipt_value["budget_status"]),
         request_sha256=expected_request_sha256,
         seeds=normalized_seeds,
@@ -3032,14 +3034,9 @@ def trace_impact(request: TraceRequest) -> TraceResult:
             raise ValueError("trace seed term must be nonempty")
         if seed.location is not None and not GRAPH._safe_path(seed.location):
             raise ValueError("trace seed location must be a safe repository-relative path")
-    normalized_seeds = tuple(
-        sorted(set(request.seeds), key=GRAPH_COORDINATOR._seed_key)
-    )
+    normalized_seeds = tuple(sorted(set(request.seeds), key=GRAPH_COORDINATOR._seed_key))
     _bounded(
-        {"seeds": [
-            {"term": seed.term, "location": seed.location}
-            for seed in normalized_seeds
-        ]},
+        {"seeds": [{"term": seed.term, "location": seed.location} for seed in normalized_seeds]},
         MAX_TRACE_BYTES,
         "trace input",
     )
@@ -3053,12 +3050,8 @@ def trace_impact(request: TraceRequest) -> TraceResult:
         raise ValueError("draft graph settings are invalid")
     if graph_settings.get("enabled") is not True:
         raise ValueError("impact graph is disabled for this draft")
-    deadline = GRAPH_COORDINATOR.Deadline(
-        time, int(graph_settings["max_seconds"])
-    )
-    receipt_path = (
-        root / ".requirements-impact-refiner" / "graph" / f"{request.draft_id}.json"
-    )
+    deadline = GRAPH_COORDINATOR.Deadline(time, int(graph_settings["max_seconds"]))
+    receipt_path = root / ".requirements-impact-refiner" / "graph" / f"{request.draft_id}.json"
     with _report_lock(root, str(draft["report_id"]), deadline=deadline):
         _recover_private_draft_transaction(root, request.draft_id)
         draft = load_draft(root, request.draft_id)
@@ -3069,14 +3062,11 @@ def trace_impact(request: TraceRequest) -> TraceResult:
         if draft.get("graph_receipt") is not None:
             binding = draft["graph_receipt"]
             requested_seeds = [
-                {"term": seed.term, "location": seed.location}
-                for seed in normalized_seeds
+                {"term": seed.term, "location": seed.location} for seed in normalized_seeds
             ]
             if not isinstance(binding, dict) or binding.get("seeds") != requested_seeds:
                 raise ValueError("draft graph receipt belongs to a different trace request")
-            context = _load_graph_context(
-                root, draft, binding.get("receipt_id"), deadline=deadline
-            )
+            context = _load_graph_context(root, draft, binding.get("receipt_id"), deadline=deadline)
             receipt_value = context["receipt"]
             return TraceResult(
                 receipt_id=str(receipt_value["receipt_id"]),
@@ -3089,30 +3079,20 @@ def trace_impact(request: TraceRequest) -> TraceResult:
             )
         intent = draft.get("graph_trace_intent")
         if intent is not None:
-            intent = _validate_trace_intent(
-                root, draft, normalized_seeds, graph_settings, intent
-            )
-            _recover_stale_cleanup_guard(
-                root, request.draft_id, intent
-            )
+            intent = _validate_trace_intent(root, draft, normalized_seeds, graph_settings, intent)
+            _recover_stale_cleanup_guard(root, request.draft_id, intent)
         receipt_exists = receipt_path.exists() or receipt_path.is_symlink()
         source_inventory = None
         if intent is None:
             if receipt_exists:
-                raise ValueError(
-                    "graph receipt has no durable pre-publication trace intent"
-                )
-            source_inventory = GRAPH_COORDINATOR._collect_source_digests(
-                root, deadline
-            )
+                raise ValueError("graph receipt has no durable pre-publication trace intent")
+            source_inventory = GRAPH_COORDINATOR._collect_source_digests(root, deadline)
             intent = _new_trace_intent(
                 root, draft, normalized_seeds, graph_settings, source_inventory
             )
             updated = dict(draft)
             updated["graph_trace_intent"] = intent
-            _cas_replace_private_draft(
-                root, request.draft_id, draft, updated
-            )
+            _cas_replace_private_draft(root, request.draft_id, draft, updated)
             draft = updated
         if receipt_exists:
             validated = _validate_persisted_trace_receipt(
@@ -3120,8 +3100,13 @@ def trace_impact(request: TraceRequest) -> TraceResult:
             )
             try:
                 _verify_source_inventory(
-                    root, graph_settings, validated[4], validated[6],
-                    validated[7], validated[0], deadline=deadline,
+                    root,
+                    graph_settings,
+                    validated[4],
+                    validated[6],
+                    validated[7],
+                    validated[0],
+                    deadline=deadline,
                     stale_message="recovery source inventory is stale",
                 )
             except ValueError as error:
@@ -3139,22 +3124,24 @@ def trace_impact(request: TraceRequest) -> TraceResult:
                 root, draft, normalized_seeds, graph_settings, intent, *validated
             )
         if source_inventory is None:
-            source_inventory = GRAPH_COORDINATOR._collect_source_digests(
-                root, deadline
-            )
+            source_inventory = GRAPH_COORDINATOR._collect_source_digests(root, deadline)
             if (
                 _source_inventory_sha256(source_inventory.digests)
                 != intent["source_inventory_sha256"]
-                or source_inventory.complete
-                != intent["source_inventory_complete"]
+                or source_inventory.complete != intent["source_inventory_complete"]
                 or source_inventory.reason != intent["source_inventory_reason"]
             ):
                 _clear_trace_intent(root, draft, intent)
                 raise ValueError("trace intent source inventory is stale")
         graph_draft = _graph_trace_draft_identity(draft, intent)
         receipt = GRAPH_COORDINATOR.trace_impact(
-            root, graph_draft, normalized_seeds, graph_settings,
-            clock=time, deadline=deadline, source_inventory=source_inventory,
+            root,
+            graph_draft,
+            normalized_seeds,
+            graph_settings,
+            clock=time,
+            deadline=deadline,
+            source_inventory=source_inventory,
         )
         payload = GRAPH.canonical_receipt_bytes(receipt)
         if not receipt_path.is_file() or receipt_path.is_symlink():
@@ -3188,7 +3175,10 @@ def _validate_analysis(analysis: Mapping[str, object]) -> None:
     _check_keys("analysis", analysis, ANALYSIS_KEYS)
     if analysis["phase"] not in {"pre-decision", "post-decision"}:
         raise ValueError("invalid analysis phase")
-    if not isinstance(analysis["refined_requirement"], str) or not analysis["refined_requirement"].strip():
+    if (
+        not isinstance(analysis["refined_requirement"], str)
+        or not analysis["refined_requirement"].strip()
+    ):
         raise ValueError("refined_requirement must be nonempty")
     for section, expected in ROW_KEYS.items():
         rows = analysis[section]
@@ -3280,14 +3270,11 @@ def _build_state(draft, analysis, graph_context=None):
     prior_state = draft.get("prior_state")
     prior_key_map = draft.get("prior_key_map") or {}
     requirement_id = (
-        prior_state["original_requirement"]["id"]
-        if isinstance(prior_state, dict)
-        else "REQ-001"
+        prior_state["original_requirement"]["id"] if isinstance(prior_state, dict) else "REQ-001"
     )
     if prior_key_map:
         missing_impacts = sorted(
-            set(prior_key_map.get("impacts", {}))
-            - {row["key"] for row in analysis["impacts"]}
+            set(prior_key_map.get("impacts", {})) - {row["key"] for row in analysis["impacts"]}
         )
         if missing_impacts:
             raise ValueError(f"impact key disappeared: {missing_impacts[0]}")
@@ -3303,68 +3290,110 @@ def _build_state(draft, analysis, graph_context=None):
     }
     impacts = []
     for row in analysis["impacts"]:
-        impacts.append({
-            "id": impact_ids[row["key"]],
-            "requirement": requirement_id,
-            "category": row["category"],
-            "severity": row["severity"],
-            "state": row["state"],
+        impacts.append(
+            {
+                "id": impact_ids[row["key"]],
+                "requirement": requirement_id,
+                "category": row["category"],
+                "severity": row["severity"],
+                "state": row["state"],
+                "evidence_level": row["evidence_level"],
+                "evidence": row["evidence"],
+                "invariants": _map_keys(row["invariant_keys"], invariant_ids, "invariant"),
+                "decisions": _map_keys(row["decision_keys"], decision_ids, "decision"),
+                "criteria": _map_keys(row["criterion_keys"], criterion_ids, "criterion"),
+            }
+        )
+    current_behavior = [
+        {
+            "id": invariant_ids[row["key"]],
+            "behavior": row["behavior"],
             "evidence_level": row["evidence_level"],
             "evidence": row["evidence"],
-            "invariants": _map_keys(row["invariant_keys"], invariant_ids, "invariant"),
-            "decisions": _map_keys(row["decision_keys"], decision_ids, "decision"),
-            "criteria": _map_keys(row["criterion_keys"], criterion_ids, "criterion"),
-        })
-    current_behavior = [{
-        "id": invariant_ids[row["key"]], "behavior": row["behavior"],
-        "evidence_level": row["evidence_level"], "evidence": row["evidence"],
-    } for row in analysis["invariants"]]
+        }
+        for row in analysis["invariants"]
+    ]
     preserved = []
     for row in analysis["invariants"]:
         affected = [
-            impact_ids[impact["key"]] for impact in analysis["impacts"]
+            impact_ids[impact["key"]]
+            for impact in analysis["impacts"]
             if row["key"] in impact["invariant_keys"]
         ]
-        preserved.append({
-            "id": invariant_ids[row["key"]], "requirement": requirement_id,
-            "impacts": affected, "evidence": row["evidence"],
-        })
-    decisions = [{
-        "id": decision_ids[row["key"]], "choice": row["choice"],
-        "requirement": requirement_id,
-        "accepted_impacts": _map_keys(row["accepted_impact_keys"], impact_ids, "impact"),
-        "rationale": row["rationale"],
-    } for row in analysis["decisions"]]
-    criteria = [{
-        "id": criterion_ids[row["key"]], "requirement": requirement_id,
-        "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
-        "invariant": _map_keys([row["invariant_key"]], invariant_ids, "invariant")[0],
-        "criterion": row["criterion"], "evidence": row["evidence"],
-    } for row in analysis["criteria"]]
+        preserved.append(
+            {
+                "id": invariant_ids[row["key"]],
+                "requirement": requirement_id,
+                "impacts": affected,
+                "evidence": row["evidence"],
+            }
+        )
+    decisions = [
+        {
+            "id": decision_ids[row["key"]],
+            "choice": row["choice"],
+            "requirement": requirement_id,
+            "accepted_impacts": _map_keys(row["accepted_impact_keys"], impact_ids, "impact"),
+            "rationale": row["rationale"],
+        }
+        for row in analysis["decisions"]
+    ]
+    criteria = [
+        {
+            "id": criterion_ids[row["key"]],
+            "requirement": requirement_id,
+            "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
+            "invariant": _map_keys([row["invariant_key"]], invariant_ids, "invariant")[0],
+            "criterion": row["criterion"],
+            "evidence": row["evidence"],
+        }
+        for row in analysis["criteria"]
+    ]
     decision_needed = None
     if analysis["phase"] == "pre-decision":
         decision_needed = {
             "question": analysis["decision_needed"]["question"],
-            "options": [{
-                "option": row["option"],
-                "impacts": _map_keys(row["impact_keys"], impact_ids, "impact"),
-                "tradeoff": row["tradeoff"],
-            } for row in analysis["decision_needed"]["options"]],
+            "options": [
+                {
+                    "option": row["option"],
+                    "impacts": _map_keys(row["impact_keys"], impact_ids, "impact"),
+                    "tradeoff": row["tradeoff"],
+                }
+                for row in analysis["decision_needed"]["options"]
+            ],
         }
-    unresolved = [{
-        "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
-        "state": row["state"], "rationale": row["rationale"],
-        "decision": None if row["decision_key"] is None else _map_keys([row["decision_key"]], decision_ids, "decision")[0],
-        "owner": row["owner"],
-    } for row in analysis["unresolved"]]
-    remaining = [row["id"] for row in impacts if row["state"] in {"accepted", "deferred", "blocked"}]
+    unresolved = [
+        {
+            "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
+            "state": row["state"],
+            "rationale": row["rationale"],
+            "decision": None
+            if row["decision_key"] is None
+            else _map_keys([row["decision_key"]], decision_ids, "decision")[0],
+            "owner": row["owner"],
+        }
+        for row in analysis["unresolved"]
+    ]
+    remaining = [
+        row["id"] for row in impacts if row["state"] in {"accepted", "deferred", "blocked"}
+    ]
     if not remaining:
         remaining = [row["id"] for row in impacts]
-    all_report_ids = [requirement_id] + list(invariant_ids.values()) + list(impact_ids.values()) + list(decision_ids.values())
-    summary = [{
-        "impact_id": impact_ids[row["key"]],
-        **row["summary"], "severity": row["severity"], "status": row["state"],
-    } for row in analysis["impacts"]]
+    all_report_ids = [
+        requirement_id,
+        *list(invariant_ids.values()),
+        *list(impact_ids.values()),
+        *list(decision_ids.values()),
+    ]
+    summary = [
+        {
+            "impact_id": impact_ids[row["key"]],
+            **row["summary"],
+            "severity": row["severity"],
+            "status": row["state"],
+        }
+        for row in analysis["impacts"]
+    ]
     first_decision = decisions[0]["id"] if decisions else None
     delta = {category: [] for category in compact_state.DELTA_CATEGORIES}
     if prior_state is None:
@@ -3374,10 +3403,14 @@ def _build_state(draft, analysis, graph_context=None):
         terminal = {"resolved", "accepted", "superseded"}
         active = {"detected", "refining", "mitigated", "deferred", "blocked"}
         state_category = {
-            "detected": "unchanged", "refining": "unchanged",
-            "mitigated": "mitigated", "resolved": "resolved",
-            "accepted": "accepted", "deferred": "deferred",
-            "blocked": "blocked", "superseded": "superseded",
+            "detected": "unchanged",
+            "refining": "unchanged",
+            "mitigated": "mitigated",
+            "resolved": "resolved",
+            "accepted": "accepted",
+            "deferred": "deferred",
+            "blocked": "blocked",
+            "superseded": "superseded",
         }
         for impact in impacts:
             previous = previous_states.get(impact["id"])
@@ -3408,15 +3441,17 @@ def _build_state(draft, analysis, graph_context=None):
                 )
             prior_history.append(history_row)
     original_requirement = (
-        {"id": requirement_id, "request": draft["request"], "source": "User request and supplied repository evidence."}
+        {
+            "id": requirement_id,
+            "request": draft["request"],
+            "source": "User request and supplied repository evidence.",
+        }
         if prior_state is None
         else prior_state["original_requirement"]
     )
     if draft.get("adapter") == "superpowers":
         handoff_workflow = SUPERPOWERS_HANDOFF_MARKER
-    elif analysis["phase"] == "pre-decision" or any(
-        row["state"] == "blocked" for row in impacts
-    ):
+    elif analysis["phase"] == "pre-decision" or any(row["state"] == "blocked" for row in impacts):
         handoff_workflow = "Not ready"
     else:
         handoff_workflow = analysis["workflow"]
@@ -3438,65 +3473,94 @@ def _build_state(draft, analysis, graph_context=None):
                 path_provenance.append(
                     f"{path_key}: {_path_provenance(path, receipt_nodes, receipt_edges)}"
                 )
-                impact_paths.append(
-                    _structured_path(path, receipt_nodes, receipt_edges)
-                )
+                impact_paths.append(_structured_path(path, receipt_nodes, receipt_edges))
             if impact_paths:
-                structured_paths.append({
-                    "impact": impact_ids[row["key"]], "paths": impact_paths,
-                })
+                structured_paths.append(
+                    {
+                        "impact": impact_ids[row["key"]],
+                        "paths": impact_paths,
+                    }
+                )
             rationale = graph_context["rationales"].get(row["key"])
-            scope.append({
-                "boundary": f"Graph paths for {impact_ids[row['key']]}",
-                "evidence": " || ".join(path_descriptions) if path_descriptions else str(rationale),
-                "confidence": (
-                    " || ".join(path_provenance) if path_provenance else
-                    "provider unavailable; confidence unknown; location unavailable"
-                ),
-            })
-        provider_summary = [
-            f"{row['name']} ({row['status']})" for row in receipt["providers"]
-        ]
+            scope.append(
+                {
+                    "boundary": f"Graph paths for {impact_ids[row['key']]}",
+                    "evidence": " || ".join(path_descriptions)
+                    if path_descriptions
+                    else str(rationale),
+                    "confidence": (
+                        " || ".join(path_provenance)
+                        if path_provenance
+                        else "provider unavailable; confidence unknown; location unavailable"
+                    ),
+                }
+            )
+        provider_summary = [f"{row['name']} ({row['status']})" for row in receipt["providers"]]
         elapsed = int(receipt["timings_ms"].get("total", 0))
         frontier_ids = ",".join(row["id"] for row in receipt["frontier"]) or "none"
-        scope.append({
-            "boundary": "Impact graph coverage",
-            "evidence": (
-                f"Impact scan: {elapsed / 1000:.1f} s · "
-                f"{' + '.join(provider_summary) or 'no provider'} · "
-                f"{len(receipt['nodes'])} nodes / {len(receipt['edges'])} edges · "
-                f"{len(receipt['frontier'])} unknown frontiers"
-            ),
-            "confidence": (
-                f"{receipt['budget_status']}; receipt {receipt['receipt_id']}; "
-                f"sha256 {graph_context['sha256']}; frontier {frontier_ids}"
-            ),
-        })
+        scope.append(
+            {
+                "boundary": "Impact graph coverage",
+                "evidence": (
+                    f"Impact scan: {elapsed / 1000:.1f} s · "
+                    f"{' + '.join(provider_summary) or 'no provider'} · "
+                    f"{len(receipt['nodes'])} nodes / {len(receipt['edges'])} edges · "
+                    f"{len(receipt['frontier'])} unknown frontiers"
+                ),
+                "confidence": (
+                    f"{receipt['budget_status']}; receipt {receipt['receipt_id']}; "
+                    f"sha256 {graph_context['sha256']}; frontier {frontier_ids}"
+                ),
+            }
+        )
         if len(scope) > 128:
             raise ValueError("scope has too many rows after graph coverage injection")
         if any(
             len(value.encode("utf-8")) > MAX_STRING_BYTES
-            for row in scope for value in row.values() if isinstance(value, str)
+            for row in scope
+            for value in row.values()
+            if isinstance(value, str)
         ):
             raise ValueError("graph coverage scope exceeds string limit")
     state = {
         "schema_version": 1,
-        "report": {"id": draft["report_id"], "revision": draft["revision"], "previous_sha256": draft["previous_sha256"], "phase": analysis["phase"]},
+        "report": {
+            "id": draft["report_id"],
+            "revision": draft["revision"],
+            "previous_sha256": draft["previous_sha256"],
+            "phase": analysis["phase"],
+        },
         "settings": draft["settings"],
         "original_requirement": original_requirement,
-        "refined_requirement": {"id": requirement_id, "revision": analysis["refined_requirement"], "decision": first_decision, "supersedes": []},
+        "refined_requirement": {
+            "id": requirement_id,
+            "revision": analysis["refined_requirement"],
+            "decision": first_decision,
+            "supersedes": [],
+        },
         "current_behavior": current_behavior,
         "preserved_invariants": preserved,
         "impacts": impacts,
         "decision_needed": decision_needed,
         "decisions": decisions,
         "delta": delta,
-        "history": prior_history + [{"requirement": requirement_id, "revision": analysis["refined_requirement"], "decision": first_decision, "superseded_impacts": [], "summary": "Controller-created refinement revision."}],
+        "history": [
+            *prior_history,
+            {
+                "requirement": requirement_id,
+                "revision": analysis["refined_requirement"],
+                "decision": first_decision,
+                "superseded_impacts": [],
+                "summary": "Controller-created refinement revision.",
+            },
+        ],
         "criteria": criteria,
         "unresolved": unresolved,
         "scope": scope,
         "handoff": {
-            "refined_requirement": requirement_id if analysis["phase"] == "post-decision" else "Not ready until the pending decision is selected.",
+            "refined_requirement": requirement_id
+            if analysis["phase"] == "post-decision"
+            else "Not ready until the pending decision is selected.",
             "report_ids": all_report_ids,
             "remaining_risks": remaining,
             "criteria": list(criterion_ids.values()),
@@ -3523,7 +3587,9 @@ def _consume(path: Path, draft: dict[str, object], published, key_map) -> None:
     updated["key_map"] = key_map
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile("wb", dir=path.parent, prefix=".draft-", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            "wb", dir=path.parent, prefix=".draft-", delete=False
+        ) as stream:
             temporary = Path(stream.name)
             stream.write(_canonical_bytes(updated))
             stream.flush()
@@ -3560,17 +3626,13 @@ def _report_lock(root: Path, report_id: str, deadline=None):
                             "graph trace deadline exhausted waiting for controller lock"
                         )
                     try:
-                        fcntl.flock(
-                            descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB
-                        )
+                        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
                         locked = True
                         break
                     except BlockingIOError:
                         time.sleep(min(0.01, deadline.remaining()))
         if deadline is not None and deadline.expired():
-            raise ValueError(
-                "graph trace deadline exhausted waiting for controller lock"
-            )
+            raise ValueError("graph trace deadline exhausted waiting for controller lock")
         yield
     finally:
         if fcntl is not None and locked:
@@ -3583,18 +3645,16 @@ def _write_controller_metadata(
     draft: Mapping[str, object],
     state_bytes: bytes,
     key_map: Mapping[str, object],
-    graph_receipt: Optional[Mapping[str, object]] = None,
+    graph_receipt: Mapping[str, object] | None = None,
 ) -> None:
-    path = _controller_metadata_path(
-        str(draft["report_id"]), int(draft["revision"]), root
-    )
+    path = _controller_metadata_path(str(draft["report_id"]), int(draft["revision"]), root)
     metadata = {
-            "schema_version": 1,
-            "draft_id": draft["draft_id"],
-            "report_id": draft["report_id"],
-            "revision": draft["revision"],
-            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
-            "key_map": key_map,
+        "schema_version": 1,
+        "draft_id": draft["draft_id"],
+        "report_id": draft["report_id"],
+        "revision": draft["revision"],
+        "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
+        "key_map": key_map,
     }
     if graph_receipt is not None:
         metadata["graph_receipt"] = dict(graph_receipt)
@@ -3627,8 +3687,10 @@ def _write_controller_metadata(
                     for suffix in ("json", "md")
                 )
                 current = report_store.load_current(root, str(draft["report_id"]))
-                if not same_draft or artifacts_exist or (
-                    current is not None and current.revision >= revision
+                if (
+                    not same_draft
+                    or artifacts_exist
+                    or (current is not None and current.revision >= revision)
                 ):
                     raise ValueError("controller revision belongs to another draft")
                 os.replace(temporary, path)
@@ -3659,9 +3721,7 @@ def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
         graph_context = None
         if graph_settings.get("enabled") is True:
             graph_context = (
-                _load_promoted_scan_context(
-                    root, draft, request.graph_receipt_id
-                )
+                _load_promoted_scan_context(root, draft, request.graph_receipt_id)
                 if draft.get("promoted_scan") is not None
                 else _load_graph_context(root, draft, request.graph_receipt_id)
             )
@@ -3672,21 +3732,22 @@ def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
         state, key_map = _build_state(draft, request.analysis, graph_context)
         state_bytes = _canonical_bytes(state)
         _write_controller_metadata(
-            root, draft, state_bytes, key_map,
-            None if graph_context is None else {
+            root,
+            draft,
+            state_bytes,
+            key_map,
+            None
+            if graph_context is None
+            else {
                 "receipt_id": graph_context["receipt"]["receipt_id"],
                 "sha256": graph_context["sha256"],
             },
         )
         try:
-            published = report_store.publish_revision(
-                root, state_bytes, resume_partial=True
-            )
+            published = report_store.publish_revision(root, state_bytes, resume_partial=True)
         except (FileExistsError, report_store.ReportStoreError) as error:
             raise ValueError(f"controller publication failed: {error}") from error
-        stored_state, errors = compact_state.load_state_bytes(
-            published.state_path.read_bytes()
-        )
+        stored_state, errors = compact_state.load_state_bytes(published.state_path.read_bytes())
         if errors or stored_state is None:
             raise ValueError("published state could not be verified")
         delivery = stored_state["settings"]["delivery"]

@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-
 ROOT_FILES = (
     ".codex-plugin/plugin.json",
     ".mcp.json",

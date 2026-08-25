@@ -3,17 +3,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ast
 import hashlib
 import importlib.util
 import os
-from pathlib import Path
 import re
 import stat
 import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping, Sequence
 
 
 def _load_graph_contract():
@@ -39,20 +39,29 @@ FrontierEntry = GRAPH.FrontierEntry
 
 DEFAULT_MAX_FILE_BYTES = 1_048_576
 MAX_GRAPH_ID = 999
-IGNORED_DIRECTORIES = frozenset({
-    ".git", ".hg", ".svn", ".requirements-impact-refiner",
-    "vendor", "build", "dist", "generated",
-    "node_modules", ".next", ".venv", "venv", "target", "coverage",
-})
+IGNORED_DIRECTORIES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".requirements-impact-refiner",
+        "vendor",
+        "build",
+        "dist",
+        "generated",
+        "node_modules",
+        ".next",
+        ".venv",
+        "venv",
+        "target",
+        "coverage",
+    }
+)
 # The left boundary forbids starting inside an alphanumeric run: without
 # it the engine retries every offset of a long base64 blob and a single
 # transcript line costs seconds (observed 3.4 s -> 2.8 ms on 140 KB).
-_DOTTED = re.compile(
-    r"(?<![A-Za-z0-9_.])[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+"
-)
-_SLASHED = re.compile(
-    r"(?<![A-Za-z0-9_./-])[A-Za-z_][A-Za-z0-9_.-]*(?:/[A-Za-z_][A-Za-z0-9_.-]*)+"
-)
+_DOTTED = re.compile(r"(?<![A-Za-z0-9_.])[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
+_SLASHED = re.compile(r"(?<![A-Za-z0-9_./-])[A-Za-z_][A-Za-z0-9_.-]*(?:/[A-Za-z_][A-Za-z0-9_.-]*)+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 _QUOTED = re.compile(r"(?P<quote>['\"])(?P<value>[^'\"\r\n]{2,256})(?P=quote)")
 _IMPORT = re.compile(r"(?m)^\s*(?:from|import)\s+(?P<value>[^\r\n#]+)")
@@ -85,14 +94,37 @@ _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?:[_-][A-Za-z0-9]+|(?-i:[A-Z][A-Za-z0-9]*))*"
     r"(?P=keyquote)\s*(?::=|[:=])\s*)"
 )
-_COMMON_TERMS = frozenset({
-    "assert", "class", "const", "def", "export", "from", "function",
-    "import", "interface", "profile", "return", "static", "string", "struct",
-    "target", "tests", "true", "value",
-})
+_COMMON_TERMS = frozenset(
+    {
+        "assert",
+        "class",
+        "const",
+        "def",
+        "export",
+        "from",
+        "function",
+        "import",
+        "interface",
+        "profile",
+        "return",
+        "static",
+        "string",
+        "struct",
+        "target",
+        "tests",
+        "true",
+        "value",
+    }
+)
 _RISK_ORDER = (
-    "authorization/privacy", "interfaces", "data", "state/concurrency",
-    "compatibility", "operations", "regression", "functionality",
+    "authorization/privacy",
+    "interfaces",
+    "data",
+    "state/concurrency",
+    "compatibility",
+    "operations",
+    "regression",
+    "functionality",
     "legal/policy",
 )
 _RISK_RANK = {name: index for index, name in enumerate(_RISK_ORDER)}
@@ -104,7 +136,11 @@ class ScanSeed:
     location: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.term, str) or not self.term.strip() or len(self.term) > GRAPH.MAX_STRING_LENGTH:
+        if (
+            not isinstance(self.term, str)
+            or not self.term.strip()
+            or len(self.term) > GRAPH.MAX_STRING_LENGTH
+        ):
             raise ValueError("scan seed term must be a bounded non-empty string")
         if self.location is not None and not GRAPH._safe_path(self.location):
             raise ValueError("scan seed location must be a safe repository-relative path")
@@ -122,8 +158,13 @@ class ScanLimits:
 
     def __post_init__(self) -> None:
         for name in (
-            "max_seconds", "max_files", "max_bytes", "max_file_bytes",
-            "max_nodes", "max_edges", "max_paths",
+            "max_seconds",
+            "max_files",
+            "max_bytes",
+            "max_file_bytes",
+            "max_nodes",
+            "max_edges",
+            "max_paths",
         ):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -182,16 +223,10 @@ _RISK_DOMAIN_PATTERNS = {
         r"concurr\w*|mutex"
     ),
     "compatibility": re.compile(r"mobile|desktop|compat\w*|migrations?"),
-    "operations": re.compile(
-        r"events?|deploy\w*|configs?|configuration|queues?"
-    ),
-    "regression": re.compile(
-        r"tests?|testing|conftest|fixtures?|migrations?"
-    ),
+    "operations": re.compile(r"events?|deploy\w*|configs?|configuration|queues?"),
+    "regression": re.compile(r"tests?|testing|conftest|fixtures?|migrations?"),
 }
-_CAMEL_BOUNDARY = re.compile(
-    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
-)
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _risk_domains(location: str | None, text: str = "") -> tuple[str, ...]:
@@ -232,8 +267,7 @@ def _expanded_terms(values) -> frozenset[str]:
         if "/" in value:
             expanded.add(value.replace("/", "."))
     return frozenset(
-        value for value in expanded
-        if len(value) >= 4 and value.lower() not in _COMMON_TERMS
+        value for value in expanded if len(value) >= 4 and value.lower() not in _COMMON_TERMS
     )
 
 
@@ -271,7 +305,7 @@ def _value_expression_end(rest: str) -> int:
             depth -= 1
         elif depth == 0 and char in ",;#\r\n":
             return index
-        elif depth == 0 and rest[index:index + 2] == "//":
+        elif depth == 0 and rest[index : index + 2] == "//":
             return index
     return len(rest)
 
@@ -300,21 +334,21 @@ def _redact_quoted_literals(value_text: str, sensitive: set[str]) -> tuple[str, 
         if end >= len(value_text):
             output.append(value_text[cursor:])
             break
-        value = value_text[cursor + 1:end]
+        value = value_text[cursor + 1 : end]
         sensitive.add(value)
-        output.extend((
-            quote,
-            _safe_graph_text(value, (value,)),
-            quote,
-        ))
+        output.extend(
+            (
+                quote,
+                _safe_graph_text(value, (value,)),
+                quote,
+            )
+        )
         count += 1
         cursor = end + 1
     return "".join(output), count
 
 
-def _yaml_block_span(
-    text: str, value_start: int, assignment_start: int
-) -> tuple[int, int] | None:
+def _yaml_block_span(text: str, value_start: int, assignment_start: int) -> tuple[int, int] | None:
     indicator = _YAML_BLOCK_INDICATOR.match(text, value_start)
     if indicator is None:
         return None
@@ -342,7 +376,7 @@ def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
     for match in _SENSITIVE_ASSIGNMENT.finditer(text):
         if match.start() < cursor:
             continue
-        output.append(text[cursor:match.end()])
+        output.append(text[cursor : match.end()])
         yaml_span = _yaml_block_span(text, match.end(), match.start())
         if yaml_span is not None:
             content_start, end = yaml_span
@@ -351,11 +385,11 @@ def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
             sensitive.add(value)
             indent = re.match(r"[ \t]*", block).group(0) if block else ""
             newline = "\n" if block.endswith(("\n", "\r")) else ""
-            output.append(text[match.end():content_start])
+            output.append(text[match.end() : content_start])
             output.append(indent + _safe_graph_text(value, (value,)) + newline)
             cursor = end
             continue
-        rest = text[match.end():]
+        rest = text[match.end() :]
         span = _value_expression_end(rest)
         value_text = rest[:span]
 
@@ -372,9 +406,7 @@ def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
             else:
                 value = bare.group(0)
                 sensitive.add(value)
-                redacted = (
-                    _safe_graph_text(value, (value,)) + value_text[bare.end():]
-                )
+                redacted = _safe_graph_text(value, (value,)) + value_text[bare.end() :]
         output.append(redacted)
         cursor = match.end() + span
     output.append(text[cursor:])
@@ -395,9 +427,7 @@ def _term_categories(text: str) -> Mapping[str, frozenset[str]]:
         imports.update(_IDENTIFIER.findall(import_text))
     for value in _expanded_terms(imports):
         categories.setdefault(value, set()).add("import")
-    return MappingProxyType({
-        value: frozenset(categories[value]) for value in sorted(categories)
-    })
+    return MappingProxyType({value: frozenset(categories[value]) for value in sorted(categories)})
 
 
 def _without_javascript_comments(text: str) -> str:
@@ -421,14 +451,14 @@ def _without_javascript_comments(text: str) -> str:
             quote = char
             index += 1
             continue
-        if text[index:index + 2] == "//":
+        if text[index : index + 2] == "//":
             end = text.find("\n", index + 2)
             end = len(text) if end < 0 else end
             for cursor in range(index, end):
                 output[cursor] = " "
             index = end
             continue
-        if text[index:index + 2] == "/*":
+        if text[index : index + 2] == "/*":
             end = text.find("*/", index + 2)
             end = len(text) if end < 0 else end + 2
             for cursor in range(index, end):
@@ -463,14 +493,14 @@ def _javascript_code_mask(text: str) -> tuple[bool, ...]:
             mask[index] = False
             index += 1
             continue
-        if text[index:index + 2] == "//":
+        if text[index : index + 2] == "//":
             end = text.find("\n", index + 2)
             end = len(text) if end < 0 else end
             for cursor in range(index, end):
                 mask[cursor] = False
             index = end
             continue
-        if text[index:index + 2] == "/*":
+        if text[index : index + 2] == "/*":
             end = text.find("*/", index + 2)
             end = len(text) if end < 0 else end + 2
             for cursor in range(index, end):
@@ -521,7 +551,7 @@ class LanguageStructure:
     defined names, and used names. None when the source cannot be
     analyzed — the scan then falls back to lexical evidence honestly."""
 
-    __slots__ = ("modules", "defs", "uses")
+    __slots__ = ("defs", "modules", "uses")
 
     def __init__(self, modules, defs, uses):
         self.modules = modules
@@ -535,9 +565,7 @@ _JS_EXPORT = re.compile(
     r"(?:async\s+)?(?:function\*?|class|const|let|var)\s+"
     r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]{2,})"
 )
-_JS_COMMONJS_EXPORT = re.compile(
-    r"(?:module\.)?exports\.(?P<name>[A-Za-z_$][A-Za-z0-9_$]{2,})\s*="
-)
+_JS_COMMONJS_EXPORT = re.compile(r"(?:module\.)?exports\.(?P<name>[A-Za-z_$][A-Za-z0-9_$]{2,})\s*=")
 _JS_IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]{2,}")
 
 
@@ -603,7 +631,7 @@ def _python_structure(text: str):
     modules = set()
     for specifier in specifiers:
         parts = [part for part in specifier.split(".") if part]
-        for value in ([parts[-1], "".join(parts)] if parts else []):
+        for value in [parts[-1], "".join(parts)] if parts else []:
             collapsed = re.sub(r"[^a-z0-9]", "", value.lower())
             if len(collapsed) >= 3:
                 modules.add(collapsed)
@@ -643,7 +671,10 @@ def _open_below_root(root: Path, relative: str) -> int:
 
 
 def _read_regular_file(
-    root: Path, relative: str, maximum: int, remaining: int | None = None,
+    root: Path,
+    relative: str,
+    maximum: int,
+    remaining: int | None = None,
     read_allowed: bool = True,
 ) -> tuple[bytes | None, str | None]:
     try:
@@ -672,9 +703,7 @@ def _read_regular_file(
         os.close(descriptor)
 
 
-def _walk_files(
-    root: Path, expired, skipped: dict[str, str], traversal_errors: list[str]
-):
+def _walk_files(root: Path, expired, skipped: dict[str, str], traversal_errors: list[str]):
     pending = [root]
     while pending:
         if expired():
@@ -703,9 +732,7 @@ def _walk_files(
         pending[0:0] = directories
 
 
-_TEST_PATH_TOKENS = frozenset(
-    {"test", "tests", "testing", "conftest", "fixture", "fixtures"}
-)
+_TEST_PATH_TOKENS = frozenset({"test", "tests", "testing", "conftest", "fixture", "fixtures"})
 
 
 def _is_test_path(target: str) -> bool:
@@ -739,22 +766,15 @@ def _module_resolves_to_target(target: str, modules: frozenset[str]) -> bool:
     if not collapsed_stem:
         return False
     segments = {part for part in re.split(r"[^a-z0-9]+", stem) if part}
-    return any(
-        module == collapsed_stem or module in segments
-        for module in modules
-    )
+    return any(module == collapsed_stem or module in segments for module in modules)
 
 
-def _edge_kind(
-    target: str, modules: frozenset[str], evidence: str, basis: str
-) -> tuple[str, str]:
+def _edge_kind(target: str, modules: frozenset[str], evidence: str, basis: str) -> tuple[str, str]:
     if _is_test_path(target):
         # A test-shaped filename alone is a lexical coincidence; structural
         # confidence requires a structural basis or evidence naming the
         # target.
-        structural = basis != "lexical" or _import_resolves_to_target(
-            target, evidence
-        )
+        structural = basis != "lexical" or _import_resolves_to_target(target, evidence)
         return "tests", "structural-inferred" if structural else "lexical"
     if basis == "import":
         return "imports", "structural-inferred"
@@ -803,13 +823,16 @@ def scan_repository(
     files_scanned = 0
     exhausted = False
     resource_limit_reached = False
-    for path, relative in _walk_files(root, expired, skipped, traversal_errors):
+    for _path, relative in _walk_files(root, expired, skipped, traversal_errors):
         if expired():
             exhausted = True
             break
         remaining = limits.max_bytes - bytes_scanned
         payload, reason = _read_regular_file(
-            root, relative, limits.max_file_bytes, remaining,
+            root,
+            relative,
+            limits.max_file_bytes,
+            remaining,
             read_allowed=files_scanned < limits.max_files,
         )
         if reason is not None or payload is None:
@@ -842,21 +865,20 @@ def scan_repository(
             structure = _javascript_structure(safe_text)
         else:
             structure = None
-        modules = (
-            structure.modules if structure is not None
-            else _import_modules(safe_text)
-        )
+        modules = structure.modules if structure is not None else _import_modules(safe_text)
         documents[relative] = (
-            safe_text, frozenset(categories), hashlib.sha256(payload).hexdigest(),
-            categories, modules, structure,
+            safe_text,
+            frozenset(categories),
+            hashlib.sha256(payload).hexdigest(),
+            categories,
+            modules,
+            structure,
         )
 
     if expired():
         exhausted = True
 
-    unreadable_sources = sorted(
-        path for path, reason in skipped.items() if reason == "unsafe-file"
-    )
+    unreadable_sources = sorted(path for path, reason in skipped.items() if reason == "unsafe-file")
 
     def deadline_result(nodes=(), edges=()):
         frontier = ()
@@ -864,15 +886,22 @@ def scan_repository(
             last = nodes[-1]
             frontier = (
                 FrontierEntry(
-                    "FRONTIER-001", last.id, "built-in scan deadline exhausted",
+                    "FRONTIER-001",
+                    last.id,
+                    "built-in scan deadline exhausted",
                     last.risk_domains,
                 ),
             )
         return BuiltInScanResult(
-            tuple(nodes), tuple(edges), (), frontier,
+            tuple(nodes),
+            tuple(edges),
+            (),
+            frontier,
             {location: documents[location][2] for location in sorted(documents)},
             {path: skipped[path] for path in sorted(skipped)},
-            files_scanned, bytes_scanned, "budget_exhausted",
+            files_scanned,
+            bytes_scanned,
+            "budget_exhausted",
         )
 
     if exhausted and expired():
@@ -901,18 +930,12 @@ def scan_repository(
             if source.endswith(".py"):
                 plausible_import_target = target.endswith(".py")
             elif source.endswith(_SCRIPT_SUFFIXES):
-                plausible_import_target = target.endswith(
-                    _SCRIPT_SUFFIXES + (".json",)
-                )
+                plausible_import_target = target.endswith((*_SCRIPT_SUFFIXES, ".json"))
             else:
                 plausible_import_target = True
-            if plausible_import_target and _module_resolves_to_target(
-                target, source_modules
-            ):
+            if plausible_import_target and _module_resolves_to_target(target, source_modules):
                 stem = target.lower().rsplit("/", 1)[-1].split(".", 1)[0]
-                relationships.append(
-                    (source, target, stem, source_modules, "import")
-                )
+                relationships.append((source, target, stem, source_modules, "import"))
                 continue
             # 2) Using a name the target genuinely defines (both sides
             #    parsed) is structural; string mentions never reach here
@@ -921,12 +944,8 @@ def scan_repository(
             if source_structure is not None and target_structure is not None:
                 used_defs = source_structure.uses & target_structure.defs
                 if used_defs:
-                    evidence = min(
-                        used_defs, key=lambda value: (-len(value), value)
-                    )
-                    relationships.append(
-                        (source, target, evidence, source_modules, "defuse")
-                    )
+                    evidence = min(used_defs, key=lambda value: (-len(value), value))
+                    relationships.append((source, target, evidence, source_modules, "defuse"))
                     continue
             # 3) Shared-token co-occurrence stays lexical.
             shared = source_terms & documents[target][1]
@@ -935,14 +954,11 @@ def scan_repository(
                 # — identical pick to the previous full sort, without paying
                 # an O(k log k) sort for every ordered file pair.
                 evidence = min(shared, key=lambda value: (-len(value), value))
-                relationships.append(
-                    (source, target, evidence, source_modules, "lexical")
-                )
+                relationships.append((source, target, evidence, source_modules, "lexical"))
 
     reachable = set(seed_locations)
     reachable.update(
-        location for location, (_, terms, *_rest) in documents.items()
-        if terms & seed_terms
+        location for location, (_, terms, *_rest) in documents.items() if terms & seed_terms
     )
     changed = True
     while changed and not expired():
@@ -957,12 +973,17 @@ def scan_repository(
     if expired():
         return deadline_result()
 
-    supplied_only = [seed for seed in normalized_seeds if seed.location is None or seed.location not in documents]
+    supplied_only = [
+        seed for seed in normalized_seeds if seed.location is None or seed.location not in documents
+    ]
     ordered_locations = sorted(
         reachable,
         key=lambda location: (
             0 if location in seed_locations else 1,
-            min((_RISK_RANK[item] for item in _risk_domains(location, documents[location][0])), default=99),
+            min(
+                (_RISK_RANK[item] for item in _risk_domains(location, documents[location][0])),
+                default=99,
+            ),
             location,
         ),
     )
@@ -973,9 +994,7 @@ def scan_repository(
         else GRAPH.MAX_FRONTIER
     )
     error_locations = all_error_locations[:error_limit]
-    matched_locations = [
-        location for location in ordered_locations if location in seed_locations
-    ]
+    matched_locations = [location for location in ordered_locations if location in seed_locations]
     remaining_locations = [
         location for location in ordered_locations if location not in seed_locations
     ]
@@ -986,7 +1005,7 @@ def scan_repository(
     if len(candidates) > limits.max_nodes:
         exhausted = True
         resource_limit_reached = True
-    candidates = candidates[:limits.max_nodes]
+    candidates = candidates[: limits.max_nodes]
 
     nodes = []
     location_ids = {}
@@ -1001,31 +1020,57 @@ def scan_repository(
             label = "unreadable repository directory"
             risk = ("functionality",)
             node = GraphNode(
-                node_id, "file", label, safe_location, "builtin", "lexical",
-                None, risk,
+                node_id,
+                "file",
+                label,
+                safe_location,
+                "builtin",
+                "lexical",
+                None,
+                risk,
             )
             error_node_ids[location] = node_id
         elif location is None:
             label = _safe_graph_text(seed.term, sensitive_literals)
             risk = _risk_domains(seed.location, seed.term)
-            node = GraphNode(node_id, "symbol", label, seed.location, "builtin", "lexical", None, risk)
+            node = GraphNode(
+                node_id, "symbol", label, seed.location, "builtin", "lexical", None, risk
+            )
         else:
             text, _, digest, *_rest = documents[location]
             risk = _risk_domains(location, text)
-            label = next((
-                _safe_graph_text(seed.term, sensitive_literals)
-                for seed in normalized_seeds if seed.location == location
-            ), location)
+            label = next(
+                (
+                    _safe_graph_text(seed.term, sensitive_literals)
+                    for seed in normalized_seeds
+                    if seed.location == location
+                ),
+                location,
+            )
             confidence = "structural-inferred" if location in seed_locations else "lexical"
-            node = GraphNode(node_id, _node_kind(location, text), label, location, "builtin", confidence, digest, risk)
+            node = GraphNode(
+                node_id,
+                _node_kind(location, text),
+                label,
+                location,
+                "builtin",
+                confidence,
+                digest,
+                risk,
+            )
             location_ids[location] = node_id
         nodes.append(node)
         node_risks[node_id] = risk
 
     if unreadable_sources and not nodes and limits.max_nodes > 0:
         node = GraphNode(
-            "NODE-001", "file", "unreadable source",
-            unreadable_sources[0], "builtin", "lexical", None,
+            "NODE-001",
+            "file",
+            "unreadable source",
+            unreadable_sources[0],
+            "builtin",
+            "lexical",
+            None,
             ("functionality",),
         )
         nodes.append(node)
@@ -1041,14 +1086,19 @@ def scan_repository(
     # Structural evidence outranks lexical co-occurrence when the edge cap
     # bites: a large repository must not lose exactly the edges the scan
     # exists to find. Ordering stays deterministic within each tier.
-    edge_candidates.sort(key=lambda item: (
-        0 if item[3] == "structural-inferred" else 1,
-        location_ids[item[0]], location_ids[item[1]], item[2], item[4],
-    ))
+    edge_candidates.sort(
+        key=lambda item: (
+            0 if item[3] == "structural-inferred" else 1,
+            location_ids[item[0]],
+            location_ids[item[1]],
+            item[2],
+            item[4],
+        )
+    )
     if len(edge_candidates) > limits.max_edges:
         exhausted = True
         resource_limit_reached = True
-    edge_candidates = edge_candidates[:limits.max_edges]
+    edge_candidates = edge_candidates[: limits.max_edges]
     edges = []
     adjacency = {}
     for index, (source, target, kind, confidence, evidence) in enumerate(edge_candidates, start=1):
@@ -1060,10 +1110,15 @@ def scan_repository(
         # target. Provenance records where the evidence actually lives.
         evidence_location = source if kind == "imports" else target
         edge = GraphEdge(
-            edge_id, location_ids[source], location_ids[target], kind,
+            edge_id,
+            location_ids[source],
+            location_ids[target],
+            kind,
             evidence_location,
-            _safe_graph_text(evidence, sensitive_literals)[:GRAPH.MAX_STRING_LENGTH],
-            confidence, "builtin", documents[evidence_location][2],
+            _safe_graph_text(evidence, sensitive_literals)[: GRAPH.MAX_STRING_LENGTH],
+            confidence,
+            "builtin",
+            documents[evidence_location][2],
         )
         edges.append(edge)
         adjacency.setdefault(edge.source, []).append((edge.target, edge.id))
@@ -1072,7 +1127,9 @@ def scan_repository(
     # component. Enumerating every simple-path permutation makes dense lexical
     # graphs explode and produces visually repetitive prefixes.
     raw_paths = []
-    start_ids = sorted(location_ids[location] for location in seed_locations if location in location_ids)
+    start_ids = sorted(
+        location_ids[location] for location in seed_locations if location in location_ids
+    )
     path_limit_reached = False
     covered_nodes = set()
     for start_id in start_ids:
@@ -1100,8 +1157,8 @@ def scan_repository(
                     continue
                 seen.add(target)
                 covered_nodes.add(target)
-                next_nodes = path_nodes + (target,)
-                next_edges = path_edges + (edge_id,)
+                next_nodes = (*path_nodes, target)
+                next_edges = (*path_edges, edge_id)
                 if len(raw_paths) >= limits.max_paths:
                     exhausted = True
                     path_limit_reached = True
@@ -1127,20 +1184,20 @@ def scan_repository(
                 ]
                 if not choices:
                     break
-                target, edge_id = min(choices, key=lambda item: (
-                    0 if by_edge_id[item[1]].confidence == "structural-inferred" else 1,
-                    -len(by_edge_id[item[1]].evidence),
-                    by_edge_id[item[1]].evidence,
-                    item[0],
-                ))
+                target, edge_id = min(
+                    choices,
+                    key=lambda item: (
+                        0 if by_edge_id[item[1]].confidence == "structural-inferred" else 1,
+                        -len(by_edge_id[item[1]].evidence),
+                        by_edge_id[item[1]].evidence,
+                        item[0],
+                    ),
+                )
                 representative_nodes += (target,)
                 representative_edges += (edge_id,)
                 current = target
             representative = (representative_nodes, representative_edges)
-            distinct_evidence = {
-                by_edge_id[edge_id].evidence
-                for edge_id in representative_edges
-            }
+            distinct_evidence = {by_edge_id[edge_id].evidence for edge_id in representative_edges}
             if (
                 len(representative_edges) >= 2
                 and len(distinct_evidence) >= 2
@@ -1161,60 +1218,79 @@ def scan_repository(
     if len(unique_paths) > limits.max_paths:
         exhausted = True
         path_limit_reached = True
-    unique_paths = unique_paths[:limits.max_paths]
+    unique_paths = unique_paths[: limits.max_paths]
     paths = []
     for index, (path_nodes, path_edges) in enumerate(unique_paths, start=1):
-        domains = {
-            domain for node_id in path_nodes for domain in node_risks[node_id]
-        }
+        domains = {domain for node_id in path_nodes for domain in node_risks[node_id]}
         ordered_domains = tuple(sorted(domains, key=lambda item: (_RISK_RANK[item], item)))
-        paths.append(GraphPath(f"PATH-{index:03d}", path_nodes, path_edges, len(path_edges), ordered_domains))
+        paths.append(
+            GraphPath(f"PATH-{index:03d}", path_nodes, path_edges, len(path_edges), ordered_domains)
+        )
 
     frontier_items = []
     for location in error_locations:
         node_id = error_node_ids.get(location)
         if node_id is not None and len(frontier_items) < GRAPH.MAX_FRONTIER:
             display = "repository root" if location == "." else location
-            frontier_items.append(FrontierEntry(
-                f"FRONTIER-{len(frontier_items) + 1:03d}", node_id,
-                f"unreadable directory: {display}", ("functionality",),
-            ))
+            frontier_items.append(
+                FrontierEntry(
+                    f"FRONTIER-{len(frontier_items) + 1:03d}",
+                    node_id,
+                    f"unreadable directory: {display}",
+                    ("functionality",),
+                )
+            )
     omitted_errors = len(all_error_locations) - len(error_node_ids)
     if omitted_errors and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
-        frontier_items.append(FrontierEntry(
-            f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[0].id,
-            f"{omitted_errors} unreadable directories omitted from node capacity",
-            nodes[0].risk_domains,
-        ))
+        frontier_items.append(
+            FrontierEntry(
+                f"FRONTIER-{len(frontier_items) + 1:03d}",
+                nodes[0].id,
+                f"{omitted_errors} unreadable directories omitted from node capacity",
+                nodes[0].risk_domains,
+            )
+        )
     if unreadable_sources and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
         display = unreadable_sources[0]
-        suffix = (
-            f" and {len(unreadable_sources) - 1} more"
-            if len(unreadable_sources) > 1 else ""
+        suffix = f" and {len(unreadable_sources) - 1} more" if len(unreadable_sources) > 1 else ""
+        frontier_items.append(
+            FrontierEntry(
+                f"FRONTIER-{len(frontier_items) + 1:03d}",
+                nodes[0].id,
+                f"unreadable source: {display}{suffix}",
+                nodes[0].risk_domains,
+            )
         )
-        frontier_items.append(FrontierEntry(
-            f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[0].id,
-            f"unreadable source: {display}{suffix}", nodes[0].risk_domains,
-        ))
     if exhausted and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
         reason = (
             "built-in scan resource capacity exhausted"
             if resource_limit_reached
             else "built-in scan path capacity exhausted"
         )
-        frontier_items.append(FrontierEntry(
-            f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[-1].id,
-            reason, nodes[-1].risk_domains,
-        ))
+        frontier_items.append(
+            FrontierEntry(
+                f"FRONTIER-{len(frontier_items) + 1:03d}",
+                nodes[-1].id,
+                reason,
+                nodes[-1].risk_domains,
+            )
+        )
     frontier = tuple(frontier_items)
     status = (
-        "provider_limited" if traversal_errors or unreadable_sources else
-        "budget_exhausted" if exhausted else "closed"
+        "provider_limited"
+        if traversal_errors or unreadable_sources
+        else "budget_exhausted"
+        if exhausted
+        else "closed"
     )
     return BuiltInScanResult(
-        tuple(nodes), tuple(edges), tuple(paths), frontier,
+        tuple(nodes),
+        tuple(edges),
+        tuple(paths),
+        frontier,
         {location: documents[location][2] for location in sorted(documents)},
         {path: skipped[path] for path in sorted(skipped)},
-        files_scanned, bytes_scanned,
+        files_scanned,
+        bytes_scanned,
         status,
     )

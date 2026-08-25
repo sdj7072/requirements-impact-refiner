@@ -3,7 +3,6 @@ import json
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "evals" / "cases.json"
 V03_CASES_PATH = ROOT / "evals" / "v0.3-cases.json"
@@ -78,16 +77,12 @@ class EvalCaseContractTest(unittest.TestCase):
 
     def test_positive_cases_cover_the_release_taxonomy(self):
         topics = {
-            case["id"].removeprefix("POS-")
-            for case in load_cases()
-            if case["kind"] == "positive"
+            case["id"].removeprefix("POS-") for case in load_cases() if case["kind"] == "positive"
         }
         self.assertEqual(topics, REQUIRED_POSITIVE_TOPICS)
 
     def test_negative_cases_protect_neighboring_workflows(self):
-        negative_ids = {
-            case["id"] for case in load_cases() if case["kind"] == "negative"
-        }
+        negative_ids = {case["id"] for case in load_cases() if case["kind"] == "negative"}
         self.assertEqual(
             negative_ids,
             {
@@ -101,10 +96,7 @@ class EvalCaseContractTest(unittest.TestCase):
 
     def test_integration_cases_cover_formal_adapters(self):
         modes = {
-            mode
-            for case in load_cases()
-            if case["kind"] == "integration"
-            for mode in case["modes"]
+            mode for case in load_cases() if case["kind"] == "integration" for mode in case["modes"]
         }
         self.assertEqual(
             modes,

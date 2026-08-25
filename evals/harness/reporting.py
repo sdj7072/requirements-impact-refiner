@@ -1,11 +1,11 @@
 """Bounded public summaries for installed-plugin evaluation evidence."""
 
-from typing import Dict, Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Optional
 
 from .catalog import load_all, select_suite
 from .models import Adjudication, MechanicalScore, RunResult, RunStatus
 from .scoring import validate_adjudications
-
 
 _STATUS_KEYS = tuple(status.value for status in RunStatus)
 _REQUIRED_METADATA = (
@@ -30,7 +30,7 @@ _RUN_PROVENANCE_KEYS = (
 
 def summarize(
     results: Sequence[RunResult], scores: Optional[Sequence[MechanicalScore]] = None
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Count every outcome, treating only strict pass as a pass.
 
     When scores are provided, a run counts as a strict pass only when both the
@@ -51,9 +51,7 @@ def summarize(
             if scores is None or (score is not None and score.passed):
                 strict_passes += 1
     summary["strict_passes"] = strict_passes
-    summary["mechanical_failed"] = sum(
-        1 for score in score_by_key.values() if not score.passed
-    )
+    summary["mechanical_failed"] = sum(1 for score in score_by_key.values() if not score.passed)
     return summary
 
 
@@ -67,12 +65,12 @@ def _metadata_value(metadata: Mapping[str, object], key: str) -> object:
     return metadata.get(key)
 
 
-def _require_metadata(metadata: Mapping[str, object]) -> Dict[str, object]:
+def _require_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
     values = {}
     for key in _REQUIRED_METADATA:
         value = _metadata_value(metadata, key)
         if value is None or (isinstance(value, str) and not value.strip()):
-            raise ValueError("report metadata requires %s" % key)
+            raise ValueError(f"report metadata requires {key}")
         values[key] = value
     repetitions = values["repetitions"]
     if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
@@ -93,9 +91,9 @@ def _environment_values(run: RunResult) -> tuple[str, ...]:
     return tuple(value for key, value in run.metadata if key == "environment")
 
 
-def _run_provenance(run: RunResult) -> Optional[Dict[str, str]]:
+def _run_provenance(run: RunResult) -> Optional[dict[str, str]]:
     """Return one unambiguous structured provenance row from a sealed final."""
-    values: Dict[str, str] = {}
+    values: dict[str, str] = {}
     for key, value in run.metadata:
         if key not in _RUN_PROVENANCE_KEYS:
             continue
@@ -123,9 +121,7 @@ def _verification_errors(
 ) -> list[str]:
     """Require the sealed canonical matrix, never a caller-supplied summary."""
     cases = select_suite(load_all(), "installed-superpowers")
-    expected_runs = {
-        (case.id, repetition) for case in cases for repetition in range(1, 6)
-    }
+    expected_runs = {(case.id, repetition) for case in cases for repetition in range(1, 6)}
     errors = []
     actual_runs = [(run.case_id, run.repetition) for run in results]
     actual_repetitions = {run.repetition for run in results}
@@ -193,24 +189,22 @@ def render_report(
     required = _require_metadata(metadata)
     summary = summarize(results, scores)
     derived_repetitions = _derived_repetitions(results)
-    verification_errors = _verification_errors(
-        results, scores, adjudications, required
-    )
+    verification_errors = _verification_errors(results, scores, adjudications, required)
     status = "verified" if not verification_errors else "not verified"
     rendered_client = required["client"]
     rendered_composition = required["enabled_composition"]
     lines = (
         "# Installed Plugin Evaluation",
         "",
-        "- status: %s" % status,
-        "- client: %s" % rendered_client,
-        "- version: %s" % required["version"],
-        "- plugin version: %s" % required["plugin_version"],
-        "- enabled composition: %s" % rendered_composition,
-        "- enabled plugins: %s" % ",".join(required["enabled_plugins"]),
-        "- model: %s" % required["model"],
-        "- reasoning: %s" % required["reasoning"],
-        "- repetitions: %s" % derived_repetitions,
+        f"- status: {status}",
+        f"- client: {rendered_client}",
+        "- version: {}".format(required["version"]),
+        "- plugin version: {}".format(required["plugin_version"]),
+        f"- enabled composition: {rendered_composition}",
+        "- enabled plugins: {}".format(",".join(required["enabled_plugins"])),
+        "- model: {}".format(required["model"]),
+        "- reasoning: {}".format(required["reasoning"]),
+        f"- repetitions: {derived_repetitions}",
         "- strict score: %d/%d" % (summary["strict_passes"], summary["total"]),
         "- pass: %d" % summary[RunStatus.PASS.value],
         "- partial: %d" % summary[RunStatus.PARTIAL.value],

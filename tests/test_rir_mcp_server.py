@@ -56,7 +56,15 @@ class RirMcpServerTest(unittest.TestCase):
     def test_tools_list_exposes_only_controller_tools(self):
         replies = self.exchange(
             [
-                request(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}),
+                request(
+                    1,
+                    "initialize",
+                    {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1"},
+                    },
+                ),
                 request(2, "tools/list", {}),
             ]
         )
@@ -71,11 +79,11 @@ class RirMcpServerTest(unittest.TestCase):
             self.assertIn("local", tool["description"].lower())
             self.assertIn("network", tool["description"].lower())
         scan_schema = replies[1]["result"]["tools"][0]["inputSchema"]
-        self.assertEqual(
-            scan_schema["required"], ["repo_root", "change_request"]
-        )
+        self.assertEqual(scan_schema["required"], ["repo_root", "change_request"])
         trace_schema = replies[1]["result"]["tools"][2]["inputSchema"]
-        self.assertEqual(trace_schema["properties"]["seeds"]["items"]["additionalProperties"], False)
+        self.assertEqual(
+            trace_schema["properties"]["seeds"]["items"]["additionalProperties"], False
+        )
         self.assertEqual(
             trace_schema["properties"]["seeds"]["items"]["required"],
             ["term", "location"],
@@ -97,37 +105,47 @@ class RirMcpServerTest(unittest.TestCase):
             (root / "api/profile.py").write_text(
                 'FIELD = "profile.displayName"\n', encoding="utf-8"
             )
-            replies = self.exchange([
-                request(1, "tools/call", {
-                    "name": "rir_scan",
-                    "arguments": {
-                        "repo_root": str(root),
-                        "change_request": "Rename profile.displayName",
-                        "evidence": [],
-                        "presentation": "balanced",
-                    },
-                })
-            ])
+            replies = self.exchange(
+                [
+                    request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "rir_scan",
+                            "arguments": {
+                                "repo_root": str(root),
+                                "change_request": "Rename profile.displayName",
+                                "evidence": [],
+                                "presentation": "balanced",
+                            },
+                        },
+                    )
+                ]
+            )
             result = replies[0]["result"]
             self.assertEqual(
                 result["content"][0]["text"],
                 result["structuredContent"]["display_text"],
             )
-            self.assertRegex(
-                result["structuredContent"]["scan_id"], r"^[0-9a-f]{32}$"
-            )
-            promoted = self.exchange([
-                request(2, "tools/call", {
-                    "name": "rir_begin",
-                    "arguments": {
-                        "repo_root": str(root),
-                        "request": "Rename profile.displayName",
-                        "repository_evidence": [],
-                        "adapter": "generic",
-                        "scan_id": result["structuredContent"]["scan_id"],
-                    },
-                })
-            ])[0]["result"]["structuredContent"]
+            self.assertRegex(result["structuredContent"]["scan_id"], r"^[0-9a-f]{32}$")
+            promoted = self.exchange(
+                [
+                    request(
+                        2,
+                        "tools/call",
+                        {
+                            "name": "rir_begin",
+                            "arguments": {
+                                "repo_root": str(root),
+                                "request": "Rename profile.displayName",
+                                "repository_evidence": [],
+                                "adapter": "generic",
+                                "scan_id": result["structuredContent"]["scan_id"],
+                            },
+                        },
+                    )
+                ]
+            )[0]["result"]["structuredContent"]
             self.assertEqual(
                 promoted["graph_receipt_id"],
                 result["structuredContent"]["receipt_id"],
@@ -148,7 +166,19 @@ class RirMcpServerTest(unittest.TestCase):
                 bufsize=1,
             )
             try:
-                begin = request(1, "tools/call", {"name": "rir_begin", "arguments": {"repo_root": str(root), "request": "Add nickname.", "repository_evidence": ["displayName exists"], "adapter": "generic"}})
+                begin = request(
+                    1,
+                    "tools/call",
+                    {
+                        "name": "rir_begin",
+                        "arguments": {
+                            "repo_root": str(root),
+                            "request": "Add nickname.",
+                            "repository_evidence": ["displayName exists"],
+                            "adapter": "generic",
+                        },
+                    },
+                )
                 process.stdin.write(json.dumps(begin) + "\n")
                 process.stdin.flush()
                 begin_reply = json.loads(process.stdout.readline())
@@ -165,8 +195,21 @@ class RirMcpServerTest(unittest.TestCase):
                 self.assertIn("remaining risk with an owner", rules)
                 self.assertIn("Superpowers handoff marker", rules)
                 self.assertIn("controller-owned", rules)
-                analysis = json.loads((FIXTURES / "controller-analysis-pre-decision.json").read_text())
-                finalize = request(2, "tools/call", {"name": "rir_finalize", "arguments": {"repo_root": str(root), "draft_id": draft_id, "analysis": analysis}})
+                analysis = json.loads(
+                    (FIXTURES / "controller-analysis-pre-decision.json").read_text()
+                )
+                finalize = request(
+                    2,
+                    "tools/call",
+                    {
+                        "name": "rir_finalize",
+                        "arguments": {
+                            "repo_root": str(root),
+                            "draft_id": draft_id,
+                            "analysis": analysis,
+                        },
+                    },
+                )
                 process.stdin.write(json.dumps(finalize) + "\n")
                 process.stdin.flush()
                 final_reply = json.loads(process.stdout.readline())
@@ -187,7 +230,19 @@ class RirMcpServerTest(unittest.TestCase):
             [
                 request(1, "tools/call", {"name": "other", "arguments": {}}),
                 request(2, "tools/call", {"name": "rir_begin", "arguments": []}),
-                request(3, "tools/call", {"name": "rir_begin", "arguments": {"repo_root": "/tmp", "request": "x", "repository_evidence": {"bad": "shape"}, "adapter": "generic"}}),
+                request(
+                    3,
+                    "tools/call",
+                    {
+                        "name": "rir_begin",
+                        "arguments": {
+                            "repo_root": "/tmp",
+                            "request": "x",
+                            "repository_evidence": {"bad": "shape"},
+                            "adapter": "generic",
+                        },
+                    },
+                ),
                 request(4, "tools/list", {}),
             ]
         )
@@ -212,20 +267,53 @@ class RirMcpServerTest(unittest.TestCase):
             root = Path(directory)
             self.write_graph_config(root, False)
             process = subprocess.Popen(
-                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+                [sys.executable, str(SERVER)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
             )
             try:
                 drafts = []
                 for identifier in (1, 2):
-                    message = request(identifier, "tools/call", {"name": "rir_begin", "arguments": {"repo_root": str(root), "request": "Add nickname.", "repository_evidence": ["displayName exists"], "adapter": "generic"}})
+                    message = request(
+                        identifier,
+                        "tools/call",
+                        {
+                            "name": "rir_begin",
+                            "arguments": {
+                                "repo_root": str(root),
+                                "request": "Add nickname.",
+                                "repository_evidence": ["displayName exists"],
+                                "adapter": "generic",
+                            },
+                        },
+                    )
                     process.stdin.write(json.dumps(message) + "\n")
                     process.stdin.flush()
-                    drafts.append(json.loads(process.stdout.readline())["result"]["structuredContent"]["draft_id"])
-                analysis = json.loads((FIXTURES / "controller-analysis-pre-decision.json").read_text())
+                    drafts.append(
+                        json.loads(process.stdout.readline())["result"]["structuredContent"][
+                            "draft_id"
+                        ]
+                    )
+                analysis = json.loads(
+                    (FIXTURES / "controller-analysis-pre-decision.json").read_text()
+                )
                 replies = []
                 for identifier, draft_id in ((3, drafts[0]), (4, drafts[1])):
-                    message = request(identifier, "tools/call", {"name": "rir_finalize", "arguments": {"repo_root": str(root), "draft_id": draft_id, "analysis": analysis}})
+                    message = request(
+                        identifier,
+                        "tools/call",
+                        {
+                            "name": "rir_finalize",
+                            "arguments": {
+                                "repo_root": str(root),
+                                "draft_id": draft_id,
+                                "analysis": analysis,
+                            },
+                        },
+                    )
                     process.stdin.write(json.dumps(message) + "\n")
                     process.stdin.flush()
                     replies.append(json.loads(process.stdout.readline()))
@@ -247,26 +335,65 @@ class RirMcpServerTest(unittest.TestCase):
             root = Path(directory)
             self.write_graph_config(root, False)
             process = subprocess.Popen(
-                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+                [sys.executable, str(SERVER)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
             )
             try:
+
                 def call(identifier, name, arguments):
-                    process.stdin.write(json.dumps(request(identifier, "tools/call", {"name": name, "arguments": arguments})) + "\n")
+                    process.stdin.write(
+                        json.dumps(
+                            request(
+                                identifier, "tools/call", {"name": name, "arguments": arguments}
+                            )
+                        )
+                        + "\n"
+                    )
                     process.stdin.flush()
                     return json.loads(process.stdout.readline())["result"]["structuredContent"]
-                first = call(1, "rir_begin", {"repo_root": str(root), "request": "Remove displayName.", "repository_evidence": ["mobile reads displayName"], "adapter": "generic"})
+
+                first = call(
+                    1,
+                    "rir_begin",
+                    {
+                        "repo_root": str(root),
+                        "request": "Remove displayName.",
+                        "repository_evidence": ["mobile reads displayName"],
+                        "adapter": "generic",
+                    },
+                )
                 post = json.loads((FIXTURES / "controller-analysis-post-decision.json").read_text())
-                call(2, "rir_finalize", {"repo_root": str(root), "draft_id": first["draft_id"], "analysis": post})
-                second = call(3, "rir_begin", {"repo_root": str(root), "request": "Desktop cache evidence arrived.", "repository_evidence": ["desktop cache persists displayName"], "adapter": "generic"})
+                call(
+                    2,
+                    "rir_finalize",
+                    {"repo_root": str(root), "draft_id": first["draft_id"], "analysis": post},
+                )
+                second = call(
+                    3,
+                    "rir_begin",
+                    {
+                        "repo_root": str(root),
+                        "request": "Desktop cache evidence arrived.",
+                        "repository_evidence": ["desktop cache persists displayName"],
+                        "adapter": "generic",
+                    },
+                )
             finally:
-                process.stdin.close(); process.wait(timeout=5)
-                process.stdout.close(); process.stderr.close()
+                process.stdin.close()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
 
         guidance = second["analysis_guidance"]
         self.assertEqual(guidance["recommended_phase"], "post-decision")
         self.assertEqual(guidance["carry_forward_decisions"][0]["key"], "own-workspace")
-        self.assertEqual(guidance["carry_forward_decisions"][0]["accepted_impact_keys"], ["member-scope"])
+        self.assertEqual(
+            guidance["carry_forward_decisions"][0]["accepted_impact_keys"], ["member-scope"]
+        )
         prior_impact = guidance["carry_forward_impacts"][0]
         self.assertEqual(prior_impact["key"], "member-scope")
         self.assertEqual(prior_impact["state"], "accepted")
@@ -277,8 +404,10 @@ class RirMcpServerTest(unittest.TestCase):
     def test_line_larger_than_limit_is_rejected_even_when_newline_is_buffered(self):
         payload = b" " * (2 * 1024 * 1024) + b"\n"
         result = subprocess.run(
-            [sys.executable, str(SERVER)], input=payload,
-            capture_output=True, check=False,
+            [sys.executable, str(SERVER)],
+            input=payload,
+            capture_output=True,
+            check=False,
         )
         replies = [json.loads(line) for line in result.stdout.splitlines()]
 
@@ -287,9 +416,19 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertIn("exceeds", replies[0]["error"]["message"])
 
     def test_initialize_negotiates_the_supported_protocol_version(self):
-        replies = self.exchange([
-            request(1, "initialize", {"protocolVersion": "2099-01-01", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}),
-        ])
+        replies = self.exchange(
+            [
+                request(
+                    1,
+                    "initialize",
+                    {
+                        "protocolVersion": "2099-01-01",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1"},
+                    },
+                ),
+            ]
+        )
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
 
     def test_deeply_nested_json_is_bounded_and_following_request_survives(self):
@@ -321,34 +460,52 @@ class RirMcpServerTest(unittest.TestCase):
                 'const key = "profile.displayName";\n', encoding="utf-8"
             )
             process = subprocess.Popen(
-                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+                [sys.executable, str(SERVER)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
             )
             try:
+
                 def call(identifier, name, arguments):
-                    process.stdin.write(json.dumps(request(
-                        identifier, "tools/call", {"name": name, "arguments": arguments}
-                    )) + "\n")
+                    process.stdin.write(
+                        json.dumps(
+                            request(
+                                identifier, "tools/call", {"name": name, "arguments": arguments}
+                            )
+                        )
+                        + "\n"
+                    )
                     process.stdin.flush()
                     return json.loads(process.stdout.readline())
 
-                begun = call(1, "rir_begin", {
-                    "repo_root": str(root), "request": "Change profile display name.",
-                    "repository_evidence": ["profile.displayName exists"],
-                    "adapter": "generic",
-                })["result"]["structuredContent"]
-                trace_reply = call(2, "rir_trace_impact", {
-                    "repo_root": str(root), "draft_id": begun["draft_id"],
-                    "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
-                })
-                traced = trace_reply["result"]["structuredContent"]
-                self.assertEqual(
-                    json.loads(trace_reply["result"]["content"][0]["text"]), traced
+                begun = call(
+                    1,
+                    "rir_begin",
+                    {
+                        "repo_root": str(root),
+                        "request": "Change profile display name.",
+                        "repository_evidence": ["profile.displayName exists"],
+                        "adapter": "generic",
+                    },
+                )["result"]["structuredContent"]
+                trace_reply = call(
+                    2,
+                    "rir_trace_impact",
+                    {
+                        "repo_root": str(root),
+                        "draft_id": begun["draft_id"],
+                        "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
+                    },
                 )
+                traced = trace_reply["result"]["structuredContent"]
+                self.assertEqual(json.loads(trace_reply["result"]["content"][0]["text"]), traced)
                 self.assertTrue(traced["compact_graph"]["paths"])
-                self.assertEqual(traced["seeds"], [
-                    {"term": "profile.displayName", "location": "api/profile.py"}
-                ])
+                self.assertEqual(
+                    traced["seeds"], [{"term": "profile.displayName", "location": "api/profile.py"}]
+                )
                 self.assertRegex(traced["request_sha256"], r"^[0-9a-f]{64}$")
                 analysis = json.loads(
                     (FIXTURES / "controller-analysis-pre-decision.json").read_text()
@@ -357,13 +514,21 @@ class RirMcpServerTest(unittest.TestCase):
                     row["key"] for row in traced["compact_graph"]["paths"]
                 ]
                 analysis["impacts"][0]["evidence_level"] = "unknown"
-                finalized = call(3, "rir_finalize", {
-                    "repo_root": str(root), "draft_id": begun["draft_id"],
-                    "graph_receipt_id": traced["receipt_id"], "analysis": analysis,
-                })
+                finalized = call(
+                    3,
+                    "rir_finalize",
+                    {
+                        "repo_root": str(root),
+                        "draft_id": begun["draft_id"],
+                        "graph_receipt_id": traced["receipt_id"],
+                        "analysis": analysis,
+                    },
+                )
             finally:
-                process.stdin.close(); process.wait(timeout=5)
-                process.stdout.close(); process.stderr.close()
+                process.stdin.close()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
 
         self.assertEqual(
             finalized["result"]["content"][0]["text"],
@@ -371,16 +536,23 @@ class RirMcpServerTest(unittest.TestCase):
         )
 
     def test_malformed_trace_error_is_bounded_and_following_request_survives(self):
-        replies = self.exchange([
-            request(1, "tools/call", {
-                "name": "rir_trace_impact",
-                "arguments": {
-                    "repo_root": "/tmp", "draft_id": "0" * 32,
-                    "seeds": [{"term": "x", "location": "../escape"}],
-                },
-            }),
-            request(2, "tools/list", {}),
-        ])
+        replies = self.exchange(
+            [
+                request(
+                    1,
+                    "tools/call",
+                    {
+                        "name": "rir_trace_impact",
+                        "arguments": {
+                            "repo_root": "/tmp",
+                            "draft_id": "0" * 32,
+                            "seeds": [{"term": "x", "location": "../escape"}],
+                        },
+                    },
+                ),
+                request(2, "tools/list", {}),
+            ]
+        )
 
         self.assertEqual(replies[0]["error"]["code"], -32602)
         self.assertLess(len(json.dumps(replies[0])), 2048)
@@ -408,30 +580,41 @@ class RirMcpServerTest(unittest.TestCase):
                 'const key = "profile.displayName";\n', encoding="utf-8"
             )
             process = subprocess.Popen(
-                [sys.executable, str(SERVER)], stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+                [sys.executable, str(SERVER)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
             )
             descriptor = None
             try:
+
                 def call(identifier, name, arguments):
-                    process.stdin.write(json.dumps(request(
-                        identifier, "tools/call", {"name": name, "arguments": arguments}
-                    )) + "\n")
+                    process.stdin.write(
+                        json.dumps(
+                            request(
+                                identifier, "tools/call", {"name": name, "arguments": arguments}
+                            )
+                        )
+                        + "\n"
+                    )
                     process.stdin.flush()
                     return json.loads(process.stdout.readline())
 
-                begun = call(1, "rir_begin", {
-                    "repo_root": str(root), "request": "Bound MCP lock.",
-                    "repository_evidence": ["profile.displayName exists"],
-                    "adapter": "generic",
-                })["result"]["structuredContent"]
-                report_dir = (
-                    root / ".requirements-impact-refiner/reports" / begun["report_id"]
-                )
+                begun = call(
+                    1,
+                    "rir_begin",
+                    {
+                        "repo_root": str(root),
+                        "request": "Bound MCP lock.",
+                        "repository_evidence": ["profile.displayName exists"],
+                        "adapter": "generic",
+                    },
+                )["result"]["structuredContent"]
+                report_dir = root / ".requirements-impact-refiner/reports" / begun["report_id"]
                 report_dir.mkdir(parents=True, exist_ok=True)
-                descriptor = os.open(
-                    report_dir / ".controller.lock", os.O_RDWR | os.O_CREAT, 0o600
-                )
+                descriptor = os.open(report_dir / ".controller.lock", os.O_RDWR | os.O_CREAT, 0o600)
                 fcntl.flock(descriptor, fcntl.LOCK_EX)
 
                 def release():
@@ -442,10 +625,15 @@ class RirMcpServerTest(unittest.TestCase):
                 releaser = threading.Thread(target=release)
                 releaser.start()
                 started = time.monotonic()
-                reply = call(2, "rir_trace_impact", {
-                    "repo_root": str(root), "draft_id": begun["draft_id"],
-                    "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
-                })
+                reply = call(
+                    2,
+                    "rir_trace_impact",
+                    {
+                        "repo_root": str(root),
+                        "draft_id": begun["draft_id"],
+                        "seeds": [{"term": "profile.displayName", "location": "api/profile.py"}],
+                    },
+                )
                 elapsed = time.monotonic() - started
                 releaser.join(timeout=2)
                 descriptor = None
@@ -456,8 +644,10 @@ class RirMcpServerTest(unittest.TestCase):
                 if descriptor is not None:
                     fcntl.flock(descriptor, fcntl.LOCK_UN)
                     os.close(descriptor)
-                process.stdin.close(); process.wait(timeout=5)
-                process.stdout.close(); process.stderr.close()
+                process.stdin.close()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
 
         self.assertEqual(reply["error"]["code"], -32602)
         self.assertIn("deadline exhausted waiting for controller lock", reply["error"]["message"])

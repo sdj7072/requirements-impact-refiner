@@ -7,7 +7,6 @@ from pathlib import Path
 
 from evals.harness.evidence import find_potential_secrets, verify_manifest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_ROOT = ROOT / "evals" / "results" / "installed-v0.3"
 RAW_ROOT = RESULT_ROOT / "raw"
@@ -25,9 +24,7 @@ LINEAGE_CASE_IDS = {
     "LINEAGE-reopened",
     "LINEAGE-no-false-resolution",
 }
-EXPECTED_MANIFEST_SHA256 = (
-    "a88f024d2631428555ae9368d1eee883794993913c93ff8ec11fe105caa53d1d"
-)
+EXPECTED_MANIFEST_SHA256 = "a88f024d2631428555ae9368d1eee883794993913c93ff8ec11fe105caa53d1d"
 EXPECTED_LINEAGE_CASE_IDS = (
     "LINEAGE-stable-blocked",
     "LINEAGE-reopened",
@@ -60,15 +57,9 @@ def load_json(path):
 
 def thread_started_ids(path):
     events = (
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     )
-    return tuple(
-        event["thread_id"]
-        for event in events
-        if event.get("type") == "thread.started"
-    )
+    return tuple(event["thread_id"] for event in events if event.get("type") == "thread.started")
 
 
 @unittest.skipUnless(
@@ -90,21 +81,13 @@ class InstalledPluginEvidenceTest(unittest.TestCase):
         """Catch a reused or mismatched persisted UUID across lineage runs."""
         selected = load_json(RESULT_ROOT / "controller.json")["runs"]
         lineage = [row for row in selected if row["case_id"] in LINEAGE_CASE_IDS]
-        self.assertEqual(
-            tuple(row["case_id"] for row in lineage), EXPECTED_LINEAGE_CASE_IDS
-        )
+        self.assertEqual(tuple(row["case_id"] for row in lineage), EXPECTED_LINEAGE_CASE_IDS)
         selected_sessions = [row["result"]["session_id"] for row in lineage]
         self.assertEqual(len(selected_sessions), len(set(selected_sessions)))
         for row in lineage:
             selected_session = row["result"]["session_id"]
             for turn in ("first", "second"):
-                raw_path = (
-                    RAW_ROOT
-                    / "codex"
-                    / row["case_id"]
-                    / "01"
-                    / (turn + ".jsonl")
-                )
+                raw_path = RAW_ROOT / "codex" / row["case_id"] / "01" / (turn + ".jsonl")
                 self.assertEqual(thread_started_ids(raw_path), (selected_session,))
 
     def test_codex_composition_is_exact_and_matches_the_observed_probe(self):
@@ -113,19 +96,20 @@ class InstalledPluginEvidenceTest(unittest.TestCase):
         identity = controller["identity"]
         probes = load_json(RESULT_ROOT / "probes.json")["probes"]
         codex_probe = next(row["probe"] for row in probes if row["client"] == "codex")
-        self.assertEqual(
-            tuple(identity["enabled_plugins"]), EXPECTED_CODEX_ENABLED_PLUGINS
-        )
+        self.assertEqual(tuple(identity["enabled_plugins"]), EXPECTED_CODEX_ENABLED_PLUGINS)
         self.assertEqual(
             tuple(sorted(codex_probe["enabled_plugins"])),
             EXPECTED_CODEX_ENABLED_PLUGINS,
         )
-        self.assertIn("requirements-impact-refiner@requirements-impact-refiner", identity["enabled_plugins"])
+        self.assertIn(
+            "requirements-impact-refiner@requirements-impact-refiner", identity["enabled_plugins"]
+        )
         self.assertIn("superpowers@openai-curated", identity["enabled_plugins"])
         self.assertEqual(
             identity["enabled_composition"],
-            "codex %s plugins=%s"
-            % (identity["version"], ",".join(EXPECTED_CODEX_ENABLED_PLUGINS)),
+            "codex {} plugins={}".format(
+                identity["version"], ",".join(EXPECTED_CODEX_ENABLED_PLUGINS)
+            ),
         )
 
     def test_smoke_evidence_is_sealed_safe_and_byte_preserved(self):
@@ -144,9 +128,7 @@ class InstalledPluginEvidenceTest(unittest.TestCase):
         self.assertEqual(findings, {})
 
         raw_paths = sorted(
-            path.relative_to(ROOT).as_posix()
-            for path in RAW_ROOT.rglob("*")
-            if path.is_file()
+            path.relative_to(ROOT).as_posix() for path in RAW_ROOT.rglob("*") if path.is_file()
         )
         checked = subprocess.run(
             ["git", "check-attr", "text", "whitespace", "--stdin"],
@@ -176,9 +158,7 @@ class InstalledPluginEvidenceTest(unittest.TestCase):
         self.assertEqual(probe_by_client["claude"]["version"], "2.1.228 (Claude Code)")
         self.assertEqual(probe_by_client["codex"]["plugin_version"], "0.3.0")
         self.assertEqual(probe_by_client["claude"]["plugin_version"], "0.3.0")
-        self.assertIn(
-            "superpowers@openai-curated", probe_by_client["codex"]["enabled_plugins"]
-        )
+        self.assertIn("superpowers@openai-curated", probe_by_client["codex"]["enabled_plugins"])
 
         identity = controller["identity"]
         self.assertEqual(controller["suite"], "smoke")
@@ -196,9 +176,7 @@ class InstalledPluginEvidenceTest(unittest.TestCase):
 
         attempts = controller["attempts"]
         self.assertEqual(len(attempts), 7)
-        integration_attempts = [
-            row for row in attempts if row["case_id"] == "INT-superpowers"
-        ]
+        integration_attempts = [row for row in attempts if row["case_id"] == "INT-superpowers"]
         self.assertEqual(
             [(row["attempt"], row["result"]["status"]) for row in integration_attempts],
             [(1, "infra_error"), (2, "pass")],

@@ -36,10 +36,10 @@ def _json_depth(text: str) -> int:
 _MAX_JSON_DEPTH = 64
 import importlib.util
 import os
-from pathlib import Path, PurePosixPath
 import re
 import stat
 import sys
+from pathlib import Path, PurePosixPath
 
 
 def _load_providers():
@@ -64,17 +64,44 @@ ProviderSpec = PROVIDERS.ProviderSpec
 
 _VERSION = re.compile(r"(?im)^ast-grep\s+0\.45\.\d+(?:[-+][^\s]+)?\s*$")
 _LANGUAGES = {
-    ".py": "python", ".pyi": "python", ".js": "javascript",
-    ".jsx": "javascript", ".ts": "typescript", ".tsx": "typescript",
-    ".java": "java", ".kt": "kotlin", ".kts": "kotlin", ".go": "go",
-    ".rs": "rust", ".swift": "swift", ".c": "c", ".h": "c",
-    ".cc": "cpp", ".cpp": "cpp", ".hpp": "cpp", ".cs": "csharp",
+    ".py": "python",
+    ".pyi": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".go": "go",
+    ".rs": "rust",
+    ".swift": "swift",
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".hpp": "cpp",
+    ".cs": "csharp",
 }
-_IGNORED = frozenset({
-    ".git", ".hg", ".svn", ".requirements-impact-refiner", ".joern",
-    "node_modules", "vendor", "build", "dist", "generated", "target",
-    ".venv", "venv", "coverage", ".next",
-})
+_IGNORED = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".requirements-impact-refiner",
+        ".joern",
+        "node_modules",
+        "vendor",
+        "build",
+        "dist",
+        "generated",
+        "target",
+        ".venv",
+        "venv",
+        "coverage",
+        ".next",
+    }
+)
 _MAX_FILES = 500
 _MAX_BYTES = 8_000_000
 _MAX_FILE_BYTES = 1_048_576
@@ -89,7 +116,11 @@ def _safe_relative(value):
     if "\\" in value or "\x00" in value:
         return None
     path = PurePosixPath(value)
-    if path.is_absolute() or value in {".", ".."} or any(part in {"", ".", ".."} for part in path.parts):
+    if (
+        path.is_absolute()
+        or value in {".", ".."}
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
         return None
     return path.as_posix()
 
@@ -108,7 +139,8 @@ def _regular_bytes(root: Path, relative: str):
         parts = PurePosixPath(safe).parts
         for part in parts[:-1]:
             next_descriptor = os.open(
-                part, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                part,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
                 dir_fd=current,
             )
             if current != descriptor:
@@ -118,11 +150,16 @@ def _regular_bytes(root: Path, relative: str):
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _MAX_FILE_BYTES:
             return None
         file_descriptor = os.open(
-            parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=current,
+            parts[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=current,
         )
         opened = os.fstat(file_descriptor)
         if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) != (
-            metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_size,
+            metadata.st_mtime_ns,
         ):
             os.close(file_descriptor)
             return None
@@ -169,8 +206,7 @@ def _source_proof(root: Path, relative: str, source_range):
     if not isinstance(source_range, (list, tuple)) or len(source_range) != 4:
         raise ValueError("provider source range must contain four integers")
     if any(
-        not isinstance(item, int) or isinstance(item, bool) or item < 0
-        for item in source_range
+        not isinstance(item, int) or isinstance(item, bool) or item < 0 for item in source_range
     ):
         raise ValueError("provider source range is invalid")
     record = _source_record(root, relative)
@@ -189,9 +225,7 @@ def _source_proof(root: Path, relative: str, source_range):
     excerpt = text[start:end]
     byte_start = len(text[:start].encode("utf-8"))
     byte_end = byte_start + len(excerpt.encode("utf-8"))
-    selected_lines = "".join(
-        item[2] for item in lines[start_line : end_line + 1]
-    ).rstrip("\r\n")
+    selected_lines = "".join(item[2] for item in lines[start_line : end_line + 1]).rstrip("\r\n")
     return {
         "payload": payload,
         "sha256": hashlib.sha256(payload).hexdigest(),
@@ -215,7 +249,8 @@ def _source_inventory(root: Path, language=None):
     try:
         for current, directories, files in os.walk(base, topdown=True, followlinks=False):
             directories[:] = sorted(
-                name for name in directories
+                name
+                for name in directories
                 if name not in _IGNORED and not (Path(current) / name).is_symlink()
             )
             for name in sorted(files):
@@ -231,7 +266,9 @@ def _source_inventory(root: Path, language=None):
                 if count > _MAX_FILES or total > _MAX_BYTES:
                     return None
                 file_language = _LANGUAGES.get(PurePosixPath(relative).suffix.lower())
-                if (language is None or file_language == language) and _source_record(base, relative) is not None:
+                if (language is None or file_language == language) and _source_record(
+                    base, relative
+                ) is not None:
                     rows.append(relative)
     except OSError:
         return None
@@ -250,7 +287,8 @@ def source_fingerprint(root) -> str | None:
     try:
         for current, directories, files in os.walk(base, topdown=True, followlinks=False):
             directories[:] = sorted(
-                name for name in directories
+                name
+                for name in directories
                 if name not in _IGNORED and not (Path(current) / name).is_symlink()
             )
             for name in sorted(files):
@@ -268,7 +306,7 @@ def source_fingerprint(root) -> str | None:
                 rows.append((relative, hashlib.sha256(payload).hexdigest()))
     except OSError:
         return None
-    canonical = "".join("%s\0%s\n" % row for row in rows).encode("utf-8")
+    canonical = "".join("{}\0{}\n".format(*row) for row in rows).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
 
@@ -283,10 +321,20 @@ def _range(value):
         raise ValueError("ast-grep start range shape is unsupported")
     if not isinstance(end, dict) or set(end) != {"line", "column"}:
         raise ValueError("ast-grep end range shape is unsupported")
-    values = (byte_offset["start"], byte_offset["end"], start["line"], start["column"], end["line"], end["column"])
+    values = (
+        byte_offset["start"],
+        byte_offset["end"],
+        start["line"],
+        start["column"],
+        end["line"],
+        end["column"],
+    )
     if any(not isinstance(item, int) or isinstance(item, bool) or item < 0 for item in values):
         raise ValueError("ast-grep range values are invalid")
-    if byte_offset["end"] < byte_offset["start"] or (end["line"], end["column"]) < (start["line"], start["column"]):
+    if byte_offset["end"] < byte_offset["start"] or (end["line"], end["column"]) < (
+        start["line"],
+        start["column"],
+    ):
         raise ValueError("ast-grep range is reversed")
     return start["line"] + 1, start["column"] + 1, end["line"] + 1, end["column"] + 1
 
@@ -325,7 +373,9 @@ def _kind(path, label):
 
 
 def _failure(name, status, confidence, detail, digests=()):
-    return ProviderResult(name, status, confidence, raw_receipt_sha256=digests, detail=str(detail)[:512])
+    return ProviderResult(
+        name, status, confidence, raw_receipt_sha256=digests, detail=str(detail)[:512]
+    )
 
 
 def probe(spec, root, deadline, runner) -> ProviderProbe:
@@ -335,18 +385,66 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
     resolved = base.resolve() if not base.is_symlink() and base.is_dir() else base.absolute()
     version = PROVIDERS.run_provider(spec, ("--version",), base, deadline, runner=runner)
     if version.status != "ready":
-        return ProviderProbe("ast-grep", version.status, "structural-inferred", spec.executable, executable_sha256=version.executable_sha256, detail=version.detail, repo_root=resolved)
+        return ProviderProbe(
+            "ast-grep",
+            version.status,
+            "structural-inferred",
+            spec.executable,
+            executable_sha256=version.executable_sha256,
+            detail=version.detail,
+            repo_root=resolved,
+        )
     line = next((item.strip() for item in version.stdout.splitlines() if item.strip()), "")
-    if not isinstance(version.executable_sha256, str) or _HEX64.fullmatch(version.executable_sha256) is None:
-        return ProviderProbe("ast-grep", "unsafe", "structural-inferred", spec.executable, line[:256] or None, detail="ast-grep executable digest is missing or invalid", repo_root=resolved)
+    if (
+        not isinstance(version.executable_sha256, str)
+        or _HEX64.fullmatch(version.executable_sha256) is None
+    ):
+        return ProviderProbe(
+            "ast-grep",
+            "unsafe",
+            "structural-inferred",
+            spec.executable,
+            line[:256] or None,
+            detail="ast-grep executable digest is missing or invalid",
+            repo_root=resolved,
+        )
     if _VERSION.fullmatch(line) is None:
-        return ProviderProbe("ast-grep", "unsupported", "structural-inferred", spec.executable, line[:256] or None, version.executable_sha256, detail="ast-grep 0.45.x is required", repo_root=resolved)
+        return ProviderProbe(
+            "ast-grep",
+            "unsupported",
+            "structural-inferred",
+            spec.executable,
+            line[:256] or None,
+            version.executable_sha256,
+            detail="ast-grep 0.45.x is required",
+            repo_root=resolved,
+        )
     help_result = PROVIDERS.run_provider(spec, ("--help",), base, deadline, runner=runner)
     if help_result.status != "ready":
-        status = help_result.status if help_result.status in {"unsafe", "timed_out"} else "unsupported"
-        return ProviderProbe("ast-grep", status, "structural-inferred", spec.executable, line, version.executable_sha256, detail=help_result.detail or "ast-grep help unavailable", repo_root=resolved)
+        status = (
+            help_result.status if help_result.status in {"unsafe", "timed_out"} else "unsupported"
+        )
+        return ProviderProbe(
+            "ast-grep",
+            status,
+            "structural-inferred",
+            spec.executable,
+            line,
+            version.executable_sha256,
+            detail=help_result.detail or "ast-grep help unavailable",
+            repo_root=resolved,
+        )
     if help_result.executable_sha256 != version.executable_sha256:
-        return ProviderProbe("ast-grep", "unsafe", "structural-inferred", spec.executable, line, version.executable_sha256, detail="provider executable changed between probes", repo_root=resolved)
+        return ProviderProbe(
+            "ast-grep",
+            "unsafe",
+            "structural-inferred",
+            spec.executable,
+            line,
+            version.executable_sha256,
+            detail="provider executable changed between probes",
+            repo_root=resolved,
+        )
     help_text = help_result.stdout
     usage = re.search(
         r"(?m)^Usage:\s+(?:sg|ast-grep)\s+--json(?:=<STYLE>|=stream)\s+"
@@ -354,14 +452,38 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
         help_text,
     )
     if usage is None or re.search(r"\bstream\b", help_text) is None:
-        return ProviderProbe("ast-grep", "unsupported", "structural-inferred", spec.executable, line, version.executable_sha256, detail="help does not confirm JSON stream, language, and pattern options", repo_root=resolved)
+        return ProviderProbe(
+            "ast-grep",
+            "unsupported",
+            "structural-inferred",
+            spec.executable,
+            line,
+            version.executable_sha256,
+            detail="help does not confirm JSON stream, language, and pattern options",
+            repo_root=resolved,
+        )
     fingerprint = source_fingerprint(resolved)
     if fingerprint is None:
-        return ProviderProbe("ast-grep", "unsafe", "structural-inferred", spec.executable, line, version.executable_sha256, detail="repository source identity is unsafe or exceeds bounds", repo_root=resolved)
+        return ProviderProbe(
+            "ast-grep",
+            "unsafe",
+            "structural-inferred",
+            spec.executable,
+            line,
+            version.executable_sha256,
+            detail="repository source identity is unsafe or exceeds bounds",
+            repo_root=resolved,
+        )
     return ProviderProbe(
-        "ast-grep", "ready", "structural-inferred", spec.executable, line,
-        version.executable_sha256, ("json-stream", "language", "pattern"),
-        repo_root=resolved, metadata={"source_fingerprint": fingerprint},
+        "ast-grep",
+        "ready",
+        "structural-inferred",
+        spec.executable,
+        line,
+        version.executable_sha256,
+        ("json-stream", "language", "pattern"),
+        repo_root=resolved,
+        metadata={"source_fingerprint": fingerprint},
     )
 
 
@@ -369,12 +491,24 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
     if not isinstance(probe, ProviderProbe) or probe.name != "ast-grep":
         raise TypeError("ast-grep query requires its ProviderProbe")
     if probe.status != "ready" or probe.executable is None or probe.repo_root is None:
-        return _failure("ast-grep", probe.status, "structural-inferred", probe.detail or "provider is not ready")
+        return _failure(
+            "ast-grep", probe.status, "structural-inferred", probe.detail or "provider is not ready"
+        )
     root = probe.repo_root.resolve()
-    if not isinstance(probe.executable_sha256, str) or _HEX64.fullmatch(probe.executable_sha256) is None:
-        return _failure("ast-grep", "unsafe", "structural-inferred", "ast-grep executable digest is missing or invalid")
+    if (
+        not isinstance(probe.executable_sha256, str)
+        or _HEX64.fullmatch(probe.executable_sha256) is None
+    ):
+        return _failure(
+            "ast-grep",
+            "unsafe",
+            "structural-inferred",
+            "ast-grep executable digest is missing or invalid",
+        )
     if source_fingerprint(root) != probe.metadata.get("source_fingerprint"):
-        return _failure("ast-grep", "stale", "structural-inferred", "repository changed after ast-grep probe")
+        return _failure(
+            "ast-grep", "stale", "structural-inferred", "repository changed after ast-grep probe"
+        )
     spec = ProviderSpec("ast-grep", probe.executable)
     nodes = {}
     edges = {}
@@ -391,44 +525,91 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
             continue
         source_key = "seed:%d" % index
         nodes[source_key] = {
-            "key": source_key, "kind": _kind(location, term), "label": term,
-            "location": location, "confidence": "structural-inferred",
+            "key": source_key,
+            "kind": _kind(location, term),
+            "label": term,
+            "location": location,
+            "confidence": "structural-inferred",
             "source_sha256": hashlib.sha256(source_record[0]).hexdigest(),
             "risk_domains": _risk_domains(location, term),
         }
         for queried_path in inventory:
             if deadline.expired():
-                return _failure("ast-grep", "timed_out", "structural-inferred", "shared deadline exhausted between ast-grep files", tuple(digests))
+                return _failure(
+                    "ast-grep",
+                    "timed_out",
+                    "structural-inferred",
+                    "shared deadline exhausted between ast-grep files",
+                    tuple(digests),
+                )
             result = PROVIDERS.run_provider(
-                spec, ("--json=stream", "--lang", language, "--pattern", term, queried_path),
-                root, deadline, runner=runner,
+                spec,
+                ("--json=stream", "--lang", language, "--pattern", term, queried_path),
+                root,
+                deadline,
+                runner=runner,
             )
             if result.status != "ready":
-                return _failure("ast-grep", result.status, "structural-inferred", result.detail or "ast-grep query failed", tuple(digests))
+                return _failure(
+                    "ast-grep",
+                    result.status,
+                    "structural-inferred",
+                    result.detail or "ast-grep query failed",
+                    tuple(digests),
+                )
             if result.executable_sha256 != probe.executable_sha256:
-                return _failure("ast-grep", "unsafe", "structural-inferred", "ast-grep executable changed after probe", tuple(digests))
+                return _failure(
+                    "ast-grep",
+                    "unsafe",
+                    "structural-inferred",
+                    "ast-grep executable changed after probe",
+                    tuple(digests),
+                )
             digest = hashlib.sha256(result.stdout.encode("utf-8")).hexdigest()
             digests.append(digest)
             lines = result.stdout.splitlines()
             if len(lines) > _MAX_MATCHES:
-                return _failure("ast-grep", "failed", "structural-inferred", "ast-grep match count exceeds bound", tuple(digests))
+                return _failure(
+                    "ast-grep",
+                    "failed",
+                    "structural-inferred",
+                    "ast-grep match count exceeds bound",
+                    tuple(digests),
+                )
             for row_index, line in enumerate(lines):
                 if not line.strip():
                     continue
                 try:
                     import json
+
                     if _json_depth(line) > _MAX_JSON_DEPTH:
                         raise ValueError("json nesting depth exceeded")
                     row = json.loads(line)
-                    required = {"text", "range", "file", "lines", "charCount", "language", "metaVariables"}
+                    required = {
+                        "text",
+                        "range",
+                        "file",
+                        "lines",
+                        "charCount",
+                        "language",
+                        "metaVariables",
+                    }
                     if not isinstance(row, dict) or set(row) != required:
                         raise ValueError("ast-grep match shape is unsupported")
                     path = _safe_relative(row["file"])
-                    if path != queried_path or not isinstance(row["text"], str) or not row["text"] or len(row["text"]) > 4096:
+                    if (
+                        path != queried_path
+                        or not isinstance(row["text"], str)
+                        or not row["text"]
+                        or len(row["text"]) > 4096
+                    ):
                         raise ValueError("ast-grep match path or text is invalid")
                     if not isinstance(row["lines"], str) or len(row["lines"]) > 4096:
                         raise ValueError("ast-grep source excerpt is invalid")
-                    if not isinstance(row["charCount"], dict) or set(row["charCount"]) != {"leading", "trailing"}:
+                    if not isinstance(row["charCount"], dict) or set(row["charCount"]) != {
+                        "leading",
+                        "trailing",
+                    }:
                         raise ValueError("ast-grep character count shape is unsupported")
                     if (
                         not isinstance(row["language"], str)
@@ -437,7 +618,9 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                     ):
                         raise ValueError("ast-grep language or metavariables are invalid")
                     start_line, start_col, end_line, end_col = _range(row["range"])
-                    proof = _source_proof(root, path, (start_line - 1, start_col - 1, end_line - 1, end_col - 1))
+                    proof = _source_proof(
+                        root, path, (start_line - 1, start_col - 1, end_line - 1, end_col - 1)
+                    )
                     byte_range = row["range"]["byteOffset"]
                     counts = row["charCount"]
                     if (
@@ -446,31 +629,62 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                         or row["text"] != proof["excerpt"]
                         or row["lines"] != proof["lines"]
                     ):
-                        raise ValueError("ast-grep match does not bind to the declared source slice")
-                except (
-                    ValueError, TypeError, json.JSONDecodeError, RecursionError
-                ) as error:
-                    return _failure("ast-grep", "failed", "structural-inferred", error, tuple(digests))
-                target_key = "match:%d:%s:%d" % (index, hashlib.sha256(path.encode()).hexdigest()[:8], row_index)
+                        raise ValueError(
+                            "ast-grep match does not bind to the declared source slice"
+                        )
+                except (ValueError, TypeError, json.JSONDecodeError, RecursionError) as error:
+                    return _failure(
+                        "ast-grep", "failed", "structural-inferred", error, tuple(digests)
+                    )
+                target_key = "match:%d:%s:%d" % (
+                    index,
+                    hashlib.sha256(path.encode()).hexdigest()[:8],
+                    row_index,
+                )
                 nodes[target_key] = {
-                    "key": target_key, "kind": _kind(path, row["text"]), "label": row["text"][:256],
-                    "location": path, "confidence": "structural-inferred",
+                    "key": target_key,
+                    "kind": _kind(path, row["text"]),
+                    "label": row["text"][:256],
+                    "location": path,
+                    "confidence": "structural-inferred",
                     "source_sha256": proof["sha256"],
                     "risk_domains": _risk_domains(path, row["text"]),
                 }
-                signature = (source_key, target_key, "references", path, start_line, start_col, end_line, end_col)
+                signature = (
+                    source_key,
+                    target_key,
+                    "references",
+                    path,
+                    start_line,
+                    start_col,
+                    end_line,
+                    end_col,
+                )
                 edges[signature] = {
-                    "source": source_key, "target": target_key, "kind": "references",
+                    "source": source_key,
+                    "target": target_key,
+                    "kind": "references",
                     "location": path,
-                    "evidence": "ast-grep structural match at %d:%d-%d:%d: %s" % (start_line, start_col, end_line, end_col, proof["excerpt"][:128]),
+                    "evidence": "ast-grep structural match at %d:%d-%d:%d: %s"
+                    % (start_line, start_col, end_line, end_col, proof["excerpt"][:128]),
                     "confidence": "structural-inferred",
                     "source_sha256": proof["sha256"],
                 }
     if source_fingerprint(root) != probe.metadata.get("source_fingerprint"):
-        return _failure("ast-grep", "stale", "structural-inferred", "repository changed during ast-grep query", tuple(digests))
+        return _failure(
+            "ast-grep",
+            "stale",
+            "structural-inferred",
+            "repository changed during ast-grep query",
+            tuple(digests),
+        )
     return ProviderResult(
-        "ast-grep", "ready", "structural-inferred", tuple(nodes.values()),
-        tuple(edges.values()), raw_receipt_sha256=tuple(digests),
+        "ast-grep",
+        "ready",
+        "structural-inferred",
+        tuple(nodes.values()),
+        tuple(edges.values()),
+        raw_receipt_sha256=tuple(digests),
         metadata={"queries": len(digests)},
     )
 

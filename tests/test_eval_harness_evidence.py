@@ -15,16 +15,13 @@ from evals.harness.evidence import (
 )
 from evals.harness.process import run_command
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class EvalHarnessEvidenceTest(unittest.TestCase):
     def test_timeout_is_preserved(self):
         """Removing the timeout handler would lose the timed-out result."""
-        result = run_command(
-            [sys.executable, "-c", "import time; time.sleep(2)"], ROOT, 0.01
-        )
+        result = run_command([sys.executable, "-c", "import time; time.sleep(2)"], ROOT, 0.01)
 
         self.assertTrue(result.timed_out)
         self.assertIsNone(result.returncode)
@@ -74,9 +71,7 @@ class EvalHarnessEvidenceTest(unittest.TestCase):
                 "Inspect the authorization rule.",
             )
             with self.assertRaises(FileExistsError):
-                record_run(
-                    raw_root, "codex", "POS-authorization", 1, artifacts, quarantine_root
-                )
+                record_run(raw_root, "codex", "POS-authorization", 1, artifacts, quarantine_root)
             self.assertEqual((recorded / "final.md").read_bytes(), b"The rule is present.\n")
 
     def test_suspicious_artifacts_are_quarantined_without_repository_write(self):
@@ -88,9 +83,7 @@ class EvalHarnessEvidenceTest(unittest.TestCase):
             artifacts = {"stdout.txt": "Authorization: Bearer sk-proj-abcdefghijklmnopqrstuv"}
 
             with self.assertRaises(PotentialSecretError) as raised:
-                record_run(
-                    raw_root, "codex", "POS-authorization", 1, artifacts, quarantine_root
-                )
+                record_run(raw_root, "codex", "POS-authorization", 1, artifacts, quarantine_root)
 
             self.assertEqual(raised.exception.findings, ("openai-token",))
             self.assertFalse(raw_root.exists())
@@ -126,7 +119,9 @@ class EvalHarnessEvidenceTest(unittest.TestCase):
 
             manifest = build_manifest(raw_root)
 
-            self.assertEqual([row.split(" ", 1)[0] for row in manifest.splitlines()], ["a.txt", "z.txt"])
+            self.assertEqual(
+                [row.split(" ", 1)[0] for row in manifest.splitlines()], ["a.txt", "z.txt"]
+            )
             self.assertTrue(manifest.endswith("\n"))
             self.assertEqual(verify_manifest(raw_root, manifest), [])
 
@@ -249,9 +244,7 @@ class EvalHarnessEvidenceTest(unittest.TestCase):
                 (raw_root / "codex" / "POS-authorization" / "01" / "final.md").read_bytes(),
                 (b"first", b"second"),
             )
-            self.assertEqual(
-                list((raw_root / "codex" / "POS-authorization").glob(".01.*")), []
-            )
+            self.assertEqual(list((raw_root / "codex" / "POS-authorization").glob(".01.*")), [])
 
     def test_record_run_rejects_whitespace_in_any_artifact_path_component(self):
         """Whitespace in a path would make the space-delimited manifest invalid."""

@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import stat
 import sys
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Mapping, Optional, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -23,7 +23,6 @@ import fast_scan_renderer
 import fast_scan_store
 import graph_builtin
 import graph_coordinator
-
 
 MAX_CHANGE_BYTES = 4 * 1024
 MAX_EVIDENCE_ROWS = 32
@@ -35,9 +34,7 @@ MAX_CANDIDATES = 3
 
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_TIMESTAMP = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"
-)
+_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 _PATH = re.compile(
     r"(?<![A-Za-z0-9_.-])"
     r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+"
@@ -61,23 +58,65 @@ _SECRET = re.compile(
     r"\s*(?::=|[:=])\s*\S+"
 )
 _SOURCE_SUFFIXES = {
-    ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js",
-    ".jsx", ".kt", ".kts", ".m", ".mm", ".php", ".py", ".rb", ".rs",
-    ".scala", ".sh", ".sql", ".swift", ".ts", ".tsx", ".vue", ".yaml",
-    ".yml", ".json", ".toml", ".xml",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".h",
+    ".hpp",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".m",
+    ".mm",
+    ".php",
+    ".py",
+    ".rb",
+    ".rs",
+    ".scala",
+    ".sh",
+    ".sql",
+    ".swift",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".toml",
+    ".xml",
 }
 # Session-control directories plus the graph scanner's dependency and build
 # directories, so scan identity is never bound to node_modules churn and
 # dependency files are never read or hashed.
 _CONTROL_PARTS = {
-    ".git", ".requirements-impact-refiner", "__pycache__", ".pytest_cache",
+    ".git",
+    ".requirements-impact-refiner",
+    "__pycache__",
+    ".pytest_cache",
 } | set(graph_builtin.IGNORED_DIRECTORIES)
 _REQUIRED_KEYS = {
-    "schema_version", "status", "scan_id", "receipt_id",
-    "repo_root_sha256", "request_sha256", "payload_sha256", "settings",
-    "source_inventory", "seeds", "graph_receipt", "risk_level",
-    "frontier", "candidates", "elapsed_ms", "cache_status",
-    "can_promote", "created_at",
+    "schema_version",
+    "status",
+    "scan_id",
+    "receipt_id",
+    "repo_root_sha256",
+    "request_sha256",
+    "payload_sha256",
+    "settings",
+    "source_inventory",
+    "seeds",
+    "graph_receipt",
+    "risk_level",
+    "frontier",
+    "candidates",
+    "elapsed_ms",
+    "cache_status",
+    "can_promote",
+    "created_at",
 }
 _STATUSES = {"complete", "partial", "needs_input"}
 _RISKS = {"low", "medium", "high", "critical", "unknown"}
@@ -105,9 +144,9 @@ def _thaw(value):
 @dataclass(frozen=True)
 class DerivedSeed:
     term: str
-    location: Optional[str]
+    location: str | None
     derivation: str
-    source_sha256: Optional[str]
+    source_sha256: str | None
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -122,7 +161,7 @@ class DerivedSeed:
 class FastScanRequest:
     repo_root: Path
     change_request: str
-    evidence: Tuple[str, ...]
+    evidence: tuple[str, ...]
     audience: str
 
     def __post_init__(self):
@@ -141,11 +180,11 @@ class FastScanReceipt:
     payload_sha256: str
     settings: Mapping[str, object]
     source_inventory: Mapping[str, object]
-    seeds: Tuple[DerivedSeed, ...]
+    seeds: tuple[DerivedSeed, ...]
     graph_receipt: Mapping[str, object]
     risk_level: str
-    frontier: Tuple[Mapping[str, object], ...]
-    candidates: Tuple[Mapping[str, object], ...]
+    frontier: tuple[Mapping[str, object], ...]
+    candidates: tuple[Mapping[str, object], ...]
     elapsed_ms: int
     cache_status: str
     can_promote: bool
@@ -157,9 +196,7 @@ class FastScanReceipt:
         object.__setattr__(self, "seeds", tuple(self.seeds))
         object.__setattr__(self, "graph_receipt", _freeze(self.graph_receipt))
         object.__setattr__(self, "frontier", tuple(_freeze(row) for row in self.frontier))
-        object.__setattr__(
-            self, "candidates", tuple(_freeze(row) for row in self.candidates)
-        )
+        object.__setattr__(self, "candidates", tuple(_freeze(row) for row in self.candidates))
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -192,9 +229,9 @@ class FastScanResult:
     receipt_sha256: str
     display_text: str
     risk_level: str
-    paths: Tuple[Mapping[str, object], ...]
-    frontier: Tuple[Mapping[str, object], ...]
-    candidates: Tuple[Mapping[str, object], ...]
+    paths: tuple[Mapping[str, object], ...]
+    frontier: tuple[Mapping[str, object], ...]
+    candidates: tuple[Mapping[str, object], ...]
     elapsed_ms: int
     cache_status: str
     can_promote: bool
@@ -205,7 +242,7 @@ class PreparedFastScan:
     root: Path
     settings: object
     deadline: object
-    seeds: Tuple[DerivedSeed, ...]
+    seeds: tuple[DerivedSeed, ...]
     source_inventory: object
     inventory_mapping: Mapping[str, object]
     request_sha256: str
@@ -226,17 +263,10 @@ def _root(value: Path) -> Path:
 
 
 def _safe_relative(value: str) -> bool:
-    if (
-        not isinstance(value, str)
-        or not value
-        or "\\" in value
-        or "\x00" in value
-    ):
+    if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
         return False
     path = PurePosixPath(value)
-    return not path.is_absolute() and all(
-        part not in {"", ".", ".."} for part in path.parts
-    )
+    return not path.is_absolute() and all(part not in {"", ".", ".."} for part in path.parts)
 
 
 def _expired(deadline: object) -> bool:
@@ -266,13 +296,11 @@ def _paths(text: str) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _read_source(root: Path, relative: str) -> Optional[tuple[str, str]]:
+def _read_source(root: Path, relative: str) -> tuple[str, str] | None:
     return _read_source_detailed(root, relative)[0]
 
 
-def _read_source_detailed(
-    root: Path, relative: str
-) -> tuple[Optional[tuple[str, str]], Optional[str]]:
+def _read_source_detailed(root: Path, relative: str) -> tuple[tuple[str, str] | None, str | None]:
     """Read a source file; on failure, say whether the content is
     legitimately outside a text inventory (binary, encoding) or genuinely
     unaccounted for (permission, mutation, oversize)."""
@@ -307,9 +335,11 @@ def _read_source_detailed(
             chunks.append(chunk)
             remaining -= len(chunk)
         after = os.fstat(descriptor)
-        if (
-            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
         ):
             return None, "unreadable-source"
         raw = b"".join(chunks)
@@ -338,7 +368,7 @@ def _source_files(root: Path, deadline: object):
         relative_directory = Path(directory).relative_to(root)
         kept = []
         for name in sorted(names):
-            parts = relative_directory.parts + (name,)
+            parts = (*relative_directory.parts, name)
             if name in _CONTROL_PARTS:
                 continue
             if len(parts) >= 2 and parts[:2] == ("evals", "results"):
@@ -366,7 +396,7 @@ def _source_files(root: Path, deadline: object):
 
 def _validate_inputs(
     change_request: str,
-    evidence: Tuple[str, ...],
+    evidence: tuple[str, ...],
     deadline: object,
     maximum: int,
 ) -> None:
@@ -396,10 +426,10 @@ def _validate_inputs(
 def derive_seeds(
     repo_root: Path,
     change_request: str,
-    evidence: Tuple[str, ...],
+    evidence: tuple[str, ...],
     deadline: object,
     maximum: int = MAX_SEEDS,
-) -> Tuple[DerivedSeed, ...]:
+) -> tuple[DerivedSeed, ...]:
     """Derive stable, repository-backed seeds without model-authored graph data."""
     evidence = tuple(evidence)
     _validate_inputs(change_request, evidence, deadline, maximum)
@@ -408,7 +438,7 @@ def derive_seeds(
         return ()
 
     ordered: list[DerivedSeed] = []
-    seen: set[tuple[str, Optional[str]]] = set()
+    seen: set[tuple[str, str | None]] = set()
 
     def add(term: str, location: str, derivation: str) -> None:
         if len(ordered) >= maximum or (term, location) in seen:
@@ -453,9 +483,9 @@ def derive_seeds(
         files = tuple(_source_files(root, deadline))
         # Read each candidate file once for the whole term sweep; the
         # (term, file) pair-product of reads dominated scan wall time.
-        source_cache: dict[str, Optional[tuple[str, str]]] = {}
+        source_cache: dict[str, tuple[str, str] | None] = {}
 
-        def _cached_source(relative: str) -> Optional[tuple[str, str]]:
+        def _cached_source(relative: str) -> tuple[str, str] | None:
             if relative not in source_cache:
                 source_cache[relative] = _read_source(root, relative)
             return source_cache[relative]
@@ -469,9 +499,7 @@ def derive_seeds(
                 source = _cached_source(relative)
                 if source is not None and term in source[0]:
                     seen.add((term, relative))
-                    ordered.append(
-                        DerivedSeed(term, relative, "repository-match", source[1])
-                    )
+                    ordered.append(DerivedSeed(term, relative, "repository-match", source[1]))
     return tuple(ordered)
 
 
@@ -483,7 +511,7 @@ def _string(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def validate_fast_scan_receipt(value: object) -> Tuple[str, ...]:
+def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
     errors: list[str] = []
     if not _mapping(value):
         return ("fast scan receipt must be an object",)
@@ -517,7 +545,11 @@ def validate_fast_scan_receipt(value: object) -> Tuple[str, ...]:
             errors.append("source_inventory digests must be an object")
         else:
             for location, digest in digests.items():
-                if not _safe_relative(location) or not isinstance(digest, str) or _HEX64.fullmatch(digest) is None:
+                if (
+                    not _safe_relative(location)
+                    or not isinstance(digest, str)
+                    or _HEX64.fullmatch(digest) is None
+                ):
                     errors.append("source_inventory contains an unsafe path or digest")
                     break
         if not isinstance(inventory["complete"], bool):
@@ -584,7 +616,10 @@ def validate_fast_scan_receipt(value: object) -> Tuple[str, ...]:
         errors.append("cache_status is invalid")
     if not isinstance(value["can_promote"], bool):
         errors.append("can_promote must be boolean")
-    if not isinstance(value["created_at"], str) or _TIMESTAMP.fullmatch(value["created_at"]) is None:
+    if (
+        not isinstance(value["created_at"], str)
+        or _TIMESTAMP.fullmatch(value["created_at"]) is None
+    ):
         errors.append("created_at must be RFC 3339 UTC text")
 
     status = value["status"]
@@ -617,9 +652,9 @@ def canonical_fast_scan_bytes(value: Mapping[str, object] | FastScanReceipt) -> 
     errors = validate_fast_scan_receipt(mapping)
     if errors:
         raise ValueError("invalid fast scan receipt: " + "; ".join(errors))
-    return json.dumps(
-        mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    return json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
 
 
 def _graph_mapping(value: object) -> dict[str, object]:
@@ -648,19 +683,18 @@ def _request_locale(request: FastScanRequest) -> str:
 
 def _only_expected_provider_gap(graph: Mapping[str, object]) -> bool:
     providers = graph.get("providers", [])
-    unavailable = sorted({
-        str(row.get("name"))
-        for row in providers
-        if isinstance(row, Mapping)
-        and row.get("name") != "builtin"
-        and row.get("status") != "ready"
-    })
+    unavailable = sorted(
+        {
+            str(row.get("name"))
+            for row in providers
+            if isinstance(row, Mapping)
+            and row.get("name") != "builtin"
+            and row.get("status") != "ready"
+        }
+    )
     if not unavailable:
         return False
-    expected = (
-        "provider unavailable; built-in fallback used: "
-        + ", ".join(unavailable)
-    )
+    expected = "provider unavailable; built-in fallback used: " + ", ".join(unavailable)
     frontier = graph.get("frontier", [])
     return (
         isinstance(frontier, list)
@@ -682,9 +716,7 @@ def _inventory(root: Path, deadline: object):
     if _expired(deadline):
         return graph_coordinator.SourceInventory(digests, False, "deadline")
     if unreadable:
-        return graph_coordinator.SourceInventory(
-            digests, False, "unreadable-source"
-        )
+        return graph_coordinator.SourceInventory(digests, False, "unreadable-source")
     return graph_coordinator.SourceInventory(digests, True, None)
 
 
@@ -710,9 +742,7 @@ def execute_fast_scan(
     *,
     coordinator=graph_coordinator.trace_impact,
 ) -> FastScanResult:
-    prepared = prepare_fast_scan_identity(
-        request, graph_settings, payload_sha256
-    )
+    prepared = prepare_fast_scan_identity(request, graph_settings, payload_sha256)
     locale = _request_locale(request)
     root = prepared.root
     settings = prepared.settings
@@ -738,11 +768,17 @@ def execute_fast_scan(
         display = fast_scan_renderer.render_fast_scan(rendered, request.audience, locale)
         graph = existing["graph_receipt"]
         return FastScanResult(
-            existing["status"], scan_id, existing["receipt_id"],
-            hashlib.sha256(existing_payload).hexdigest(), display,
-            existing["risk_level"], tuple(graph.get("paths", [])),
-            tuple(existing["frontier"]), tuple(existing["candidates"]),
-            min(30_000, deadline.elapsed_ms()), "hit",
+            existing["status"],
+            scan_id,
+            existing["receipt_id"],
+            hashlib.sha256(existing_payload).hexdigest(),
+            display,
+            existing["risk_level"],
+            tuple(graph.get("paths", [])),
+            tuple(existing["frontier"]),
+            tuple(existing["candidates"]),
+            min(30_000, deadline.elapsed_ms()),
+            "hit",
             existing["can_promote"],
         )
     candidates = []
@@ -753,28 +789,30 @@ def execute_fast_scan(
         risk_level = "unknown"
         cache_status = "bypassed"
     else:
-        graph = _graph_mapping(coordinator(
-            root, {"draft_id": scan_id},
-            tuple(graph_coordinator.ScanSeed(row.term, row.location) for row in seeds),
-            settings, deadline=deadline, source_inventory=source_inventory,
-        ))
+        graph = _graph_mapping(
+            coordinator(
+                root,
+                {"draft_id": scan_id},
+                tuple(graph_coordinator.ScanSeed(row.term, row.location) for row in seeds),
+                settings,
+                deadline=deadline,
+                source_inventory=source_inventory,
+            )
+        )
         receipt_id = graph["receipt_id"]
         # A missing optional provider alone must not make the documented
         # promotion path unreachable on default installs — but only when
         # every frontier entry is that disclosure. Any other frontier
         # reason (coverage gap, deadline, disagreement) keeps the scan
         # partial and unpromotable.
-        frontier_rows = graph.get("frontier", [])
+        graph.get("frontier", [])
         only_provider_gaps = _only_expected_provider_gap(graph)
         status = (
             "complete"
             if source_inventory.complete
             and (
                 graph.get("budget_status") == "closed"
-                or (
-                    graph.get("budget_status") == "provider_limited"
-                    and only_provider_gaps
-                )
+                or (graph.get("budget_status") == "provider_limited" and only_provider_gaps)
             )
             else "partial"
         )
@@ -782,10 +820,23 @@ def execute_fast_scan(
         cache_status = graph.get("cache", {}).get("status", "bypassed")
     elapsed = min(30_000, deadline.elapsed_ms())
     receipt = FastScanReceipt(
-        1, status, scan_id, receipt_id, root_sha, request_sha, payload_sha256,
-        settings.to_mapping(), inventory_mapping,
-        seeds, graph, risk_level, tuple(graph.get("frontier", [])),
-        tuple(candidates), elapsed, cache_status, status == "complete",
+        1,
+        status,
+        scan_id,
+        receipt_id,
+        root_sha,
+        request_sha,
+        payload_sha256,
+        settings.to_mapping(),
+        inventory_mapping,
+        seeds,
+        graph,
+        risk_level,
+        tuple(graph.get("frontier", [])),
+        tuple(candidates),
+        elapsed,
+        cache_status,
+        status == "complete",
         datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
     payload = canonical_fast_scan_bytes(receipt)
@@ -794,9 +845,18 @@ def execute_fast_scan(
     display = fast_scan_renderer.render_fast_scan(mapping, request.audience, locale)
     digest = hashlib.sha256(payload).hexdigest()
     return FastScanResult(
-        status, scan_id, receipt_id, digest, display, risk_level,
-        tuple(graph.get("paths", [])), tuple(graph.get("frontier", [])),
-        tuple(candidates), elapsed, cache_status, status == "complete",
+        status,
+        scan_id,
+        receipt_id,
+        digest,
+        display,
+        risk_level,
+        tuple(graph.get("paths", [])),
+        tuple(graph.get("frontier", [])),
+        tuple(candidates),
+        elapsed,
+        cache_status,
+        status == "complete",
     )
 
 
@@ -817,25 +877,45 @@ def prepare_fast_scan_identity(
         "complete": source_inventory.complete,
         "reason": source_inventory.reason,
     }
-    identity = json.dumps({
-        "root": str(root), "change_request": request.change_request,
-        "evidence": list(request.evidence), "settings": settings.to_mapping(),
-        "payload_sha256": payload_sha256,
-        "source_inventory": inventory_mapping,
-        "seeds": [row.to_mapping() for row in seeds],
-    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    identity = json.dumps(
+        {
+            "root": str(root),
+            "change_request": request.change_request,
+            "evidence": list(request.evidence),
+            "settings": settings.to_mapping(),
+            "payload_sha256": payload_sha256,
+            "source_inventory": inventory_mapping,
+            "seeds": [row.to_mapping() for row in seeds],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     request_sha = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     scan_id = request_sha[:32]
     root_sha = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
     return PreparedFastScan(
-        root, settings, deadline, seeds, source_inventory,
-        inventory_mapping, request_sha, scan_id, root_sha,
+        root,
+        settings,
+        deadline,
+        seeds,
+        source_inventory,
+        inventory_mapping,
+        request_sha,
+        scan_id,
+        root_sha,
     )
 
 
 __all__ = [
-    "DerivedSeed", "FastScanReceipt", "FastScanRequest", "FastScanResult",
+    "DerivedSeed",
+    "FastScanReceipt",
+    "FastScanRequest",
+    "FastScanResult",
     "PreparedFastScan",
-    "canonical_fast_scan_bytes", "derive_seeds", "execute_fast_scan",
-    "prepare_fast_scan_identity", "validate_fast_scan_receipt",
+    "canonical_fast_scan_bytes",
+    "derive_seeds",
+    "execute_fast_scan",
+    "prepare_fast_scan_identity",
+    "validate_fast_scan_receipt",
 ]

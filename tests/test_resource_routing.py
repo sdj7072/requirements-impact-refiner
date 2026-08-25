@@ -5,15 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = (
-    ROOT
-    / "skills"
-    / "requirements-impact-refiner"
-    / "scripts"
-    / "resource_route.py"
-)
+MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "resource_route.py"
 SPEC = importlib.util.spec_from_file_location("resource_route", MODULE_PATH)
 ROUTING = importlib.util.module_from_spec(SPEC)
 sys.modules["resource_route"] = ROUTING

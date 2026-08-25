@@ -6,14 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = (
-    ROOT
-    / "skills"
-    / "requirements-impact-refiner"
-    / "scripts"
-    / "validate-impact-report.py"
+    ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "validate-impact-report.py"
 )
 SPEC = importlib.util.spec_from_file_location("validate_impact_report", SCRIPT_PATH)
 VALIDATOR = importlib.util.module_from_spec(SPEC)
@@ -214,35 +209,40 @@ PRE_DECISION_REPORT = """# Requirements Impact Report
 """
 
 
-POST_DECISION_REPORT = PRE_DECISION_REPORT.replace(
-    "| pre-decision |", "| post-decision |", 1
-).replace(
-    "## Decision Needed\n\n"
-    "| Question | Option | Impact IDs | Trade-off |\n"
-    "| --- | --- | --- | --- |\n"
-    "| Which sharing mechanism should be used? | Expiring signed URLs | IMP-001 | Simple expiry, limited revocation. |\n"
-    "| Which sharing mechanism should be used? | Revocable opaque links | IMP-001 | Explicit revocation, more stored state. |",
-    "## Decisions and Accepted Risks\n\n"
-    "| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |\n"
-    "| --- | --- | --- | --- | --- |\n"
-    "| DEC-001 | Use revocable opaque links. | REQ-001 | IMP-001 | Explicit revocation is required. |",
-    1,
-).replace(
-    "| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — |",
-    "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — |",
-    1,
-).replace(
-    "| critical | refining | verified | tests/test_exports.py | INV-001 | — | AC-001 |",
-    "| critical | accepted | verified | tests/test_exports.py | INV-001 | DEC-001 | AC-001 |",
-    1,
-).replace(
-    "| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — | Initial refinement. |",
-    "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — | Applied selected mechanism. |",
-    1,
-).replace(
-    "| Not ready until the pending decision is selected. | REQ-001, INV-001, IMP-001 | Pending sharing mechanism. | AC-001 | Not ready |",
-    "| REQ-001 | INV-001, IMP-001, DEC-001 | Accepted IMP-001 | AC-001 | Existing planning workflow |",
-    1,
+POST_DECISION_REPORT = (
+    PRE_DECISION_REPORT.replace("| pre-decision |", "| post-decision |", 1)
+    .replace(
+        "## Decision Needed\n\n"
+        "| Question | Option | Impact IDs | Trade-off |\n"
+        "| --- | --- | --- | --- |\n"
+        "| Which sharing mechanism should be used? | Expiring signed URLs | IMP-001 | Simple expiry, limited revocation. |\n"
+        "| Which sharing mechanism should be used? | Revocable opaque links | IMP-001 | Explicit revocation, more stored state. |",
+        "## Decisions and Accepted Risks\n\n"
+        "| Decision ID | Choice | Requirement revision | Accepted impacts | Rationale |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| DEC-001 | Use revocable opaque links. | REQ-001 | IMP-001 | Explicit revocation is required. |",
+        1,
+    )
+    .replace(
+        "| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — |",
+        "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — |",
+        1,
+    )
+    .replace(
+        "| critical | refining | verified | tests/test_exports.py | INV-001 | — | AC-001 |",
+        "| critical | accepted | verified | tests/test_exports.py | INV-001 | DEC-001 | AC-001 |",
+        1,
+    )
+    .replace(
+        "| REQ-001 | Preserve authenticated exports while selecting sharing mechanics. | — | — | Initial refinement. |",
+        "| REQ-001 | Add revocable opaque sharing links and preserve authenticated exports. | DEC-001 | — | Applied selected mechanism. |",
+        1,
+    )
+    .replace(
+        "| Not ready until the pending decision is selected. | REQ-001, INV-001, IMP-001 | Pending sharing mechanism. | AC-001 | Not ready |",
+        "| REQ-001 | INV-001, IMP-001, DEC-001 | Accepted IMP-001 | AC-001 | Existing planning workflow |",
+        1,
+    )
 )
 
 
@@ -250,9 +250,7 @@ class ValidateImpactReportTest(unittest.TestCase):
     def test_friendly_summary_is_required_only_when_requested(self):
         self.assertEqual(VALIDATOR.validate_report(POST_DECISION_REPORT), [])
 
-        errors = VALIDATOR.validate_report(
-            POST_DECISION_REPORT, require_summary=True
-        )
+        errors = VALIDATOR.validate_report(POST_DECISION_REPORT, require_summary=True)
 
         self.assertIn("missing section: Change Impact Summary", errors)
 
@@ -268,9 +266,7 @@ class ValidateImpactReportTest(unittest.TestCase):
             "## Original Requirement\n", summary + "## Original Requirement\n", 1
         )
 
-        self.assertEqual(
-            VALIDATOR.validate_report(report, require_summary=True), []
-        )
+        self.assertEqual(VALIDATOR.validate_report(report, require_summary=True), [])
 
         wrong = report.replace(
             "| critical | Keep private-by-default", "| low | Keep private-by-default", 1
@@ -390,9 +386,7 @@ class ValidateImpactReportTest(unittest.TestCase):
             "## Impact Delta",
             1,
         )
-        with_identifier = PRE_DECISION_REPORT.replace(
-            "the pending decision", "DEC-001", 1
-        )
+        with_identifier = PRE_DECISION_REPORT.replace("the pending decision", "DEC-001", 1)
 
         self.assertIn(
             "pre-decision report forbids section: Decisions and Accepted Risks",
@@ -557,9 +551,7 @@ class ValidateImpactReportTest(unittest.TestCase):
         )
 
     def test_delta_rejects_unknown_impacts_and_state_category_disagreement(self):
-        unknown = POST_DECISION_REPORT.replace(
-            "| blocked | none |", "| blocked | IMP-999 |", 1
-        )
+        unknown = POST_DECISION_REPORT.replace("| blocked | none |", "| blocked | IMP-999 |", 1)
         wrong_category = POST_DECISION_REPORT.replace(
             "| new | IMP-001 |", "| resolved | IMP-001 |", 1
         ).replace("| resolved | none |", "| new | none |", 1)
@@ -678,7 +670,10 @@ class ValidateImpactReportTest(unittest.TestCase):
         for name, report in mutations.items():
             with self.subTest(name=name):
                 self.assertTrue(
-                    any(error.startswith("invalid identifier ") for error in VALIDATOR.validate_report(report))
+                    any(
+                        error.startswith("invalid identifier ")
+                        for error in VALIDATOR.validate_report(report)
+                    )
                 )
 
     def test_rejects_canonical_placeholder_tokens_left_in_relationship_cells(self):
@@ -742,8 +737,12 @@ class ValidateImpactReportTest(unittest.TestCase):
             ),
             "malformed_id": VALID_REPORT.replace("| IMP-001 | REQ-001 |", "| IMP-1 | REQ-001 |", 1),
             "state": VALID_REPORT.replace("| critical | accepted |", "| critical | ignored |", 1),
-            "evidence_level": VALID_REPORT.replace("| accepted | verified |", "| accepted | certain |", 1),
-            "missing_requirement": VALID_REPORT.replace("| IMP-001 | REQ-001 |", "| IMP-001 | — |", 1),
+            "evidence_level": VALID_REPORT.replace(
+                "| accepted | verified |", "| accepted | certain |", 1
+            ),
+            "missing_requirement": VALID_REPORT.replace(
+                "| IMP-001 | REQ-001 |", "| IMP-001 | — |", 1
+            ),
             "resolved_without_evidence": VALID_REPORT.replace(
                 "| accepted | verified | tests/test_exports.py |",
                 "| resolved | verified |  |",
@@ -791,24 +790,29 @@ class ValidateImpactReportTest(unittest.TestCase):
         self.assertIn(EXPECTED_ERRORS["state"], VALIDATOR.validate_report(report))
 
     def test_accepts_code_formatted_enums_and_matching_unresolved_state(self):
-        report = VALID_REPORT.replace(
-            "| INV-001 | Existing exports remain private. | verified | tests/test_exports.py |",
-            "| INV-001 | Existing exports remain private. | `verified` | tests/test_exports.py |",
-            1,
-        ).replace(
-            "| critical | accepted | verified |",
-            "| critical | `blocked` | `verified` |",
-            1,
-        ).replace(
-            "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
-            "| --- | --- | --- | --- | --- |\n"
-            "| IMP-001 | `blocked` | Waiting for product input. | DEC-001 | Product |\n\n"
-            "## Analysis Scope and Limitations",
-            1,
-        ).replace(
-            "| Existing planning workflow |",
-            "| Not ready |",
-            1,
+        report = (
+            VALID_REPORT.replace(
+                "| INV-001 | Existing exports remain private. | verified | tests/test_exports.py |",
+                "| INV-001 | Existing exports remain private. | `verified` | tests/test_exports.py |",
+                1,
+            )
+            .replace(
+                "| critical | accepted | verified |",
+                "| critical | `blocked` | `verified` |",
+                1,
+            )
+            .replace(
+                "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
+                "| --- | --- | --- | --- | --- |\n"
+                "| IMP-001 | `blocked` | Waiting for product input. | DEC-001 | Product |\n\n"
+                "## Analysis Scope and Limitations",
+                1,
+            )
+            .replace(
+                "| Existing planning workflow |",
+                "| Not ready |",
+                1,
+            )
         )
 
         self.assertEqual(VALIDATOR.validate_report(report), [])
@@ -824,9 +828,7 @@ class ValidateImpactReportTest(unittest.TestCase):
             1,
         )
 
-        self.assertIn(
-            EXPECTED_ERRORS["critical_without_ac"], VALIDATOR.validate_report(report)
-        )
+        self.assertIn(EXPECTED_ERRORS["critical_without_ac"], VALIDATOR.validate_report(report))
 
     def test_rejects_duplicate_unresolved_impact_rows(self):
         report = VALID_REPORT.replace(
@@ -845,15 +847,19 @@ class ValidateImpactReportTest(unittest.TestCase):
         self.assertIn("duplicate unresolved impact IMP-001", VALIDATOR.validate_report(report))
 
     def test_rejects_noncanonical_or_multiple_unresolved_impact_ids(self):
-        base = VALID_REPORT.replace(
-            "| critical | accepted | verified |",
-            "| critical | blocked | verified |",
-            1,
-        ).replace(
-            "| accepted | IMP-001 |",
-            "| blocked | IMP-001 |",
-            1,
-        ).replace("| blocked | none |", "| accepted | none |", 1)
+        base = (
+            VALID_REPORT.replace(
+                "| critical | accepted | verified |",
+                "| critical | blocked | verified |",
+                1,
+            )
+            .replace(
+                "| accepted | IMP-001 |",
+                "| blocked | IMP-001 |",
+                1,
+            )
+            .replace("| blocked | none |", "| accepted | none |", 1)
+        )
         mutations = {
             "none": "none",
             "multiple": "IMP-001, IMP-001",
@@ -920,7 +926,10 @@ class ValidateImpactReportTest(unittest.TestCase):
     def test_requires_at_least_one_impact_with_requirement_relationship(self):
         report = VALID_REPORT.replace("| IMP-001 | REQ-001 |", "| IMP-001 | — |", 1)
 
-        self.assertIn("report requires at least one impact with REQ relationship", VALIDATOR.validate_report(report))
+        self.assertIn(
+            "report requires at least one impact with REQ relationship",
+            VALIDATOR.validate_report(report),
+        )
 
     def test_rejects_accepted_state_in_unresolved_items(self):
         report = VALID_REPORT.replace(
@@ -979,11 +988,7 @@ class ShippedTemplateStructureTest(unittest.TestCase):
 
     def filled(self, template_name):
         template = (
-            ROOT
-            / "skills"
-            / "requirements-impact-refiner"
-            / "assets"
-            / template_name
+            ROOT / "skills" / "requirements-impact-refiner" / "assets" / template_name
         ).read_text()
         filled = template.replace("###", "001")
         filled = self.MENU.sub(r"\1", filled)
@@ -993,17 +998,13 @@ class ShippedTemplateStructureTest(unittest.TestCase):
 
     def test_pre_decision_template_validates_cleanly(self):
         self.assertEqual(
-            VALIDATOR.validate_report(
-                self.filled("impact-report-pre-decision-template.md")
-            ),
+            VALIDATOR.validate_report(self.filled("impact-report-pre-decision-template.md")),
             [],
         )
 
     def test_post_decision_template_validates_cleanly(self):
         self.assertEqual(
-            VALIDATOR.validate_report(
-                self.filled("impact-report-post-decision-template.md")
-            ),
+            VALIDATOR.validate_report(self.filled("impact-report-post-decision-template.md")),
             [],
         )
 
@@ -1041,9 +1042,12 @@ class ParserRobustnessTest(unittest.TestCase):
 
         errors = VALIDATOR.validate_report(report)
         self.assertIn("multiple tables in Original Requirement", errors)
-        self.assertNotIn("REQ-002", {  # phantom must not become a definition
-            error.split()[-1] for error in errors if "unknown reference" in error
-        })
+        self.assertNotIn(
+            "REQ-002",
+            {  # phantom must not become a definition
+                error.split()[-1] for error in errors if "unknown reference" in error
+            },
+        )
 
 
 class CalculateDeltaGuardTest(unittest.TestCase):
@@ -1052,23 +1056,15 @@ class CalculateDeltaGuardTest(unittest.TestCase):
 
     def test_invalid_state_raises_value_error(self):
         module_path = (
-            ROOT
-            / "skills"
-            / "requirements-impact-refiner"
-            / "scripts"
-            / "impact_report.py"
+            ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "impact_report.py"
         )
         spec = importlib.util.spec_from_file_location("impact_report_guard", module_path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
 
-        previous, _ = module.parse_report(
-            VALID_REPORT.replace("| accepted |", "| refining |", 1)
-        )
-        current, _ = module.parse_report(
-            VALID_REPORT.replace("| accepted |", "| bogus-state |", 1)
-        )
+        previous, _ = module.parse_report(VALID_REPORT.replace("| accepted |", "| refining |", 1))
+        current, _ = module.parse_report(VALID_REPORT.replace("| accepted |", "| bogus-state |", 1))
         with self.assertRaises(ValueError):
             module.calculate_delta(previous, current)
 
@@ -1082,10 +1078,10 @@ class PreviousReportErrorAttributionTest(unittest.TestCase):
 
         previous = VALID_REPORT.replace("| accepted |", "| ignored |", 1)
         digest = _hashlib.sha256(previous.encode("utf-8")).hexdigest()
-        current = VALID_REPORT.replace(
-            "| RPT-001 | 1 | none |", f"| RPT-001 | 2 | {digest} |", 1
-        ).replace("| new | IMP-001 |", "| new | none |", 1).replace(
-            "| unchanged | none |", "| unchanged | IMP-001 |", 1
+        current = (
+            VALID_REPORT.replace("| RPT-001 | 1 | none |", f"| RPT-001 | 2 | {digest} |", 1)
+            .replace("| new | IMP-001 |", "| new | none |", 1)
+            .replace("| unchanged | none |", "| unchanged | IMP-001 |", 1)
         )
 
         errors = VALIDATOR.validate_report(

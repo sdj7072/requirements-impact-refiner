@@ -3,9 +3,8 @@ import os
 import sys
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
-
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "graph-project"
@@ -29,8 +28,7 @@ class FakeClock:
 
 def scan(root, seeds=(None,), limits=None, clock=None):
     actual_seeds = (
-        (BUILTIN.ScanSeed("profile.displayName", "api/profile.py"),)
-        if seeds == (None,) else seeds
+        (BUILTIN.ScanSeed("profile.displayName", "api/profile.py"),) if seeds == (None,) else seeds
     )
     return BUILTIN.scan_repository(
         root,
@@ -45,8 +43,10 @@ class GraphBuiltinTest(unittest.TestCase):
         result = scan(FIXTURE_ROOT)
         locations = {node.location for node in result.nodes}
         expected = {
-            "api/profile.py", "mobile/user_dto.swift",
-            "desktop/profile_cache.ts", "events/profile_changed.py",
+            "api/profile.py",
+            "mobile/user_dto.swift",
+            "desktop/profile_cache.ts",
+            "events/profile_changed.py",
             "tests/test_profile_migration.py",
         }
         self.assertTrue(expected <= locations)
@@ -54,17 +54,14 @@ class GraphBuiltinTest(unittest.TestCase):
         destinations = {by_id[path.nodes[-1]] for path in result.paths}
         self.assertTrue(expected - {"api/profile.py"} <= destinations)
         self.assertTrue(all(edge.evidence for edge in result.edges))
-        self.assertTrue(all(
-            edge.confidence in {"lexical", "structural-inferred"}
-            for edge in result.edges
-        ))
+        self.assertTrue(
+            all(edge.confidence in {"lexical", "structural-inferred"} for edge in result.edges)
+        )
 
     def test_dense_filename_seed_graph_uses_distinct_file_labels_and_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            locations = ["docs/POLICY.md"] + [
-                f"module_{index}.py" for index in range(7)
-            ]
+            locations = ["docs/POLICY.md"] + [f"module_{index}.py" for index in range(7)]
             (root / "docs").mkdir()
             for location in locations:
                 path = root / location
@@ -72,16 +69,11 @@ class GraphBuiltinTest(unittest.TestCase):
                     'POLICY = "POLICY.md"\nAUTH = "authorization"\n',
                     encoding="utf-8",
                 )
-            seeds = tuple(
-                BUILTIN.ScanSeed("POLICY.md", location)
-                for location in locations
-            )
+            seeds = tuple(BUILTIN.ScanSeed("POLICY.md", location) for location in locations)
 
             result = scan(root, seeds=seeds)
 
-            self.assertEqual(
-                {node.location for node in result.nodes}, set(locations)
-            )
+            self.assertEqual({node.location for node in result.nodes}, set(locations))
             self.assertEqual(len(result.paths), len(result.nodes) - 1)
             self.assertNotEqual(result.budget_status, "budget_exhausted")
 
@@ -97,9 +89,7 @@ class GraphBuiltinTest(unittest.TestCase):
             )
             (root / "d.py").write_text('C = "gammabridgethree"\n', encoding="utf-8")
 
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed("alphabridgeone", "a.py"),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed("alphabridgeone", "a.py"),))
 
             self.assertTrue(any(path.distance == 3 for path in result.paths))
 
@@ -153,10 +143,11 @@ class GraphBuiltinTest(unittest.TestCase):
 
             self.assertEqual(result.budget_status, "provider_limited")
             blocked = next(node for node in result.nodes if node.location == "blocked")
-            self.assertTrue(any(
-                item.node == blocked.id and "blocked" in item.reason
-                for item in result.frontier
-            ))
+            self.assertTrue(
+                any(
+                    item.node == blocked.id and "blocked" in item.reason for item in result.frontier
+                )
+            )
 
     def test_directory_entry_classification_error_is_unknown_frontier(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -184,13 +175,14 @@ class GraphBuiltinTest(unittest.TestCase):
 
             self.assertEqual(result.budget_status, "provider_limited")
             blocked = next(
-                node for node in result.nodes
-                if node.location == "classification-blocked"
+                node for node in result.nodes if node.location == "classification-blocked"
             )
-            self.assertTrue(any(
-                item.node == blocked.id and "classification-blocked" in item.reason
-                for item in result.frontier
-            ))
+            self.assertTrue(
+                any(
+                    item.node == blocked.id and "classification-blocked" in item.reason
+                    for item in result.frontier
+                )
+            )
 
     def test_unknown_placeholders_never_displace_seed_under_tight_node_limit(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -216,10 +208,9 @@ class GraphBuiltinTest(unittest.TestCase):
 
             self.assertEqual(result.budget_status, "provider_limited")
             self.assertEqual([node.location for node in result.nodes], ["api/profile.py"])
-            self.assertTrue(any(
-                "2 unreadable directories omitted" in item.reason
-                for item in result.frontier
-            ))
+            self.assertTrue(
+                any("2 unreadable directories omitted" in item.reason for item in result.frontier)
+            )
 
     def test_rejects_traversal_and_root_symlinks_and_skips_file_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -249,10 +240,17 @@ class GraphBuiltinTest(unittest.TestCase):
             oversized = root / "oversized.py"
             oversized.write_bytes(b"profile.displayName" + b"x" * 200)
             limits = BUILTIN.ScanLimits(
-                max_seconds=30, max_files=3, max_bytes=300, max_file_bytes=100,
-                max_nodes=2, max_edges=1, max_paths=1,
+                max_seconds=30,
+                max_files=3,
+                max_bytes=300,
+                max_file_bytes=100,
+                max_nodes=2,
+                max_edges=1,
+                max_paths=1,
             )
-            result = scan(root, seeds=(BUILTIN.ScanSeed("profile.displayName", "file_0.py"),), limits=limits)
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("profile.displayName", "file_0.py"),), limits=limits
+            )
             self.assertLessEqual(result.files_scanned, 3)
             self.assertLessEqual(result.bytes_scanned, 300)
             self.assertLessEqual(len(result.nodes), 2)
@@ -265,9 +263,7 @@ class GraphBuiltinTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "growing.py").write_text("x", encoding="utf-8")
-            with mock.patch.object(
-                BUILTIN, "_read_regular_file", return_value=(b"x" * 101, None)
-            ):
+            with mock.patch.object(BUILTIN, "_read_regular_file", return_value=(b"x" * 101, None)):
                 result = scan(
                     root,
                     seeds=(BUILTIN.ScanSeed("profile.displayName", "growing.py"),),
@@ -292,17 +288,18 @@ class GraphBuiltinTest(unittest.TestCase):
                 root,
                 seeds=(BUILTIN.ScanSeed("profile.displayName", "file_0.py"),),
                 limits=BUILTIN.ScanLimits(
-                    max_seconds=30, max_files=50, max_bytes=10_000,
-                    max_nodes=10, max_edges=100, max_paths=1,
+                    max_seconds=30,
+                    max_files=50,
+                    max_bytes=10_000,
+                    max_nodes=10,
+                    max_edges=100,
+                    max_paths=1,
                 ),
                 clock=clock,
             )
             self.assertEqual(len(result.paths), 1)
             self.assertLess(clock.calls, 150)
-            self.assertTrue(any(
-                "path capacity exhausted" in row.reason
-                for row in result.frontier
-            ))
+            self.assertTrue(any("path capacity exhausted" in row.reason for row in result.frontier))
 
     def test_exact_path_capacity_is_not_reported_as_exhausted(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -362,7 +359,9 @@ class GraphBuiltinTest(unittest.TestCase):
                 root,
                 seeds=(BUILTIN.ScanSeed("profile.displayName", "file_00.py"),),
                 limits=BUILTIN.ScanLimits(
-                    max_files=100, max_bytes=100_000, max_paths=0,
+                    max_files=100,
+                    max_bytes=100_000,
+                    max_paths=0,
                 ),
             )
 
@@ -387,26 +386,27 @@ class GraphBuiltinTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "source.py").write_text('KEY = "profile.displayName"', encoding="utf-8")
-            (root / "cache.py").write_text('KEY = "profile.displayName"\nCACHE = "profileCache"', encoding="utf-8")
-            (root / "authorization.py").write_text('KEY = "profile.displayName"\nPERMISSION = "profile.read"', encoding="utf-8")
+            (root / "cache.py").write_text(
+                'KEY = "profile.displayName"\nCACHE = "profileCache"', encoding="utf-8"
+            )
+            (root / "authorization.py").write_text(
+                'KEY = "profile.displayName"\nPERMISSION = "profile.read"', encoding="utf-8"
+            )
             result = scan(root, seeds=(BUILTIN.ScanSeed("profile.displayName", "source.py"),))
             self.assertEqual(result.paths[0].risk_domains[0], "authorization/privacy")
 
     def test_shared_quoted_data_is_lexical_reference_not_structural_import(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "api.py").write_text(
-                'FIELD = "profile.displayName"\n', encoding="utf-8"
-            )
+            (root / "api.py").write_text('FIELD = "profile.displayName"\n', encoding="utf-8")
             (root / "profile_cache.py").write_text(
                 'CACHE_KEY = "profile.displayName"\n', encoding="utf-8"
             )
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed("profile.displayName", "api.py"),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed("profile.displayName", "api.py"),))
             locations = {node.id: node.location for node in result.nodes}
             matching = [
-                edge for edge in result.edges
+                edge
+                for edge in result.edges
                 if locations[edge.source] == "api.py"
                 and locations[edge.target] == "profile_cache.py"
             ]
@@ -424,13 +424,10 @@ class GraphBuiltinTest(unittest.TestCase):
             (root / "shared_model.py").write_text(
                 "class SharedModel:\n    pass\n", encoding="utf-8"
             )
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed("SharedModel", "consumer.py"),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed("SharedModel", "consumer.py"),))
             locations = {node.id: node.location for node in result.nodes}
             directions = {
-                (locations[edge.source], locations[edge.target]):
-                (edge.kind, edge.confidence)
+                (locations[edge.source], locations[edge.target]): (edge.kind, edge.confidence)
                 for edge in result.edges
             }
 
@@ -445,7 +442,11 @@ class GraphBuiltinTest(unittest.TestCase):
 
     def test_deadline_stops_before_traversal_and_during_frontier_expansion(self):
         immediate = FakeClock((5.0, 5.0))
-        result = scan(FIXTURE_ROOT, clock=immediate, limits=BUILTIN.ScanLimits(max_seconds=0, max_files=500, max_bytes=8_000_000))
+        result = scan(
+            FIXTURE_ROOT,
+            clock=immediate,
+            limits=BUILTIN.ScanLimits(max_seconds=0, max_files=500, max_bytes=8_000_000),
+        )
         self.assertEqual(result.nodes, ())
         self.assertEqual(result.budget_status, "budget_exhausted")
 
@@ -488,10 +489,8 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
 
     WRAPPED_ASSIGNMENTS = (
         ('token := []byte("real-secret-value")', "real-secret-value"),
-        ('password = map[string]string{"k": "real-secret-value"}',
-         "real-secret-value"),
-        ('API_KEY = os.getenv("FALLBACK", "real-secret-value")',
-         "real-secret-value"),
+        ('password = map[string]string{"k": "real-secret-value"}', "real-secret-value"),
+        ('API_KEY = os.getenv("FALLBACK", "real-secret-value")', "real-secret-value"),
         ('token = "first-secret" + "second-secret"', "second-secret"),
     )
 
@@ -505,8 +504,8 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
     def test_multiline_raw_and_escaped_assignment_values_are_redacted(self):
         cases = (
             ('token := []byte(\n  "multiline-secret"\n)', "multiline-secret"),
-            ('token := []byte(`raw-secret-value`)', "raw-secret-value"),
-            ('token := []byte("abc\\\"escaped-secret")', "escaped-secret"),
+            ("token := []byte(`raw-secret-value`)", "raw-secret-value"),
+            ('token := []byte("abc\\"escaped-secret")', "escaped-secret"),
         )
         for source, secret in cases:
             with self.subTest(source=source):
@@ -518,16 +517,10 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             secret = "ULTRASECRET123456789"
-            (root / "a.go").write_text(
-                f"token := []byte(`{secret}`)\n", encoding="utf-8"
-            )
-            (root / "b.go").write_text(
-                f'const Linked = "{secret}"\n', encoding="utf-8"
-            )
+            (root / "a.go").write_text(f"token := []byte(`{secret}`)\n", encoding="utf-8")
+            (root / "b.go").write_text(f'const Linked = "{secret}"\n', encoding="utf-8")
 
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed("token", "a.go"),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed("token", "a.go"),))
 
             self.assertTrue(all(secret not in edge.evidence for edge in result.edges))
 
@@ -536,17 +529,12 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
             root = Path(temporary)
             secret = "ULTRASECRET123456789"
             (root / "config.yml").write_text(
-                f"token: |\n  {secret}\n  shared_boundary\n"
-                "name: visible\n",
+                f"token: |\n  {secret}\n  shared_boundary\nname: visible\n",
                 encoding="utf-8",
             )
-            (root / "consumer.py").write_text(
-                f'VALUE = "{secret}"\n', encoding="utf-8"
-            )
+            (root / "consumer.py").write_text(f'VALUE = "{secret}"\n', encoding="utf-8")
 
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed("token", "config.yml"),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed("token", "config.yml"),))
 
             self.assertTrue(all(secret not in edge.evidence for edge in result.edges))
 
@@ -584,13 +572,10 @@ class EdgeKindClassificationTest(unittest.TestCase):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content, encoding="utf-8")
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),))
             locations = {node.id: node.location for node in result.nodes}
             return {
-                (locations[edge.source], locations[edge.target]):
-                (edge.kind, edge.confidence)
+                (locations[edge.source], locations[edge.target]): (edge.kind, edge.confidence)
                 for edge in result.edges
             }
 
@@ -639,10 +624,7 @@ class EdgeKindClassificationTest(unittest.TestCase):
     def test_imported_member_name_does_not_link_unrelated_module_file(self):
         directions = self.edge_kinds(
             {
-                "consumer.py": (
-                    "from helpers import auth\n"
-                    "value = auth()\n"
-                ),
+                "consumer.py": ("from helpers import auth\nvalue = auth()\n"),
                 "helpers.py": "def auth():\n    return True\n",
                 "auth.py": 'UNRELATED = "auth"\n',
             },
@@ -662,8 +644,7 @@ class EdgeKindClassificationTest(unittest.TestCase):
         directions = self.edge_kinds(
             {
                 "consumer.ts": (
-                    'import { auth } from "./helpers";\n'
-                    'const value = "shared_boundary";\n'
+                    'import { auth } from "./helpers";\nconst value = "shared_boundary";\n'
                 ),
                 "helpers.ts": 'export const helper = "shared_boundary";\n',
                 "auth.ts": 'export const unrelated = "shared_boundary";\n',
@@ -683,10 +664,7 @@ class EdgeKindClassificationTest(unittest.TestCase):
     def test_module_suffix_does_not_earn_structural_import_confidence(self):
         directions = self.edge_kinds(
             {
-                "consumer.py": (
-                    "import oauth\n"
-                    'VALUE = "shared_boundary"\n'
-                ),
+                "consumer.py": ('import oauth\nVALUE = "shared_boundary"\n'),
                 "auth.py": 'UNRELATED = "shared_boundary"\n',
             },
             "shared_boundary",
@@ -701,8 +679,7 @@ class EdgeKindClassificationTest(unittest.TestCase):
         directions = self.edge_kinds(
             {
                 "consumer.ts": (
-                    'import { helper } from "./auth/helpers";\n'
-                    'const value = "shared_boundary";\n'
+                    'import { helper } from "./auth/helpers";\nconst value = "shared_boundary";\n'
                 ),
                 "auth.ts": 'export const unrelated = "shared_boundary";\n',
                 "helpers.ts": 'export const helper = "shared_boundary";\n',
@@ -723,7 +700,7 @@ class EdgeKindClassificationTest(unittest.TestCase):
         directions = self.edge_kinds(
             {
                 "consumer.ts": (
-                    "import {\n  helper,\n  other\n} from \"./helpers\";\n"
+                    'import {\n  helper,\n  other\n} from "./helpers";\n'
                     'const value = "shared_boundary";\n'
                 ),
                 "helpers.ts": 'export const helper = "shared_boundary";\n',
@@ -802,30 +779,19 @@ class EdgeKindClassificationTest(unittest.TestCase):
 
     def test_import_resolution_rejects_substring_collisions(self):
         module = BUILTIN
-        self.assertTrue(
-            module._import_resolves_to_target("pkg/shared_model.py", "sharedmodel")
-        )
-        self.assertTrue(
-            module._import_resolves_to_target("pkg/auth_service.py", "auth")
-        )
+        self.assertTrue(module._import_resolves_to_target("pkg/shared_model.py", "sharedmodel"))
+        self.assertTrue(module._import_resolves_to_target("pkg/auth_service.py", "auth"))
         self.assertFalse(
             module._import_resolves_to_target("pkg/app_config_loader.py", "config_loader_x")
         )
-        self.assertFalse(
-            module._import_resolves_to_target("pkg/reconfigure.py", "config")
-        )
+        self.assertFalse(module._import_resolves_to_target("pkg/reconfigure.py", "config"))
 
     def test_import_taint_requires_target_resolution(self):
         directions = self.edge_kinds(
             {
-                "consumer.py": (
-                    "from shared_model import SharedModel\n"
-                    "value = SharedModel()\n"
-                ),
+                "consumer.py": ("from shared_model import SharedModel\nvalue = SharedModel()\n"),
                 "shared_model.py": "class SharedModel:\n    pass\n",
-                "narrative_docs.py": (
-                    'NOTE = "SharedModel is documented elsewhere"\n'
-                ),
+                "narrative_docs.py": ('NOTE = "SharedModel is documented elsewhere"\n'),
             },
             "SharedModel",
             "consumer.py",
@@ -852,14 +818,10 @@ class SymlinkedParentTraversalTest(unittest.TestCase):
             outside = base / "outside"
             repo.mkdir()
             outside.mkdir()
-            (outside / "secret.py").write_text(
-                'LEAKED = "outside-the-repo"\n', encoding="utf-8"
-            )
+            (outside / "secret.py").write_text('LEAKED = "outside-the-repo"\n', encoding="utf-8")
             (repo / "linkdir").symlink_to(outside)
 
-            payload, reason = BUILTIN._read_regular_file(
-                repo, "linkdir/secret.py", 1 << 20
-            )
+            payload, reason = BUILTIN._read_regular_file(repo, "linkdir/secret.py", 1 << 20)
 
             self.assertIsNone(payload)
             self.assertEqual(reason, "unsafe-file")
@@ -870,9 +832,7 @@ class SymlinkedParentTraversalTest(unittest.TestCase):
             (repo / "pkg").mkdir()
             (repo / "pkg" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
 
-            payload, reason = BUILTIN._read_regular_file(
-                repo, "pkg/module.py", 1 << 20
-            )
+            payload, reason = BUILTIN._read_regular_file(repo, "pkg/module.py", 1 << 20)
 
             self.assertIsNone(reason)
             self.assertEqual(payload, b"VALUE = 1\n")
@@ -884,6 +844,7 @@ class ImportEdgeProvenanceTest(unittest.TestCase):
 
     def test_import_edge_records_source_location_and_digest(self):
         import hashlib as _hashlib
+
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             consumer = "from shared_model import SharedModel\nvalue = SharedModel()\n"
@@ -891,14 +852,12 @@ class ImportEdgeProvenanceTest(unittest.TestCase):
             (root / "shared_model.py").write_text(
                 "class SharedModel:\n    pass\n", encoding="utf-8"
             )
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed("SharedModel", "consumer.py"),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed("SharedModel", "consumer.py"),))
             locations = {node.id: node.location for node in result.nodes}
             import_edges = [
-                edge for edge in result.edges
-                if edge.kind == "imports"
-                and locations[edge.source] == "consumer.py"
+                edge
+                for edge in result.edges
+                if edge.kind == "imports" and locations[edge.source] == "consumer.py"
             ]
             self.assertTrue(import_edges)
             expected = _hashlib.sha256(consumer.encode("utf-8")).hexdigest()
@@ -916,9 +875,7 @@ class RiskDomainTokenizationTest(unittest.TestCase):
         return BUILTIN._risk_domains(location, text)
 
     def test_author_and_role_attribute_are_not_authorization(self):
-        self.assertNotIn(
-            "authorization/privacy", self.domains("src/greet.py", "# author: alice")
-        )
+        self.assertNotIn("authorization/privacy", self.domains("src/greet.py", "# author: alice"))
         self.assertNotIn(
             "authorization/privacy",
             self.domains("package.json", '{"author": "Alice", "license": "MIT"}'),
@@ -957,13 +914,10 @@ class PythonAstStructureTest(unittest.TestCase):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content, encoding="utf-8")
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),))
             locations = {node.id: node.location for node in result.nodes}
             return {
-                (locations[edge.source], locations[edge.target]):
-                (edge.kind, edge.confidence)
+                (locations[edge.source], locations[edge.target]): (edge.kind, edge.confidence)
                 for edge in result.edges
             }
 
@@ -1040,16 +994,11 @@ class StructuralEdgeSurvivalTest(unittest.TestCase):
                 'import blobstore\nSHARED = "common_marker_token"\n',
                 encoding="utf-8",
             )
-            (root / "blobstore.py").write_text(
-                "class Storage:\n    pass\n", encoding="utf-8"
-            )
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed("Storage", "app.py"),)
-            )
+            (root / "blobstore.py").write_text("class Storage:\n    pass\n", encoding="utf-8")
+            result = scan(root, seeds=(BUILTIN.ScanSeed("Storage", "app.py"),))
             locations = {node.id: node.location for node in result.nodes}
             kinds = {
-                (locations[edge.source], locations[edge.target]): edge.kind
-                for edge in result.edges
+                (locations[edge.source], locations[edge.target]): edge.kind for edge in result.edges
             }
             self.assertGreaterEqual(len(result.edges), 999)
             self.assertEqual(kinds.get(("app.py", "blobstore.py")), "imports")
@@ -1067,13 +1016,10 @@ class JavaScriptStructureTest(unittest.TestCase):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content, encoding="utf-8")
-            result = scan(
-                root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),)
-            )
+            result = scan(root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),))
             locations = {node.id: node.location for node in result.nodes}
             return {
-                (locations[edge.source], locations[edge.target]):
-                (edge.kind, edge.confidence)
+                (locations[edge.source], locations[edge.target]): (edge.kind, edge.confidence)
                 for edge in result.edges
             }
 

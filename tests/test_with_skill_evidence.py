@@ -3,7 +3,6 @@ import subprocess
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "evals" / "results" / "with-skill.md"
 EVIDENCE_ROOT = ROOT / "evals" / "results" / "with-skill-raw"
@@ -17,9 +16,7 @@ EXPECTED_COUNTS = {
     "rerun-5": 10,
     "scoring": 6,
 }
-EVIDENCE_MANIFEST_SHA256 = (
-    "6fe00ab7e7ea3c9158c987094c77690efe673a692ab73a3945807b6ae7dde842"
-)
+EVIDENCE_MANIFEST_SHA256 = "6fe00ab7e7ea3c9158c987094c77690efe673a692ab73a3945807b6ae7dde842"
 
 
 def evidence_manifest() -> str:

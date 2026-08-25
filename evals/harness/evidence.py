@@ -5,9 +5,9 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping, Union
-
+from typing import Union
 
 Artifact = Union[str, bytes]
 
@@ -115,7 +115,7 @@ def _run_directory(
 
 
 def _repository_root(path: Path):
-    for candidate in (path,) + tuple(path.parents):
+    for candidate in (path, *tuple(path.parents)):
         if (candidate / ".git").exists():
             return candidate
     return None
@@ -149,9 +149,7 @@ def _write_atomically(target: Path, artifacts: tuple[tuple[str, bytes], ...]) ->
     try:
         if target.exists():
             raise FileExistsError(f"evidence already exists: {target}")
-        temporary = Path(
-            tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent)
-        )
+        temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
         for name, payload in artifacts:
             destination = temporary / name
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -203,9 +201,7 @@ def record_run(
             {
                 finding
                 for _, payload in prepared
-                for finding in find_potential_secrets(
-                    payload.decode("utf-8", errors="replace")
-                )
+                for finding in find_potential_secrets(payload.decode("utf-8", errors="replace"))
             }
         )
     )
@@ -245,9 +241,7 @@ def record_probe(
             {
                 finding
                 for _, payload in prepared
-                for finding in find_potential_secrets(
-                    payload.decode("utf-8", errors="replace")
-                )
+                for finding in find_potential_secrets(payload.decode("utf-8", errors="replace"))
             }
         )
     )
@@ -311,15 +305,11 @@ def _parse_manifest(manifest: str) -> tuple[dict[str, str], list[str]]:
 def verify_manifest(raw_root: Path, manifest: str) -> list[str]:
     """Return deterministic integrity failures for a manifest and raw tree."""
     expected, problems = _parse_manifest(manifest)
-    canonical = "\n".join(
-        "%s %s" % (relative, expected[relative]) for relative in sorted(expected)
-    )
+    canonical = "\n".join(f"{relative} {expected[relative]}" for relative in sorted(expected))
     if expected:
         canonical += "\n"
     if manifest != canonical:
-        problems.insert(
-            0, "manifest is not the canonical sorted POSIX representation"
-        )
+        problems.insert(0, "manifest is not the canonical sorted POSIX representation")
     actual = {}
     root = Path(raw_root)
     for path in _evidence_files(root):

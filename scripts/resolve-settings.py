@@ -7,7 +7,6 @@ import json
 import sys
 from pathlib import Path
 
-
 AUDIENCES = ("simple", "balanced", "technical")
 DELIVERIES = ("compact", "full")
 CONFIG_NAME = ".requirements-impact-refiner.json"
@@ -96,17 +95,29 @@ def resolve_graph_settings(config: dict[str, object]) -> tuple[dict[str, object]
     providers, install_policy = configured.get("providers"), configured.get("install_policy")
     if not isinstance(enabled, bool) or not isinstance(deep, bool):
         return graph_defaults(), "enabled and deep must be booleans"
-    if (not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1 or maximum > 30):
+    if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1 or maximum > 30:
         return graph_defaults(), "max_seconds must be a positive integer at most 30"
-    if (not isinstance(target, int) or isinstance(target, bool) or target < 1 or target > maximum):
-        return graph_defaults(), "target_seconds must be a positive integer no greater than max_seconds"
-    if (not isinstance(providers, list) or not providers or any(not isinstance(item, str) or not item for item in providers) or len(set(providers)) != len(providers)):
+    if not isinstance(target, int) or isinstance(target, bool) or target < 1 or target > maximum:
+        return (
+            graph_defaults(),
+            "target_seconds must be a positive integer no greater than max_seconds",
+        )
+    if (
+        not isinstance(providers, list)
+        or not providers
+        or any(not isinstance(item, str) or not item for item in providers)
+        or len(set(providers)) != len(providers)
+    ):
         return graph_defaults(), "providers must be a non-empty list of unique names"
     if install_policy != "never":
         return graph_defaults(), "install_policy must be never"
     return {
-        "enabled": enabled, "max_seconds": maximum, "target_seconds": target,
-        "providers": list(providers), "install_policy": install_policy, "deep": deep,
+        "enabled": enabled,
+        "max_seconds": maximum,
+        "target_seconds": target,
+        "providers": list(providers),
+        "install_policy": install_policy,
+        "deep": deep,
     }, None
 
 

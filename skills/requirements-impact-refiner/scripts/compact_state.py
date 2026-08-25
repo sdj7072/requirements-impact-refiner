@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Mapping, Sequence
-
+from collections.abc import Mapping, Sequence
 
 TOP_LEVEL_KEYS = {
-    "schema_version", "report", "settings", "original_requirement",
-    "refined_requirement", "current_behavior", "preserved_invariants",
-    "impacts", "decision_needed", "decisions", "delta", "history",
-    "criteria", "unresolved", "scope", "handoff", "summary",
+    "schema_version",
+    "report",
+    "settings",
+    "original_requirement",
+    "refined_requirement",
+    "current_behavior",
+    "preserved_invariants",
+    "impacts",
+    "decision_needed",
+    "decisions",
+    "delta",
+    "history",
+    "criteria",
+    "unresolved",
+    "scope",
+    "handoff",
+    "summary",
 }
 OPTIONAL_TOP_LEVEL_KEYS = {"graph_paths"}
 OBJECT_FIELDS = {
@@ -23,28 +35,67 @@ OBJECT_FIELDS = {
 ROW_FIELDS = {
     "current_behavior": {"id", "behavior", "evidence_level", "evidence"},
     "preserved_invariants": {"id", "requirement", "impacts", "evidence"},
-    "impacts": {"id", "requirement", "category", "severity", "state", "evidence_level", "evidence", "invariants", "decisions", "criteria"},
+    "impacts": {
+        "id",
+        "requirement",
+        "category",
+        "severity",
+        "state",
+        "evidence_level",
+        "evidence",
+        "invariants",
+        "decisions",
+        "criteria",
+    },
     "decisions": {"id", "choice", "requirement", "accepted_impacts", "rationale"},
     "history": {"requirement", "revision", "decision", "superseded_impacts", "summary"},
     "criteria": {"id", "requirement", "impact", "invariant", "criterion", "evidence"},
     "unresolved": {"impact", "state", "rationale", "decision", "owner"},
     "scope": {"boundary", "evidence", "confidence"},
-    "summary": {"impact_id", "changed_feature", "possible_issue", "affected", "trigger", "severity", "prevention", "status"},
+    "summary": {
+        "impact_id",
+        "changed_feature",
+        "possible_issue",
+        "affected",
+        "trigger",
+        "severity",
+        "prevention",
+        "status",
+    },
 }
 DECISION_NEEDED_FIELDS = {"question", "options"}
 OPTION_FIELDS = {"option", "impacts", "tradeoff"}
 DELTA_CATEGORIES = (
-    "resolved", "mitigated", "unchanged", "accepted", "deferred",
-    "blocked", "superseded", "reopened", "new",
+    "resolved",
+    "mitigated",
+    "unchanged",
+    "accepted",
+    "deferred",
+    "blocked",
+    "superseded",
+    "reopened",
+    "new",
 )
 IMPACT_CATEGORIES = {
-    "functionality", "data", "interfaces", "authorization/privacy",
-    "state/concurrency", "operations", "compatibility", "legal/policy",
+    "functionality",
+    "data",
+    "interfaces",
+    "authorization/privacy",
+    "state/concurrency",
+    "operations",
+    "compatibility",
+    "legal/policy",
     "regression",
 }
 IMPACT_STATES = {
-    "detected", "refining", "mitigated", "resolved", "accepted",
-    "deferred", "blocked", "superseded",
+    "detected",
+    "refining",
+    "mitigated",
+    "resolved",
+    "accepted",
+    "deferred",
+    "blocked",
+    "superseded",
 }
 SEVERITIES = {"critical", "high", "medium", "low"}
 EVIDENCE_LEVELS = {"verified", "inferred", "unknown"}
@@ -54,7 +105,12 @@ SETTING_SOURCES = {"request", "repository", "default"}
 SETTING_FIELDS = {"audience", "audience_source", "delivery", "delivery_source"}
 OPTIONAL_SETTING_FIELDS = {"impact_graph", "warnings"}
 GRAPH_SETTING_FIELDS = {
-    "enabled", "max_seconds", "target_seconds", "providers", "install_policy", "deep",
+    "enabled",
+    "max_seconds",
+    "target_seconds",
+    "providers",
+    "install_policy",
+    "deep",
 }
 PHASES = {"pre-decision", "post-decision"}
 ID_PATTERNS = {
@@ -124,7 +180,10 @@ def validate_structure(value: object) -> list[str]:
     if not _mapping(value):
         return ["state must contain a JSON object"]
     errors = [f"missing top-level key {key}" for key in sorted(TOP_LEVEL_KEYS - set(value))]
-    errors.extend(f"unknown top-level key {key}" for key in sorted(set(value) - TOP_LEVEL_KEYS - OPTIONAL_TOP_LEVEL_KEYS))
+    errors.extend(
+        f"unknown top-level key {key}"
+        for key in sorted(set(value) - TOP_LEVEL_KEYS - OPTIONAL_TOP_LEVEL_KEYS)
+    )
     if errors:
         return errors
     if value["schema_version"] != 1:
@@ -183,18 +242,35 @@ def validate_structure(value: object) -> list[str]:
                     errors.append(f"graph path row {index} paths must be a bounded array")
                     continue
                 for path_index, path in enumerate(paths, start=1):
-                    errors.extend(_check_keys(f"graph path {index}.{path_index}", path, {"id", "labels", "providers", "confidence", "locations"}))
+                    errors.extend(
+                        _check_keys(
+                            f"graph path {index}.{path_index}",
+                            path,
+                            {"id", "labels", "providers", "confidence", "locations"},
+                        )
+                    )
                     if not _mapping(path):
                         continue
-                    if not isinstance(path.get("id"), str) or re.fullmatch(r"PATH-\d{3}", path["id"]) is None:
+                    if (
+                        not isinstance(path.get("id"), str)
+                        or re.fullmatch(r"PATH-\d{3}", path["id"]) is None
+                    ):
                         errors.append(f"graph path {index}.{path_index} has invalid id")
                     if not _string_list(path.get("labels")):
-                        errors.append(f"graph path {index}.{path_index} labels must be non-empty strings")
+                        errors.append(
+                            f"graph path {index}.{path_index} labels must be non-empty strings"
+                        )
                     if not _string_list(path.get("providers")):
-                        errors.append(f"graph path {index}.{path_index} providers must be non-empty strings")
+                        errors.append(
+                            f"graph path {index}.{path_index} providers must be non-empty strings"
+                        )
                     if not _nonempty(path.get("confidence")):
-                        errors.append(f"graph path {index}.{path_index} confidence must be nonempty")
-                    if not isinstance(path.get("locations"), list) or any(not _nonempty(item) for item in path["locations"]):
+                        errors.append(
+                            f"graph path {index}.{path_index} confidence must be nonempty"
+                        )
+                    if not isinstance(path.get("locations"), list) or any(
+                        not _nonempty(item) for item in path["locations"]
+                    ):
                         errors.append(f"graph path {index}.{path_index} locations must be strings")
     return errors
 
@@ -228,8 +304,10 @@ def validate_definitions(state: Mapping[str, object]) -> list[str]:
     previous = report.get("previous_sha256")
     if revision == 1 and previous != "none":
         errors.append("revision 1 requires previous_sha256 none")
-    if isinstance(revision, int) and revision > 1 and not (
-        isinstance(previous, str) and SHA256_PATTERN.fullmatch(previous)
+    if (
+        isinstance(revision, int)
+        and revision > 1
+        and not (isinstance(previous, str) and SHA256_PATTERN.fullmatch(previous))
     ):
         errors.append("later revision requires a lowercase SHA-256 predecessor")
     if report.get("phase") not in PHASES:
@@ -291,7 +369,9 @@ def validate_relationships(state: Mapping[str, object]) -> list[str]:
             errors.append(f"preserved invariant {invariant_id} references unknown requirement")
         for impact_id in row.get("impacts", []):
             if impact_id not in known["impact"]:
-                errors.append(f"preserved invariant {invariant_id} references unknown impact {impact_id}")
+                errors.append(
+                    f"preserved invariant {invariant_id} references unknown impact {impact_id}"
+                )
         if not _nonempty(row.get("evidence")):
             errors.append(f"preserved invariant {invariant_id} requires evidence")
     for row in state["impacts"]:
@@ -309,7 +389,11 @@ def validate_relationships(state: Mapping[str, object]) -> list[str]:
             errors.append(f"impact {impact_id} has invalid evidence level {level}")
         if not _current_evidence(row.get("evidence")):
             errors.append(f"impact {impact_id} {level} evidence requires a current basis")
-        for field, kind in (("invariants", "invariant"), ("decisions", "decision"), ("criteria", "criterion")):
+        for field, kind in (
+            ("invariants", "invariant"),
+            ("decisions", "decision"),
+            ("criteria", "criterion"),
+        ):
             for identifier in row.get(field, []):
                 if identifier not in known[kind]:
                     errors.append(f"impact {impact_id} references unknown {kind} {identifier}")
@@ -319,7 +403,11 @@ def validate_relationships(state: Mapping[str, object]) -> list[str]:
             errors.append(f"accepted impact {impact_id} requires a decision")
     for row in state["criteria"]:
         criterion_id = row.get("id")
-        for field, kind in (("requirement", "requirement"), ("impact", "impact"), ("invariant", "invariant")):
+        for field, kind in (
+            ("requirement", "requirement"),
+            ("impact", "impact"),
+            ("invariant", "invariant"),
+        ):
             if row.get(field) not in known[kind]:
                 errors.append(f"criterion {criterion_id} references unknown {kind}")
         if not _nonempty(row.get("criterion")) or not _nonempty(row.get("evidence")):
@@ -331,7 +419,11 @@ def validate_phase(state: Mapping[str, object]) -> list[str]:
     errors: list[str] = []
     phase = state["report"].get("phase")
     if phase == "pre-decision":
-        if state["decisions"] or state["refined_requirement"].get("decision") is not None or any(row.get("decisions") for row in state["impacts"]):
+        if (
+            state["decisions"]
+            or state["refined_requirement"].get("decision") is not None
+            or any(row.get("decisions") for row in state["impacts"])
+        ):
             errors.append("pre-decision state forbids decisions")
         needed = state["decision_needed"]
         if not _mapping(needed):
@@ -342,7 +434,9 @@ def validate_phase(state: Mapping[str, object]) -> list[str]:
             options = needed.get("options")
             if not isinstance(options, list) or not 2 <= len(options) <= 3:
                 errors.append("decision_needed requires two or three options")
-            elif len({option.get("option") for option in options if _mapping(option)}) != len(options):
+            elif len({option.get("option") for option in options if _mapping(option)}) != len(
+                options
+            ):
                 errors.append("decision_needed options must be distinct")
             if isinstance(options, list):
                 known_impacts = _defined_ids(state)["impact"]
@@ -444,9 +538,13 @@ def validate_summary(state: Mapping[str, object]) -> list[str]:
             if not _nonempty(row.get(field)):
                 errors.append(f"summary {impact_id} requires {field}")
         if row.get("severity") != impact.get("severity"):
-            errors.append(f"summary {impact_id} severity {row.get('severity')} disagrees with impact {impact.get('severity')}")
+            errors.append(
+                f"summary {impact_id} severity {row.get('severity')} disagrees with impact {impact.get('severity')}"
+            )
         if row.get("status") != impact.get("state"):
-            errors.append(f"summary {impact_id} status {row.get('status')} disagrees with impact {impact.get('state')}")
+            errors.append(
+                f"summary {impact_id} status {row.get('status')} disagrees with impact {impact.get('state')}"
+            )
     for impact_id in sorted(impacts):
         count = counts.get(impact_id, 0)
         if count == 0:

@@ -7,14 +7,11 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest import mock
 from pathlib import Path
-
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = (
-    ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "graph_providers.py"
-)
+MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "graph_providers.py"
 SPEC = importlib.util.spec_from_file_location("graph_providers", MODULE_PATH)
 PROVIDERS = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = PROVIDERS
@@ -34,8 +31,14 @@ class FakeClock:
 
 class Completed:
     def __init__(
-        self, returncode=0, stdout=b"ok\n", stderr=b"", *,
-        timed_out=False, stdout_truncated=False, stderr_truncated=False,
+        self,
+        returncode=0,
+        stdout=b"ok\n",
+        stderr=b"",
+        *,
+        timed_out=False,
+        stdout_truncated=False,
+        stderr_truncated=False,
     ):
         self.returncode = returncode
         self.stdout = stdout
@@ -77,16 +80,21 @@ class ProviderRunnerTest(unittest.TestCase):
         runner = RecordingRunner()
         result = PROVIDERS.run_provider(
             PROVIDERS.ProviderSpec("ast-grep", executable=self.fake_binary),
-            ("--version",), self.repo, PROVIDERS.Deadline(self.clock, 30),
+            ("--version",),
+            self.repo,
+            PROVIDERS.Deadline(self.clock, 30),
             runner=runner,
         )
 
         self.assertEqual(result.argv, (str(self.fake_binary), "--version"))
-        self.assertEqual(result.environment, {
-            "PATH": str(self.fake_binary.parent),
-            "CODEGRAPH_TELEMETRY": "0",
-            "NO_COLOR": "1",
-        })
+        self.assertEqual(
+            result.environment,
+            {
+                "PATH": str(self.fake_binary.parent),
+                "CODEGRAPH_TELEMETRY": "0",
+                "NO_COLOR": "1",
+            },
+        )
         argv, kwargs = runner.calls[0]
         self.assertEqual(argv, result.argv)
         self.assertFalse(kwargs["shell"])
@@ -96,25 +104,33 @@ class ProviderRunnerTest(unittest.TestCase):
         self.assertEqual(kwargs["stdout_limit"], 4 * 1024 * 1024)
         self.assertEqual(kwargs["stderr_limit"], 256 * 1024)
         self.assertNotIn("HOME", kwargs["env"])
-        self.assertFalse(any(
-            name.lower().endswith(("token", "proxy", "password", "secret"))
-            for name in kwargs["env"]
-        ))
+        self.assertFalse(
+            any(
+                name.lower().endswith(("token", "proxy", "password", "secret"))
+                for name in kwargs["env"]
+            )
+        )
 
     def test_deadline_is_shared_and_expired_work_is_not_started(self):
         deadline = PROVIDERS.Deadline(self.clock, 30)
         self.clock.advance(12.5)
         runner = RecordingRunner()
-        result = PROVIDERS.run_provider(
+        PROVIDERS.run_provider(
             PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-            ("--help",), self.repo, deadline, runner=runner,
+            ("--help",),
+            self.repo,
+            deadline,
+            runner=runner,
         )
         self.assertEqual(runner.calls[0][1]["timeout"], 17.5)
 
         self.clock.advance(17.5)
         expired = PROVIDERS.run_provider(
             PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-            ("--help",), self.repo, deadline, runner=runner,
+            ("--help",),
+            self.repo,
+            deadline,
+            runner=runner,
         )
         self.assertEqual(expired.status, "timed_out")
         self.assertEqual(len(runner.calls), 1)
@@ -131,8 +147,11 @@ class ProviderRunnerTest(unittest.TestCase):
         for path in (directory, linked):
             with self.subTest(path=path):
                 result = PROVIDERS.run_provider(
-                    PROVIDERS.ProviderSpec("ast-grep", path), ("--version",),
-                    self.repo, PROVIDERS.Deadline(self.clock, 30), runner=runner,
+                    PROVIDERS.ProviderSpec("ast-grep", path),
+                    ("--version",),
+                    self.repo,
+                    PROVIDERS.Deadline(self.clock, 30),
+                    runner=runner,
                 )
                 self.assertEqual(result.status, "unsafe")
         self.assertEqual(runner.calls, [])
@@ -154,7 +173,9 @@ class ProviderRunnerTest(unittest.TestCase):
 
         result = PROVIDERS.run_provider(
             PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-            ("--version",), self.repo, PROVIDERS.Deadline(self.clock, 30),
+            ("--version",),
+            self.repo,
+            PROVIDERS.Deadline(self.clock, 30),
             runner=inspecting_runner,
         )
         self.assertEqual(result.status, "ready")
@@ -168,8 +189,11 @@ class ProviderRunnerTest(unittest.TestCase):
         oversized.chmod(0o700)
         runner = RecordingRunner()
         result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", oversized), ("--version",),
-            self.repo, PROVIDERS.Deadline(self.clock, 30), runner=runner,
+            PROVIDERS.ProviderSpec("ast-grep", oversized),
+            ("--version",),
+            self.repo,
+            PROVIDERS.Deadline(self.clock, 30),
+            runner=runner,
         )
         self.assertEqual(result.status, "unsafe")
         self.assertEqual(runner.calls, [])
@@ -186,8 +210,11 @@ class ProviderRunnerTest(unittest.TestCase):
             with self.subTest(response=response, expect_json=expect_json):
                 result = PROVIDERS.run_provider(
                     PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-                    ("--version",), self.repo, PROVIDERS.Deadline(self.clock, 30),
-                    runner=RecordingRunner((response,)), expect_json=expect_json,
+                    ("--version",),
+                    self.repo,
+                    PROVIDERS.Deadline(self.clock, 30),
+                    runner=RecordingRunner((response,)),
+                    expect_json=expect_json,
                 )
                 self.assertEqual(result.status, expected)
                 self.assertLessEqual(len(result.stdout.encode("utf-8")), 4 * 1024 * 1024)
@@ -216,8 +243,11 @@ class ProviderRunnerTest(unittest.TestCase):
     def test_timeout_status_is_preserved(self):
         runner = RecordingRunner((subprocess.TimeoutExpired(("sg",), 2),))
         result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary), ("--help",),
-            self.repo, PROVIDERS.Deadline(self.clock, 2), runner=runner,
+            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
+            ("--help",),
+            self.repo,
+            PROVIDERS.Deadline(self.clock, 2),
+            runner=runner,
         )
         self.assertEqual(result.status, "timed_out")
 
@@ -234,12 +264,16 @@ class ProviderRunnerTest(unittest.TestCase):
             return PROVIDERS._bounded_subprocess(argv, **kwargs)
 
         with mock.patch.object(
-            PROVIDERS, "_terminate_process_group",
+            PROVIDERS,
+            "_terminate_process_group",
             wraps=PROVIDERS._terminate_process_group,
         ) as terminate:
             result = PROVIDERS.run_provider(
-                PROVIDERS.ProviderSpec("ast-grep", sleeper), ("--help",),
-                self.repo, PROVIDERS.Deadline(time, 0.05), runner=capture_snapshot,
+                PROVIDERS.ProviderSpec("ast-grep", sleeper),
+                ("--help",),
+                self.repo,
+                PROVIDERS.Deadline(time, 0.05),
+                runner=capture_snapshot,
             )
         self.assertEqual(result.status, "timed_out")
         self.assertTrue(terminate.called)
@@ -256,8 +290,11 @@ class ProviderRunnerTest(unittest.TestCase):
             raise OSError("controlled runner failure")
 
         result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary), ("--help",),
-            self.repo, PROVIDERS.Deadline(self.clock, 2), runner=failing_runner,
+            PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
+            ("--help",),
+            self.repo,
+            PROVIDERS.Deadline(self.clock, 2),
+            runner=failing_runner,
         )
         self.assertEqual(result.status, "failed")
         self.assertFalse(captured["snapshot"].exists())
@@ -283,8 +320,10 @@ class ProviderRunnerTest(unittest.TestCase):
         child_pid = None
         try:
             result = PROVIDERS.run_provider(
-                PROVIDERS.ProviderSpec("ast-grep", sleeper), ("--help",),
-                self.repo, PROVIDERS.Deadline(FakeClock(), 2.0),
+                PROVIDERS.ProviderSpec("ast-grep", sleeper),
+                ("--help",),
+                self.repo,
+                PROVIDERS.Deadline(FakeClock(), 2.0),
             )
             self.assertEqual(result.status, "timed_out")
             self.assertLess(time.monotonic() - started, 3.5)
@@ -313,19 +352,24 @@ class ProviderRunnerTest(unittest.TestCase):
         )
         subprocess.run(
             ("/usr/bin/clang", str(source), "-o", str(compiled)),
-            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True,
+            capture_output=True,
         )
         script = self.bin / "sg-self-contained"
         script.write_text("#!/bin/sh\nprintf 'snapshot-script\\n'\n", encoding="utf-8")
         script.chmod(0o700)
 
         compiled_result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("codegraph", compiled), ("--version",),
-            self.repo, PROVIDERS.Deadline(time, 2),
+            PROVIDERS.ProviderSpec("codegraph", compiled),
+            ("--version",),
+            self.repo,
+            PROVIDERS.Deadline(time, 2),
         )
         script_result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", script), ("--version",),
-            self.repo, PROVIDERS.Deadline(time, 2),
+            PROVIDERS.ProviderSpec("ast-grep", script),
+            ("--version",),
+            self.repo,
+            PROVIDERS.Deadline(time, 2),
         )
         self.assertEqual(compiled_result.status, "ready")
         self.assertEqual(compiled_result.stdout.strip(), "snapshot-compiled")
@@ -340,12 +384,18 @@ class ProviderRunnerTest(unittest.TestCase):
                 binary.write_text("#!/bin/sh\nprintf 'snapshot-safe\\n'\n", encoding="utf-8")
                 binary.chmod(0o700)
 
-                def mutating_runner(argv, **kwargs):
+                def mutating_runner(
+                    argv,
+                    attacker_marker=attacker_marker,
+                    mutation=mutation,
+                    binary=binary,
+                    **kwargs,
+                ):
                     attacker = (
                         "#!/bin/sh\n"
-                        f"/bin/echo attacker > \"{attacker_marker}\"\n"
+                        f'/bin/echo attacker > "{attacker_marker}"\n'
                         "printf 'attacker\\n'\n"
-                    ).encode("utf-8")
+                    ).encode()
                     if mutation == "replace":
                         replacement = binary.with_suffix(".replacement")
                         replacement.write_bytes(attacker)
@@ -361,8 +411,11 @@ class ProviderRunnerTest(unittest.TestCase):
                     return PROVIDERS._bounded_subprocess(argv, **kwargs)
 
                 result = PROVIDERS.run_provider(
-                    PROVIDERS.ProviderSpec("ast-grep", binary), ("--version",),
-                    self.repo, PROVIDERS.Deadline(time, 2), runner=mutating_runner,
+                    PROVIDERS.ProviderSpec("ast-grep", binary),
+                    ("--version",),
+                    self.repo,
+                    PROVIDERS.Deadline(time, 2),
+                    runner=mutating_runner,
                 )
                 self.assertEqual(result.status, "ready")
                 self.assertEqual(result.stdout.strip(), "snapshot-safe")
@@ -378,15 +431,18 @@ class ProviderRunnerTest(unittest.TestCase):
             snapshot = Path(kwargs["executable_snapshot"])
             snapshot.chmod(0o700)
             snapshot.write_text(
-                f"#!/bin/sh\n/bin/echo attacker > \"{attacker_marker}\"\n",
+                f'#!/bin/sh\n/bin/echo attacker > "{attacker_marker}"\n',
                 encoding="utf-8",
             )
             snapshot.chmod(0o700)
             return PROVIDERS._bounded_subprocess(argv, **kwargs)
 
         result = PROVIDERS.run_provider(
-            PROVIDERS.ProviderSpec("ast-grep", binary), ("--version",),
-            self.repo, PROVIDERS.Deadline(time, 2), runner=mutate_snapshot,
+            PROVIDERS.ProviderSpec("ast-grep", binary),
+            ("--version",),
+            self.repo,
+            PROVIDERS.Deadline(time, 2),
+            runner=mutate_snapshot,
         )
         self.assertEqual(result.status, "unsafe")
         self.assertFalse(attacker_marker.exists())
@@ -396,12 +452,12 @@ class ProviderRunnerTest(unittest.TestCase):
         binary = self.bin / "cleanup-hostile-provider"
         binary.write_text(
             "#!/bin/sh\n"
-            "snapshot=\"$0\"\n"
-            "directory=$(/usr/bin/dirname \"$snapshot\")\n"
+            'snapshot="$0"\n'
+            'directory=$(/usr/bin/dirname "$snapshot")\n'
             "printf 'extra' > \"$directory/extra-file\"\n"
-            "/bin/ln -s /etc/passwd \"$directory/extra-link\"\n"
-            "/bin/chmod 000 \"$snapshot\"\n"
-            "/bin/chmod 000 \"$directory\"\n",
+            '/bin/ln -s /etc/passwd "$directory/extra-link"\n'
+            '/bin/chmod 000 "$snapshot"\n'
+            '/bin/chmod 000 "$directory"\n',
             encoding="utf-8",
         )
         binary.chmod(0o700)
@@ -415,12 +471,13 @@ class ProviderRunnerTest(unittest.TestCase):
 
         try:
             result = PROVIDERS.run_provider(
-                PROVIDERS.ProviderSpec("ast-grep", binary), ("--version",),
-                self.repo, PROVIDERS.Deadline(time, 2), runner=capture_snapshot,
+                PROVIDERS.ProviderSpec("ast-grep", binary),
+                ("--version",),
+                self.repo,
+                PROVIDERS.Deadline(time, 2),
+                runner=capture_snapshot,
             )
-            remnants = {
-                name: os.path.lexists(path) for name, path in captured.items()
-            }
+            remnants = {name: os.path.lexists(path) for name, path in captured.items()}
         finally:
             directory = captured.get("directory")
             if directory is not None and os.path.lexists(directory):
@@ -430,9 +487,15 @@ class ProviderRunnerTest(unittest.TestCase):
                     pass
                 shutil.rmtree(directory)
         self.assertEqual(result.status, "unsafe")
-        self.assertEqual(remnants, {
-            "snapshot": False, "directory": False, "extra": False, "link": False,
-        })
+        self.assertEqual(
+            remnants,
+            {
+                "snapshot": False,
+                "directory": False,
+                "extra": False,
+                "link": False,
+            },
+        )
 
     def test_cleanup_child_directory_swap_never_touches_outside_target(self):
         captured = {}
@@ -454,20 +517,12 @@ class ProviderRunnerTest(unittest.TestCase):
             os.symlink(outside, captured["child"], target_is_directory=True)
 
         def racing_open(path, flags, mode=0o777, *, dir_fd=None):
-            if (
-                not swapped
-                and dir_fd is not None
-                and path == captured.get("child", Path()).name
-            ):
+            if not swapped and dir_fd is not None and path == captured.get("child", Path()).name:
                 swap_child_to_outside_symlink()
             return real_open(path, flags, mode, dir_fd=dir_fd)
 
         def racing_scandir(path):
-            if (
-                not swapped
-                and not isinstance(path, int)
-                and Path(path) == captured.get("child")
-            ):
+            if not swapped and not isinstance(path, int) and Path(path) == captured.get("child"):
                 swap_child_to_outside_symlink()
             return real_scandir(path)
 
@@ -477,19 +532,26 @@ class ProviderRunnerTest(unittest.TestCase):
             captured["child"] = captured["directory"] / "race-child"
             captured["child"].mkdir()
             (captured["child"] / "private-file").write_text(
-                "private", encoding="utf-8",
+                "private",
+                encoding="utf-8",
             )
             return Completed(stdout=b"ready\n")
 
         try:
-            with mock.patch.object(PROVIDERS.os, "open", side_effect=racing_open), \
-                    mock.patch.object(
-                        PROVIDERS.os, "scandir", side_effect=racing_scandir,
-                    ):
+            with (
+                mock.patch.object(PROVIDERS.os, "open", side_effect=racing_open),
+                mock.patch.object(
+                    PROVIDERS.os,
+                    "scandir",
+                    side_effect=racing_scandir,
+                ),
+            ):
                 result = PROVIDERS.run_provider(
                     PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-                    ("--version",), self.repo,
-                    PROVIDERS.Deadline(self.clock, 2), runner=create_private_child,
+                    ("--version",),
+                    self.repo,
+                    PROVIDERS.Deadline(self.clock, 2),
+                    runner=create_private_child,
                 )
             self.assertTrue(swapped)
             self.assertEqual(result.status, "unsafe")
@@ -512,7 +574,9 @@ class ProviderRunnerTest(unittest.TestCase):
         directory, descriptor = PROVIDERS.create_private_root("rir-test-root-")
         original = directory
         raw = os.open(
-            "raw-index", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400,
+            "raw-index",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o400,
             dir_fd=descriptor,
         )
         os.write(raw, b"raw-index-bytes")
@@ -524,7 +588,8 @@ class ProviderRunnerTest(unittest.TestCase):
         replacement.write_text("keep", encoding="utf-8")
 
         cleaned, changed, detail = PROVIDERS.cleanup_private_root(
-            original, descriptor,
+            original,
+            descriptor,
         )
 
         self.assertTrue(cleaned)
@@ -545,11 +610,15 @@ class ProviderRunnerTest(unittest.TestCase):
             return False, "controlled cleanup verification failure"
 
         with mock.patch.object(
-            PROVIDERS, "_cleanup_snapshot", side_effect=controlled_cleanup_failure,
+            PROVIDERS,
+            "_cleanup_snapshot",
+            side_effect=controlled_cleanup_failure,
         ):
             result = PROVIDERS.run_provider(
                 PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
-                ("--version",), self.repo, PROVIDERS.Deadline(self.clock, 2),
+                ("--version",),
+                self.repo,
+                PROVIDERS.Deadline(self.clock, 2),
                 runner=RecordingRunner((Completed(stdout=b"ready\n"),)),
             )
         self.assertEqual(result.status, "unsafe")
@@ -563,7 +632,10 @@ class ProviderRunnerTest(unittest.TestCase):
             with self.subTest(argument=argument):
                 result = PROVIDERS.run_provider(
                     PROVIDERS.ProviderSpec("codegraph", self.fake_binary),
-                    (argument,), self.repo, PROVIDERS.Deadline(self.clock, 30), runner=runner,
+                    (argument,),
+                    self.repo,
+                    PROVIDERS.Deadline(self.clock, 30),
+                    runner=runner,
                 )
                 self.assertEqual(result.status, "unsafe")
         self.assertEqual(runner.calls, [])
@@ -586,26 +658,45 @@ class ProviderDiscoveryTest(unittest.TestCase):
     def test_auto_discovery_has_fixed_names_priority_and_exact_probe_argv(self):
         responses = []
         for name in ("codegraph", "scip", "joern", "ast-grep"):
-            responses.extend((
-                Completed(stdout=(name + " 1.2.3\n").encode()),
-                Completed(stdout=b"read-only json help\n"),
-            ))
+            responses.extend(
+                (
+                    Completed(stdout=(name + " 1.2.3\n").encode()),
+                    Completed(stdout=b"read-only json help\n"),
+                )
+            )
         runner = RecordingRunner(responses)
         probes = PROVIDERS.discover_providers(
-            self.repo, ("auto",), PROVIDERS.Deadline(self.clock, 30),
-            runner=runner, search_path=str(self.bin), deep=True,
+            self.repo,
+            ("auto",),
+            PROVIDERS.Deadline(self.clock, 30),
+            runner=runner,
+            search_path=str(self.bin),
+            deep=True,
         )
 
-        self.assertEqual([probe.name for probe in probes], [
-            "codegraph", "scip", "joern", "ast-grep",
-        ])
+        self.assertEqual(
+            [probe.name for probe in probes],
+            [
+                "codegraph",
+                "scip",
+                "joern",
+                "ast-grep",
+            ],
+        )
         self.assertTrue(all(probe.status == "ready" for probe in probes))
-        self.assertEqual([call[0][1:] for call in runner.calls], [
-            ("--version",), ("--help",),
-            ("--version",), ("--help",),
-            ("--version",), ("--help",),
-            ("--version",), ("--help",),
-        ])
+        self.assertEqual(
+            [call[0][1:] for call in runner.calls],
+            [
+                ("--version",),
+                ("--help",),
+                ("--version",),
+                ("--help",),
+                ("--version",),
+                ("--help",),
+                ("--version",),
+                ("--help",),
+            ],
+        )
         self.assertTrue(all(probe.version for probe in probes))
         self.assertTrue(all(len(probe.executable_sha256 or "") == 64 for probe in probes))
 
@@ -613,17 +704,24 @@ class ProviderDiscoveryTest(unittest.TestCase):
         def discover(deep):
             names = (
                 ("codegraph", "scip", "joern", "ast-grep")
-                if deep else ("codegraph", "scip", "ast-grep")
+                if deep
+                else ("codegraph", "scip", "ast-grep")
             )
             responses = []
             for name in names:
-                responses.extend((
-                    Completed(stdout=(name + " 1.0\n").encode()),
-                    Completed(stdout=b"help\n"),
-                ))
+                responses.extend(
+                    (
+                        Completed(stdout=(name + " 1.0\n").encode()),
+                        Completed(stdout=b"help\n"),
+                    )
+                )
             return PROVIDERS.discover_providers(
-                self.repo, ("auto",), PROVIDERS.Deadline(self.clock, 30),
-                runner=RecordingRunner(responses), search_path=str(self.bin), deep=deep,
+                self.repo,
+                ("auto",),
+                PROVIDERS.Deadline(self.clock, 30),
+                runner=RecordingRunner(responses),
+                search_path=str(self.bin),
+                deep=deep,
             )
 
         self.assertEqual(
@@ -640,31 +738,46 @@ class ProviderDiscoveryTest(unittest.TestCase):
             with self.subTest(requested=requested):
                 runner = RecordingRunner()
                 probes = PROVIDERS.discover_providers(
-                    self.repo, (requested,), PROVIDERS.Deadline(self.clock, 30),
-                    runner=runner, search_path=str(self.bin), deep=False,
+                    self.repo,
+                    (requested,),
+                    PROVIDERS.Deadline(self.clock, 30),
+                    runner=runner,
+                    search_path=str(self.bin),
+                    deep=False,
                 )
                 self.assertEqual(len(probes), 1)
                 self.assertEqual(probes[0].name, "joern")
                 self.assertEqual(probes[0].status, "unsupported")
                 self.assertEqual(runner.calls, [])
 
-        runner = RecordingRunner((
-            Completed(stdout=b"joern 4.0.12\n"),
-            Completed(stdout=b"Usage: joern query --json --graph <GRAPH> --seed <TEXT>\n"),
-        ))
+        runner = RecordingRunner(
+            (
+                Completed(stdout=b"joern 4.0.12\n"),
+                Completed(stdout=b"Usage: joern query --json --graph <GRAPH> --seed <TEXT>\n"),
+            )
+        )
         probes = PROVIDERS.discover_providers(
-            self.repo, ("joern",), PROVIDERS.Deadline(self.clock, 30),
-            runner=runner, search_path=str(self.bin), deep=True,
+            self.repo,
+            ("joern",),
+            PROVIDERS.Deadline(self.clock, 30),
+            runner=runner,
+            search_path=str(self.bin),
+            deep=True,
         )
         self.assertEqual(probes[0].status, "ready")
         self.assertEqual([call[0][1:] for call in runner.calls], [("--version",), ("--help",)])
 
     def test_explicit_absolute_path_and_sg_alias_are_normalized(self):
-        runner = RecordingRunner((
-            Completed(stdout=b"ast-grep 0.45.0\n"), Completed(stdout=b"json stream\n"),
-        ))
+        runner = RecordingRunner(
+            (
+                Completed(stdout=b"ast-grep 0.45.0\n"),
+                Completed(stdout=b"json stream\n"),
+            )
+        )
         probes = PROVIDERS.discover_providers(
-            self.repo, (str(self.bin / "sg"),), PROVIDERS.Deadline(self.clock, 30),
+            self.repo,
+            (str(self.bin / "sg"),),
+            PROVIDERS.Deadline(self.clock, 30),
             runner=runner,
         )
         self.assertEqual(len(probes), 1)
@@ -676,16 +789,22 @@ class ProviderDiscoveryTest(unittest.TestCase):
         for configured in ("other", "tools/sg"):
             with self.subTest(configured=configured):
                 probes = PROVIDERS.discover_providers(
-                    self.repo, (configured,), PROVIDERS.Deadline(self.clock, 30),
-                    runner=runner, search_path=str(self.bin),
+                    self.repo,
+                    (configured,),
+                    PROVIDERS.Deadline(self.clock, 30),
+                    runner=runner,
+                    search_path=str(self.bin),
                 )
                 self.assertEqual(probes[0].status, "unsafe")
         self.assertEqual(runner.calls, [])
 
     def test_missing_timeout_failure_and_unsupported_help_preserve_status(self):
         missing = PROVIDERS.discover_providers(
-            self.repo, ("codegraph",), PROVIDERS.Deadline(self.clock, 30),
-            runner=RecordingRunner(), search_path="",
+            self.repo,
+            ("codegraph",),
+            PROVIDERS.Deadline(self.clock, 30),
+            runner=RecordingRunner(),
+            search_path="",
         )
         self.assertEqual(missing[0].status, "missing")
 
@@ -698,8 +817,10 @@ class ProviderDiscoveryTest(unittest.TestCase):
             with self.subTest(expected=expected):
                 values = responses if isinstance(responses, tuple) else (responses,)
                 probe = PROVIDERS.discover_providers(
-                    self.repo, (str(self.bin / "scip"),),
-                    PROVIDERS.Deadline(self.clock, 30), runner=RecordingRunner(values),
+                    self.repo,
+                    (str(self.bin / "scip"),),
+                    PROVIDERS.Deadline(self.clock, 30),
+                    runner=RecordingRunner(values),
                 )[0]
                 self.assertEqual(probe.status, expected)
 
@@ -725,35 +846,53 @@ class ProviderDiscoveryTest(unittest.TestCase):
             return Completed(stdout=b"help\n")
 
         probe = PROVIDERS.discover_providers(
-            self.repo, (str(binary),), PROVIDERS.Deadline(self.clock, 30),
+            self.repo,
+            (str(binary),),
+            PROVIDERS.Deadline(self.clock, 30),
             runner=changing_runner,
         )[0]
         self.assertEqual(probe.status, "unsafe")
 
     def test_version_metadata_redacts_credential_shaped_provider_output(self):
-        runner = RecordingRunner((
-            Completed(stdout=b"API_TOKEN=supersecret\n"),
-            Completed(stdout=b"help\n"),
-        ))
+        runner = RecordingRunner(
+            (
+                Completed(stdout=b"API_TOKEN=supersecret\n"),
+                Completed(stdout=b"help\n"),
+            )
+        )
         probe = PROVIDERS.discover_providers(
-            self.repo, (str(self.bin / "codegraph"),),
-            PROVIDERS.Deadline(self.clock, 30), runner=runner,
+            self.repo,
+            (str(self.bin / "codegraph"),),
+            PROVIDERS.Deadline(self.clock, 30),
+            runner=runner,
         )[0]
         self.assertNotIn("supersecret", probe.version or "")
 
     def test_discovery_result_does_not_capture_inherited_credentials(self):
         runner = RecordingRunner((Completed(stdout=b"v1\n"), Completed(stdout=b"help\n")))
-        with mock.patch.dict(os.environ, {
-            "HOME": "/sensitive", "HTTP_PROXY": "http://proxy", "API_TOKEN": "secret",
-        }):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HOME": "/sensitive",
+                "HTTP_PROXY": "http://proxy",
+                "API_TOKEN": "secret",
+            },
+        ):
             PROVIDERS.discover_providers(
-                self.repo, (str(self.bin / "codegraph"),),
-                PROVIDERS.Deadline(self.clock, 30), runner=runner,
+                self.repo,
+                (str(self.bin / "codegraph"),),
+                PROVIDERS.Deadline(self.clock, 30),
+                runner=runner,
             )
         for _, kwargs in runner.calls:
-            self.assertEqual(set(kwargs["env"]), {
-                "PATH", "CODEGRAPH_TELEMETRY", "NO_COLOR",
-            })
+            self.assertEqual(
+                set(kwargs["env"]),
+                {
+                    "PATH",
+                    "CODEGRAPH_TELEMETRY",
+                    "NO_COLOR",
+                },
+            )
 
 
 if __name__ == "__main__":

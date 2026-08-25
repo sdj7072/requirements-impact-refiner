@@ -1,20 +1,13 @@
-import json
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = (
-    ROOT
-    / "skills"
-    / "requirements-impact-refiner"
-    / "scripts"
-    / "resolve-settings.py"
-)
+SCRIPT = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "resolve-settings.py"
 SPEC = importlib.util.spec_from_file_location("resolve_settings", SCRIPT)
 SETTINGS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SETTINGS)
@@ -140,10 +133,17 @@ class PresentationSettingsTest(unittest.TestCase):
             )
             result = self.run_resolver(directory)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout)["impact_graph"], {
-                "enabled": False, "max_seconds": 12, "target_seconds": 5,
-                "providers": ["builtin"], "install_policy": "never", "deep": True,
-            })
+            self.assertEqual(
+                json.loads(result.stdout)["impact_graph"],
+                {
+                    "enabled": False,
+                    "max_seconds": 12,
+                    "target_seconds": 5,
+                    "providers": ["builtin"],
+                    "install_policy": "never",
+                    "deep": True,
+                },
+            )
 
             Path(directory, ".requirements-impact-refiner.json").write_text(
                 '{"impact_graph":{"max_seconds":31}}\n', encoding="utf-8"

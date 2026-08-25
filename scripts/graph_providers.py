@@ -3,17 +3,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import selectors
 import shutil
 import signal
 import stat
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 
 
 def _json_depth(text: str) -> int:
@@ -46,9 +46,9 @@ def _json_depth(text: str) -> int:
 _MAX_JSON_DEPTH = 64
 import tempfile
 import time
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
-
+from typing import Any
 
 STDOUT_LIMIT = 4 * 1024 * 1024
 STDERR_LIMIT = 256 * 1024
@@ -63,11 +63,29 @@ _DISCOVERY_NAMES = {
     "joern": ("joern",),
 }
 _ALIASES = {"sg": "ast-grep", **{name: name for name in PROVIDER_PRIORITY}}
-_FORBIDDEN_COMMANDS = frozenset({
-    "auth", "authenticate", "connect", "daemon", "fix", "index", "install",
-    "joern-parse", "login", "logout", "parse", "publish", "rewrite", "server",
-    "setup", "update", "upload", "watch", "watcher",
-})
+_FORBIDDEN_COMMANDS = frozenset(
+    {
+        "auth",
+        "authenticate",
+        "connect",
+        "daemon",
+        "fix",
+        "index",
+        "install",
+        "joern-parse",
+        "login",
+        "logout",
+        "parse",
+        "publish",
+        "rewrite",
+        "server",
+        "setup",
+        "update",
+        "upload",
+        "watch",
+        "watcher",
+    }
+)
 _CREDENTIAL_VALUE = re.compile(
     r"(?i)\b[a-z0-9_-]*(?:api[_-]?key|token|password|secret)"
     r"\b\s*[:=]\s*[^\s,;]+"
@@ -122,7 +140,7 @@ class Deadline:
         return self.remaining() <= 0.0
 
     def elapsed_ms(self) -> int:
-        return max(0, int(round((float(self.clock.monotonic()) - self.started) * 1000)))
+        return max(0, round((float(self.clock.monotonic()) - self.started) * 1000))
 
 
 @dataclass(frozen=True)
@@ -161,11 +179,20 @@ class ProviderProbe:
             raise ValueError("provider probe name is not allowed")
         object.__setattr__(self, "name", canonical)
         if self.status not in {
-            "ready", "missing", "stale", "unsafe", "unsupported", "failed", "timed_out",
+            "ready",
+            "missing",
+            "stale",
+            "unsafe",
+            "unsupported",
+            "failed",
+            "timed_out",
         }:
             raise ValueError("invalid provider probe status")
         if self.confidence not in {
-            "verified-provider", "verified-source", "structural-inferred", "lexical",
+            "verified-provider",
+            "verified-source",
+            "structural-inferred",
+            "lexical",
         }:
             raise ValueError("invalid provider probe confidence")
         if self.executable is not None:
@@ -174,7 +201,9 @@ class ProviderProbe:
             object.__setattr__(self, "repo_root", Path(self.repo_root))
         object.__setattr__(self, "capabilities", tuple(self.capabilities))
         object.__setattr__(
-            self, "metadata", _freeze(dict(self.metadata or {})),
+            self,
+            "metadata",
+            _freeze(dict(self.metadata or {})),
         )
 
 
@@ -201,7 +230,13 @@ class ProviderQuery:
             raise ValueError("provider query name is not allowed")
         object.__setattr__(self, "provider", canonical)
         if self.status not in {
-            "ready", "missing", "stale", "unsafe", "unsupported", "failed", "timed_out",
+            "ready",
+            "missing",
+            "stale",
+            "unsafe",
+            "unsupported",
+            "failed",
+            "timed_out",
         }:
             raise ValueError("invalid provider query status")
         object.__setattr__(self, "argv", tuple(self.argv))
@@ -228,11 +263,20 @@ class ProviderResult:
             raise ValueError("provider result name is not allowed")
         object.__setattr__(self, "provider", canonical)
         if self.status not in {
-            "ready", "missing", "stale", "unsafe", "unsupported", "failed", "timed_out",
+            "ready",
+            "missing",
+            "stale",
+            "unsafe",
+            "unsupported",
+            "failed",
+            "timed_out",
         }:
             raise ValueError("invalid provider result status")
         if self.confidence not in {
-            "verified-provider", "verified-source", "structural-inferred", "lexical",
+            "verified-provider",
+            "verified-source",
+            "structural-inferred",
+            "lexical",
         }:
             raise ValueError("invalid provider result confidence")
         object.__setattr__(self, "nodes", tuple(_freeze(item) for item in self.nodes))
@@ -240,7 +284,9 @@ class ProviderResult:
         object.__setattr__(self, "frontier", tuple(_freeze(item) for item in self.frontier))
         object.__setattr__(self, "raw_receipt_sha256", tuple(self.raw_receipt_sha256))
         object.__setattr__(
-            self, "metadata", _freeze(dict(self.metadata or {})),
+            self,
+            "metadata",
+            _freeze(dict(self.metadata or {})),
         )
 
 
@@ -277,7 +323,11 @@ def _bounded_detail(value: object) -> str:
 
 def _empty_query(spec, status, argv, environment, detail=None, digest=None):
     return ProviderQuery(
-        spec.name, status, argv, environment, executable_sha256=digest,
+        spec.name,
+        status,
+        argv,
+        environment,
+        executable_sha256=digest,
         detail=_bounded_detail(detail) if detail else None,
     )
 
@@ -386,9 +436,9 @@ def _snapshot_matches(snapshot: _ExecutableSnapshot) -> bool:
     total = 0
     try:
         opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or (opened.st_dev, opened.st_ino) != (snapshot.device, snapshot.inode)
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+            snapshot.device,
+            snapshot.inode,
         ):
             return False
         while True:
@@ -439,7 +489,9 @@ def _remove_private_tree(directory_fd: int) -> None:
                     raise OSError("private snapshot directory changed while opening")
                 _remove_private_tree(child_fd)
                 current = os.stat(
-                    name, dir_fd=directory_fd, follow_symlinks=False,
+                    name,
+                    dir_fd=directory_fd,
+                    follow_symlinks=False,
                 )
                 if not _same_directory_identity(child_opened, current):
                     raise OSError("private snapshot directory changed during cleanup")
@@ -464,7 +516,9 @@ def _remove_private_root(directory: Path, directory_fd: int) -> bool:
         retained_name = None
         try:
             named_root = os.stat(
-                directory.name, dir_fd=parent_fd, follow_symlinks=False,
+                directory.name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
             )
         except FileNotFoundError:
             named_root = None
@@ -506,10 +560,7 @@ def create_private_root(prefix="rir-provider-data-"):
         os.fchmod(directory_fd, 0o700)
         opened = os.fstat(directory_fd)
         named = directory.lstat()
-        if (
-            stat.S_IMODE(opened.st_mode) != 0o700
-            or not _same_directory_identity(opened, named)
-        ):
+        if stat.S_IMODE(opened.st_mode) != 0o700 or not _same_directory_identity(opened, named):
             raise OSError("private snapshot root identity is unsafe")
         return directory, directory_fd
     except Exception:
@@ -531,15 +582,15 @@ def cleanup_private_root(directory, directory_fd):
     try:
         changed = _remove_private_root(Path(directory), directory_fd)
     except OSError as error:
-        return False, True, _bounded_detail(
-            "private snapshot cleanup failed: " + str(error)
-        )
+        return False, True, _bounded_detail("private snapshot cleanup failed: " + str(error))
     detail = "private snapshot root changed and retained inode was removed" if changed else None
     return True, changed, detail
 
 
 def _create_executable_snapshot(
-    executable_fd: int, opened, expected_sha256: str,
+    executable_fd: int,
+    opened,
+    expected_sha256: str,
 ) -> _ExecutableSnapshot:
     directory = Path(tempfile.mkdtemp(prefix="rir-provider-"))
     path = directory / "provider-executable"
@@ -569,9 +620,7 @@ def _create_executable_snapshot(
                     break
                 total += len(chunk)
                 if total > MAX_EXECUTABLE_BYTES:
-                    raise UnsafeExecutableError(
-                        "provider executable exceeds maximum byte size"
-                    )
+                    raise UnsafeExecutableError("provider executable exceeds maximum byte size")
                 _write_all(descriptor, chunk)
                 digest.update(chunk)
             os.fsync(descriptor)
@@ -601,8 +650,14 @@ def _create_executable_snapshot(
             )
         os.fsync(directory_fd)
         snapshot = _ExecutableSnapshot(
-            directory, path, expected_sha256, metadata.st_dev, metadata.st_ino,
-            total, metadata.st_mtime_ns, directory_fd,
+            directory,
+            path,
+            expected_sha256,
+            metadata.st_dev,
+            metadata.st_ino,
+            total,
+            metadata.st_mtime_ns,
+            directory_fd,
         )
         if not _snapshot_matches(snapshot):
             raise UnsafeExecutableError("provider snapshot failed identity verification")
@@ -618,9 +673,7 @@ def _create_executable_snapshot(
                     directory_fd = None
         except OSError as cleanup_error:
             raise UnsafeExecutableError(
-                _bounded_detail(
-                    "provider snapshot creation cleanup failed: " + str(cleanup_error)
-                )
+                _bounded_detail("provider snapshot creation cleanup failed: " + str(cleanup_error))
             ) from error
         raise
 
@@ -631,9 +684,7 @@ def _cleanup_snapshot(snapshot: _ExecutableSnapshot):
     try:
         changed = _remove_private_root(snapshot.directory, snapshot.directory_fd)
     except OSError as error:
-        return False, _bounded_detail(
-            "provider snapshot cleanup failed: " + str(error)
-        )
+        return False, _bounded_detail("provider snapshot cleanup failed: " + str(error))
     if changed:
         return False, "provider snapshot root changed during cleanup"
     if os.path.lexists(snapshot.path) or os.path.lexists(snapshot.directory):
@@ -642,23 +693,39 @@ def _cleanup_snapshot(snapshot: _ExecutableSnapshot):
 
 
 def _bounded_subprocess(
-    argv, *, cwd, env, timeout, shell, start_new_session, stdout_limit, stderr_limit,
-    executable_snapshot, snapshot_sha256, snapshot_identity,
+    argv,
+    *,
+    cwd,
+    env,
+    timeout,
+    shell,
+    start_new_session,
+    stdout_limit,
+    stderr_limit,
+    executable_snapshot,
+    snapshot_sha256,
+    snapshot_identity,
 ):
     if shell or not start_new_session:
         raise ValueError("provider subprocess security options are mandatory")
     snapshot = _ExecutableSnapshot(
-        Path(executable_snapshot).parent, Path(executable_snapshot), snapshot_sha256,
+        Path(executable_snapshot).parent,
+        Path(executable_snapshot),
+        snapshot_sha256,
         *snapshot_identity,
     )
     if not _snapshot_matches(snapshot):
-        raise UnsafeExecutableError(
-            "provider snapshot changed before process spawn"
-        )
-    execution_argv = (str(snapshot.path),) + tuple(argv[1:])
+        raise UnsafeExecutableError("provider snapshot changed before process spawn")
+    execution_argv = (str(snapshot.path), *tuple(argv[1:]))
     process = subprocess.Popen(
-        execution_argv, executable=str(snapshot.path), cwd=cwd, env=env, shell=False,
-        start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        execution_argv,
+        executable=str(snapshot.path),
+        cwd=cwd,
+        env=env,
+        shell=False,
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         close_fds=True,
     )
     process_group_id = process.pid
@@ -702,8 +769,12 @@ def _bounded_subprocess(
     if not _snapshot_matches(snapshot):
         raise UnsafeExecutableError("provider snapshot changed during execution")
     return _ProcessOutcome(
-        returncode, bytes(buffers[process.stdout]), bytes(buffers[process.stderr]),
-        timed_out, truncated[process.stdout], truncated[process.stderr],
+        returncode,
+        bytes(buffers[process.stdout]),
+        bytes(buffers[process.stderr]),
+        timed_out,
+        truncated[process.stdout],
+        truncated[process.stderr],
     )
 
 
@@ -725,21 +796,21 @@ def run_provider(
         safe_arguments = _validate_arguments(arguments)
     except PermissionError as error:
         executable = str(spec.executable) if spec.executable else spec.name
-        return _empty_query(spec, "unsafe", (executable,) + tuple(arguments), {}, error)
+        return _empty_query(spec, "unsafe", (executable, *tuple(arguments)), {}, error)
     root = Path(repo_root)
     if root.is_symlink() or not root.is_dir():
         executable = str(spec.executable) if spec.executable else spec.name
-        return _empty_query(spec, "unsafe", (executable,) + safe_arguments, {}, "unsafe repo_root")
+        return _empty_query(spec, "unsafe", (executable, *safe_arguments), {}, "unsafe repo_root")
     root = root.resolve()
     if spec.executable is None:
-        return _empty_query(spec, "missing", (spec.name,) + safe_arguments, {}, "missing executable")
+        return _empty_query(spec, "missing", (spec.name, *safe_arguments), {}, "missing executable")
     executable = spec.executable
     environment = {
         "PATH": str(executable.parent),
         "CODEGRAPH_TELEMETRY": "0",
         "NO_COLOR": "1",
     }
-    argv = (str(executable),) + safe_arguments
+    argv = (str(executable), *safe_arguments)
     remaining = deadline.remaining()
     if remaining <= 0:
         return _empty_query(spec, "timed_out", argv, environment, "shared deadline exhausted")
@@ -759,45 +830,80 @@ def run_provider(
     try:
         if not _snapshot_matches(snapshot):
             preliminary = _empty_query(
-                spec, "unsafe", argv, environment,
-                "provider snapshot changed before runner invocation", digest,
+                spec,
+                "unsafe",
+                argv,
+                environment,
+                "provider snapshot changed before runner invocation",
+                digest,
             )
         else:
             try:
                 outcome = execute(
-                    argv, cwd=str(root), env=dict(environment), timeout=remaining,
-                    shell=False, start_new_session=True, stdout_limit=STDOUT_LIMIT,
+                    argv,
+                    cwd=str(root),
+                    env=dict(environment),
+                    timeout=remaining,
+                    shell=False,
+                    start_new_session=True,
+                    stdout_limit=STDOUT_LIMIT,
                     stderr_limit=STDERR_LIMIT,
                     executable_snapshot=str(snapshot.path),
                     snapshot_sha256=snapshot.sha256,
                     snapshot_identity=(
-                        snapshot.device, snapshot.inode, snapshot.size,
+                        snapshot.device,
+                        snapshot.inode,
+                        snapshot.size,
                         snapshot.modified_ns,
                     ),
                 )
             except subprocess.TimeoutExpired as error:
                 preliminary = _empty_query(
-                    spec, "timed_out", argv, environment, error, digest,
+                    spec,
+                    "timed_out",
+                    argv,
+                    environment,
+                    error,
+                    digest,
                 )
             except UnsafeExecutableError as error:
                 preliminary = _empty_query(
-                    spec, "unsafe", argv, environment, error, digest,
+                    spec,
+                    "unsafe",
+                    argv,
+                    environment,
+                    error,
+                    digest,
                 )
             except (OSError, ValueError) as error:
                 preliminary = _empty_query(
-                    spec, "failed", argv, environment, error, digest,
+                    spec,
+                    "failed",
+                    argv,
+                    environment,
+                    error,
+                    digest,
                 )
             if preliminary is None and not _snapshot_matches(snapshot):
                 preliminary = _empty_query(
-                    spec, "unsafe", argv, environment,
-                    "provider snapshot changed after runner completion", digest,
+                    spec,
+                    "unsafe",
+                    argv,
+                    environment,
+                    "provider snapshot changed after runner completion",
+                    digest,
                 )
     finally:
         cleanup_ok, cleanup_detail = _cleanup_snapshot(snapshot)
 
     if not cleanup_ok:
         return _empty_query(
-            spec, "unsafe", argv, environment, cleanup_detail, digest,
+            spec,
+            "unsafe",
+            argv,
+            environment,
+            cleanup_detail,
+            digest,
         )
     if preliminary is not None:
         return preliminary
@@ -806,16 +912,24 @@ def run_provider(
     stdout_raw = getattr(outcome, "stdout", b"")
     stderr_raw = getattr(outcome, "stderr", b"")
     if not isinstance(stdout_raw, bytes) or not isinstance(stderr_raw, bytes):
-        return _empty_query(spec, "failed", argv, environment, "provider output must be bytes", digest)
-    stdout_truncated = bool(getattr(outcome, "stdout_truncated", False)) or len(stdout_raw) > STDOUT_LIMIT
-    stderr_truncated = bool(getattr(outcome, "stderr_truncated", False)) or len(stderr_raw) > STDERR_LIMIT
+        return _empty_query(
+            spec, "failed", argv, environment, "provider output must be bytes", digest
+        )
+    stdout_truncated = (
+        bool(getattr(outcome, "stdout_truncated", False)) or len(stdout_raw) > STDOUT_LIMIT
+    )
+    stderr_truncated = (
+        bool(getattr(outcome, "stderr_truncated", False)) or len(stderr_raw) > STDERR_LIMIT
+    )
     stdout_raw = stdout_raw[:STDOUT_LIMIT]
     stderr_raw = stderr_raw[:STDERR_LIMIT]
     try:
         stdout = stdout_raw.decode("utf-8")
         stderr = stderr_raw.decode("utf-8")
     except UnicodeDecodeError:
-        return _empty_query(spec, "failed", argv, environment, "provider output must be UTF-8", digest)
+        return _empty_query(
+            spec, "failed", argv, environment, "provider output must be UTF-8", digest
+        )
     timed_out = bool(getattr(outcome, "timed_out", False))
     returncode = getattr(outcome, "returncode", None)
     status = "timed_out" if timed_out else "ready"
@@ -826,10 +940,7 @@ def run_provider(
         detail = "provider process failed or exceeded an output bound"
     elif expect_json:
         try:
-            _stdout_text = (
-                stdout if isinstance(stdout, str)
-                else stdout.decode("utf-8", "replace")
-            )
+            _stdout_text = stdout if isinstance(stdout, str) else stdout.decode("utf-8", "replace")
             if _json_depth(_stdout_text) > _MAX_JSON_DEPTH:
                 raise ValueError("json nesting depth exceeded")
             parsed = json.loads(stdout)
@@ -837,8 +948,18 @@ def run_provider(
             status = "failed"
             detail = "provider output must contain valid JSON"
     return ProviderQuery(
-        spec.name, status, argv, environment, stdout, stderr, returncode, digest,
-        parsed, stdout_truncated, stderr_truncated, detail,
+        spec.name,
+        status,
+        argv,
+        environment,
+        stdout,
+        stderr,
+        returncode,
+        digest,
+        parsed,
+        stdout_truncated,
+        stderr_truncated,
+        detail,
     )
 
 
@@ -854,7 +975,8 @@ def _configured_specs(requested, search_path, deep):
     if values == ("auto",):
         names = (
             ("codegraph", "scip", "joern", "ast-grep")
-            if deep else ("codegraph", "scip", "ast-grep")
+            if deep
+            else ("codegraph", "scip", "ast-grep")
         )
         specs = []
         for name in names:
@@ -886,7 +1008,9 @@ def _configured_specs(requested, search_path, deep):
                     break
             specs.append(ProviderSpec(name, found) if found else ProviderSpec(name))
         else:
-            unsafe.append(_unsafe_probe(value, "configured provider must be a fixed name or absolute path"))
+            unsafe.append(
+                _unsafe_probe(value, "configured provider must be a fixed name or absolute path")
+            )
     order = {name: index for index, name in enumerate(PROVIDER_PRIORITY)}
     return tuple(sorted(specs, key=lambda item: order[item.name])), tuple(unsafe)
 
@@ -915,45 +1039,77 @@ def discover_providers(
     probes = []
     for spec in specs:
         if spec.name == "joern" and not deep:
-            probes.append(ProviderProbe(
-                "joern", "unsupported", detail="Joern requires explicit deep mode",
-                executable=spec.executable, repo_root=root,
-            ))
+            probes.append(
+                ProviderProbe(
+                    "joern",
+                    "unsupported",
+                    detail="Joern requires explicit deep mode",
+                    executable=spec.executable,
+                    repo_root=root,
+                )
+            )
             continue
         if spec.executable is None:
-            probes.append(ProviderProbe(
-                spec.name, "missing", detail="executable not found", repo_root=root,
-            ))
+            probes.append(
+                ProviderProbe(
+                    spec.name,
+                    "missing",
+                    detail="executable not found",
+                    repo_root=root,
+                )
+            )
             continue
         version_result = run_provider(
-            spec, ("--version",), repo_root, deadline, runner=runner,
+            spec,
+            ("--version",),
+            repo_root,
+            deadline,
+            runner=runner,
         )
         if version_result.status != "ready":
-            probes.append(ProviderProbe(
-                spec.name, version_result.status, "lexical", spec.executable,
-                executable_sha256=version_result.executable_sha256,
-                detail=version_result.detail, repo_root=root,
-            ))
+            probes.append(
+                ProviderProbe(
+                    spec.name,
+                    version_result.status,
+                    "lexical",
+                    spec.executable,
+                    executable_sha256=version_result.executable_sha256,
+                    detail=version_result.detail,
+                    repo_root=root,
+                )
+            )
             continue
         version = next(
             (
                 _bounded_detail(line.strip())[:256]
-                for line in version_result.stdout.splitlines() if line.strip()
+                for line in version_result.stdout.splitlines()
+                if line.strip()
             ),
             "unknown",
         )
         help_result = run_provider(
-            spec, ("--help",), repo_root, deadline, runner=runner,
+            spec,
+            ("--help",),
+            repo_root,
+            deadline,
+            runner=runner,
         )
         if (
             help_result.executable_sha256 is not None
             and help_result.executable_sha256 != version_result.executable_sha256
         ):
-            probes.append(ProviderProbe(
-                spec.name, "unsafe", "lexical", spec.executable, version,
-                version_result.executable_sha256,
-                detail="provider executable changed between probes", repo_root=root,
-            ))
+            probes.append(
+                ProviderProbe(
+                    spec.name,
+                    "unsafe",
+                    "lexical",
+                    spec.executable,
+                    version,
+                    version_result.executable_sha256,
+                    detail="provider executable changed between probes",
+                    repo_root=root,
+                )
+            )
             continue
         if help_result.status != "ready":
             status = (
@@ -961,26 +1117,50 @@ def discover_providers(
                 if help_result.status in {"timed_out", "unsafe"}
                 else "unsupported"
             )
-            probes.append(ProviderProbe(
-                spec.name, status, "lexical", spec.executable, version,
-                version_result.executable_sha256, detail=help_result.detail,
-                repo_root=root,
-            ))
+            probes.append(
+                ProviderProbe(
+                    spec.name,
+                    status,
+                    "lexical",
+                    spec.executable,
+                    version,
+                    version_result.executable_sha256,
+                    detail=help_result.detail,
+                    repo_root=root,
+                )
+            )
             continue
         capabilities = tuple(
             _bounded_detail(line.strip())[:256]
             for line in help_result.stdout.splitlines()[:64]
             if line.strip()
         )
-        probes.append(ProviderProbe(
-            spec.name, "ready", "verified-provider", spec.executable, version,
-            version_result.executable_sha256, capabilities, repo_root=root,
-        ))
+        probes.append(
+            ProviderProbe(
+                spec.name,
+                "ready",
+                "verified-provider",
+                spec.executable,
+                version,
+                version_result.executable_sha256,
+                capabilities,
+                repo_root=root,
+            )
+        )
     return tuple(probes) + unsafe
 
 
 __all__ = [
-    "Deadline", "ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec",
-    "PROVIDER_PRIORITY", "STDERR_LIMIT", "STDOUT_LIMIT", "discover_providers",
-    "run_provider", "create_private_root", "cleanup_private_root",
+    "PROVIDER_PRIORITY",
+    "STDERR_LIMIT",
+    "STDOUT_LIMIT",
+    "Deadline",
+    "ProviderProbe",
+    "ProviderQuery",
+    "ProviderResult",
+    "ProviderSpec",
+    "cleanup_private_root",
+    "create_private_root",
+    "discover_providers",
+    "run_provider",
 ]

@@ -8,9 +8,12 @@ from unittest.mock import patch
 from evals.harness.adapters.codex import CodexAdapter
 from evals.harness.graph_scoring import load_graph_cases
 from evals.harness.models import (
-    CaseSpec, CaseTurn, ClientProbe, RunRequest, RunStatus,
+    CaseSpec,
+    CaseTurn,
+    ClientProbe,
+    RunRequest,
+    RunStatus,
 )
-
 
 UUID = "123e4567-e89b-12d3-a456-426614174000"
 COMPACT_PREDECESSOR_HANDOFF = (
@@ -77,8 +80,7 @@ def make_request(root, turns, model=None, reasoning=None, evidence=None):
             id="POS-example",
             kind="lineage" if len(turns) > 1 else "positive",
             turns=tuple(
-                CaseTurn(prompt, turn_evidence)
-                for prompt, turn_evidence in zip(turns, evidence)
+                CaseTurn(prompt, turn_evidence) for prompt, turn_evidence in zip(turns, evidence)
             ),
             must_detect=("relevant impact",),
             must_not_do=("write implementation",),
@@ -101,7 +103,12 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
             "version": "0.3.0",
             "enabled": True,
         },
-        {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+        {
+            "id": "superpowers@openai-curated",
+            "name": "Superpowers",
+            "version": "6.3.0",
+            "enabled": True,
+        },
         {"id": "other-enabled", "name": "Other", "version": "1.0.0", "enabled": True},
         {"id": "disabled", "name": "Disabled", "version": "1.0.0", "enabled": False},
     ]
@@ -151,15 +158,15 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "        print('error: --sandbox and --approve-for-me cannot be used together', file=sys.stderr)\n"
         "        sys.exit(2)\n"
         "    if mode == 'nonzero':\n"
-        "        print('{\\\"type\\\":\\\"thread.started\\\",\\\"thread_id\\\":\\\"" + UUID + "\\\"}')\n"
+        '        print(\'{\\"type\\":\\"thread.started\\",\\"thread_id\\":\\"' + UUID + "\\\"}')\n"
         "        print('client error', file=sys.stderr)\n"
         "        sys.exit(7)\n"
         "    if mode == 'malformed-jsonl':\n"
         "        print('not json')\n"
         "    elif mode == 'missing-thread':\n"
-        "        print('{\\\"type\\\":\\\"item.completed\\\"}')\n"
+        '        print(\'{\\"type\\":\\"item.completed\\"}\')\n'
         "    else:\n"
-        "        print('{\\\"type\\\":\\\"thread.started\\\",\\\"thread_id\\\":\\\"" + UUID + "\\\"}')\n"
+        '        print(\'{\\"type\\":\\"thread.started\\",\\"thread_id\\":\\"' + UUID + "\\\"}')\n"
         "        if mode == 'controller-success':\n"
         "            draft = '0123456789abcdef0123456789abcdef'\n"
         "            receipt = 'fedcba9876543210fedcba9876543210'\n"
@@ -200,9 +207,7 @@ class CodexAdapterTest(unittest.TestCase):
                 dict(case.fixture_files)["api/profile.py"],
             )
             settings = json.loads(
-                (root / ".requirements-impact-refiner.json").read_text(
-                    encoding="utf-8"
-                )
+                (root / ".requirements-impact-refiner.json").read_text(encoding="utf-8")
             )
             self.assertEqual(settings["impact_graph"]["providers"], ["builtin"])
             self.assertEqual(settings["impact_graph"]["max_seconds"], 30)
@@ -211,36 +216,39 @@ class CodexAdapterTest(unittest.TestCase):
 
     def test_graph_case_policy_is_sealed_in_raw_run_metadata(self):
         case = load_graph_cases()[0]
-        request = RunRequest(
-            case.to_case_spec(), 1, "codex", None, None, Path("raw")
-        )
+        request = RunRequest(case.to_case_spec(), 1, "codex", None, None, Path("raw"))
         probe = ClientProbe(
-            client="codex", available=True, version="fake",
-            authenticated=None, plugin_version="0.4.0",
+            client="codex",
+            available=True,
+            version="fake",
+            authenticated=None,
+            plugin_version="0.4.0",
             enabled_plugins=(
                 "requirements-impact-refiner@requirements-impact-refiner",
                 "superpowers@openai-curated",
             ),
-            capabilities=("fake",), reason=None,
+            capabilities=("fake",),
+            reason=None,
         )
 
-        metadata = json.loads(
-            CodexAdapter._metadata_json(probe, (), (), request)
-        )
+        metadata = json.loads(CodexAdapter._metadata_json(probe, (), (), request))
 
-        self.assertEqual(metadata["graph_policy"], {
-            "schema_version": 1,
-            "settings": {
-                "enabled": True, "max_seconds": 30, "target_seconds": 10,
-                "providers": ["builtin"], "install_policy": "never",
-                "deep": False,
+        self.assertEqual(
+            metadata["graph_policy"],
+            {
+                "schema_version": 1,
+                "settings": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["builtin"],
+                    "install_policy": "never",
+                    "deep": False,
+                },
+                "provider_inventory": ["builtin"],
+                "seeds": [{"term": term, "location": location} for term, location in case.seeds],
             },
-            "provider_inventory": ["builtin"],
-            "seeds": [
-                {"term": term, "location": location}
-                for term, location in case.seeds
-            ],
-        })
+        )
 
     def test_graph_fixture_staging_never_follows_settings_or_parent_symlinks(self):
         case = load_graph_cases()[0]
@@ -256,9 +264,7 @@ class CodexAdapterTest(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "overwrite|symlink|unsafe"):
                 CodexAdapter._stage_graph_fixture(case.id, settings_root)
-            self.assertEqual(
-                outside_settings.read_text(encoding="utf-8"), "outside-safe"
-            )
+            self.assertEqual(outside_settings.read_text(encoding="utf-8"), "outside-safe")
 
             outside_directory = base / "outside-directory"
             outside_directory.mkdir()
@@ -323,28 +329,42 @@ class CodexAdapterTest(unittest.TestCase):
                 outside_graph = Path(temporary) / "outside-graph"
                 (outside_base / "graph").mkdir(parents=True)
                 outside_graph.mkdir()
-                (outside_base / "graph" / receipt_name).write_bytes(
-                    b"outside-base-receipt"
-                )
-                (outside_graph / receipt_name).write_bytes(
-                    b"outside-graph-receipt"
-                )
+                (outside_base / "graph" / receipt_name).write_bytes(b"outside-base-receipt")
+                (outside_graph / receipt_name).write_bytes(b"outside-graph-receipt")
                 saved = Path(temporary) / f"saved-{boundary}"
                 real_open = os.open
                 raced = False
 
-                def racing_open(path, flags, *args, **kwargs):
+                def racing_open(
+                    path,
+                    flags,
+                    *args,
+                    boundary=boundary,
+                    graph=graph,
+                    root=root,
+                    saved=saved,
+                    outside_base=outside_base,
+                    outside_graph=outside_graph,
+                    real_open=real_open,
+                    **kwargs,
+                ):
                     nonlocal raced
                     selected = os.fspath(path)
-                    if not raced and boundary == "workspace-base" and (
-                        selected == os.fspath(graph)
-                        or selected == ".requirements-impact-refiner"
+                    if (
+                        not raced
+                        and boundary == "workspace-base"
+                        and (
+                            selected == os.fspath(graph)
+                            or selected == ".requirements-impact-refiner"
+                        )
                     ):
                         raced = True
                         os.rename(root / ".requirements-impact-refiner", saved)
                         os.symlink(outside_base, root / ".requirements-impact-refiner")
-                    elif not raced and boundary == "base-graph" and (
-                        selected == os.fspath(graph) or selected == "graph"
+                    elif (
+                        not raced
+                        and boundary == "base-graph"
+                        and (selected == os.fspath(graph) or selected == "graph")
                     ):
                         raced = True
                         os.rename(graph, saved)
@@ -367,22 +387,36 @@ class CodexAdapterTest(unittest.TestCase):
                         b"inside-receipt",
                     )
                 else:
-                    self.assertEqual(
-                        (saved / receipt_name).read_bytes(), b"inside-receipt"
-                    )
+                    self.assertEqual((saved / receipt_name).read_bytes(), b"inside-receipt")
 
     def test_v04_run_records_and_enforces_controller_trace(self):
         plugins = [
-            {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.4.0", "enabled": True},
-            {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+            {
+                "id": "requirements-impact-refiner@requirements-impact-refiner",
+                "name": "Requirements Impact Refiner",
+                "version": "0.4.0",
+                "enabled": True,
+            },
+            {
+                "id": "superpowers@openai-curated",
+                "name": "Superpowers",
+                "version": "6.3.0",
+                "enabled": True,
+            },
         ]
         with tempfile.TemporaryDirectory() as temporary:
-            executable = write_fake_codex(temporary, plugins=plugins, exec_mode="controller-success")
+            executable = write_fake_codex(
+                temporary, plugins=plugins, exec_mode="controller-success"
+            )
             request = make_request(temporary, ("first turn",))
-            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.4.0")
+            adapter = CodexAdapter(
+                executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.4.0"
+            )
 
             result = adapter.execute(request)
-            evidence_path = request.output_root / "codex" / "POS-example" / "01" / "controller-evidence.json"
+            evidence_path = (
+                request.output_root / "codex" / "POS-example" / "01" / "controller-evidence.json"
+            )
             evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result.status, RunStatus.PASS)
@@ -400,13 +434,25 @@ class CodexAdapterTest(unittest.TestCase):
 
     def test_v04_run_without_controller_is_invalid_evidence(self):
         plugins = [
-            {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.4.0", "enabled": True},
-            {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+            {
+                "id": "requirements-impact-refiner@requirements-impact-refiner",
+                "name": "Requirements Impact Refiner",
+                "version": "0.4.0",
+                "enabled": True,
+            },
+            {
+                "id": "superpowers@openai-curated",
+                "name": "Superpowers",
+                "version": "6.3.0",
+                "enabled": True,
+            },
         ]
         with tempfile.TemporaryDirectory() as temporary:
             executable = write_fake_codex(temporary, plugins=plugins)
             request = make_request(temporary, ("first turn",))
-            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.4.0")
+            adapter = CodexAdapter(
+                executable=str(executable), cwd=Path(temporary), expected_plugin_version="0.4.0"
+            )
 
             result = adapter.execute(request)
 
@@ -423,7 +469,17 @@ class CodexAdapterTest(unittest.TestCase):
 
         self.assertEqual(
             argv[:9],
-            ("codex", "exec", "--ephemeral", "--json", "--skip-git-repo-check", "--approve-for-me", "-o", str(Path(temporary) / "FINAL"), "first turn\n\nRepository evidence:\n- src/example.py"),
+            (
+                "codex",
+                "exec",
+                "--ephemeral",
+                "--json",
+                "--skip-git-repo-check",
+                "--approve-for-me",
+                "-o",
+                str(Path(temporary) / "FINAL"),
+                "first turn\n\nRepository evidence:\n- src/example.py",
+            ),
         )
         self.assertNotIn("-s", argv)
         self.assertIn("--approve-for-me", argv)
@@ -486,8 +542,12 @@ class CodexAdapterTest(unittest.TestCase):
     def test_parse_thread_id_rejects_non_thread_or_non_uuid_events(self):
         adapter = CodexAdapter()
 
-        self.assertIsNone(adapter.parse_thread_id('{"type":"item.completed","thread_id":"' + UUID + '"}\n'))
-        self.assertIsNone(adapter.parse_thread_id('{"type":"thread.started","thread_id":"not-a-uuid"}\n'))
+        self.assertIsNone(
+            adapter.parse_thread_id('{"type":"item.completed","thread_id":"' + UUID + '"}\n')
+        )
+        self.assertIsNone(
+            adapter.parse_thread_id('{"type":"thread.started","thread_id":"not-a-uuid"}\n')
+        )
         self.assertIsNone(adapter.parse_thread_id("not json\n"))
 
     def test_probe_requires_exact_enabled_composition_and_records_all_enabled_ids(self):
@@ -554,20 +614,41 @@ class CodexAdapterTest(unittest.TestCase):
         """A display name must not impersonate either required plugin identity."""
         mutations = (
             (
-                {"id": "wrong-rir@market", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
-                {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+                {
+                    "id": "wrong-rir@market",
+                    "name": "Requirements Impact Refiner",
+                    "version": "0.3.0",
+                    "enabled": True,
+                },
+                {
+                    "id": "superpowers@openai-curated",
+                    "name": "Superpowers",
+                    "version": "6.3.0",
+                    "enabled": True,
+                },
             ),
             (
-                {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
-                {"id": "wrong-superpowers@market", "name": "Superpowers", "version": "6.3.0", "enabled": True},
+                {
+                    "id": "requirements-impact-refiner@requirements-impact-refiner",
+                    "name": "Requirements Impact Refiner",
+                    "version": "0.3.0",
+                    "enabled": True,
+                },
+                {
+                    "id": "wrong-superpowers@market",
+                    "name": "Superpowers",
+                    "version": "6.3.0",
+                    "enabled": True,
+                },
             ),
         )
         for plugins in mutations:
-            with self.subTest(ids=[entry["id"] for entry in plugins]), tempfile.TemporaryDirectory() as temporary:
+            with (
+                self.subTest(ids=[entry["id"] for entry in plugins]),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
                 executable = write_fake_codex(temporary, list(plugins))
-                probe = CodexAdapter(
-                    executable=str(executable), cwd=Path(temporary)
-                ).probe()
+                probe = CodexAdapter(executable=str(executable), cwd=Path(temporary)).probe()
                 self.assertFalse(probe.available)
 
     def test_probe_accepts_an_alias_only_when_its_exact_id_is_explicitly_expected(self):
@@ -576,12 +657,8 @@ class CodexAdapterTest(unittest.TestCase):
         plugins = [dict(entry) for entry in INSTALLED_PLUGIN_LIST["installed"]]
         plugins[0]["pluginId"] = alias_id
         with tempfile.TemporaryDirectory() as temporary:
-            executable = write_fake_codex(
-                temporary, {"installed": plugins, "available": []}
-            )
-            default_probe = CodexAdapter(
-                executable=str(executable), cwd=Path(temporary)
-            ).probe()
+            executable = write_fake_codex(temporary, {"installed": plugins, "available": []})
+            default_probe = CodexAdapter(executable=str(executable), cwd=Path(temporary)).probe()
             explicit_probe = CodexAdapter(
                 executable=str(executable),
                 cwd=Path(temporary),
@@ -594,8 +671,18 @@ class CodexAdapterTest(unittest.TestCase):
 
     def test_prepare_rejects_disabled_required_plugin(self):
         plugins = [
-            {"id": "requirements-impact-refiner@requirements-impact-refiner", "name": "Requirements Impact Refiner", "version": "0.3.0", "enabled": True},
-            {"id": "superpowers@openai-curated", "name": "Superpowers", "version": "6.3.0", "enabled": False},
+            {
+                "id": "requirements-impact-refiner@requirements-impact-refiner",
+                "name": "Requirements Impact Refiner",
+                "version": "0.3.0",
+                "enabled": True,
+            },
+            {
+                "id": "superpowers@openai-curated",
+                "name": "Superpowers",
+                "version": "6.3.0",
+                "enabled": False,
+            },
         ]
         with tempfile.TemporaryDirectory() as temporary:
             executable = write_fake_codex(temporary, plugins)
@@ -622,7 +709,13 @@ class CodexAdapterTest(unittest.TestCase):
             self.assertIsNone(result.session_id)
             self.assertEqual(
                 set(path.name for path in evidence.iterdir()),
-                {"first.prompt.txt", "first.jsonl", "first.stderr.txt", "first.final.txt", "metadata.json"},
+                {
+                    "first.prompt.txt",
+                    "first.jsonl",
+                    "first.stderr.txt",
+                    "first.final.txt",
+                    "metadata.json",
+                },
             )
             metadata = json.loads((evidence / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["environment"], "Codex with Superpowers")
@@ -673,9 +766,7 @@ class CodexAdapterTest(unittest.TestCase):
         """A future sealed final must carry all provenance used for promotion."""
         with tempfile.TemporaryDirectory() as temporary:
             executable = write_fake_codex(temporary)
-            request = make_request(
-                temporary, ("first turn",), "gpt-5.6-sol", "high"
-            )
+            request = make_request(temporary, ("first turn",), "gpt-5.6-sol", "high")
             result = CodexAdapter(
                 executable=str(executable),
                 cwd=Path(temporary),
@@ -706,9 +797,7 @@ class CodexAdapterTest(unittest.TestCase):
         """Request fields alone cannot prove which model options the client executed."""
         with tempfile.TemporaryDirectory() as temporary:
             executable = write_fake_codex(temporary)
-            request = make_request(
-                temporary, ("first turn",), "gpt-5.6-sol", "high"
-            )
+            request = make_request(temporary, ("first turn",), "gpt-5.6-sol", "high")
             adapter = CodexAdapter(
                 executable=str(executable),
                 cwd=Path(temporary),
@@ -751,7 +840,7 @@ class CodexAdapterTest(unittest.TestCase):
                     os.environ["FAKE_CODEX_LOG"] = original_log
 
             commands = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-            persisted_second_prompt = (
+            (
                 request.output_root / "codex" / request.case.id / "01" / "second.prompt.txt"
             ).read_text(encoding="utf-8")
 
@@ -795,8 +884,7 @@ class CodexAdapterTest(unittest.TestCase):
                     os.environ["FAKE_CODEX_CWD_LOG"] = original_cwd_log
 
             executions = [
-                json.loads(line)
-                for line in cwd_log.read_text(encoding="utf-8").splitlines()
+                json.loads(line) for line in cwd_log.read_text(encoding="utf-8").splitlines()
             ]
 
         self.assertEqual(multi_turn_result.status, RunStatus.PASS)
@@ -807,7 +895,9 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertNotEqual(first_workspace, Path(executions[2]["cwd"]))
         self.assertNotEqual(first_workspace, harness)
         self.assertNotEqual(Path(executions[2]["cwd"]), harness)
-        self.assertTrue(all("--skip-git-repo-check" in execution["args"] for execution in executions))
+        self.assertTrue(
+            all("--skip-git-repo-check" in execution["args"] for execution in executions)
+        )
         self.assertFalse(first_workspace.exists())
         self.assertFalse(Path(executions[2]["cwd"]).exists())
 
@@ -856,8 +946,7 @@ class CodexAdapterTest(unittest.TestCase):
 
         self.assertEqual(
             argv[-1],
-            "same prompt\n\nRepository evidence:\n- supplied.py\n\n"
-            + COMPACT_PREDECESSOR_HANDOFF,
+            "same prompt\n\nRepository evidence:\n- supplied.py\n\n" + COMPACT_PREDECESSOR_HANDOFF,
         )
         self.assertNotIn("must_detect", argv[-1])
         self.assertNotIn("must_not_do", argv[-1])
@@ -898,8 +987,7 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.status, RunStatus.PASS)
         self.assertEqual(
             execution_commands[1][-1],
-            "same prompt\n\nRepository evidence:\n- second.py\n\n"
-            + COMPACT_PREDECESSOR_HANDOFF,
+            "same prompt\n\nRepository evidence:\n- second.py\n\n" + COMPACT_PREDECESSOR_HANDOFF,
         )
         self.assertEqual(persisted_second_prompt, execution_commands[1][-1])
         self.assertEqual(persisted_second_prompt.count("Harness continuity evidence:"), 1)

@@ -2,7 +2,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = ROOT / "skills" / "requirements-impact-refiner"
 REFERENCES = SKILL_DIR / "references"
@@ -38,8 +37,7 @@ OWNERSHIP_CLAUSES = (
     "If more than one orchestrator is active, ask the user to choose one before continuing.",
 )
 SUPERPOWERS_HANDOFF_MARKER = (
-    "superpowers:after-approved-brainstorming;impact-refinement;"
-    "manual-handoff-before-writing-plans"
+    "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans"
 )
 
 
@@ -74,7 +72,10 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertIn("Approval alone is not sufficient.", entry)
         self.assertIn("substantive change request", entry)
         self.assertIn("affected repository scope or evidence target", entry)
-        self.assertIn("Before emitting any `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, `AC-###`, or canonical report", entry)
+        self.assertIn(
+            "Before emitting any `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, `AC-###`, or canonical report",
+            entry,
+        )
         self.assertIn("do not start impact refinement", entry)
         self.assertIn("state that the entry gate is not met", entry)
         self.assertIn("ask only for the missing requirement text or scope", entry)
@@ -89,9 +90,7 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertIn("explicit requested mechanics as already selected", entry)
 
     def test_superpowers_missing_design_content_becomes_a_blocked_report(self):
-        text = (REFERENCES / ADAPTERS["superpowers"]["file"]).read_text(
-            encoding="utf-8"
-        )
+        text = (REFERENCES / ADAPTERS["superpowers"]["file"]).read_text(encoding="utf-8")
         entry = text.split("## Entry\n", 1)[1].split("\n## Ownership", 1)[0]
 
         self.assertIn("approval state is known", entry)
@@ -108,9 +107,7 @@ class IntegrationAdapterContractTest(unittest.TestCase):
 
     def test_superpowers_adapter_requires_the_exact_structured_handoff_marker(self):
         """Packaged guidance must emit the marker consumed by mechanical scoring."""
-        text = (REFERENCES / ADAPTERS["superpowers"]["file"]).read_text(
-            encoding="utf-8"
-        )
+        text = (REFERENCES / ADAPTERS["superpowers"]["file"]).read_text(encoding="utf-8")
         output = text.split("## Output\n", 1)[1].split("\n## Exit", 1)[0]
 
         self.assertIn(SUPERPOWERS_HANDOFF_MARKER, output)

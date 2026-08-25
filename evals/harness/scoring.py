@@ -8,11 +8,11 @@ recorded run.  Whether a response discovered a meaningful impact remains an
 import importlib.util
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional
 
 from .models import Adjudication, CaseSpec, MechanicalScore, RunResult, RunStatus
-
 
 _REFINEMENT_ID = re.compile(r"\b(?:RPT|REQ|IMP|INV|DEC|AC)-\d{3}\b")
 _REPORT_WORKFLOW = re.compile(
@@ -54,7 +54,7 @@ if _REPORT_MODEL is None:
 def _complete_report_errors(
     output: str,
     previous_bytes: Optional[bytes],
-) -> List[str]:
+) -> list[str]:
     """Delegate complete report validation to the canonical implementation."""
     if previous_bytes is None:
         return list(_VALIDATOR.validate_report(output))
@@ -84,7 +84,7 @@ def _planning_handoff_workflow(output: str) -> Optional[str]:
     return _REPORT_MODEL.unquote(rows[0].get("Selected planning workflow", ""))
 
 
-def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
+def _lineage_findings(case: CaseSpec, output: str) -> list[str]:
     """Check the catalog's transition claim without making a human judgment."""
     transition = case.expected_transition
     if transition == "rejected":
@@ -97,10 +97,10 @@ def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
         }
         findings = []
         if not states or not states <= _REJECTION_ACTIVE_STATES:
-            findings.append("%s requires an active evidence-supported ledger state" % case.id)
+            findings.append(f"{case.id} requires an active evidence-supported ledger state")
         authored = _REPORT_MODEL.authored_delta(parsed)
         if authored.get("resolved") or authored.get("accepted"):
-            findings.append("%s forbids resolved or accepted Impact Delta" % case.id)
+            findings.append(f"{case.id} forbids resolved or accepted Impact Delta")
         return findings
     if transition in {"unchanged", "reopened"}:
         parsed, parse_errors = _VALIDATOR.parse_report(output)
@@ -108,7 +108,7 @@ def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
             return []
         authored = _REPORT_MODEL.authored_delta(parsed)
         if not authored.get(transition):
-            return ["%s requires %s Impact Delta transition" % (case.id, transition)]
+            return [f"{case.id} requires {transition} Impact Delta transition"]
     return []
 
 
@@ -125,11 +125,11 @@ def score_mechanical(
     is mechanical only when expressed as the exact structured Planning Handoff
     workflow marker; semantic prose remains quoted human adjudication.
     """
-    findings: List[str] = []
+    findings: list[str] = []
     if result.case_id != case.id:
         findings.append("result case ID does not match case")
     if result.status is not RunStatus.PASS:
-        findings.append("run status %s is not pass" % result.status.value)
+        findings.append(f"run status {result.status.value} is not pass")
         return MechanicalScore(case.id, result.repetition, False, tuple(findings))
 
     output = result.final_output or ""
@@ -149,13 +149,8 @@ def score_mechanical(
         findings.extend(_complete_report_errors(output, previous_bytes))
 
     if case.id == "INT-superpowers":
-        if (
-            _planning_handoff_workflow(output)
-            != _REPORT_MODEL.SUPERPOWERS_HANDOFF_MARKER
-        ):
-            findings.append(
-                "INT-superpowers requires the exact structured Planning Handoff marker"
-            )
+        if _planning_handoff_workflow(output) != _REPORT_MODEL.SUPERPOWERS_HANDOFF_MARKER:
+            findings.append("INT-superpowers requires the exact structured Planning Handoff marker")
     if case.kind == "lineage":
         findings.extend(_lineage_findings(case, output))
 
@@ -166,19 +161,18 @@ def validate_adjudications(
     rows: Sequence[Adjudication],
     cases: Optional[Sequence[CaseSpec]] = None,
     runs: Optional[Sequence[RunResult]] = None,
-) -> List[str]:
+) -> list[str]:
     """Validate human judgments against the exact catalog and sealed transcript.
 
     Without the optional catalog/run index this retains the narrow local check
     used by callers that only need quote/rationale completeness.  Passing both
     enables full, one-row-per-rubric transcript validation.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for row in rows:
         if not isinstance(row.passed, bool):
             errors.append(
-                "%s/%02d %s passed must be boolean"
-                % (row.case_id, row.repetition, row.rubric)
+                "%s/%02d %s passed must be boolean" % (row.case_id, row.repetition, row.rubric)
             )
         if (
             not isinstance(row.quote, str)
@@ -193,7 +187,7 @@ def validate_adjudications(
     if cases is None and runs is None:
         return errors
     if cases is None or runs is None:
-        return errors + ["adjudication validation requires both cases and runs"]
+        return [*errors, "adjudication validation requires both cases and runs"]
 
     expected = {
         (case.id, repetition, rubric)
@@ -214,19 +208,16 @@ def validate_adjudications(
         key = (row.case_id, row.repetition, row.rubric)
         label = "%s/%02d %s" % key
         if key not in expected:
-            errors.append("unknown adjudication %s" % label)
+            errors.append(f"unknown adjudication {label}")
             continue
         if key in seen:
-            errors.append("duplicate adjudication %s" % label)
+            errors.append(f"duplicate adjudication {label}")
             continue
         seen.add(key)
         run = run_index.get((row.case_id, row.repetition))
         if run is None:
-            errors.append("%s has no sealed run" % label)
+            errors.append(f"{label} has no sealed run")
         elif isinstance(row.quote, str) and row.quote.strip() not in (run.final_output or ""):
-            errors.append("%s quote is not in sealed final output" % label)
-    errors.extend(
-        "missing adjudication %s/%02d %s" % key
-        for key in sorted(expected - seen)
-    )
+            errors.append(f"{label} quote is not in sealed final output")
+    errors.extend("missing adjudication %s/%02d %s" % key for key in sorted(expected - seen))
     return errors

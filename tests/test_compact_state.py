@@ -4,12 +4,9 @@ import json
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
-MODULE_PATH = (
-    ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "compact_state.py"
-)
+MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "compact_state.py"
 SPEC = importlib.util.spec_from_file_location("compact_state", MODULE_PATH)
 COMPACT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COMPACT)
@@ -34,9 +31,7 @@ class CompactStateTest(unittest.TestCase):
 
         errors = COMPACT.validate_state(value)
 
-        self.assertIn(
-            "summary IMP-001 severity low disagrees with impact critical", errors
-        )
+        self.assertIn("summary IMP-001 severity low disagrees with impact critical", errors)
         self.assertIn("summary lists IMP-001 more than once", errors)
 
     def test_phase_rules_reject_predecision_decisions(self):
@@ -52,9 +47,7 @@ class CompactStateTest(unittest.TestCase):
             }
         ]
 
-        self.assertIn(
-            "pre-decision state forbids decisions", COMPACT.validate_state(value)
-        )
+        self.assertIn("pre-decision state forbids decisions", COMPACT.validate_state(value))
 
     def test_structure_rejects_unknown_and_missing_keys(self):
         value = self.fixture()
@@ -110,9 +103,7 @@ class CompactStateTest(unittest.TestCase):
         value = self.fixture()
         value["delta"]["accepted"] = ["IMP-001"]
 
-        self.assertIn(
-            "delta lists IMP-001 more than once", COMPACT.validate_state(value)
-        )
+        self.assertIn("delta lists IMP-001 more than once", COMPACT.validate_state(value))
 
     def test_accepted_impact_requires_a_decision(self):
         value = self.fixture()

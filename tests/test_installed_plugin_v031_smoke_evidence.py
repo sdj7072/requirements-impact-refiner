@@ -13,7 +13,6 @@ from evals.harness.models import Adjudication, MechanicalScore, RunResult, RunSt
 from evals.harness.reporting import render_report
 from evals.harness.scoring import _planning_handoff_workflow, validate_adjudications
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_ROOT = ROOT / "evals" / "results" / "installed-v0.3.1"
 RAW_ROOT = RESULT_ROOT / "raw"
@@ -24,6 +23,7 @@ def require_raw_evidence(test):
     if not RAW_ROOT.is_dir() or not (RESULT_ROOT / "controller.json").is_file():
         test.skipTest("raw evaluation evidence lives on the evidence-v031 branch")
 
+
 INSTALLED_CACHE_ROOT = Path(
     "/Users/p042890/.codex/plugins/cache/requirements-impact-refiner-v031-eval/"
     "requirements-impact-refiner/0.3.1"
@@ -32,12 +32,8 @@ PAYLOAD_SOURCE = "/private/tmp/rir-v031-eval-marketplace"
 PAYLOAD_ALIAS = "requirements-impact-refiner@requirements-impact-refiner-v031-eval"
 CANONICAL_RELEASE_COMMIT = "d92ad185ebbb722cd30fc0c720a86e411bec3462"
 
-EXPECTED_MANIFEST_SHA256 = (
-    "8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d"
-)
-FINAL_CASE_IDS = tuple(
-    case.id for case in select_suite(load_all(), "installed-superpowers")
-)
+EXPECTED_MANIFEST_SHA256 = "8e195a0cd5584dd56980917ae97ca284e8ef1653570742bdb1838079ec99d88d"
+FINAL_CASE_IDS = tuple(case.id for case in select_suite(load_all(), "installed-superpowers"))
 LINEAGE_CASE_IDS = (
     "LINEAGE-stable-blocked",
     "LINEAGE-reopened",
@@ -61,8 +57,7 @@ EXPECTED_CODEX_ENABLED_PLUGINS = (
     "visualize@openai-bundled",
 )
 SUPERPOWERS_HANDOFF_MARKER = (
-    "superpowers:after-approved-brainstorming;impact-refinement;"
-    "manual-handoff-before-writing-plans"
+    "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans"
 )
 PREDECESSOR_ARTIFACT_NOTE = (
     "The exact predecessor report bytes are available in `first.final.txt` "
@@ -80,11 +75,7 @@ def sha256(path):
 
 def is_functional_payload_file(path):
     """Exclude interpreter caches created while the test suite is running."""
-    return (
-        path.is_file()
-        and "__pycache__" not in path.parts
-        and path.suffix != ".pyc"
-    )
+    return path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
 
 
 def functional_payload_inventory(root):
@@ -93,9 +84,7 @@ def functional_payload_inventory(root):
     paths = set()
     for directory in (".codex-plugin", "skills", "references", "assets"):
         paths.update(
-            path
-            for path in (root / directory).rglob("*")
-            if is_functional_payload_file(path)
+            path for path in (root / directory).rglob("*") if is_functional_payload_file(path)
         )
     paths.add(root / ".claude-plugin" / "plugin.json")
     for name in ("install-agent-skill.py", "impact_report.py", "validate-impact-report.py"):
@@ -120,9 +109,7 @@ def commit_payload_inventory(commit, paths):
             capture_output=True,
             check=True,
         )
-        rows.append(
-            {"path": relative, "sha256": hashlib.sha256(shown.stdout).hexdigest()}
-        )
+        rows.append({"path": relative, "sha256": hashlib.sha256(shown.stdout).hexdigest()})
     return rows
 
 
@@ -265,9 +252,7 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         self.assertEqual(findings, {})
 
         raw_paths = sorted(
-            path.relative_to(ROOT).as_posix()
-            for path in RAW_ROOT.rglob("*")
-            if path.is_file()
+            path.relative_to(ROOT).as_posix() for path in RAW_ROOT.rglob("*") if path.is_file()
         )
         checked = subprocess.run(
             ["git", "check-attr", "text", "whitespace", "--stdin"],
@@ -291,8 +276,7 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         """Catch a client, model, alias, selection, or retry-history regression."""
         controller = load_json(RESULT_ROOT / "controller.json")
         probes = {
-            row["client"]: row["probe"]
-            for row in load_json(RESULT_ROOT / "probes.json")["probes"]
+            row["client"]: row["probe"] for row in load_json(RESULT_ROOT / "probes.json")["probes"]
         }
 
         self.assertEqual(set(probes), {"codex", "claude"})
@@ -326,21 +310,22 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
             identity["skills_sha256"],
             "ed337f8d828e5476dad94a38b3ad032243c5060e5027d14ecf4f337271ea3d93",
         )
-        self.assertEqual(
-            tuple(identity["enabled_plugins"]), EXPECTED_CODEX_ENABLED_PLUGINS
-        )
+        self.assertEqual(tuple(identity["enabled_plugins"]), EXPECTED_CODEX_ENABLED_PLUGINS)
         self.assertEqual(
             tuple(sorted(probes["codex"]["enabled_plugins"])),
             EXPECTED_CODEX_ENABLED_PLUGINS,
         )
         self.assertEqual(
             identity["enabled_composition"],
-            "codex %s plugins=%s"
-            % (identity["version"], ",".join(EXPECTED_CODEX_ENABLED_PLUGINS)),
+            "codex {} plugins={}".format(
+                identity["version"], ",".join(EXPECTED_CODEX_ENABLED_PLUGINS)
+            ),
         )
 
         selected = controller["runs"]
-        expected_keys = {(case_id, repetition) for case_id in FINAL_CASE_IDS for repetition in range(1, 6)}
+        expected_keys = {
+            (case_id, repetition) for case_id in FINAL_CASE_IDS for repetition in range(1, 6)
+        }
         self.assertEqual(len(FINAL_CASE_IDS), 17)
         self.assertEqual(len(selected), 85)
         self.assertEqual(
@@ -404,15 +389,23 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         )
         self.assertTrue(all(type(row["passed"]) is bool for row in adjudications))
         self.assertTrue(all(row["passed"] for row in adjudications))
-        self.assertTrue(all(isinstance(row["quote"], str) and row["quote"].strip() for row in adjudications))
-        self.assertTrue(all(isinstance(row["rationale"], str) and row["rationale"].strip() for row in adjudications))
+        self.assertTrue(
+            all(isinstance(row["quote"], str) and row["quote"].strip() for row in adjudications)
+        )
+        self.assertTrue(
+            all(
+                isinstance(row["rationale"], str) and row["rationale"].strip()
+                for row in adjudications
+            )
+        )
         selected_outputs = {
             (row["case_id"], row["repetition"]): row["result"]["final_output"]
             for row in controller["runs"]
         }
         self.assertTrue(
             all(
-                row["quote"] and row["quote"] in selected_outputs[(row["case_id"], row["repetition"])]
+                row["quote"]
+                and row["quote"] in selected_outputs[(row["case_id"], row["repetition"])]
                 for row in adjudications
             )
         )
@@ -442,8 +435,7 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         )
 
         all_pass_scores = tuple(
-            MechanicalScore(row["case_id"], row["repetition"], True, ())
-            for row in scores
+            MechanicalScore(row["case_id"], row["repetition"], True, ()) for row in scores
         )
         legacy_render = render_report(
             typed_runs,
@@ -477,8 +469,7 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         """Catch a cross-case session, resume prompt, raw-final, or byte-lineage swap."""
         controller = load_json(RESULT_ROOT / "controller.json")
         selected = {
-            (row["case_id"], row["repetition"]): row["result"]
-            for row in controller["runs"]
+            (row["case_id"], row["repetition"]): row["result"] for row in controller["runs"]
         }
         session_ids = []
 
@@ -494,10 +485,16 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
 
                 self.assertEqual(str(uuid.UUID(session_id)), session_id)
                 session_ids.append(session_id)
-                self.assertEqual(thread_started_ids(raw_path(case_id, repetition, "first")), (session_id,))
-                self.assertEqual(thread_started_ids(raw_path(case_id, repetition, "second")), (session_id,))
+                self.assertEqual(
+                    thread_started_ids(raw_path(case_id, repetition, "first")), (session_id,)
+                )
+                self.assertEqual(
+                    thread_started_ids(raw_path(case_id, repetition, "second")), (session_id,)
+                )
                 self.assertEqual(result["final_output"], second_final)
-                self.assertEqual(report_previous_sha(second_final), hashlib.sha256(first_final).hexdigest())
+                self.assertEqual(
+                    report_previous_sha(second_final), hashlib.sha256(first_final).hexdigest()
+                )
 
                 resume_argv = metadata["execution_commands"][1]["argv"]
                 self.assertEqual(resume_argv[-2], session_id)
@@ -512,8 +509,7 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
         """Catch substitution of a selected final transcript outside lineage cases."""
         controller = load_json(RESULT_ROOT / "controller.json")
         selected = {
-            (row["case_id"], row["repetition"]): row["result"]
-            for row in controller["runs"]
+            (row["case_id"], row["repetition"]): row["result"] for row in controller["runs"]
         }
         for case_id in set(FINAL_CASE_IDS) - set(LINEAGE_CASE_IDS):
             for repetition in range(1, 6):
@@ -523,7 +519,9 @@ class InstalledPluginV031SmokeEvidenceTest(unittest.TestCase):
                 self.assertEqual(selected[(case_id, repetition)]["final_output"], raw_final)
         for repetition in range(1, 6):
             self.assertEqual(
-                _planning_handoff_workflow(selected[("INT-superpowers", repetition)]["final_output"]),
+                _planning_handoff_workflow(
+                    selected[("INT-superpowers", repetition)]["final_output"]
+                ),
                 SUPERPOWERS_HANDOFF_MARKER,
             )
 

@@ -1,4 +1,5 @@
 .worktrees/
 .superpowers/
+.quality-venv/
 __pycache__/
 *.pyc

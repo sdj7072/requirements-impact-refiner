@@ -1,8 +1,7 @@
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import os
-import re
 import sys
 import tempfile
 import threading
@@ -11,7 +10,6 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
@@ -123,15 +121,9 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(traced.budget_status, "closed")
         self.assertTrue(traced.compact_graph["paths"])
         stored = CONTROLLER.load_draft(self.root, draft.draft_id)
-        self.assertEqual(
-            stored["graph_receipt"]["receipt_id"], traced.receipt_id
-        )
-        self.assertEqual(
-            stored["graph_receipt"]["sha256"], traced.receipt_sha256
-        )
-        self.assertEqual(
-            traced.request_sha256, stored["graph_receipt"]["request_sha256"]
-        )
+        self.assertEqual(stored["graph_receipt"]["receipt_id"], traced.receipt_id)
+        self.assertEqual(stored["graph_receipt"]["sha256"], traced.receipt_sha256)
+        self.assertEqual(traced.request_sha256, stored["graph_receipt"]["request_sha256"])
         self.assertEqual(
             traced.seeds,
             (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
@@ -140,9 +132,7 @@ class RirControllerTest(unittest.TestCase):
     def test_fast_scan_promotes_and_finalizes_without_graph_rerun(self):
         self.enable_builtin_graph()
         scan = CONTROLLER.scan_impact(
-            CONTROLLER.ScanRequest(
-                self.root, "Rename profile.displayName", (), "balanced"
-            )
+            CONTROLLER.ScanRequest(self.root, "Rename profile.displayName", (), "balanced")
         )
         with mock.patch.object(
             CONTROLLER.GRAPH_COORDINATOR,
@@ -159,18 +149,14 @@ class RirControllerTest(unittest.TestCase):
                 )
             )
             analysis = self.fixture("controller-analysis-pre-decision.json")
-            analysis["impacts"][0]["graph_path_keys"] = [
-                row["id"] for row in scan.paths
-            ]
+            analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in scan.paths]
             if not analysis["impacts"][0]["graph_path_keys"]:
                 analysis["impacts"][0]["coverage_rationale"] = (
                     "Fast Scan found no closed repository path."
                 )
             analysis["impacts"][0]["evidence_level"] = "unknown"
             result = CONTROLLER.finalize_refinement(
-                CONTROLLER.FinalizeRequest(
-                    self.root, draft.draft_id, analysis, scan.receipt_id
-                )
+                CONTROLLER.FinalizeRequest(self.root, draft.draft_id, analysis, scan.receipt_id)
             )
 
         self.assertEqual(result.status, "published")
@@ -182,24 +168,26 @@ class RirControllerTest(unittest.TestCase):
     def test_fast_scan_promotion_rejects_wrong_request_and_source_mutation(self):
         self.enable_builtin_graph()
         scan = CONTROLLER.scan_impact(
-            CONTROLLER.ScanRequest(
-                self.root, "Rename profile.displayName", (), "balanced"
-            )
+            CONTROLLER.ScanRequest(self.root, "Rename profile.displayName", (), "balanced")
         )
         with self.assertRaisesRegex(ValueError, "request|identity"):
             CONTROLLER.begin_refinement(
                 CONTROLLER.BeginRequest(
-                    self.root, "Different request", (), "generic",
+                    self.root,
+                    "Different request",
+                    (),
+                    "generic",
                     scan_id=scan.scan_id,
                 )
             )
-        (self.root / "api/profile.py").write_text(
-            'FIELD = "profile.changed"\n', encoding="utf-8"
-        )
+        (self.root / "api/profile.py").write_text('FIELD = "profile.changed"\n', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "stale|source|identity"):
             CONTROLLER.begin_refinement(
                 CONTROLLER.BeginRequest(
-                    self.root, "Rename profile.displayName", (), "generic",
+                    self.root,
+                    "Rename profile.displayName",
+                    (),
+                    "generic",
                     scan_id=scan.scan_id,
                 )
             )
@@ -208,9 +196,7 @@ class RirControllerTest(unittest.TestCase):
         draft = CONTROLLER.begin_refinement(self.request())
         self.assertIsNone(draft.scan_id)
         self.assertIsNone(draft.graph_receipt_id)
-        self.assertNotIn(
-            "promoted_scan", CONTROLLER.load_draft(self.root, draft.draft_id)
-        )
+        self.assertNotIn("promoted_scan", CONTROLLER.load_draft(self.root, draft.draft_id))
 
     def test_trace_uses_coordinator_normalized_seed_identity(self):
         self.enable_builtin_graph()
@@ -236,9 +222,7 @@ class RirControllerTest(unittest.TestCase):
             tuple(seed.term for seed in traced.seeds),
             ("authorization.profile", "profile.displayName"),
         )
-        self.assertEqual(
-            traced.request_sha256, stored["graph_receipt"]["request_sha256"]
-        )
+        self.assertEqual(traced.request_sha256, stored["graph_receipt"]["request_sha256"])
         self.assertRegex(traced.receipt_id, r"^[0-9a-f]{32}$")
 
     def test_trace_rejects_wrong_root_unknown_and_consumed_drafts(self):
@@ -379,9 +363,7 @@ class RirControllerTest(unittest.TestCase):
                         self.root,
                         draft.draft_id,
                         tuple(
-                            CONTROLLER.TraceSeed(
-                                f"{index:03d}-" + "x" * (4096 - 4), None
-                            )
+                            CONTROLLER.TraceSeed(f"{index:03d}-" + "x" * (4096 - 4), None)
                             for index in range(128)
                         ),
                     )
@@ -391,10 +373,7 @@ class RirControllerTest(unittest.TestCase):
                     CONTROLLER.TraceRequest(
                         self.root,
                         draft.draft_id,
-                        tuple(
-                            CONTROLLER.TraceSeed(f"seed-{index}", None)
-                            for index in range(129)
-                        ),
+                        tuple(CONTROLLER.TraceSeed(f"seed-{index}", None) for index in range(129)),
                     )
                 )
 
@@ -414,18 +393,14 @@ class RirControllerTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "publication failure"):
                 CONTROLLER.trace_impact(request)
 
-        self.assertIsNone(
-            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
-        )
+        self.assertIsNone(CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt"))
         self.assertIsInstance(
             CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_trace_intent"),
             dict,
         )
         traced = CONTROLLER.trace_impact(request)
         self.assertTrue(traced.receipt_path.is_file())
-        self.assertNotIn(
-            "graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id)
-        )
+        self.assertNotIn("graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id))
 
     def test_trace_retry_recovers_exact_receipt_after_draft_binding_failure(self):
         self.enable_builtin_graph()
@@ -443,13 +418,9 @@ class RirControllerTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "injected binding failure"):
                 CONTROLLER.trace_impact(request)
 
-        receipt_path = (
-            self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
-        )
+        receipt_path = self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
         published_bytes = receipt_path.read_bytes()
-        self.assertIsNone(
-            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
-        )
+        self.assertIsNone(CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt"))
         self.assertIsInstance(
             CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_trace_intent"),
             dict,
@@ -466,9 +437,7 @@ class RirControllerTest(unittest.TestCase):
             CONTROLLER.load_draft(self.root, draft.draft_id)["graph_receipt"]["receipt_id"],
             recovered.receipt_id,
         )
-        self.assertNotIn(
-            "graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id)
-        )
+        self.assertNotIn("graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id))
 
     def test_trace_bind_cas_recovers_from_every_interruption_phase(self):
         phases = (
@@ -486,11 +455,7 @@ class RirControllerTest(unittest.TestCase):
                 request = CONTROLLER.TraceRequest(
                     self.root,
                     draft.draft_id,
-                    (
-                        CONTROLLER.TraceSeed(
-                            "profile.displayName", "api/profile.py"
-                        ),
-                    ),
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
                 )
                 with mock.patch.object(
                     CONTROLLER,
@@ -501,9 +466,7 @@ class RirControllerTest(unittest.TestCase):
                         CONTROLLER.trace_impact(request)
 
                 receipt_path = (
-                    self.root
-                    / ".requirements-impact-refiner/graph"
-                    / f"{draft.draft_id}.json"
+                    self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
                 )
                 published = receipt_path.read_bytes()
                 filename = f"{draft.draft_id}.json"
@@ -512,7 +475,14 @@ class RirControllerTest(unittest.TestCase):
                 real_unlink = CONTROLLER.os.unlink
                 interrupted = False
 
-                def interrupting_rename(directory_fd, source, destination):
+                def interrupting_rename(
+                    directory_fd,
+                    source,
+                    destination,
+                    real_rename=real_rename,
+                    phase=phase,
+                    filename=filename,
+                ):
                     nonlocal interrupted
                     result = real_rename(directory_fd, source, destination)
                     if (
@@ -525,7 +495,14 @@ class RirControllerTest(unittest.TestCase):
                         raise SimulatedProcessInterruption(phase)
                     return result
 
-                def interrupting_link(source, destination, **kwargs):
+                def interrupting_link(
+                    source,
+                    destination,
+                    real_link=real_link,
+                    phase=phase,
+                    filename=filename,
+                    **kwargs,
+                ):
                     nonlocal interrupted
                     result = real_link(source, destination, **kwargs)
                     if (
@@ -538,40 +515,31 @@ class RirControllerTest(unittest.TestCase):
                         raise SimulatedProcessInterruption(phase)
                     return result
 
-                def interrupting_unlink(path, **kwargs):
+                def interrupting_unlink(path, real_unlink=real_unlink, phase=phase, **kwargs):
                     nonlocal interrupted
-                    is_quarantine = str(path).endswith(
-                        ".quarantine"
-                    ) or str(path).endswith(".quarantine.removing")
-                    if (
-                        not interrupted
-                        and phase == "before-quarantine-cleanup"
-                        and is_quarantine
-                    ):
+                    is_quarantine = str(path).endswith(".quarantine") or str(path).endswith(
+                        ".quarantine.removing"
+                    )
+                    if not interrupted and phase == "before-quarantine-cleanup" and is_quarantine:
                         interrupted = True
                         raise SimulatedProcessInterruption(phase)
                     result = real_unlink(path, **kwargs)
-                    if (
-                        not interrupted
-                        and phase == "after-quarantine-cleanup"
-                        and is_quarantine
-                    ):
+                    if not interrupted and phase == "after-quarantine-cleanup" and is_quarantine:
                         interrupted = True
                         raise SimulatedProcessInterruption(phase)
                     return result
 
-                with mock.patch.object(
-                    CONTROLLER.GRAPH_COORDINATOR,
-                    "trace_impact",
-                    side_effect=AssertionError(
-                        "binding recovery must not republish"
+                with (
+                    mock.patch.object(
+                        CONTROLLER.GRAPH_COORDINATOR,
+                        "trace_impact",
+                        side_effect=AssertionError("binding recovery must not republish"),
                     ),
-                ), mock.patch.object(
-                    CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
-                ), mock.patch.object(
-                    CONTROLLER.os, "link", side_effect=interrupting_link
-                ), mock.patch.object(
-                    CONTROLLER.os, "unlink", side_effect=interrupting_unlink
+                    mock.patch.object(
+                        CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
+                    ),
+                    mock.patch.object(CONTROLLER.os, "link", side_effect=interrupting_link),
+                    mock.patch.object(CONTROLLER.os, "unlink", side_effect=interrupting_unlink),
                 ):
                     with self.assertRaises(SimulatedProcessInterruption):
                         CONTROLLER.trace_impact(request)
@@ -580,23 +548,15 @@ class RirControllerTest(unittest.TestCase):
                 with mock.patch.object(
                     CONTROLLER.GRAPH_COORDINATOR,
                     "trace_impact",
-                    side_effect=AssertionError(
-                        "binding recovery must not republish"
-                    ),
+                    side_effect=AssertionError("binding recovery must not republish"),
                 ):
                     recovered = CONTROLLER.trace_impact(request)
 
                 self.assertEqual(receipt_path.read_bytes(), published)
                 stored = CONTROLLER.load_draft(self.root, draft.draft_id)
-                self.assertEqual(
-                    stored["graph_receipt"]["receipt_id"], recovered.receipt_id
-                )
+                self.assertEqual(stored["graph_receipt"]["receipt_id"], recovered.receipt_id)
                 self.assertNotIn("graph_trace_intent", stored)
-                draft_path = (
-                    self.root
-                    / ".requirements-impact-refiner/drafts"
-                    / filename
-                )
+                draft_path = self.root / ".requirements-impact-refiner/drafts" / filename
                 metadata = draft_path.stat()
                 self.assertEqual(metadata.st_mode & 0o777, 0o600)
                 self.assertEqual(metadata.st_nlink, 1)
@@ -617,10 +577,13 @@ class RirControllerTest(unittest.TestCase):
             "manifest",
             "cleanup-marker",
         )
-        phases = (("cleanup-marker", "persist"),) + tuple(
-            (kind, boundary)
-            for kind in component_kinds
-            for boundary in ("quarantine", "removal")
+        phases = (
+            ("cleanup-marker", "persist"),
+            *tuple(
+                (kind, boundary)
+                for kind in component_kinds
+                for boundary in ("quarantine", "removal")
+            ),
         )
         for target_kind, boundary in phases:
             phase = f"after-{target_kind}-{boundary}"
@@ -632,11 +595,7 @@ class RirControllerTest(unittest.TestCase):
                 request = CONTROLLER.TraceRequest(
                     self.root,
                     draft.draft_id,
-                    (
-                        CONTROLLER.TraceSeed(
-                            "profile.displayName", "api/profile.py"
-                        ),
-                    ),
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
                 )
                 with mock.patch.object(
                     CONTROLLER,
@@ -647,22 +606,18 @@ class RirControllerTest(unittest.TestCase):
                         CONTROLLER.trace_impact(request)
 
                 receipt_path = (
-                    self.root
-                    / ".requirements-impact-refiner/graph"
-                    / f"{draft.draft_id}.json"
+                    self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
                 )
                 published = receipt_path.read_bytes()
-                real_write_component = (
-                    CONTROLLER._write_private_transaction_component
-                )
+                real_write_component = CONTROLLER._write_private_transaction_component
                 real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
                 interrupted = False
 
-                def component_kind(name):
+                def component_kind(name, draft=draft):
                     selected = str(name)
                     if selected.endswith(".removing"):
-                        selected = selected[:-len(".removing")]
+                        selected = selected[: -len(".removing")]
                     fixed = {
                         f".{draft.draft_id}.transaction": "manifest",
                         f".{draft.draft_id}.cleanup": "cleanup-marker",
@@ -676,18 +631,22 @@ class RirControllerTest(unittest.TestCase):
                         (".commit", "commit"),
                         (".swap", "swap"),
                     ):
-                        if (
-                            selected.startswith(f".{draft.draft_id}.")
-                            and selected.endswith(suffix)
-                        ):
+                        if selected.startswith(f".{draft.draft_id}.") and selected.endswith(suffix):
                             return kind
                     return None
 
-                def interrupting_write(directory_fd, name, payload, label):
+                def interrupting_write(
+                    directory_fd,
+                    name,
+                    payload,
+                    label,
+                    real_write_component=real_write_component,
+                    boundary=boundary,
+                    target_kind=target_kind,
+                    phase=phase,
+                ):
                     nonlocal interrupted
-                    result = real_write_component(
-                        directory_fd, name, payload, label
-                    )
+                    result = real_write_component(directory_fd, name, payload, label)
                     if (
                         not interrupted
                         and boundary == "persist"
@@ -699,7 +658,15 @@ class RirControllerTest(unittest.TestCase):
                         raise SimulatedProcessInterruption(phase)
                     return result
 
-                def interrupting_rename(directory_fd, source, destination):
+                def interrupting_rename(
+                    directory_fd,
+                    source,
+                    destination,
+                    real_rename=real_rename,
+                    boundary=boundary,
+                    target_kind=target_kind,
+                    phase=phase,
+                ):
                     nonlocal interrupted
                     result = real_rename(directory_fd, source, destination)
                     if (
@@ -712,7 +679,14 @@ class RirControllerTest(unittest.TestCase):
                         raise SimulatedProcessInterruption(phase)
                     return result
 
-                def interrupting_unlink(path, **kwargs):
+                def interrupting_unlink(
+                    path,
+                    real_unlink=real_unlink,
+                    boundary=boundary,
+                    target_kind=target_kind,
+                    phase=phase,
+                    **kwargs,
+                ):
                     nonlocal interrupted
                     result = real_unlink(path, **kwargs)
                     if (
@@ -724,40 +698,35 @@ class RirControllerTest(unittest.TestCase):
                         raise SimulatedProcessInterruption(phase)
                     return result
 
-                with mock.patch.object(
-                    CONTROLLER.GRAPH_COORDINATOR,
-                    "trace_impact",
-                    side_effect=AssertionError(
-                        "cleanup recovery must not republish"
+                with (
+                    mock.patch.object(
+                        CONTROLLER.GRAPH_COORDINATOR,
+                        "trace_impact",
+                        side_effect=AssertionError("cleanup recovery must not republish"),
                     ),
-                ), mock.patch.object(
-                    CONTROLLER,
-                    "_write_private_transaction_component",
-                    side_effect=interrupting_write,
-                ), mock.patch.object(
-                    CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
-                ), mock.patch.object(
-                    CONTROLLER.os, "unlink", side_effect=interrupting_unlink
+                    mock.patch.object(
+                        CONTROLLER,
+                        "_write_private_transaction_component",
+                        side_effect=interrupting_write,
+                    ),
+                    mock.patch.object(
+                        CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
+                    ),
+                    mock.patch.object(CONTROLLER.os, "unlink", side_effect=interrupting_unlink),
                 ):
                     with self.assertRaises(SimulatedProcessInterruption):
                         CONTROLLER.trace_impact(request)
 
                 self.assertTrue(interrupted)
-                draft_directory = (
-                    self.root / ".requirements-impact-refiner/drafts"
-                )
+                draft_directory = self.root / ".requirements-impact-refiner/drafts"
                 interrupted_artifacts = [
                     path.name
                     for path in draft_directory.iterdir()
                     if path.name.startswith(f".{draft.draft_id}.")
                 ]
-                interrupted_kinds = {
-                    component_kind(name) for name in interrupted_artifacts
-                }
+                interrupted_kinds = {component_kind(name) for name in interrupted_artifacts}
                 canonical_during_cleanup = json.loads(
-                    (
-                        draft_directory / f"{draft.draft_id}.json"
-                    ).read_text(encoding="utf-8")
+                    (draft_directory / f"{draft.draft_id}.json").read_text(encoding="utf-8")
                 )
                 self.assertIn("graph_receipt", canonical_during_cleanup)
                 if boundary == "removal":
@@ -772,30 +741,21 @@ class RirControllerTest(unittest.TestCase):
                     self.assertIn("cleanup-marker", interrupted_kinds)
                 if target_kind == "manifest" and boundary == "removal":
                     self.assertEqual(interrupted_kinds, {"cleanup-marker"})
-                if (
-                    target_kind == "cleanup-marker"
-                    and boundary == "removal"
-                ):
+                if target_kind == "cleanup-marker" and boundary == "removal":
                     self.assertEqual(interrupted_artifacts, [])
                 with mock.patch.object(
                     CONTROLLER.GRAPH_COORDINATOR,
                     "trace_impact",
-                    side_effect=AssertionError(
-                        "cleanup recovery must not republish"
-                    ),
+                    side_effect=AssertionError("cleanup recovery must not republish"),
                 ):
                     recovered = CONTROLLER.trace_impact(request)
 
                 self.assertEqual(receipt_path.read_bytes(), published)
                 stored = CONTROLLER.load_draft(self.root, draft.draft_id)
-                self.assertEqual(
-                    stored["graph_receipt"]["receipt_id"], recovered.receipt_id
-                )
+                self.assertEqual(stored["graph_receipt"]["receipt_id"], recovered.receipt_id)
                 self.assertNotIn("graph_trace_intent", stored)
                 draft_path = (
-                    self.root
-                    / ".requirements-impact-refiner/drafts"
-                    / f"{draft.draft_id}.json"
+                    self.root / ".requirements-impact-refiner/drafts" / f"{draft.draft_id}.json"
                 )
                 self.assertEqual(
                     sorted(
@@ -813,9 +773,7 @@ class RirControllerTest(unittest.TestCase):
                     self.request(request=f"Foreign cleanup marker {marker_kind}")
                 )
                 draft_path = (
-                    self.root
-                    / ".requirements-impact-refiner/drafts"
-                    / f"{draft.draft_id}.json"
+                    self.root / ".requirements-impact-refiner/drafts" / f"{draft.draft_id}.json"
                 )
                 marker_path = draft_path.parent / f".{draft.draft_id}.cleanup"
                 canonical = draft_path.read_bytes()
@@ -827,9 +785,7 @@ class RirControllerTest(unittest.TestCase):
                     "replacement_dev": metadata.st_dev,
                     "replacement_ino": metadata.st_ino,
                     "replacement_sha256": hashlib.sha256(canonical).hexdigest(),
-                    "repo_root_sha256": hashlib.sha256(
-                        str(self.root).encode("utf-8")
-                    ).hexdigest(),
+                    "repo_root_sha256": hashlib.sha256(str(self.root).encode("utf-8")).hexdigest(),
                     "schema_version": 1,
                     "transaction_id": "b" * 32,
                 }
@@ -847,12 +803,8 @@ class RirControllerTest(unittest.TestCase):
                 else:
                     os.symlink(outside, marker_path)
 
-                with self.assertRaisesRegex(
-                    ValueError, "cleanup|transaction.*unsafe|identity"
-                ):
-                    CONTROLLER._recover_private_draft_transaction(
-                        self.root, draft.draft_id
-                    )
+                with self.assertRaisesRegex(ValueError, "cleanup|transaction.*unsafe|identity"):
+                    CONTROLLER._recover_private_draft_transaction(self.root, draft.draft_id)
 
                 self.assertEqual(draft_path.read_bytes(), canonical)
                 if marker_kind == "cross-draft":
@@ -869,44 +821,37 @@ class RirControllerTest(unittest.TestCase):
                     replacement_kind=replacement_kind,
                 ):
                     draft = CONTROLLER.begin_refinement(
-                        self.request(
-                            request=(
-                                f"Pre-manifest {target_kind} {replacement_kind}"
-                            )
-                        )
+                        self.request(request=(f"Pre-manifest {target_kind} {replacement_kind}"))
                     )
                     expected = CONTROLLER.load_draft(self.root, draft.draft_id)
                     replacement = dict(expected)
-                    replacement["graph_trace_intent"] = {
-                        "intent_id": "c" * 32
-                    }
+                    replacement["graph_trace_intent"] = {"intent_id": "c" * 32}
                     token = "d" * 32
                     suffix = "new" if target_kind == "replacement" else "anchor"
                     target_name = f".{draft.draft_id}.{token}.{suffix}"
-                    target_path = (
-                        self.root
-                        / ".requirements-impact-refiner/drafts"
-                        / target_name
-                    )
-                    outside = self.root / (
-                        f"pre-manifest-{target_kind}-{replacement_kind}"
-                    )
+                    target_path = self.root / ".requirements-impact-refiner/drafts" / target_name
+                    outside = self.root / (f"pre-manifest-{target_kind}-{replacement_kind}")
                     outside.write_bytes(b"outside-safe")
-                    foreign = (
-                        f"foreign-{target_kind}-{replacement_kind}".encode("utf-8")
-                    )
+                    foreign = f"foreign-{target_kind}-{replacement_kind}".encode()
                     real_write = CONTROLLER._write_private_transaction_component
                     real_rename = CONTROLLER._rename_noreplace
                     real_unlink = CONTROLLER.os.unlink
-                    inserted = False
+                    inserted = {"value": False}
 
-                    def fail_manifest(directory_fd, name, payload, label):
+                    def fail_manifest(directory_fd, name, payload, label, real_write=real_write):
                         if label == "draft transaction manifest":
                             raise ValueError("injected manifest failure")
                         return real_write(directory_fd, name, payload, label)
 
-                    def install(directory_fd):
-                        nonlocal inserted
+                    def install(
+                        directory_fd,
+                        real_unlink=real_unlink,
+                        target_name=target_name,
+                        replacement_kind=replacement_kind,
+                        outside=outside,
+                        foreign=foreign,
+                        inserted=inserted,
+                    ):
                         real_unlink(target_name, dir_fd=directory_fd)
                         self._install_cleanup_replacement(
                             replacement_kind,
@@ -915,36 +860,48 @@ class RirControllerTest(unittest.TestCase):
                             outside,
                             foreign,
                         )
-                        inserted = True
+                        inserted["value"] = True
 
-                    def replacing_rename(directory_fd, source, destination):
+                    def replacing_rename(
+                        directory_fd,
+                        source,
+                        destination,
+                        target_name=target_name,
+                        real_rename=real_rename,
+                        inserted=inserted,
+                    ):
                         if (
-                            not inserted
+                            not inserted["value"]
                             and source == target_name
                             and str(destination).endswith(".removing")
                         ):
                             install(directory_fd)
                         return real_rename(directory_fd, source, destination)
 
-                    def replacing_unlink(path, **kwargs):
-                        if not inserted and path == target_name:
+                    def replacing_unlink(
+                        path,
+                        real_unlink=real_unlink,
+                        target_name=target_name,
+                        inserted=inserted,
+                        **kwargs,
+                    ):
+                        if not inserted["value"] and path == target_name:
                             install(kwargs["dir_fd"])
                         return real_unlink(path, **kwargs)
 
-                    with mock.patch.object(
-                        CONTROLLER.secrets, "token_hex", return_value=token
-                    ), mock.patch.object(
-                        CONTROLLER,
-                        "_write_private_transaction_component",
-                        side_effect=fail_manifest,
-                    ), mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
-                    ), mock.patch.object(
-                        CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                    with (
+                        mock.patch.object(CONTROLLER.secrets, "token_hex", return_value=token),
+                        mock.patch.object(
+                            CONTROLLER,
+                            "_write_private_transaction_component",
+                            side_effect=fail_manifest,
+                        ),
+                        mock.patch.object(
+                            CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                        ),
+                        mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                     ):
-                        with self.assertRaisesRegex(
-                            ValueError, "manifest|cleanup|uncertain"
-                        ):
+                        with self.assertRaisesRegex(ValueError, "manifest|cleanup|uncertain"):
                             CONTROLLER._cas_replace_private_draft(
                                 Path(str(expected["repo_root"])),
                                 draft.draft_id,
@@ -958,13 +915,9 @@ class RirControllerTest(unittest.TestCase):
                     else:
                         self.assertTrue(target_path.is_symlink())
                         self.assertEqual(outside.read_bytes(), b"outside-safe")
-                    self.assertEqual(
-                        CONTROLLER.load_draft(self.root, draft.draft_id), expected
-                    )
+                    self.assertEqual(CONTROLLER.load_draft(self.root, draft.draft_id), expected)
 
-    def _assert_durable_cas_quarantine_destination_is_no_clobber(
-        self, replacement_kind
-    ):
+    def _assert_durable_cas_quarantine_destination_is_no_clobber(self, replacement_kind):
         draft = CONTROLLER.begin_refinement(
             self.request(request=f"CAS quarantine destination {replacement_kind}")
         )
@@ -978,7 +931,7 @@ class RirControllerTest(unittest.TestCase):
         canonical = draft_directory / f"{draft.draft_id}.json"
         outside = self.root / f"cas-quarantine-outside-{replacement_kind}"
         outside.write_bytes(b"outside-safe")
-        foreign = f"cas-quarantine-foreign-{replacement_kind}".encode("utf-8")
+        foreign = f"cas-quarantine-foreign-{replacement_kind}".encode()
         real_claim = CONTROLLER._rename_noreplace
         inserted = False
 
@@ -995,14 +948,11 @@ class RirControllerTest(unittest.TestCase):
                 inserted = True
             return real_claim(directory_fd, source, selected)
 
-        with mock.patch.object(
-            CONTROLLER.secrets, "token_hex", return_value=token
-        ), mock.patch.object(
-            CONTROLLER, "_rename_noreplace", side_effect=race_claim
+        with (
+            mock.patch.object(CONTROLLER.secrets, "token_hex", return_value=token),
+            mock.patch.object(CONTROLLER, "_rename_noreplace", side_effect=race_claim),
         ):
-            with self.assertRaisesRegex(
-                ValueError, "compare-and-swap|quarantine|uncertain"
-            ):
+            with self.assertRaisesRegex(ValueError, "compare-and-swap|quarantine|uncertain"):
                 CONTROLLER._cas_replace_private_draft(
                     Path(str(expected["repo_root"])),
                     draft.draft_id,
@@ -1033,28 +983,25 @@ class RirControllerTest(unittest.TestCase):
             draft.draft_id,
             (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
         )
-        with mock.patch.object(
-            CONTROLLER,
-            "_cas_replace_private_draft",
-            side_effect=ValueError("injected intent write failure"),
-        ), mock.patch.object(
-            CONTROLLER.GRAPH_COORDINATOR,
-            "trace_impact",
-            side_effect=AssertionError("publication must not run before intent"),
+        with (
+            mock.patch.object(
+                CONTROLLER,
+                "_cas_replace_private_draft",
+                side_effect=ValueError("injected intent write failure"),
+            ),
+            mock.patch.object(
+                CONTROLLER.GRAPH_COORDINATOR,
+                "trace_impact",
+                side_effect=AssertionError("publication must not run before intent"),
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "intent write failure"):
                 CONTROLLER.trace_impact(request)
 
-        receipt_path = (
-            self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
-        )
+        receipt_path = self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
         self.assertFalse(receipt_path.exists())
-        self.assertNotIn(
-            "graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id)
-        )
-        self.assertRegex(
-            CONTROLLER.trace_impact(request).receipt_id, r"^[0-9a-f]{32}$"
-        )
+        self.assertNotIn("graph_trace_intent", CONTROLLER.load_draft(self.root, draft.draft_id))
+        self.assertRegex(CONTROLLER.trace_impact(request).receipt_id, r"^[0-9a-f]{32}$")
 
     def test_trace_rejects_cross_draft_transaction_intent(self):
         self.enable_builtin_graph()
@@ -1071,9 +1018,7 @@ class RirControllerTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "stop after intent"):
                 CONTROLLER.trace_impact(first_request)
-        first_intent = CONTROLLER.load_draft(
-            self.root, first.draft_id
-        )["graph_trace_intent"]
+        first_intent = CONTROLLER.load_draft(self.root, first.draft_id)["graph_trace_intent"]
         second = CONTROLLER.begin_refinement(self.request(request="Second intent"))
         second_stored = CONTROLLER.load_draft(self.root, second.draft_id)
         second_stored["graph_trace_intent"] = first_intent
@@ -1089,10 +1034,7 @@ class RirControllerTest(unittest.TestCase):
             )
 
         self.assertFalse(
-            (
-                self.root / ".requirements-impact-refiner/graph"
-                / f"{second.draft_id}.json"
-            ).exists()
+            (self.root / ".requirements-impact-refiner/graph" / f"{second.draft_id}.json").exists()
         )
 
     def test_trace_rejects_internally_valid_receipt_without_controller_intent(self):
@@ -1100,9 +1042,7 @@ class RirControllerTest(unittest.TestCase):
         draft = CONTROLLER.begin_refinement(self.request(request="Unmarked artifact"))
         stored = CONTROLLER.load_draft(self.root, draft.draft_id)
         graph_settings = stored["settings"]["impact_graph"]
-        seeds = (
-            CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),
-        )
+        seeds = (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),)
         CONTROLLER.GRAPH_COORDINATOR.trace_impact(
             self.root,
             CONTROLLER._graph_draft_identity(stored),
@@ -1111,13 +1051,9 @@ class RirControllerTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "pre-publication trace intent"):
-            CONTROLLER.trace_impact(
-                CONTROLLER.TraceRequest(self.root, draft.draft_id, seeds)
-            )
+            CONTROLLER.trace_impact(CONTROLLER.TraceRequest(self.root, draft.draft_id, seeds))
 
-        self.assertIsNone(
-            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
-        )
+        self.assertIsNone(CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt"))
 
     def test_trace_stale_crash_artifact_is_cleaned_before_fresh_retry(self):
         self.enable_builtin_graph()
@@ -1134,9 +1070,7 @@ class RirControllerTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "post-persist bind failure"):
                 CONTROLLER.trace_impact(request)
-        receipt_path = (
-            self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
-        )
+        receipt_path = self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
         self.assertTrue(receipt_path.is_file())
         (self.root / "desktop/new_consumer.py").write_text(
             'FIELD = "profile.displayName"\n', encoding="utf-8"
@@ -1146,14 +1080,14 @@ class RirControllerTest(unittest.TestCase):
             CONTROLLER.trace_impact(request)
 
         self.assertFalse(receipt_path.exists())
-        self.assertIsNone(
-            CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt")
-        )
+        self.assertIsNone(CONTROLLER.load_draft(self.root, draft.draft_id).get("graph_receipt"))
         fresh = CONTROLLER.trace_impact(request)
-        self.assertTrue(any(
-            node["location"] == "desktop/new_consumer.py"
-            for node in fresh.compact_graph["nodes"]
-        ))
+        self.assertTrue(
+            any(
+                node["location"] == "desktop/new_consumer.py"
+                for node in fresh.compact_graph["nodes"]
+            )
+        )
 
     def _trace_with_pre_bind_draft_mutation(self, request_text, mutate):
         self.enable_builtin_graph()
@@ -1170,9 +1104,7 @@ class RirControllerTest(unittest.TestCase):
             mutate(current, request)
             return real_bind(*args, **kwargs)
 
-        with mock.patch.object(
-            CONTROLLER, "_bind_trace_receipt", side_effect=racing_bind
-        ):
+        with mock.patch.object(CONTROLLER, "_bind_trace_receipt", side_effect=racing_bind):
             with self.assertRaisesRegex(
                 ValueError, "trace transaction changed before receipt binding"
             ):
@@ -1182,13 +1114,9 @@ class RirControllerTest(unittest.TestCase):
     def test_bind_fails_cas_when_trace_intent_is_removed(self):
         def remove(current, request):
             current.pop("graph_trace_intent", None)
-            CONTROLLER._replace_private_draft(
-                self.root, current["draft_id"], current
-            )
+            CONTROLLER._replace_private_draft(self.root, current["draft_id"], current)
 
-        draft = self._trace_with_pre_bind_draft_mutation(
-            "Removed bind intent", remove
-        )
+        draft = self._trace_with_pre_bind_draft_mutation("Removed bind intent", remove)
 
         stored = CONTROLLER.load_draft(self.root, draft.draft_id)
         self.assertNotIn("graph_trace_intent", stored)
@@ -1199,13 +1127,9 @@ class RirControllerTest(unittest.TestCase):
             replacement = dict(current["graph_trace_intent"])
             replacement["intent_id"] = "0" * 32
             current["graph_trace_intent"] = replacement
-            CONTROLLER._replace_private_draft(
-                self.root, current["draft_id"], current
-            )
+            CONTROLLER._replace_private_draft(self.root, current["draft_id"], current)
 
-        draft = self._trace_with_pre_bind_draft_mutation(
-            "Replaced bind intent", replace
-        )
+        draft = self._trace_with_pre_bind_draft_mutation("Replaced bind intent", replace)
 
         stored = CONTROLLER.load_draft(self.root, draft.draft_id)
         self.assertEqual(stored["graph_trace_intent"]["intent_id"], "0" * 32)
@@ -1225,9 +1149,7 @@ class RirControllerTest(unittest.TestCase):
             )
             competing.update(replacement)
             current["graph_trace_intent"] = replacement
-            CONTROLLER._replace_private_draft(
-                self.root, current["draft_id"], current
-            )
+            CONTROLLER._replace_private_draft(self.root, current["draft_id"], current)
 
         draft = self._trace_with_pre_bind_draft_mutation(
             "Competing bind intent", replace_with_valid
@@ -1245,9 +1167,7 @@ class RirControllerTest(unittest.TestCase):
         path.chmod(0o600)
         return graph_dir, path, payload
 
-    def _install_cleanup_replacement(
-        self, replacement_kind, name, directory_fd, outside, payload
-    ):
+    def _install_cleanup_replacement(self, replacement_kind, name, directory_fd, outside, payload):
         if replacement_kind == "regular":
             descriptor = os.open(
                 name,
@@ -1280,9 +1200,7 @@ class RirControllerTest(unittest.TestCase):
             CONTROLLER, "_read_bound_receipt_bytes", side_effect=swap_after_read
         ):
             with self.assertRaisesRegex(ValueError, "cleanup.*changed|uncertain"):
-                CONTROLLER._remove_exact_trace_receipt(
-                    self.root, draft_id, expected
-                )
+                CONTROLLER._remove_exact_trace_receipt(self.root, draft_id, expected)
 
         self.assertEqual(path.read_bytes(), foreign)
         self.assertEqual(saved.read_bytes(), expected)
@@ -1305,9 +1223,7 @@ class RirControllerTest(unittest.TestCase):
             CONTROLLER, "_read_bound_receipt_bytes", side_effect=swap_after_read
         ):
             with self.assertRaisesRegex(ValueError, "cleanup.*unsafe|uncertain|changed"):
-                CONTROLLER._remove_exact_trace_receipt(
-                    self.root, draft_id, expected
-                )
+                CONTROLLER._remove_exact_trace_receipt(self.root, draft_id, expected)
 
         self.assertTrue(path.is_symlink())
         self.assertEqual(outside.read_text(encoding="utf-8"), "outside-safe")
@@ -1327,13 +1243,16 @@ class RirControllerTest(unittest.TestCase):
             if source == f"{draft_id}.json" and not swapped:
                 swapped = True
                 real_path_rename(
-                    source, saved.name,
+                    source,
+                    saved.name,
                     src_dir_fd=directory_fd,
                     dst_dir_fd=directory_fd,
                 )
                 descriptor = os.open(
-                    source, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                    0o600, dir_fd=directory_fd,
+                    source,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                    dir_fd=directory_fd,
                 )
                 try:
                     os.write(descriptor, foreign)
@@ -1341,30 +1260,24 @@ class RirControllerTest(unittest.TestCase):
                     os.close(descriptor)
             return real_rename(directory_fd, source, destination)
 
-        with mock.patch.object(
-            CONTROLLER, "_rename_noreplace", side_effect=swap_before_quarantine
-        ):
+        with mock.patch.object(CONTROLLER, "_rename_noreplace", side_effect=swap_before_quarantine):
             with self.assertRaisesRegex(ValueError, "cleanup.*changed|uncertain"):
-                CONTROLLER._remove_exact_trace_receipt(
-                    self.root, draft_id, expected
-                )
+                CONTROLLER._remove_exact_trace_receipt(self.root, draft_id, expected)
 
         self.assertEqual(path.read_bytes(), foreign)
         self.assertEqual(saved.read_bytes(), expected)
 
-    def _assert_stale_receipt_quarantine_destination_is_no_clobber(
-        self, replacement_kind
-    ):
+    def _assert_stale_receipt_quarantine_destination_is_no_clobber(self, replacement_kind):
         draft_id = ("8" if replacement_kind == "regular" else "9") * 32
         graph_dir, receipt, expected = self._private_cleanup_receipt(
-            draft_id, payload=f"stale-exact-{replacement_kind}".encode("utf-8")
+            draft_id, payload=f"stale-exact-{replacement_kind}".encode()
         )
         cleanup_id = "e" * 32
         destination_name = f".{draft_id}.{cleanup_id}.stale"
         destination = graph_dir / destination_name
         outside = self.root / f"stale-destination-outside-{replacement_kind}"
         outside.write_bytes(b"outside-safe")
-        foreign = f"stale-destination-foreign-{replacement_kind}".encode("utf-8")
+        foreign = f"stale-destination-foreign-{replacement_kind}".encode()
         real_claim = CONTROLLER._rename_noreplace
         inserted = False
         committed = False
@@ -1386,15 +1299,12 @@ class RirControllerTest(unittest.TestCase):
             nonlocal committed
             committed = True
 
-        with mock.patch.object(
-            CONTROLLER.secrets, "token_hex", return_value=cleanup_id
-        ), mock.patch.object(
-            CONTROLLER, "_rename_noreplace", side_effect=race_claim
+        with (
+            mock.patch.object(CONTROLLER.secrets, "token_hex", return_value=cleanup_id),
+            mock.patch.object(CONTROLLER, "_rename_noreplace", side_effect=race_claim),
         ):
             with self.assertRaisesRegex(ValueError, "cleanup|quarantine|unsafe"):
-                CONTROLLER._remove_exact_trace_receipt(
-                    self.root, draft_id, expected, commit=commit
-                )
+                CONTROLLER._remove_exact_trace_receipt(self.root, draft_id, expected, commit=commit)
 
         self.assertTrue(inserted)
         self.assertFalse(committed)
@@ -1415,20 +1325,27 @@ class RirControllerTest(unittest.TestCase):
         for index, replacement_kind in enumerate(("regular", "symlink")):
             with self.subTest(replacement_kind=replacement_kind):
                 draft_id = str(index + 4) * 32
-                graph_dir, path, expected = self._private_cleanup_receipt(
-                    draft_id, payload=f"exact-{replacement_kind}".encode("utf-8")
+                _graph_dir, path, expected = self._private_cleanup_receipt(
+                    draft_id, payload=f"exact-{replacement_kind}".encode()
                 )
                 outside = self.root / f"guard-outside-{replacement_kind}"
                 outside.write_bytes(b"outside-safe")
-                foreign = f"foreign-{replacement_kind}".encode("utf-8")
+                foreign = f"foreign-{replacement_kind}".encode()
                 real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
-                inserted = False
+                inserted = {"value": False}
                 committed = False
                 filename = f"{draft_id}.json"
 
-                def install(directory_fd):
-                    nonlocal inserted
+                def install(
+                    directory_fd,
+                    real_unlink=real_unlink,
+                    filename=filename,
+                    replacement_kind=replacement_kind,
+                    outside=outside,
+                    foreign=foreign,
+                    inserted=inserted,
+                ):
                     real_unlink(filename, dir_fd=directory_fd)
                     self._install_cleanup_replacement(
                         replacement_kind,
@@ -1437,19 +1354,32 @@ class RirControllerTest(unittest.TestCase):
                         outside,
                         foreign,
                     )
-                    inserted = True
+                    inserted["value"] = True
 
-                def replacing_rename(directory_fd, source, destination):
+                def replacing_rename(
+                    directory_fd,
+                    source,
+                    destination,
+                    filename=filename,
+                    real_rename=real_rename,
+                    inserted=inserted,
+                ):
                     if (
-                        not inserted
+                        not inserted["value"]
                         and source == filename
                         and str(destination).endswith(".removing")
                     ):
                         install(directory_fd)
                     return real_rename(directory_fd, source, destination)
 
-                def replacing_unlink(selected, **kwargs):
-                    if not inserted and selected == filename:
+                def replacing_unlink(
+                    selected,
+                    real_unlink=real_unlink,
+                    filename=filename,
+                    inserted=inserted,
+                    **kwargs,
+                ):
+                    if not inserted["value"] and selected == filename:
                         install(kwargs["dir_fd"])
                     return real_unlink(selected, **kwargs)
 
@@ -1457,10 +1387,11 @@ class RirControllerTest(unittest.TestCase):
                     nonlocal committed
                     committed = True
 
-                with mock.patch.object(
-                    CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
-                ), mock.patch.object(
-                    CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                with (
+                    mock.patch.object(
+                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                    ),
+                    mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                 ):
                     with self.assertRaisesRegex(
                         ValueError, "cleanup.*changed|cleanup.*replacement|uncertain"
@@ -1484,19 +1415,19 @@ class RirControllerTest(unittest.TestCase):
         for index, replacement_kind in enumerate(("regular", "symlink")):
             with self.subTest(replacement_kind=replacement_kind):
                 draft_id = str(index + 6) * 32
-                graph_dir, path, expected = self._private_cleanup_receipt(
+                _graph_dir, path, expected = self._private_cleanup_receipt(
                     draft_id,
-                    payload=f"recover-{replacement_kind}".encode("utf-8"),
+                    payload=f"recover-{replacement_kind}".encode(),
                 )
                 intent = {"draft_id": draft_id, "transaction_id": "e" * 32}
                 outside = self.root / f"recovery-outside-{replacement_kind}"
                 outside.write_bytes(b"outside-safe")
-                foreign = f"recovery-foreign-{replacement_kind}".encode("utf-8")
+                foreign = f"recovery-foreign-{replacement_kind}".encode()
                 real_unlink = CONTROLLER.os.unlink
                 real_rename = CONTROLLER._rename_noreplace
                 interrupted = False
 
-                def interrupt_stale_quarantine(selected, **kwargs):
+                def interrupt_stale_quarantine(selected, real_unlink=real_unlink, **kwargs):
                     nonlocal interrupted
                     if not interrupted and str(selected).endswith(".stale"):
                         interrupted = True
@@ -1504,7 +1435,7 @@ class RirControllerTest(unittest.TestCase):
                     return real_unlink(selected, **kwargs)
 
                 def interrupt_stale_quarantine_rename(
-                    directory_fd, source, destination
+                    directory_fd, source, destination, real_rename=real_rename
                 ):
                     nonlocal interrupted
                     if (
@@ -1513,36 +1444,42 @@ class RirControllerTest(unittest.TestCase):
                         and str(destination).endswith(".removing")
                     ):
                         interrupted = True
-                        raise SimulatedProcessInterruption(
-                            "recovery guard prepared"
-                        )
+                        raise SimulatedProcessInterruption("recovery guard prepared")
                     return real_rename(directory_fd, source, destination)
 
-                with mock.patch.object(
-                    CONTROLLER.os,
-                    "unlink",
-                    side_effect=interrupt_stale_quarantine,
-                ), mock.patch.object(
-                    CONTROLLER,
-                    "_rename_noreplace",
-                    side_effect=interrupt_stale_quarantine_rename,
+                with (
+                    mock.patch.object(
+                        CONTROLLER.os,
+                        "unlink",
+                        side_effect=interrupt_stale_quarantine,
+                    ),
+                    mock.patch.object(
+                        CONTROLLER,
+                        "_rename_noreplace",
+                        side_effect=interrupt_stale_quarantine_rename,
+                    ),
                 ):
                     with self.assertRaises(SimulatedProcessInterruption):
                         CONTROLLER._remove_exact_trace_receipt(
                             self.root,
                             draft_id,
                             expected,
-                            guard_intent_sha256=(
-                                CONTROLLER._trace_intent_sha256(intent)
-                            ),
+                            guard_intent_sha256=(CONTROLLER._trace_intent_sha256(intent)),
                         )
 
                 self.assertTrue(interrupted)
-                inserted = False
+                inserted = {"value": False}
                 filename = f"{draft_id}.json"
 
-                def install(directory_fd):
-                    nonlocal inserted
+                def install(
+                    directory_fd,
+                    real_unlink=real_unlink,
+                    filename=filename,
+                    replacement_kind=replacement_kind,
+                    outside=outside,
+                    foreign=foreign,
+                    inserted=inserted,
+                ):
                     real_unlink(filename, dir_fd=directory_fd)
                     self._install_cleanup_replacement(
                         replacement_kind,
@@ -1551,33 +1488,45 @@ class RirControllerTest(unittest.TestCase):
                         outside,
                         foreign,
                     )
-                    inserted = True
+                    inserted["value"] = True
 
-                def replacing_rename(directory_fd, source, destination):
+                def replacing_rename(
+                    directory_fd,
+                    source,
+                    destination,
+                    filename=filename,
+                    real_rename=real_rename,
+                    inserted=inserted,
+                ):
                     if (
-                        not inserted
+                        not inserted["value"]
                         and source == filename
                         and str(destination).endswith(".removing")
                     ):
                         install(directory_fd)
                     return real_rename(directory_fd, source, destination)
 
-                def replacing_unlink(selected, **kwargs):
-                    if not inserted and selected == filename:
+                def replacing_unlink(
+                    selected,
+                    real_unlink=real_unlink,
+                    filename=filename,
+                    inserted=inserted,
+                    **kwargs,
+                ):
+                    if not inserted["value"] and selected == filename:
                         install(kwargs["dir_fd"])
                     return real_unlink(selected, **kwargs)
 
-                with mock.patch.object(
-                    CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
-                ), mock.patch.object(
-                    CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                with (
+                    mock.patch.object(
+                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                    ),
+                    mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                 ):
                     with self.assertRaisesRegex(
                         ValueError, "cleanup.*changed|cleanup.*replacement|uncertain"
                     ):
-                        CONTROLLER._recover_stale_cleanup_guard(
-                            self.root, draft_id, intent
-                        )
+                        CONTROLLER._recover_stale_cleanup_guard(self.root, draft_id, intent)
 
                 self.assertTrue(inserted)
                 if replacement_kind == "regular":
@@ -1598,7 +1547,7 @@ class RirControllerTest(unittest.TestCase):
                 selected.chmod(0o600)
                 outside = self.root / f"component-outside-{replacement_kind}"
                 outside.write_bytes(b"outside-safe")
-                foreign = f"component-foreign-{replacement_kind}".encode("utf-8")
+                foreign = f"component-foreign-{replacement_kind}".encode()
                 flags = os.O_RDONLY | os.O_DIRECTORY
                 if hasattr(os, "O_NOFOLLOW"):
                     flags |= os.O_NOFOLLOW
@@ -1609,10 +1558,17 @@ class RirControllerTest(unittest.TestCase):
                 self.assertIsNotNone(component)
                 real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
-                inserted = False
+                inserted = {"value": False}
 
-                def install():
-                    nonlocal inserted
+                def install(
+                    real_unlink=real_unlink,
+                    name=name,
+                    directory_fd=directory_fd,
+                    replacement_kind=replacement_kind,
+                    outside=outside,
+                    foreign=foreign,
+                    inserted=inserted,
+                ):
                     real_unlink(name, dir_fd=directory_fd)
                     self._install_cleanup_replacement(
                         replacement_kind,
@@ -1621,31 +1577,39 @@ class RirControllerTest(unittest.TestCase):
                         outside,
                         foreign,
                     )
-                    inserted = True
+                    inserted["value"] = True
 
-                def replacing_rename(directory_fd, source, destination):
+                def replacing_rename(
+                    directory_fd,
+                    source,
+                    destination,
+                    name=name,
+                    real_rename=real_rename,
+                    inserted=inserted,
+                ):
                     if (
-                        not inserted
+                        not inserted["value"]
                         and source == name
                         and str(destination).endswith(".removing")
                     ):
                         install()
                     return real_rename(directory_fd, source, destination)
 
-                def replacing_unlink(path, **kwargs):
-                    if not inserted and path == name:
+                def replacing_unlink(
+                    path, real_unlink=real_unlink, name=name, inserted=inserted, **kwargs
+                ):
+                    if not inserted["value"] and path == name:
                         install()
                     return real_unlink(path, **kwargs)
 
                 try:
-                    with mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
-                    ), mock.patch.object(
-                        CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                    with (
+                        mock.patch.object(
+                            CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                        ),
+                        mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                     ):
-                        with self.assertRaisesRegex(
-                            ValueError, "changed|replacement|uncertain"
-                        ):
+                        with self.assertRaisesRegex(ValueError, "changed|replacement|uncertain"):
                             CONTROLLER._unlink_transaction_component(
                                 directory_fd,
                                 name,
@@ -1682,9 +1646,7 @@ class RirControllerTest(unittest.TestCase):
                 "cleanup needs an exclusive no-clobber quarantine claim",
             )
             with self.assertRaises(FileExistsError):
-                CONTROLLER._rename_noreplace(
-                    directory_fd, source.name, destination.name
-                )
+                CONTROLLER._rename_noreplace(directory_fd, source.name, destination.name)
         finally:
             os.close(directory_fd)
 
@@ -1710,9 +1672,7 @@ class RirControllerTest(unittest.TestCase):
                 "cleanup needs an exclusive no-clobber quarantine claim",
             )
             with self.assertRaises(FileExistsError):
-                CONTROLLER._rename_noreplace(
-                    directory_fd, source.name, destination.name
-                )
+                CONTROLLER._rename_noreplace(directory_fd, source.name, destination.name)
         finally:
             os.close(directory_fd)
 
@@ -1733,9 +1693,7 @@ class RirControllerTest(unittest.TestCase):
         try:
             with mock.patch.object(CONTROLLER.sys, "platform", "unsupported"):
                 with self.assertRaisesRegex(OSError, "unavailable"):
-                    CONTROLLER._rename_noreplace(
-                        directory_fd, source.name, destination.name
-                    )
+                    CONTROLLER._rename_noreplace(directory_fd, source.name, destination.name)
         finally:
             os.close(directory_fd)
 
@@ -1751,7 +1709,7 @@ class RirControllerTest(unittest.TestCase):
         destination = directory / removing_name
         outside = self.root / f"quarantine-race-outside-{replacement_kind}"
         exact = b"exact-transaction-component"
-        foreign = f"foreign-destination-{replacement_kind}".encode("utf-8")
+        foreign = f"foreign-destination-{replacement_kind}".encode()
         selected.write_bytes(exact)
         selected.chmod(0o600)
         outside.write_bytes(b"outside-safe")
@@ -1787,9 +1745,7 @@ class RirControllerTest(unittest.TestCase):
                 "_rename_noreplace",
                 side_effect=insert_at_destination_window,
             ):
-                with self.assertRaisesRegex(
-                    ValueError, "quarantined|already exists|uncertain"
-                ):
+                with self.assertRaisesRegex(ValueError, "quarantined|already exists|uncertain"):
                     CONTROLLER._unlink_transaction_component(
                         directory_fd,
                         name,
@@ -1826,17 +1782,24 @@ class RirControllerTest(unittest.TestCase):
                 selected = directory / name
                 outside = self.root / f"write-outside-{replacement_kind}"
                 outside.write_bytes(b"outside-safe")
-                foreign = f"write-foreign-{replacement_kind}".encode("utf-8")
+                foreign = f"write-foreign-{replacement_kind}".encode()
                 flags = os.O_RDONLY | os.O_DIRECTORY
                 if hasattr(os, "O_NOFOLLOW"):
                     flags |= os.O_NOFOLLOW
                 directory_fd = os.open(directory, flags)
                 real_rename = CONTROLLER._rename_noreplace
                 real_unlink = CONTROLLER.os.unlink
-                inserted = False
+                inserted = {"value": False}
 
-                def install():
-                    nonlocal inserted
+                def install(
+                    real_unlink=real_unlink,
+                    name=name,
+                    directory_fd=directory_fd,
+                    replacement_kind=replacement_kind,
+                    outside=outside,
+                    foreign=foreign,
+                    inserted=inserted,
+                ):
                     real_unlink(name, dir_fd=directory_fd)
                     self._install_cleanup_replacement(
                         replacement_kind,
@@ -1845,35 +1808,44 @@ class RirControllerTest(unittest.TestCase):
                         outside,
                         foreign,
                     )
-                    inserted = True
+                    inserted["value"] = True
 
-                def replacing_rename(directory_fd, source, destination):
+                def replacing_rename(
+                    directory_fd,
+                    source,
+                    destination,
+                    name=name,
+                    real_rename=real_rename,
+                    inserted=inserted,
+                ):
                     if (
-                        not inserted
+                        not inserted["value"]
                         and source == name
                         and str(destination).endswith(".removing")
                     ):
                         install()
                     return real_rename(directory_fd, source, destination)
 
-                def replacing_unlink(path, **kwargs):
-                    if not inserted and path == name:
+                def replacing_unlink(
+                    path, real_unlink=real_unlink, name=name, inserted=inserted, **kwargs
+                ):
+                    if not inserted["value"] and path == name:
                         install()
                     return real_unlink(path, **kwargs)
 
                 try:
-                    with mock.patch.object(
-                        CONTROLLER.os,
-                        "fsync",
-                        side_effect=OSError("injected component fsync failure"),
-                    ), mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
-                    ), mock.patch.object(
-                        CONTROLLER.os, "unlink", side_effect=replacing_unlink
+                    with (
+                        mock.patch.object(
+                            CONTROLLER.os,
+                            "fsync",
+                            side_effect=OSError("injected component fsync failure"),
+                        ),
+                        mock.patch.object(
+                            CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                        ),
+                        mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                     ):
-                        with self.assertRaisesRegex(
-                            ValueError, "persist|cleanup|uncertain"
-                        ):
+                        with self.assertRaisesRegex(ValueError, "persist|cleanup|uncertain"):
                             CONTROLLER._write_private_transaction_component(
                                 directory_fd,
                                 name,
@@ -1900,28 +1872,20 @@ class RirControllerTest(unittest.TestCase):
                 request = CONTROLLER.TraceRequest(
                     self.root,
                     draft.draft_id,
-                    (
-                        CONTROLLER.TraceSeed(
-                            "profile.displayName", "api/profile.py"
-                        ),
-                    ),
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
                 )
                 with mock.patch.object(
                     CONTROLLER,
                     "_bind_trace_receipt",
                     side_effect=ValueError("stop after receipt publication"),
                 ):
-                    with self.assertRaisesRegex(
-                        ValueError, "stop after receipt publication"
-                    ):
+                    with self.assertRaisesRegex(ValueError, "stop after receipt publication"):
                         CONTROLLER.trace_impact(request)
 
                 stored = CONTROLLER.load_draft(self.root, draft.draft_id)
                 intent = stored["graph_trace_intent"]
                 receipt_path = (
-                    self.root
-                    / ".requirements-impact-refiner/graph"
-                    / f"{draft.draft_id}.json"
+                    self.root / ".requirements-impact-refiner/graph" / f"{draft.draft_id}.json"
                 )
                 (self.root / "desktop" / f"late_{replacement_kind}.py").write_text(
                     'FIELD = "profile.displayName"\n', encoding="utf-8"
@@ -1931,11 +1895,17 @@ class RirControllerTest(unittest.TestCase):
                 foreign = b"foreign-late-receipt"
                 real_unlink = CONTROLLER.os.unlink
                 real_rename = CONTROLLER._rename_noreplace
-                inserted = False
+                inserted = {"value": False}
 
-                def insert_receipt_replacement(directory_fd):
-                    nonlocal inserted
-                    inserted = True
+                def insert_receipt_replacement(
+                    directory_fd,
+                    draft=draft,
+                    replacement_kind=replacement_kind,
+                    foreign=foreign,
+                    outside=outside,
+                    inserted=inserted,
+                ):
+                    inserted["value"] = True
                     try:
                         os.unlink(
                             f"{draft.draft_id}.json",
@@ -1961,25 +1931,30 @@ class RirControllerTest(unittest.TestCase):
                             dir_fd=directory_fd,
                         )
 
-                def insert_at_late_window(path, **kwargs):
-                    if not inserted and str(path).endswith(".stale"):
+                def insert_at_late_window(
+                    path, real_unlink=real_unlink, inserted=inserted, **kwargs
+                ):
+                    if not inserted["value"] and str(path).endswith(".stale"):
                         insert_receipt_replacement(kwargs["dir_fd"])
                     return real_unlink(path, **kwargs)
 
-                def insert_at_late_rename(directory_fd, source, destination):
+                def insert_at_late_rename(
+                    directory_fd, source, destination, real_rename=real_rename, inserted=inserted
+                ):
                     result = real_rename(directory_fd, source, destination)
                     if (
-                        not inserted
+                        not inserted["value"]
                         and str(source).endswith(".stale")
                         and str(destination).endswith(".removing")
                     ):
                         insert_receipt_replacement(directory_fd)
                     return result
 
-                with mock.patch.object(
-                    CONTROLLER.os, "unlink", side_effect=insert_at_late_window
-                ), mock.patch.object(
-                    CONTROLLER, "_rename_noreplace", side_effect=insert_at_late_rename
+                with (
+                    mock.patch.object(CONTROLLER.os, "unlink", side_effect=insert_at_late_window),
+                    mock.patch.object(
+                        CONTROLLER, "_rename_noreplace", side_effect=insert_at_late_rename
+                    ),
                 ):
                     with self.assertRaisesRegex(
                         ValueError, "cleanup.*replacement|cleanup.*uncertain"
@@ -1997,46 +1972,36 @@ class RirControllerTest(unittest.TestCase):
                     self.assertEqual(outside.read_bytes(), b"outside-safe")
 
                 receipt_path.unlink()
-                with self.assertRaisesRegex(
-                    ValueError, "trace intent source inventory is stale"
-                ):
+                with self.assertRaisesRegex(ValueError, "trace intent source inventory is stale"):
                     CONTROLLER.trace_impact(request)
                 self.assertNotIn(
                     "graph_trace_intent",
                     CONTROLLER.load_draft(self.root, draft.draft_id),
                 )
                 fresh = CONTROLLER.trace_impact(request)
-                self.assertTrue(any(
-                    node["location"] == f"desktop/late_{replacement_kind}.py"
-                    for node in fresh.compact_graph["nodes"]
-                ))
+                self.assertTrue(
+                    any(
+                        node["location"] == f"desktop/late_{replacement_kind}.py"
+                        for node in fresh.compact_graph["nodes"]
+                    )
+                )
 
     def test_stale_cleanup_guard_interruption_recovers_before_receipt_loading(self):
         self.enable_builtin_graph()
-        draft = CONTROLLER.begin_refinement(
-            self.request(request="Interrupted stale cleanup guard")
-        )
+        draft = CONTROLLER.begin_refinement(self.request(request="Interrupted stale cleanup guard"))
         request = CONTROLLER.TraceRequest(
             self.root,
             draft.draft_id,
-            (
-                CONTROLLER.TraceSeed(
-                    "profile.displayName", "api/profile.py"
-                ),
-            ),
+            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
         )
         with mock.patch.object(
             CONTROLLER,
             "_bind_trace_receipt",
             side_effect=ValueError("stop after receipt publication"),
         ):
-            with self.assertRaisesRegex(
-                ValueError, "stop after receipt publication"
-            ):
+            with self.assertRaisesRegex(ValueError, "stop after receipt publication"):
                 CONTROLLER.trace_impact(request)
-        intent = CONTROLLER.load_draft(
-            self.root, draft.draft_id
-        )["graph_trace_intent"]
+        intent = CONTROLLER.load_draft(self.root, draft.draft_id)["graph_trace_intent"]
         (self.root / "desktop/interrupted_cleanup.py").write_text(
             'FIELD = "profile.displayName"\n', encoding="utf-8"
         )
@@ -2062,23 +2027,24 @@ class RirControllerTest(unittest.TestCase):
                 raise SimulatedProcessInterruption("stale-cleanup-guard")
             return real_rename(directory_fd, source, destination)
 
-        with mock.patch.object(
-            CONTROLLER.os,
-            "unlink",
-            side_effect=interrupt_before_quarantine_cleanup,
-        ), mock.patch.object(
-            CONTROLLER,
-            "_rename_noreplace",
-            side_effect=interrupt_before_quarantine_rename,
+        with (
+            mock.patch.object(
+                CONTROLLER.os,
+                "unlink",
+                side_effect=interrupt_before_quarantine_cleanup,
+            ),
+            mock.patch.object(
+                CONTROLLER,
+                "_rename_noreplace",
+                side_effect=interrupt_before_quarantine_rename,
+            ),
         ):
             with self.assertRaises(SimulatedProcessInterruption):
                 CONTROLLER.trace_impact(request)
 
         self.assertTrue(interrupted)
         self.assertEqual(
-            CONTROLLER.load_draft(
-                self.root, draft.draft_id
-            )["graph_trace_intent"],
+            CONTROLLER.load_draft(self.root, draft.draft_id)["graph_trace_intent"],
             intent,
         )
         with mock.patch.object(
@@ -2086,9 +2052,7 @@ class RirControllerTest(unittest.TestCase):
             "trace_impact",
             side_effect=AssertionError("guard recovery must not republish"),
         ):
-            with self.assertRaisesRegex(
-                ValueError, "trace intent source inventory is stale"
-            ):
+            with self.assertRaisesRegex(ValueError, "trace intent source inventory is stale"):
                 CONTROLLER.trace_impact(request)
         self.assertNotIn(
             "graph_trace_intent",
@@ -2096,18 +2060,16 @@ class RirControllerTest(unittest.TestCase):
         )
         graph_dir = self.root / ".requirements-impact-refiner/graph"
         self.assertEqual(
-            sorted(
-                path.name
-                for path in graph_dir.iterdir()
-                if draft.draft_id in path.name
-            ),
+            sorted(path.name for path in graph_dir.iterdir() if draft.draft_id in path.name),
             [],
         )
         fresh = CONTROLLER.trace_impact(request)
-        self.assertTrue(any(
-            node["location"] == "desktop/interrupted_cleanup.py"
-            for node in fresh.compact_graph["nodes"]
-        ))
+        self.assertTrue(
+            any(
+                node["location"] == "desktop/interrupted_cleanup.py"
+                for node in fresh.compact_graph["nodes"]
+            )
+        )
 
     def test_trace_preserves_deadline_and_provider_failure_statuses(self):
         self.enable_builtin_graph()
@@ -2128,8 +2090,9 @@ class RirControllerTest(unittest.TestCase):
                 clock.current = 30.0
                 yield
 
-        with mock.patch.object(CONTROLLER, "time", clock), mock.patch.object(
-            CONTROLLER, "_report_lock", side_effect=expire_after_lock
+        with (
+            mock.patch.object(CONTROLLER, "time", clock),
+            mock.patch.object(CONTROLLER, "_report_lock", side_effect=expire_after_lock),
         ):
             deadline = CONTROLLER.trace_impact(
                 CONTROLLER.TraceRequest(
@@ -2148,9 +2111,7 @@ class RirControllerTest(unittest.TestCase):
         (self.root / ".requirements-impact-refiner.json").write_text(
             json.dumps(config), encoding="utf-8"
         )
-        provider_draft = CONTROLLER.begin_refinement(
-            self.request(request="Provider fallback")
-        )
+        provider_draft = CONTROLLER.begin_refinement(self.request(request="Provider fallback"))
         probe = CONTROLLER.GRAPH_COORDINATOR.ProviderProbe(
             "scip", "ready", "verified-provider", Path("/bin/scip")
         )
@@ -2159,12 +2120,13 @@ class RirControllerTest(unittest.TestCase):
             def probe(self, *args, **kwargs):
                 raise ValueError("injected provider failure")
 
-        with mock.patch.object(
-            CONTROLLER.GRAPH_COORDINATOR,
-            "discover_providers",
-            return_value=(probe,),
-        ), mock.patch.object(
-            CONTROLLER.GRAPH_COORDINATOR, "ADAPTERS", {"scip": FailingAdapter()}
+        with (
+            mock.patch.object(
+                CONTROLLER.GRAPH_COORDINATOR,
+                "discover_providers",
+                return_value=(probe,),
+            ),
+            mock.patch.object(CONTROLLER.GRAPH_COORDINATOR, "ADAPTERS", {"scip": FailingAdapter()}),
         ):
             provider = CONTROLLER.trace_impact(
                 CONTROLLER.TraceRequest(
@@ -2173,10 +2135,7 @@ class RirControllerTest(unittest.TestCase):
                     (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
                 )
             )
-        statuses = {
-            row["name"]: row["status"]
-            for row in provider.compact_graph["providers"]
-        }
+        statuses = {row["name"]: row["status"] for row in provider.compact_graph["providers"]}
         self.assertEqual(statuses["scip"], "failed")
         self.assertIn("builtin", statuses)
 
@@ -2194,9 +2153,7 @@ class RirControllerTest(unittest.TestCase):
             draft.draft_id,
             (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
         )
-        report_dir = (
-            self.root / ".requirements-impact-refiner/reports" / draft.report_id
-        )
+        report_dir = self.root / ".requirements-impact-refiner/reports" / draft.report_id
         report_dir.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(report_dir / ".controller.lock", os.O_RDWR | os.O_CREAT, 0o600)
         CONTROLLER.fcntl.flock(descriptor, CONTROLLER.fcntl.LOCK_EX)
@@ -2237,8 +2194,9 @@ class RirControllerTest(unittest.TestCase):
                 clock.current = 30.0
                 yield
 
-        with mock.patch.object(CONTROLLER, "time", clock), mock.patch.object(
-            CONTROLLER, "_report_lock", side_effect=expire_after_lock
+        with (
+            mock.patch.object(CONTROLLER, "time", clock),
+            mock.patch.object(CONTROLLER, "_report_lock", side_effect=expire_after_lock),
         ):
             receipt = CONTROLLER.trace_impact(
                 CONTROLLER.TraceRequest(
@@ -2249,10 +2207,12 @@ class RirControllerTest(unittest.TestCase):
             )
         self.assertEqual(receipt.budget_status, "budget_exhausted")
         self.assertTrue(receipt.compact_graph["frontier"])
-        self.assertTrue(any(
-            "source inventory incomplete" in row["reason"]
-            for row in receipt.compact_graph["frontier"]
-        ))
+        self.assertTrue(
+            any(
+                "source inventory incomplete" in row["reason"]
+                for row in receipt.compact_graph["frontier"]
+            )
+        )
         binding = CONTROLLER.load_draft(self.root, draft.draft_id)["graph_receipt"]
         self.assertFalse(binding["source_inventory_complete"])
         analysis = self.fixture("controller-analysis-pre-decision.json")
@@ -2262,15 +2222,10 @@ class RirControllerTest(unittest.TestCase):
         )
         analysis["impacts"][0]["evidence_level"] = "unknown"
 
-        result = CONTROLLER.finalize_refinement(
-            self.finalize(draft, analysis, receipt)
-        )
+        result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
         state = json.loads(result.state_path.read_text(encoding="utf-8"))
-        coverage = next(
-            row for row in state["scope"]
-            if row["boundary"] == "Impact graph coverage"
-        )
+        coverage = next(row for row in state["scope"] if row["boundary"] == "Impact graph coverage")
         self.assertIn("unknown frontiers", coverage["evidence"])
         self.assertIn("budget_exhausted", coverage["confidence"])
 
@@ -2294,10 +2249,12 @@ class RirControllerTest(unittest.TestCase):
         self.assertFalse(binding["source_inventory_complete"])
         self.assertEqual(binding["source_inventory_reason"], "collection-limit")
         self.assertNotEqual(receipt.budget_status, "closed")
-        self.assertTrue(any(
-            "source inventory incomplete" in row["reason"]
-            for row in receipt.compact_graph["frontier"]
-        ))
+        self.assertTrue(
+            any(
+                "source inventory incomplete" in row["reason"]
+                for row in receipt.compact_graph["frontier"]
+            )
+        )
         analysis = self.fixture("controller-analysis-pre-decision.json")
         analysis["impacts"][0]["graph_path_keys"] = [
             row["key"] for row in receipt.compact_graph["paths"]
@@ -2308,9 +2265,7 @@ class RirControllerTest(unittest.TestCase):
             )
         analysis["impacts"][0]["evidence_level"] = "unknown"
 
-        result = CONTROLLER.finalize_refinement(
-            self.finalize(draft, analysis, receipt)
-        )
+        result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
         self.assertEqual(result.status, "published")
 
@@ -2337,14 +2292,10 @@ class RirControllerTest(unittest.TestCase):
         if not analysis["impacts"][0]["graph_path_keys"]:
             analysis["impacts"][0]["coverage_rationale"] = "Unknown bounded inventory."
         analysis["impacts"][0]["evidence_level"] = "unknown"
-        (self.root / "api/profile.py").write_text(
-            'FIELD = "profile.changed"\n', encoding="utf-8"
-        )
+        (self.root / "api/profile.py").write_text('FIELD = "profile.changed"\n', encoding="utf-8")
 
         with self.assertRaisesRegex(ValueError, "stale"):
-            CONTROLLER.finalize_refinement(
-                self.finalize(draft, analysis, receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
     def test_finalize_rejects_uncovered_high_risk_graph_node(self):
         self.enable_builtin_graph()
@@ -2394,23 +2345,15 @@ class RirControllerTest(unittest.TestCase):
             row["key"] for row in receipt.compact_graph["paths"]
         ]
         analysis["impacts"][0]["evidence_level"] = "unknown"
-        self.assertTrue(any(
-            row["distance"] >= 3 for row in receipt.compact_graph["paths"]
-        ))
+        self.assertTrue(any(row["distance"] >= 3 for row in receipt.compact_graph["paths"]))
 
-        result = CONTROLLER.finalize_refinement(
-            self.finalize(draft, analysis, receipt)
-        )
+        result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
         state = json.loads(result.state_path.read_text(encoding="utf-8"))
         path_scope = next(
-            row for row in state["scope"]
-            if row["boundary"] == "Graph paths for IMP-001"
+            row for row in state["scope"] if row["boundary"] == "Graph paths for IMP-001"
         )
-        coverage = next(
-            row for row in state["scope"]
-            if row["boundary"] == "Impact graph coverage"
-        )
+        coverage = next(row for row in state["scope"] if row["boundary"] == "Impact graph coverage")
         self.assertIn("PATH-", path_scope["evidence"])
         self.assertIn("profile.displayName", path_scope["evidence"])
         self.assertIn("Impact scan:", coverage["evidence"])
@@ -2424,9 +2367,7 @@ class RirControllerTest(unittest.TestCase):
         self.assertTrue(state["graph_paths"][0]["paths"][0]["providers"])
         self.assertIn("PATH-", result.display_text)
         metadata = json.loads(
-            result.state_path.with_name("revision-0001.controller.json").read_text(
-                encoding="utf-8"
-            )
+            result.state_path.with_name("revision-0001.controller.json").read_text(encoding="utf-8")
         )
         self.assertEqual(
             metadata["graph_receipt"],
@@ -2439,7 +2380,9 @@ class RirControllerTest(unittest.TestCase):
         (self.root / "events/profile.py").write_text("EVENT = True\n", encoding="utf-8")
         config = json.loads((self.root / ".requirements-impact-refiner.json").read_text())
         config["impact_graph"]["providers"] = ["codegraph", "scip"]
-        (self.root / ".requirements-impact-refiner.json").write_text(json.dumps(config), encoding="utf-8")
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(config), encoding="utf-8"
+        )
         draft = CONTROLLER.begin_refinement(self.request(audience_override="technical"))
         special_label = "<profile || `wire|field`> " + "long-label " * 40
 
@@ -2450,31 +2393,116 @@ class RirControllerTest(unittest.TestCase):
                 CONTROLLER.GRAPH.ProviderStatus("scip", "ready", "verified-provider"),
             )
             request_sha = CONTROLLER.GRAPH_COORDINATOR._request_sha256(graph_draft, seeds, settings)
-            receipt_id = CONTROLLER.GRAPH_COORDINATOR._trace_identity(root, graph_draft["draft_id"], request_sha, seeds, settings, providers)
-            digest = lambda path: hashlib.sha256((root / path).read_bytes()).hexdigest()
-            receipt = CONTROLLER.GRAPH.GraphReceipt(
-                receipt_id, graph_draft["draft_id"], hashlib.sha256(str(root).encode()).hexdigest(), request_sha, settings, providers,
-                (
-                    CONTROLLER.GRAPH.GraphNode("NODE-001", "api_field", special_label, "api/profile.py", "codegraph", "verified-provider", digest("api/profile.py"), ("interfaces",)),
-                    CONTROLLER.GRAPH.GraphNode("NODE-002", "cache", "desktop cache", "desktop/profile_cache.ts", "scip", "verified-provider", digest("desktop/profile_cache.ts"), ("data",)),
-                    CONTROLLER.GRAPH.GraphNode("NODE-003", "event", "event consumer", "events/profile.py", "codegraph", "verified-provider", digest("events/profile.py"), ("operations",)),
-                ),
-                (
-                    CONTROLLER.GRAPH.GraphEdge("EDGE-001", "NODE-001", "NODE-002", "references", "desktop/profile_cache.ts", "wire", "verified-provider", "scip", digest("desktop/profile_cache.ts")),
-                    CONTROLLER.GRAPH.GraphEdge("EDGE-002", "NODE-001", "NODE-003", "publishes", "events/profile.py", "wire", "verified-provider", "codegraph", digest("events/profile.py")),
-                ),
-                (
-                    CONTROLLER.GRAPH.GraphPath("PATH-001", ("NODE-001", "NODE-002"), ("EDGE-001",), 1, ("interfaces", "data")),
-                    CONTROLLER.GRAPH.GraphPath("PATH-002", ("NODE-001", "NODE-003"), ("EDGE-002",), 1, ("interfaces", "operations")),
-                ), (), {"total": 8400}, "closed", {"status": "miss", "key": "0" * 64, "invalidated_nodes": []},
+            receipt_id = CONTROLLER.GRAPH_COORDINATOR._trace_identity(
+                root, graph_draft["draft_id"], request_sha, seeds, settings, providers
             )
-            published = CONTROLLER.GRAPH_COORDINATOR.CACHE.publish(root, receipt, kwargs["source_inventory"].digests)
-            receipt = replace(receipt, cache={"status": "miss", "key": published.key, "invalidated_nodes": []})
+
+            def digest(path):
+                return hashlib.sha256((root / path).read_bytes()).hexdigest()
+
+            receipt = CONTROLLER.GRAPH.GraphReceipt(
+                receipt_id,
+                graph_draft["draft_id"],
+                hashlib.sha256(str(root).encode()).hexdigest(),
+                request_sha,
+                settings,
+                providers,
+                (
+                    CONTROLLER.GRAPH.GraphNode(
+                        "NODE-001",
+                        "api_field",
+                        special_label,
+                        "api/profile.py",
+                        "codegraph",
+                        "verified-provider",
+                        digest("api/profile.py"),
+                        ("interfaces",),
+                    ),
+                    CONTROLLER.GRAPH.GraphNode(
+                        "NODE-002",
+                        "cache",
+                        "desktop cache",
+                        "desktop/profile_cache.ts",
+                        "scip",
+                        "verified-provider",
+                        digest("desktop/profile_cache.ts"),
+                        ("data",),
+                    ),
+                    CONTROLLER.GRAPH.GraphNode(
+                        "NODE-003",
+                        "event",
+                        "event consumer",
+                        "events/profile.py",
+                        "codegraph",
+                        "verified-provider",
+                        digest("events/profile.py"),
+                        ("operations",),
+                    ),
+                ),
+                (
+                    CONTROLLER.GRAPH.GraphEdge(
+                        "EDGE-001",
+                        "NODE-001",
+                        "NODE-002",
+                        "references",
+                        "desktop/profile_cache.ts",
+                        "wire",
+                        "verified-provider",
+                        "scip",
+                        digest("desktop/profile_cache.ts"),
+                    ),
+                    CONTROLLER.GRAPH.GraphEdge(
+                        "EDGE-002",
+                        "NODE-001",
+                        "NODE-003",
+                        "publishes",
+                        "events/profile.py",
+                        "wire",
+                        "verified-provider",
+                        "codegraph",
+                        digest("events/profile.py"),
+                    ),
+                ),
+                (
+                    CONTROLLER.GRAPH.GraphPath(
+                        "PATH-001",
+                        ("NODE-001", "NODE-002"),
+                        ("EDGE-001",),
+                        1,
+                        ("interfaces", "data"),
+                    ),
+                    CONTROLLER.GRAPH.GraphPath(
+                        "PATH-002",
+                        ("NODE-001", "NODE-003"),
+                        ("EDGE-002",),
+                        1,
+                        ("interfaces", "operations"),
+                    ),
+                ),
+                (),
+                {"total": 8400},
+                "closed",
+                {"status": "miss", "key": "0" * 64, "invalidated_nodes": []},
+            )
+            published = CONTROLLER.GRAPH_COORDINATOR.CACHE.publish(
+                root, receipt, kwargs["source_inventory"].digests
+            )
+            receipt = replace(
+                receipt, cache={"status": "miss", "key": published.key, "invalidated_nodes": []}
+            )
             CONTROLLER.GRAPH_COORDINATOR._persist_receipt(root, receipt)
             return receipt
 
-        with mock.patch.object(CONTROLLER.GRAPH_COORDINATOR, "trace_impact", side_effect=fake_trace):
-            receipt = CONTROLLER.trace_impact(CONTROLLER.TraceRequest(self.root, draft.draft_id, (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),)))
+        with mock.patch.object(
+            CONTROLLER.GRAPH_COORDINATOR, "trace_impact", side_effect=fake_trace
+        ):
+            receipt = CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
         analysis = self.fixture("controller-analysis-pre-decision.json")
         analysis["impacts"][0]["graph_path_keys"] = ["PATH-001", "PATH-002"]
         analysis["impacts"][0]["evidence_level"] = "unknown"
@@ -2512,20 +2540,17 @@ class RirControllerTest(unittest.TestCase):
             expected_second_path,
         )
 
-        rendered_reload = CONTROLLER.impact_renderer.render_compact(
-            reloaded_state
-        ).removesuffix("\n")
+        rendered_reload = CONTROLLER.impact_renderer.render_compact(reloaded_state).removesuffix(
+            "\n"
+        )
         self.assertEqual(rendered_reload, result.display_text)
         displayed_path_lines = [
-            line
-            for line in rendered_reload.splitlines()
-            if line.startswith("- `IMP-001`:")
+            line for line in rendered_reload.splitlines() if line.startswith("- `IMP-001`:")
         ]
         self.assertEqual(len(displayed_path_lines), 1)
         displayed_path = displayed_path_lines[0]
         self.assertIn(
-            "PATH-001: &lt;profile &#124;&#124; "
-            "&#96;wire&#124;field&#96;&gt;",
+            "PATH-001: &lt;profile &#124;&#124; &#96;wire&#124;field&#96;&gt;",
             displayed_path,
         )
         self.assertIn(
@@ -2560,19 +2585,13 @@ class RirControllerTest(unittest.TestCase):
         )
         analysis["impacts"][0]["evidence_level"] = "unknown"
 
-        result = CONTROLLER.finalize_refinement(
-            self.finalize(draft, analysis, receipt)
-        )
+        result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
         state = json.loads(result.state_path.read_text(encoding="utf-8"))
         path_scope = next(
-            row for row in state["scope"]
-            if row["boundary"] == "Graph paths for IMP-001"
+            row for row in state["scope"] if row["boundary"] == "Graph paths for IMP-001"
         )
-        coverage = next(
-            row for row in state["scope"]
-            if row["boundary"] == "Impact graph coverage"
-        )
+        coverage = next(row for row in state["scope"] if row["boundary"] == "Impact graph coverage")
         self.assertIn("Supplied-only", path_scope["evidence"])
         self.assertIn("unknown frontiers", coverage["evidence"])
         self.assertIn("FRONTIER-", coverage["confidence"])
@@ -2593,9 +2612,7 @@ class RirControllerTest(unittest.TestCase):
             with self.subTest(key=key):
                 analysis["impacts"][0]["graph_path_keys"] = [key]
                 with self.assertRaisesRegex(ValueError, f"{message} graph path key"):
-                    CONTROLLER.finalize_refinement(
-                        self.finalize(draft, analysis, receipt)
-                    )
+                    CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
     def test_finalize_rejects_confidence_upgrade_and_lexical_only_resolution(self):
         self.enable_builtin_graph()
@@ -2613,16 +2630,12 @@ class RirControllerTest(unittest.TestCase):
         ]
         analysis["impacts"][0]["evidence_level"] = "verified"
         with self.assertRaisesRegex(ValueError, "upgrades graph path evidence"):
-            CONTROLLER.finalize_refinement(
-                self.finalize(draft, analysis, receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
         analysis["impacts"][0]["evidence_level"] = "unknown"
         analysis["impacts"][0]["state"] = "resolved"
         with self.assertRaisesRegex(ValueError, "solely on lexical"):
-            CONTROLLER.finalize_refinement(
-                self.finalize(draft, analysis, receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
     def test_finalize_rejects_missing_mismatched_tampered_and_stale_receipts(self):
         self.enable_builtin_graph()
@@ -2635,7 +2648,7 @@ class RirControllerTest(unittest.TestCase):
             CONTROLLER.finalize_refinement(self.finalize(missing, analysis))
 
         mismatch = CONTROLLER.begin_refinement(self.request(request="Mismatch"))
-        mismatch_receipt = CONTROLLER.trace_impact(
+        CONTROLLER.trace_impact(
             CONTROLLER.TraceRequest(
                 self.root,
                 mismatch.draft_id,
@@ -2644,9 +2657,7 @@ class RirControllerTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "does not match selected"):
             CONTROLLER.finalize_refinement(
-                CONTROLLER.FinalizeRequest(
-                    self.root, mismatch.draft_id, analysis, "0" * 32
-                )
+                CONTROLLER.FinalizeRequest(self.root, mismatch.draft_id, analysis, "0" * 32)
             )
 
         tampered = CONTROLLER.begin_refinement(self.request(request="Tampered"))
@@ -2661,9 +2672,7 @@ class RirControllerTest(unittest.TestCase):
             tampered_receipt.receipt_path.read_bytes() + b"\n"
         )
         with self.assertRaisesRegex(ValueError, "canonical|tampered"):
-            CONTROLLER.finalize_refinement(
-                self.finalize(tampered, analysis, tampered_receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(tampered, analysis, tampered_receipt))
 
         stale = CONTROLLER.begin_refinement(self.request(request="Stale"))
         stale_receipt = CONTROLLER.trace_impact(
@@ -2673,13 +2682,9 @@ class RirControllerTest(unittest.TestCase):
                 (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
             )
         )
-        (self.root / "api/profile.py").write_text(
-            'FIELD = "profile.renamed"\n', encoding="utf-8"
-        )
+        (self.root / "api/profile.py").write_text('FIELD = "profile.renamed"\n', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "stale"):
-            CONTROLLER.finalize_refinement(
-                self.finalize(stale, analysis, stale_receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(stale, analysis, stale_receipt))
 
     def test_finalize_rejects_new_relevant_source_outside_receipt_inventory(self):
         self.enable_builtin_graph()
@@ -2701,9 +2706,7 @@ class RirControllerTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "source inventory is stale"):
-            CONTROLLER.finalize_refinement(
-                self.finalize(draft, analysis, receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
         self.assertFalse(
             (self.root / ".requirements-impact-refiner/reports/RPT-001/current.json").exists()
@@ -2729,14 +2732,13 @@ class RirControllerTest(unittest.TestCase):
         )
         current = CONTROLLER.GRAPH_COORDINATOR._collect_source_digests(
             self.root,
-            CONTROLLER.GRAPH_COORDINATOR.Deadline(
-                CONTROLLER.time, 30
-            ),
+            CONTROLLER.GRAPH_COORDINATOR.Deadline(CONTROLLER.time, 30),
         )
-        rebound = hashlib.sha256(json.dumps(
-            dict(current.digests), ensure_ascii=False, sort_keys=True,
-            separators=(",", ":")
-        ).encode("utf-8")).hexdigest()
+        rebound = hashlib.sha256(
+            json.dumps(
+                dict(current.digests), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
         stored = CONTROLLER.load_draft(self.root, draft.draft_id)
         stored["graph_receipt"]["source_inventory_sha256"] = rebound
         CONTROLLER._replace_private_draft(self.root, draft.draft_id, stored)
@@ -2744,9 +2746,7 @@ class RirControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(
             ValueError, "trace intent request|inventory cache does not match binding"
         ):
-            CONTROLLER.finalize_refinement(
-                self.finalize(draft, analysis, receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
     def test_finalize_rejects_deleted_and_renamed_unmapped_inventory_sources(self):
         self.enable_builtin_graph()
@@ -2803,9 +2803,7 @@ class RirControllerTest(unittest.TestCase):
         stored["request"] = "Replaced request"
         CONTROLLER._replace_private_draft(self.root, request_draft.draft_id, stored)
         with self.assertRaisesRegex(ValueError, "identity"):
-            CONTROLLER.finalize_refinement(
-                self.finalize(request_draft, analysis, request_receipt)
-            )
+            CONTROLLER.finalize_refinement(self.finalize(request_draft, analysis, request_receipt))
 
         forged_draft = CONTROLLER.begin_refinement(self.request(request="Forged ID"))
         forged_receipt = CONTROLLER.trace_impact(
@@ -2815,41 +2813,31 @@ class RirControllerTest(unittest.TestCase):
                 (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
             )
         )
-        receipt_value = json.loads(
-            forged_receipt.receipt_path.read_text(encoding="utf-8")
-        )
+        receipt_value = json.loads(forged_receipt.receipt_path.read_text(encoding="utf-8"))
         receipt_value["receipt_id"] = "0" * 32
         forged_payload = CONTROLLER.GRAPH.canonical_receipt_bytes(receipt_value)
         forged_receipt.receipt_path.write_bytes(forged_payload)
         forged_binding = CONTROLLER.load_draft(self.root, forged_draft.draft_id)
         forged_binding["graph_receipt"]["receipt_id"] = "0" * 32
-        forged_binding["graph_receipt"]["sha256"] = (
-            CONTROLLER.hashlib.sha256(forged_payload).hexdigest()
-        )
-        CONTROLLER._replace_private_draft(
-            self.root, forged_draft.draft_id, forged_binding
-        )
+        forged_binding["graph_receipt"]["sha256"] = CONTROLLER.hashlib.sha256(
+            forged_payload
+        ).hexdigest()
+        CONTROLLER._replace_private_draft(self.root, forged_draft.draft_id, forged_binding)
         with self.assertRaisesRegex(ValueError, "identity"):
             CONTROLLER.finalize_refinement(
-                CONTROLLER.FinalizeRequest(
-                    self.root, forged_draft.draft_id, analysis, "0" * 32
-                )
+                CONTROLLER.FinalizeRequest(self.root, forged_draft.draft_id, analysis, "0" * 32)
             )
 
     def test_graph_disabled_finalize_remains_backward_compatible(self):
         draft = CONTROLLER.begin_refinement(self.request())
 
         result = CONTROLLER.finalize_refinement(
-            self.finalize(
-                draft, self.fixture("controller-analysis-pre-decision.json")
-            )
+            self.finalize(draft, self.fixture("controller-analysis-pre-decision.json"))
         )
 
         state = json.loads(result.state_path.read_text(encoding="utf-8"))
         self.assertFalse(state["settings"]["impact_graph"]["enabled"])
-        self.assertFalse(any(
-            row["boundary"] == "Impact graph coverage" for row in state["scope"]
-        ))
+        self.assertFalse(any(row["boundary"] == "Impact graph coverage" for row in state["scope"]))
 
     def test_begin_creates_repository_bound_private_draft(self):
         result = CONTROLLER.begin_refinement(self.request())
@@ -2866,13 +2854,9 @@ class RirControllerTest(unittest.TestCase):
 
     def test_begin_migrates_valid_precontroller_report_lineage(self):
         state = self.fixture("compact-state-pre-decision.json")
-        CONTROLLER.report_store.publish_revision(
-            self.root, CONTROLLER._canonical_bytes(state)
-        )
+        CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(state))
 
-        result = CONTROLLER.begin_refinement(
-            self.request(request="Revise legacy report.")
-        )
+        result = CONTROLLER.begin_refinement(self.request(request="Revise legacy report."))
 
         self.assertEqual(result.report_id, "RPT-001")
         self.assertEqual(result.revision, 2)
@@ -2905,9 +2889,7 @@ class RirControllerTest(unittest.TestCase):
             'const key = "profile.displayName";\n', encoding="utf-8"
         )
         draft = CONTROLLER.begin_refinement(self.request())
-        with mock.patch.object(
-            CONTROLLER.GRAPH_COORDINATOR, "discover_providers", return_value=()
-        ):
+        with mock.patch.object(CONTROLLER.GRAPH_COORDINATOR, "discover_providers", return_value=()):
             receipt = CONTROLLER.trace_impact(
                 CONTROLLER.TraceRequest(
                     self.root,
@@ -2920,9 +2902,7 @@ class RirControllerTest(unittest.TestCase):
             row["key"] for row in receipt.compact_graph["paths"]
         ]
         analysis["impacts"][0]["evidence_level"] = "unknown"
-        result = CONTROLLER.finalize_refinement(
-            self.finalize(draft, analysis, receipt)
-        )
+        result = CONTROLLER.finalize_refinement(self.finalize(draft, analysis, receipt))
 
         state = json.loads(result.state_path.read_text(encoding="utf-8"))
         self.assertEqual(state["settings"]["impact_graph"]["max_seconds"], 30)
@@ -2930,9 +2910,7 @@ class RirControllerTest(unittest.TestCase):
 
     def test_begin_rejects_oversized_request_and_non_directory_root(self):
         with self.assertRaisesRegex(ValueError, "256 KiB"):
-            CONTROLLER.begin_refinement(
-                self.request(request="x" * (256 * 1024 + 1))
-            )
+            CONTROLLER.begin_refinement(self.request(request="x" * (256 * 1024 + 1)))
         file_root = self.root / "file"
         file_root.write_text("x", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "repository root"):
@@ -2941,9 +2919,7 @@ class RirControllerTest(unittest.TestCase):
     def test_predecision_finalize_allocates_ids_and_embeds_question(self):
         draft = CONTROLLER.begin_refinement(self.request())
         result = CONTROLLER.finalize_refinement(
-            self.finalize(
-                draft, self.fixture("controller-analysis-pre-decision.json")
-            )
+            self.finalize(draft, self.fixture("controller-analysis-pre-decision.json"))
         )
 
         self.assertEqual(result.status, "published")
@@ -2957,14 +2933,10 @@ class RirControllerTest(unittest.TestCase):
         self.assertEqual(state["current_behavior"][0]["id"], "INV-001")
 
     def test_superpowers_adapter_gets_exact_controller_owned_handoff_marker(self):
-        draft = CONTROLLER.begin_refinement(
-            self.request(adapter="superpowers")
-        )
+        draft = CONTROLLER.begin_refinement(self.request(adapter="superpowers"))
 
         result = CONTROLLER.finalize_refinement(
-            self.finalize(
-                draft, self.fixture("controller-analysis-pre-decision.json")
-            )
+            self.finalize(draft, self.fixture("controller-analysis-pre-decision.json"))
         )
         state = json.loads(result.state_path.read_text(encoding="utf-8"))
 
@@ -2986,9 +2958,7 @@ class RirControllerTest(unittest.TestCase):
     def test_postdecision_finalize_allocates_decision_and_consumes_draft(self):
         draft = CONTROLLER.begin_refinement(self.request())
         result = CONTROLLER.finalize_refinement(
-            self.finalize(
-                draft, self.fixture("controller-analysis-post-decision.json")
-            )
+            self.finalize(draft, self.fixture("controller-analysis-post-decision.json"))
         )
 
         state = json.loads(result.state_path.read_text(encoding="utf-8"))
@@ -2998,16 +2968,12 @@ class RirControllerTest(unittest.TestCase):
         self.assertTrue(stored["consumed"])
         with self.assertRaisesRegex(ValueError, "consumed"):
             CONTROLLER.finalize_refinement(
-                self.finalize(
-                    draft, self.fixture("controller-analysis-post-decision.json")
-                )
+                self.finalize(draft, self.fixture("controller-analysis-post-decision.json"))
             )
 
     def test_finalize_retry_completes_consumption_after_post_publish_failure(self):
         draft = CONTROLLER.begin_refinement(self.request())
-        request = self.finalize(
-            draft, self.fixture("controller-analysis-pre-decision.json")
-        )
+        request = self.finalize(draft, self.fixture("controller-analysis-pre-decision.json"))
         real_consume = CONTROLLER._consume
         with mock.patch.object(
             CONTROLLER,
@@ -3026,15 +2992,16 @@ class RirControllerTest(unittest.TestCase):
 
     def test_controller_metadata_is_never_exposed_partially_and_retry_succeeds(self):
         draft = CONTROLLER.begin_refinement(self.request())
-        request = self.finalize(
-            draft, self.fixture("controller-analysis-pre-decision.json")
-        )
+        request = self.finalize(draft, self.fixture("controller-analysis-pre-decision.json"))
         with mock.patch.object(CONTROLLER.os, "link", side_effect=OSError("injected link failure")):
             with self.assertRaisesRegex(ValueError, "cannot write controller lineage"):
                 CONTROLLER.finalize_refinement(request)
         metadata = (
-            self.root / ".requirements-impact-refiner" / "reports" /
-            "RPT-001" / "revision-0001.controller.json"
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
         )
         self.assertFalse(metadata.exists())
 
@@ -3058,8 +3025,11 @@ class RirControllerTest(unittest.TestCase):
         )
 
         path = (
-            self.root / ".requirements-impact-refiner" / "reports" /
-            "RPT-001" / "revision-0001.controller.json"
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
         )
         stored = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(
@@ -3115,9 +3085,7 @@ class RirControllerTest(unittest.TestCase):
         analysis["impacts"][0]["decision_keys"] = []
         analysis["decisions"][0]["accepted_impact_keys"] = []
 
-        second = CONTROLLER.finalize_refinement(
-            self.finalize(second_draft, analysis)
-        )
+        second = CONTROLLER.finalize_refinement(self.finalize(second_draft, analysis))
         state = json.loads(second.state_path.read_text(encoding="utf-8"))
 
         self.assertEqual(second_draft.report_id, "RPT-001")

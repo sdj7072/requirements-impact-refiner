@@ -3,17 +3,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import sys
 import tempfile
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 def _load_graph_contract():
@@ -34,16 +35,33 @@ def _load_graph_contract():
 GRAPH = _load_graph_contract()
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _CACHE_COMPONENTS = (
-    ".requirements-impact-refiner", "cache", "graph", "v1",
+    ".requirements-impact-refiner",
+    "cache",
+    "graph",
+    "v1",
 )
-_CACHE_FIELDS = frozenset({
-    "cache_schema_version", "identity", "receipt", "source_digests",
-})
-_IDENTITY_FIELDS = frozenset({
-    "graph_schema_version", "repo_root_sha256", "settings", "providers",
-    "source_digests", "receipt_id", "draft_id", "request_sha256",
-    "source_inventory_complete", "source_inventory_reason",
-})
+_CACHE_FIELDS = frozenset(
+    {
+        "cache_schema_version",
+        "identity",
+        "receipt",
+        "source_digests",
+    }
+)
+_IDENTITY_FIELDS = frozenset(
+    {
+        "graph_schema_version",
+        "repo_root_sha256",
+        "settings",
+        "providers",
+        "source_digests",
+        "receipt_id",
+        "draft_id",
+        "request_sha256",
+        "source_inventory_complete",
+        "source_inventory_reason",
+    }
+)
 _INVENTORY_REASONS = frozenset({"deadline", "collection-limit", "traversal", "unreadable-source"})
 MAX_CACHE_BYTES = GRAPH.MAX_RECEIPT_BYTES * 2
 
@@ -83,9 +101,9 @@ def _source_digests(value: Mapping[str, str]) -> dict[str, str]:
 
 
 def _canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
 
 
 def _cache_directory(root: Path, create: bool) -> Path | None:
@@ -106,7 +124,7 @@ def _cache_directory(root: Path, create: bool) -> Path | None:
                 current.mkdir(mode=0o700)
             except FileExistsError:
                 if current.is_symlink() or not current.is_dir():
-                    raise ValueError("cache component must not be a symlink")
+                    raise ValueError("cache component must not be a symlink") from None
             os.chmod(current, 0o700)
         else:
             return None
@@ -122,19 +140,23 @@ def _normalize_receipt(value) -> tuple[dict[str, Any], bytes]:
 
 
 def _identity(
-    root: Path, receipt: Mapping[str, Any], source_digests, schema_version: int,
-    inventory_complete: bool, inventory_reason: str | None,
+    root: Path,
+    receipt: Mapping[str, Any],
+    source_digests,
+    schema_version: int,
+    inventory_complete: bool,
+    inventory_reason: str | None,
 ):
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version < 1:
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version < 1
+    ):
         raise ValueError("schema_version must be a positive integer")
     if not isinstance(inventory_complete, bool):
         raise ValueError("inventory_complete must be boolean")
-    if (
-        (inventory_complete and inventory_reason is not None)
-        or (
-            not inventory_complete
-            and inventory_reason not in _INVENTORY_REASONS
-        )
+    if (inventory_complete and inventory_reason is not None) or (
+        not inventory_complete and inventory_reason not in _INVENTORY_REASONS
     ):
         raise ValueError("inventory completeness reason is invalid")
     return {
@@ -204,16 +226,22 @@ def publish(
     normalized_digests = _source_digests(source_digests)
     normalized_receipt, _ = _normalize_receipt(receipt)
     identity = _identity(
-        root, normalized_receipt, normalized_digests, schema_version,
-        inventory_complete, inventory_reason,
+        root,
+        normalized_receipt,
+        normalized_digests,
+        schema_version,
+        inventory_complete,
+        inventory_reason,
     )
     key = hashlib.sha256(_canonical_json(identity)).hexdigest()
-    payload = _canonical_json({
-        "cache_schema_version": 1,
-        "identity": identity,
-        "receipt": normalized_receipt,
-        "source_digests": normalized_digests,
-    })
+    payload = _canonical_json(
+        {
+            "cache_schema_version": 1,
+            "identity": identity,
+            "receipt": normalized_receipt,
+            "source_digests": normalized_digests,
+        }
+    )
     if len(payload) > MAX_CACHE_BYTES:
         raise ValueError("graph cache artifact exceeds maximum byte size")
     cache_dir = _cache_directory(root, True)
@@ -243,14 +271,10 @@ def invalidate(
     cached = _source_digests(cached_source_digests)
     current = _source_digests(current_source_digests)
     changed_paths = {
-        path for path in set(cached) | set(current)
-        if cached.get(path) != current.get(path)
+        path for path in set(cached) | set(current) if cached.get(path) != current.get(path)
     }
     nodes = receipt.get("nodes", ())
-    direct = {
-        node["id"] for node in nodes
-        if node.get("location") in changed_paths
-    }
+    direct = {node["id"] for node in nodes if node.get("location") in changed_paths}
     invalidated = set(direct)
     adjacency = {}
     for edge in receipt.get("edges", ()):
@@ -315,7 +339,11 @@ def load(
     identity = value.get("identity")
     cached = value.get("source_digests")
     receipt = value.get("receipt")
-    if not isinstance(identity, dict) or not isinstance(cached, dict) or not isinstance(receipt, dict):
+    if (
+        not isinstance(identity, dict)
+        or not isinstance(cached, dict)
+        or not isinstance(receipt, dict)
+    ):
         return _miss(key)
     try:
         cached = _source_digests(cached)
@@ -347,19 +375,21 @@ def load(
     if identity.get("providers") != normalized["providers"]:
         return _miss(key)
     schema_version = identity.get("graph_schema_version")
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version < 1:
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version < 1
+    ):
         return _miss(key)
     if hashlib.sha256(_canonical_json(identity)).hexdigest() != key:
         return _miss(key)
     if not complete:
         return _miss(key)
     changed_paths = {
-        path for path in set(cached) | set(current)
-        if cached.get(path) != current.get(path)
+        path for path in set(cached) | set(current) if cached.get(path) != current.get(path)
     }
     mapped_paths = {
-        node.get("location") for node in normalized["nodes"]
-        if node.get("location") is not None
+        node.get("location") for node in normalized["nodes"] if node.get("location") is not None
     }
     if not changed_paths <= mapped_paths:
         return _miss(key)

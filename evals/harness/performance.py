@@ -1,11 +1,11 @@
 """Deterministic compact-delivery performance observations and smoke gate."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from statistics import median
-from typing import Optional, Sequence, Tuple
+from typing import Optional
 
 from .models import RunStatus
-
 
 SMOKE_CASE_IDS = (
     "POS-authorization",
@@ -47,7 +47,7 @@ class PerformanceObservation:
     duration_ms: Optional[int]
     input_tokens: Optional[int]
     output_tokens: Optional[int]
-    impact_ids: Tuple[str, ...]
+    impact_ids: tuple[str, ...]
     state_markdown_match: bool
     workflow_boundary_passed: bool
     controller_begin_calls: int
@@ -62,7 +62,7 @@ class PerformanceObservation:
 @dataclass(frozen=True)
 class SmokeGateResult:
     passed: bool
-    errors: Tuple[str, ...]
+    errors: tuple[str, ...]
     median_output_words: float
     median_routed_resource_words: float
 
@@ -80,7 +80,7 @@ class GraphPerformanceObservation:
     output_words: int
     routed_resource_words: int
     receipt_state_provider_parity: bool
-    uncovered_high_risk_nodes: Tuple[str, ...]
+    uncovered_high_risk_nodes: tuple[str, ...]
     controller_begin_calls: int
     controller_trace_calls: int
     controller_finalize_calls: int
@@ -93,7 +93,7 @@ class GraphPerformanceObservation:
 @dataclass(frozen=True)
 class GraphSmokeGateResult:
     passed: bool
-    errors: Tuple[str, ...]
+    errors: tuple[str, ...]
     median_graph_duration_ms: float
     median_output_words: float
     median_routed_resource_words: float
@@ -108,10 +108,10 @@ class FastScanPerformanceObservation:
     retry_of: Optional[str]
     scan_duration_ms: Optional[int]
     output_words: int
-    controller_calls: Tuple[str, ...]
+    controller_calls: tuple[str, ...]
     scoring_passed: bool
     exact_provenance: bool
-    uncovered_high_risk_nodes: Tuple[str, ...]
+    uncovered_high_risk_nodes: tuple[str, ...]
     input_tokens: Optional[int]
     output_tokens: Optional[int]
 
@@ -119,7 +119,7 @@ class FastScanPerformanceObservation:
 @dataclass(frozen=True)
 class FastScanGateResult:
     passed: bool
-    errors: Tuple[str, ...]
+    errors: tuple[str, ...]
     median_scan_duration_ms: float
     median_output_words: float
 
@@ -172,10 +172,7 @@ def evaluate_smoke_gate(
         for row in valid_observations
     ):
         errors.append("controller display text differs from final output")
-    if any(
-        (row.input_tokens is None) != (row.output_tokens is None)
-        for row in valid_observations
-    ):
+    if any((row.input_tokens is None) != (row.output_tokens is None) for row in valid_observations):
         errors.append("token usage must be complete or absent")
     for row in valid_observations:
         if row.case_id != "NEG-debugging" and not row.impact_ids:
@@ -191,15 +188,11 @@ def evaluate_smoke_gate(
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 errors.append(f"{row.case_id} has invalid {field}")
     median_output = _median([row.output_words for row in valid_observations])
-    median_resources = _median(
-        [row.routed_resource_words for row in valid_observations]
-    )
+    median_resources = _median([row.routed_resource_words for row in valid_observations])
     if median_output > MAX_MEDIAN_OUTPUT_WORDS:
         errors.append("median compact output exceeds 450 words")
     if median_resources > MAX_MEDIAN_ROUTED_RESOURCE_WORDS:
-        errors.append(
-            "median routed resources do not reduce baseline by 50 percent"
-        )
+        errors.append("median routed resources do not reduce baseline by 50 percent")
     unique_errors = tuple(sorted(set(errors)))
     return SmokeGateResult(
         passed=not unique_errors,
@@ -241,8 +234,7 @@ def evaluate_graph_smoke(
         ) != (expected_calls, expected_calls, expected_calls):
             errors.append("controller graph call count or order failed")
     if any(
-        not row.controller_evidence_valid or row.duplicate_or_error_calls
-        for row in observations
+        not row.controller_evidence_valid or row.duplicate_or_error_calls for row in observations
     ):
         errors.append("controller graph evidence contains duplicate or error calls")
 
@@ -268,17 +260,13 @@ def evaluate_graph_smoke(
 
     median_duration = _median(durations)
     median_output = _median([row.output_words for row in observations])
-    median_resources = _median(
-        [row.routed_resource_words for row in observations]
-    )
+    median_resources = _median([row.routed_resource_words for row in observations])
     if median_duration > MAX_MEDIAN_GRAPH_DURATION_MS:
         errors.append("median graph duration exceeds 10 seconds")
     if median_output > MAX_MEDIAN_OUTPUT_WORDS:
         errors.append("median graph compact output exceeds 450 words")
     if median_resources > MAX_MEDIAN_ROUTED_RESOURCE_WORDS:
-        errors.append(
-            "median graph routed guidance does not reduce baseline by 50 percent"
-        )
+        errors.append("median graph routed guidance does not reduce baseline by 50 percent")
     unique = tuple(sorted(set(errors)))
     return GraphSmokeGateResult(
         passed=not unique,
@@ -292,31 +280,48 @@ def evaluate_graph_smoke(
 def evaluate_fast_scan_gate(observations):
     errors = []
     rows = tuple(row for row in observations if isinstance(row, FastScanPerformanceObservation))
-    if len(rows) != len(observations): errors.append("Fast Scan observations contain invalid rows")
+    if len(rows) != len(observations):
+        errors.append("Fast Scan observations contain invalid rows")
     keys = [(row.case_id, row.repetition) for row in rows]
     expected = {(case_id, 1) for case_id in GRAPH_SMOKE_CASE_IDS}
-    if set(keys) != expected or len(rows) != len(expected): errors.append("Fast Scan observations do not cover the exact six cases")
-    if len(set(keys)) != len(keys): errors.append("Fast Scan observations contain duplicates")
-    if any(row.attempt != 1 or row.retry_of is not None for row in rows): errors.append("Fast Scan observations must not retry")
-    if any(row.status is not RunStatus.PASS for row in rows): errors.append("every Fast Scan runtime must pass")
+    if set(keys) != expected or len(rows) != len(expected):
+        errors.append("Fast Scan observations do not cover the exact six cases")
+    if len(set(keys)) != len(keys):
+        errors.append("Fast Scan observations contain duplicates")
+    if any(row.attempt != 1 or row.retry_of is not None for row in rows):
+        errors.append("Fast Scan observations must not retry")
+    if any(row.status is not RunStatus.PASS for row in rows):
+        errors.append("every Fast Scan runtime must pass")
     durations = []
     for row in rows:
         negative = row.case_id == GRAPH_NEGATIVE_CASE_ID
         expected_calls = () if negative else ("rir_scan",)
-        if row.controller_calls != expected_calls: errors.append("Fast Scan must call only rir_scan once")
-        if not row.scoring_passed or not row.exact_provenance: errors.append("Fast Scan scoring or provenance failed")
-        if row.uncovered_high_risk_nodes: errors.append("Fast Scan has uncovered high-risk nodes")
+        if row.controller_calls != expected_calls:
+            errors.append("Fast Scan must call only rir_scan once")
+        if not row.scoring_passed or not row.exact_provenance:
+            errors.append("Fast Scan scoring or provenance failed")
+        if row.uncovered_high_risk_nodes:
+            errors.append("Fast Scan has uncovered high-risk nodes")
         if negative:
-            if row.scan_duration_ms is not None: errors.append("negative Fast Scan must not report duration")
-        elif isinstance(row.scan_duration_ms, bool) or not isinstance(row.scan_duration_ms, int) or row.scan_duration_ms < 0:
+            if row.scan_duration_ms is not None:
+                errors.append("negative Fast Scan must not report duration")
+        elif (
+            isinstance(row.scan_duration_ms, bool)
+            or not isinstance(row.scan_duration_ms, int)
+            or row.scan_duration_ms < 0
+        ):
             errors.append("Fast Scan duration is invalid")
         else:
             durations.append(row.scan_duration_ms)
-            if row.scan_duration_ms > MAX_GRAPH_DURATION_MS: errors.append("Fast Scan exceeds 30 seconds")
-        if row.output_words > MAX_FAST_SCAN_OUTPUT_WORDS: errors.append("Fast Scan output exceeds 180 words")
-        if (row.input_tokens is None) != (row.output_tokens is None): errors.append("Fast Scan token usage must be complete or absent")
+            if row.scan_duration_ms > MAX_GRAPH_DURATION_MS:
+                errors.append("Fast Scan exceeds 30 seconds")
+        if row.output_words > MAX_FAST_SCAN_OUTPUT_WORDS:
+            errors.append("Fast Scan output exceeds 180 words")
+        if (row.input_tokens is None) != (row.output_tokens is None):
+            errors.append("Fast Scan token usage must be complete or absent")
     median_duration = _median(durations)
     median_output = _median([row.output_words for row in rows])
-    if median_duration > MAX_MEDIAN_GRAPH_DURATION_MS: errors.append("median Fast Scan duration exceeds 10 seconds")
+    if median_duration > MAX_MEDIAN_GRAPH_DURATION_MS:
+        errors.append("median Fast Scan duration exceeds 10 seconds")
     unique = tuple(sorted(set(errors)))
     return FastScanGateResult(not unique, unique, median_duration, median_output)

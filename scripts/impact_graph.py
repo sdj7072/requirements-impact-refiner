@@ -3,13 +3,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from pathlib import PurePosixPath
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
-
+from typing import Any
 
 MAX_RECEIPT_BYTES = 1_048_576
 MAX_STRING_LENGTH = 4_096
@@ -20,28 +20,78 @@ MAX_FRONTIER = 256
 MAX_PROVIDERS = 16
 MAX_COLLECTION_LENGTH = 64
 
-NODE_KINDS = frozenset({
-    "symbol", "file", "api_field", "data_key", "schema", "database", "cache",
-    "event", "permission", "configuration", "operation", "test",
-})
-EDGE_KINDS = frozenset({
-    "calls", "references", "implements", "imports", "reads", "writes",
-    "serializes", "persists", "caches", "publishes", "subscribes", "authorizes",
-    "configures", "deploys", "tests",
-})
+NODE_KINDS = frozenset(
+    {
+        "symbol",
+        "file",
+        "api_field",
+        "data_key",
+        "schema",
+        "database",
+        "cache",
+        "event",
+        "permission",
+        "configuration",
+        "operation",
+        "test",
+    }
+)
+EDGE_KINDS = frozenset(
+    {
+        "calls",
+        "references",
+        "implements",
+        "imports",
+        "reads",
+        "writes",
+        "serializes",
+        "persists",
+        "caches",
+        "publishes",
+        "subscribes",
+        "authorizes",
+        "configures",
+        "deploys",
+        "tests",
+    }
+)
 CONFIDENCES = ("verified-provider", "verified-source", "structural-inferred", "lexical")
-PROVIDER_STATUSES = frozenset({
-    "ready", "missing", "stale", "unsafe", "unsupported", "failed", "timed_out",
-})
+PROVIDER_STATUSES = frozenset(
+    {
+        "ready",
+        "missing",
+        "stale",
+        "unsafe",
+        "unsupported",
+        "failed",
+        "timed_out",
+    }
+)
 BUDGET_STATUSES = frozenset({"closed", "budget_exhausted", "provider_limited", "no_workspace"})
 CACHE_STATUSES = frozenset({"miss", "hit", "partial"})
-RISK_DOMAINS = frozenset({
-    "functionality", "data", "interfaces", "authorization/privacy", "state/concurrency",
-    "operations", "compatibility", "legal/policy", "regression",
-})
-GRAPH_SETTING_KEYS = frozenset({
-    "enabled", "max_seconds", "target_seconds", "providers", "install_policy", "deep",
-})
+RISK_DOMAINS = frozenset(
+    {
+        "functionality",
+        "data",
+        "interfaces",
+        "authorization/privacy",
+        "state/concurrency",
+        "operations",
+        "compatibility",
+        "legal/policy",
+        "regression",
+    }
+)
+GRAPH_SETTING_KEYS = frozenset(
+    {
+        "enabled",
+        "max_seconds",
+        "target_seconds",
+        "providers",
+        "install_policy",
+        "deep",
+    }
+)
 
 _ID_PATTERNS = {
     "node": re.compile(r"NODE-\d{3}"),
@@ -195,7 +245,9 @@ def _mapping(value: object) -> bool:
     return isinstance(value, dict)
 
 
-def _keys(errors: list[str], label: str, value: object, expected: frozenset[str] | set[str]) -> bool:
+def _keys(
+    errors: list[str], label: str, value: object, expected: frozenset[str] | set[str]
+) -> bool:
     if not _mapping(value):
         errors.append(f"{label} must be an object")
         return False
@@ -211,7 +263,11 @@ def _identifier(value: object, kind: str) -> bool:
 
 
 def _string(value: object, *, allow_empty: bool = False) -> bool:
-    return isinstance(value, str) and len(value) <= MAX_STRING_LENGTH and (allow_empty or bool(value.strip()))
+    return (
+        isinstance(value, str)
+        and len(value) <= MAX_STRING_LENGTH
+        and (allow_empty or bool(value.strip()))
+    )
 
 
 def _safe_path(value: object) -> bool:
@@ -221,10 +277,14 @@ def _safe_path(value: object) -> bool:
     if path.startswith("/") or path.startswith("//"):
         return False
     parts = path.split("/")
-    return all(part not in {"", ".", ".."} for part in parts) and not PurePosixPath(path).is_absolute()
+    return (
+        all(part not in {"", ".", ".."} for part in parts) and not PurePosixPath(path).is_absolute()
+    )
 
 
-def _string_list(value: object, label: str, errors: list[str], allowed: frozenset[str] | None = None) -> None:
+def _string_list(
+    value: object, label: str, errors: list[str], allowed: frozenset[str] | None = None
+) -> None:
     if not isinstance(value, list):
         errors.append(f"{label} must be an array")
         return
@@ -296,39 +356,87 @@ def _receipt_mapping(value: object) -> dict[str, Any] | None:
             "repo_root_sha256": value.repo_root_sha256,
             "request_sha256": value.request_sha256,
             "settings": value.settings.to_mapping(),
-            "providers": [{
-                "name": item.name, "status": item.status, "confidence": item.confidence,
-                "version": item.version, "executable_sha256": item.executable_sha256,
-            } for item in value.providers],
-            "nodes": [{
-                "id": item.id, "kind": item.kind, "label": item.label, "location": item.location,
-                "provider": item.provider, "confidence": item.confidence,
-                "source_sha256": item.source_sha256, "risk_domains": list(item.risk_domains),
-            } for item in value.nodes],
-            "edges": [{
-                "id": item.id, "source": item.source, "target": item.target, "kind": item.kind,
-                "location": item.location, "evidence": item.evidence, "confidence": item.confidence,
-                "provider": item.provider, "source_sha256": item.source_sha256,
-            } for item in value.edges],
-            "paths": [{
-                "id": item.id, "nodes": list(item.nodes), "edges": list(item.edges),
-                "distance": item.distance, "risk_domains": list(item.risk_domains),
-            } for item in value.paths],
-            "frontier": [{
-                "id": item.id, "node": item.node, "reason": item.reason,
-                "risk_domains": list(item.risk_domains),
-            } for item in value.frontier],
-            "timings_ms": _json_value(value.timings_ms), "budget_status": value.budget_status,
+            "providers": [
+                {
+                    "name": item.name,
+                    "status": item.status,
+                    "confidence": item.confidence,
+                    "version": item.version,
+                    "executable_sha256": item.executable_sha256,
+                }
+                for item in value.providers
+            ],
+            "nodes": [
+                {
+                    "id": item.id,
+                    "kind": item.kind,
+                    "label": item.label,
+                    "location": item.location,
+                    "provider": item.provider,
+                    "confidence": item.confidence,
+                    "source_sha256": item.source_sha256,
+                    "risk_domains": list(item.risk_domains),
+                }
+                for item in value.nodes
+            ],
+            "edges": [
+                {
+                    "id": item.id,
+                    "source": item.source,
+                    "target": item.target,
+                    "kind": item.kind,
+                    "location": item.location,
+                    "evidence": item.evidence,
+                    "confidence": item.confidence,
+                    "provider": item.provider,
+                    "source_sha256": item.source_sha256,
+                }
+                for item in value.edges
+            ],
+            "paths": [
+                {
+                    "id": item.id,
+                    "nodes": list(item.nodes),
+                    "edges": list(item.edges),
+                    "distance": item.distance,
+                    "risk_domains": list(item.risk_domains),
+                }
+                for item in value.paths
+            ],
+            "frontier": [
+                {
+                    "id": item.id,
+                    "node": item.node,
+                    "reason": item.reason,
+                    "risk_domains": list(item.risk_domains),
+                }
+                for item in value.frontier
+            ],
+            "timings_ms": _json_value(value.timings_ms),
+            "budget_status": value.budget_status,
             "cache": _json_value(value.cache),
         }
     return value if _mapping(value) else None
 
 
-TOP_LEVEL_KEYS = frozenset({
-    "schema_version", "receipt_id", "draft_id", "repo_root_sha256", "request_sha256",
-    "settings", "providers", "nodes", "edges", "paths", "frontier", "timings_ms",
-    "budget_status", "cache",
-})
+TOP_LEVEL_KEYS = frozenset(
+    {
+        "schema_version",
+        "receipt_id",
+        "draft_id",
+        "repo_root_sha256",
+        "request_sha256",
+        "settings",
+        "providers",
+        "nodes",
+        "edges",
+        "paths",
+        "frontier",
+        "timings_ms",
+        "budget_status",
+        "cache",
+    }
+)
 
 
 def validate_receipt(value: object) -> tuple[str, ...]:
@@ -343,7 +451,12 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         return tuple(errors)
     if receipt["schema_version"] != 1:
         errors.append("schema_version must be 1")
-    for name, length in (("receipt_id", 32), ("draft_id", 32), ("repo_root_sha256", 64), ("request_sha256", 64)):
+    for name, length in (
+        ("receipt_id", 32),
+        ("draft_id", 32),
+        ("repo_root_sha256", 64),
+        ("request_sha256", 64),
+    ):
         if not _valid_hash(receipt[name], length):
             errors.append(f"{name} must be a lowercase SHA-{length * 4} hex string")
     _validate_settings(receipt["settings"], errors)
@@ -370,11 +483,22 @@ def validate_receipt(value: object) -> tuple[str, ...]:
                 errors.append(f"provider {name} has invalid {field}")
         executable = row.get("executable_sha256")
         if executable is not None and not _valid_hash(executable, 64):
-            errors.append(f"provider {name} executable_sha256 must be a lowercase SHA-256 hex string")
+            errors.append(
+                f"provider {name} executable_sha256 must be a lowercase SHA-256 hex string"
+            )
 
     node_rows = _check_limit(receipt["nodes"], "nodes", MAX_NODES, errors)
     nodes: dict[str, dict[str, Any]] = {}
-    node_fields = {"id", "kind", "label", "location", "provider", "confidence", "source_sha256", "risk_domains"}
+    node_fields = {
+        "id",
+        "kind",
+        "label",
+        "location",
+        "provider",
+        "confidence",
+        "source_sha256",
+        "risk_domains",
+    }
     for row in node_rows:
         _keys(errors, "node", row, node_fields)
         identifier = row.get("id")
@@ -400,16 +524,32 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         confidence = row.get("confidence")
         if confidence not in CONFIDENCES:
             errors.append(f"node {identifier} has invalid confidence {confidence}")
-        elif provider in providers and providers[provider].get("confidence") in _CONFIDENCE_RANK and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[providers[provider]["confidence"]]:
+        elif (
+            provider in providers
+            and providers[provider].get("confidence") in _CONFIDENCE_RANK
+            and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[providers[provider]["confidence"]]
+        ):
             errors.append(f"node {identifier} upgrades provider {provider} confidence")
         source = row.get("source_sha256")
         if source is not None and not _valid_hash(source, 64):
             errors.append(f"node {identifier} source_sha256 must be a lowercase SHA-256 hex string")
-        _string_list(row.get("risk_domains"), f"node {identifier} risk_domains", errors, RISK_DOMAINS)
+        _string_list(
+            row.get("risk_domains"), f"node {identifier} risk_domains", errors, RISK_DOMAINS
+        )
 
     edge_rows = _check_limit(receipt["edges"], "edges", MAX_EDGES, errors)
     edges: dict[str, dict[str, Any]] = {}
-    edge_fields = {"id", "source", "target", "kind", "location", "evidence", "confidence", "provider", "source_sha256"}
+    edge_fields = {
+        "id",
+        "source",
+        "target",
+        "kind",
+        "location",
+        "evidence",
+        "confidence",
+        "provider",
+        "source_sha256",
+    }
     for row in edge_rows:
         _keys(errors, "edge", row, edge_fields)
         identifier = row.get("id")
@@ -435,7 +575,11 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         confidence = row.get("confidence")
         if confidence not in CONFIDENCES:
             errors.append(f"edge {identifier} has invalid confidence {confidence}")
-        elif provider in providers and providers[provider].get("confidence") in _CONFIDENCE_RANK and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[providers[provider]["confidence"]]:
+        elif (
+            provider in providers
+            and providers[provider].get("confidence") in _CONFIDENCE_RANK
+            and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[providers[provider]["confidence"]]
+        ):
             errors.append(f"edge {identifier} upgrades provider {provider} confidence")
         source = row.get("source_sha256")
         if source is not None and not _valid_hash(source, 64):
@@ -464,15 +608,25 @@ def validate_receipt(value: object) -> tuple[str, ...]:
             for edge in edge_ids:
                 if edge not in edges:
                     errors.append(f"unknown graph edge {edge}")
-        if not isinstance(node_ids, list) or not isinstance(edge_ids, list) or not edge_ids or len(node_ids) != len(edge_ids) + 1:
+        if (
+            not isinstance(node_ids, list)
+            or not isinstance(edge_ids, list)
+            or not edge_ids
+            or len(node_ids) != len(edge_ids) + 1
+        ):
             errors.append(f"path {identifier} requires contiguous node and edge evidence")
         elif all(edge in edges for edge in edge_ids):
             for index, edge in enumerate(edge_ids):
-                if edges[edge].get("source") != node_ids[index] or edges[edge].get("target") != node_ids[index + 1]:
+                if (
+                    edges[edge].get("source") != node_ids[index]
+                    or edges[edge].get("target") != node_ids[index + 1]
+                ):
                     errors.append(f"path {identifier} edge {edge} does not connect declared nodes")
         if row.get("distance") != len(edge_ids) if isinstance(edge_ids, list) else True:
             errors.append(f"path {identifier} distance must equal edge count")
-        _string_list(row.get("risk_domains"), f"path {identifier} risk_domains", errors, RISK_DOMAINS)
+        _string_list(
+            row.get("risk_domains"), f"path {identifier} risk_domains", errors, RISK_DOMAINS
+        )
 
     frontier_rows = _check_limit(receipt["frontier"], "frontier", MAX_FRONTIER, errors)
     frontier: set[str] = set()
@@ -490,7 +644,9 @@ def validate_receipt(value: object) -> tuple[str, ...]:
             errors.append(f"frontier {identifier} references unknown graph node {row.get('node')}")
         if not _string(row.get("reason")):
             errors.append(f"frontier {identifier} requires a reason")
-        _string_list(row.get("risk_domains"), f"frontier {identifier} risk_domains", errors, RISK_DOMAINS)
+        _string_list(
+            row.get("risk_domains"), f"frontier {identifier} risk_domains", errors, RISK_DOMAINS
+        )
     if receipt["budget_status"] not in BUDGET_STATUSES:
         errors.append(f"invalid budget_status {receipt['budget_status']}")
     if receipt["budget_status"] != "closed" and not frontier_rows:
@@ -503,7 +659,12 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         if len(timings) > MAX_COLLECTION_LENGTH:
             errors.append("timings_ms exceeds maximum collection size")
         for name, milliseconds in timings.items():
-            if not _string(name) or not isinstance(milliseconds, int) or isinstance(milliseconds, bool) or milliseconds < 0:
+            if (
+                not _string(name)
+                or not isinstance(milliseconds, int)
+                or isinstance(milliseconds, bool)
+                or milliseconds < 0
+            ):
                 errors.append("timings_ms must map names to non-negative integers")
                 break
     cache = receipt["cache"]
@@ -544,9 +705,9 @@ def canonical_receipt_bytes(value: Mapping[str, Any] | GraphReceipt) -> bytes:
     errors = validate_receipt(receipt)
     if errors:
         raise ValueError("invalid graph receipt: " + "; ".join(errors))
-    payload = json.dumps(
-        receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    payload = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
     if len(payload) > MAX_RECEIPT_BYTES:
         raise ValueError("canonical graph receipt exceeds maximum byte size")
     return payload

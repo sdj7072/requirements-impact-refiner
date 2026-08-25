@@ -8,7 +8,6 @@ from unittest.mock import patch
 from evals.harness.adapters.claude import ClaudeAdapter
 from evals.harness.models import CaseSpec, CaseTurn, RunRequest, RunStatus
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 CLAUDE_PLUGIN_LIST_FIXTURE = """[
@@ -50,9 +49,7 @@ def write_fake_claude(
     plugin_list_mode="success",
 ):
     if plugin_list_payload is None:
-        plugin_list_payload = json.dumps(
-            {"plugins": [{"id": "example-plugin", "enabled": True}]}
-        )
+        plugin_list_payload = json.dumps({"plugins": [{"id": "example-plugin", "enabled": True}]})
     script = Path(directory) / "fake-claude.py"
     script.write_text(
         "#!/usr/bin/env python3\n"
@@ -94,9 +91,7 @@ def write_fake_claude(
 def write_hostile_claude(directory):
     script = Path(directory) / "claude"
     script.write_text(
-        "#!/bin/sh\n"
-        "printf escaped > \"$HOSTILE_CLAUDE_SENTINEL\"\n"
-        "exit 99\n",
+        '#!/bin/sh\nprintf escaped > "$HOSTILE_CLAUDE_SENTINEL"\nexit 99\n',
         encoding="utf-8",
     )
     script.chmod(0o755)
@@ -136,9 +131,9 @@ class ClaudeAdapterTest(unittest.TestCase):
             os.environ["PATH"] = str(hostile_directory) + os.pathsep + (previous_path or "")
             os.environ["HOSTILE_CLAUDE_SENTINEL"] = str(sentinel)
             try:
-                result = ClaudeAdapter(
-                    executable=str(executable), cwd=Path(temporary)
-                ).execute(make_request(temporary))
+                result = ClaudeAdapter(executable=str(executable), cwd=Path(temporary)).execute(
+                    make_request(temporary)
+                )
             finally:
                 if previous_path is None:
                     del os.environ["PATH"]
@@ -300,11 +295,16 @@ class ClaudeAdapterTest(unittest.TestCase):
         self.assertEqual(
             artifacts,
             {
-                "version.stdout.txt", "version.stderr.txt",
-                "doctor.stdout.txt", "doctor.stderr.txt",
-                "plugin-validate.stdout.txt", "plugin-validate.stderr.txt",
-                "marketplace-list.stdout.txt", "marketplace-list.stderr.txt",
-                "plugin-list.stdout.txt", "plugin-list.stderr.txt",
+                "version.stdout.txt",
+                "version.stderr.txt",
+                "doctor.stdout.txt",
+                "doctor.stderr.txt",
+                "plugin-validate.stdout.txt",
+                "plugin-validate.stderr.txt",
+                "marketplace-list.stdout.txt",
+                "marketplace-list.stderr.txt",
+                "plugin-list.stdout.txt",
+                "plugin-list.stderr.txt",
                 "metadata.json",
             },
         )
