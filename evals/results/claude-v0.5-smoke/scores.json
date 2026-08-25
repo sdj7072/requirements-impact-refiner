@@ -1,0 +1,151 @@
+[
+ {
+  "case": "NEG-brainstorming",
+  "detail": {
+   "refinement_ids": [],
+   "report_workflow": false
+  },
+  "kind": "negative",
+  "mechanical": "pass"
+ },
+ {
+  "case": "NEG-code-review",
+  "detail": {
+   "refinement_ids": [],
+   "report_workflow": false
+  },
+  "kind": "negative",
+  "mechanical": "pass"
+ },
+ {
+  "case": "NEG-debugging",
+  "detail": {
+   "refinement_ids": [],
+   "report_workflow": false
+  },
+  "kind": "negative",
+  "mechanical": "pass"
+ },
+ {
+  "case": "NEG-generic-prd",
+  "detail": {
+   "refinement_ids": [],
+   "report_workflow": false
+  },
+  "kind": "negative",
+  "mechanical": "pass"
+ },
+ {
+  "case": "NEG-planning",
+  "detail": {
+   "refinement_ids": [],
+   "report_workflow": false
+  },
+  "kind": "negative",
+  "mechanical": "pass"
+ },
+ {
+  "case": "POS-api-contract",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "backward compatibility": false,
+    "mobile consumer": false,
+    "stored payload": false
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ },
+ {
+  "case": "POS-authorization",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "audit behavior": true,
+    "invitation scope": true,
+    "owner/admin distinction": false
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ },
+ {
+  "case": "POS-background-retry",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "dead-letter observability": true,
+    "duplicate output": true,
+    "retry ceiling": true
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ },
+ {
+  "case": "POS-cache",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "invalidation path": true,
+    "stale authorization": false,
+    "tenant key": true
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ },
+ {
+  "case": "POS-deletion",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "asynchronous jobs": false,
+    "foreign records": true,
+    "retention policy": true
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ },
+ {
+  "case": "POS-offline-sync",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "conflict resolution": true,
+    "deleted records": false,
+    "ordering": false
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ },
+ {
+  "case": "POS-payments",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "duplicate capture": true,
+    "idempotency key": true,
+    "user-visible status": true
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ },
+ {
+  "case": "POS-sharing",
+  "detail": {
+   "report": "absent",
+   "topic_hits_informational": {
+    "permission changes": true,
+    "revocation": true,
+    "secret rotation": true
+   }
+  },
+  "kind": "positive",
+  "mechanical": "fail"
+ }
+]

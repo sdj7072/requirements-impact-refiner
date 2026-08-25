@@ -30,7 +30,7 @@ PRE_LIVE_COMPATIBILITY = {
     "Codex skill quick validator": "blocked",
     "Codex plugin validator": "blocked",
     "Claude Code standalone": "blocked",
-    "Claude Code with Superpowers": "blocked",
+    "Claude Code with Superpowers": "not verified",
     "Claude Code with `feature-dev`": "blocked",
     "Claude Code with Spec Kit": "blocked",
     "Generic Agent Skills-compatible harness": "blocked",

@@ -152,7 +152,7 @@ Revision 1 の基準報告では両方の影響を `new` とします。次の�
 | Codex skill quick validator | local system snapshot | `blocked` | PyYAML がありません。静的監査では、この検証器の許可キー一覧に Agent Skills の `compatibility` キーがないことも確認しました。実行合格とは主張しません。 |
 | Codex plugin validator | local system snapshot | `blocked` | `ModuleNotFoundError: yaml` で実行が停止しました。manifest テストをこの検証器の合格として代用しません。 |
 | Claude Code standalone | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、認証済み Claude 動作評価は実行していません。 |
-| Claude Code with Superpowers | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、Claude 側 Superpowers の動作互換性は引き続き blocked です。 |
+| Claude Code with Superpowers | `2.1.237 (Claude Code)` subagent smoke; RIR `0.5.0` | `not verified` | claude-code モード 13 ケースの 1 回反復動作スモーク: 陰性 5/5 が機械的に合格(境界ケースの planning は除外規則を文言どおり引用)、陽性 0/8 — v0.5 Fast Scan 経路は 1 ターンのハーネスが送らない確認を待つため、8 件中 7 件が scan → needs_input → 質問 → 停止を文書どおり実行し、1 件はスキルを使用しませんでした。生出力とスコアカードは [`evals/results/claude-v0.5-smoke/`](evals/results/claude-v0.5-smoke/scorecard.md) にあります。 |
 | Claude Code with `feature-dev` | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、`feature-dev` の動作互換性は引き続き blocked です。 |
 | Claude Code with Spec Kit | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 構造プローブのみであり、Spec Kit の動作互換性は引き続き blocked です。 |
 | Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | 名前付きまたは設定済みの汎用ハーネス実行ファイルがありません。 |
