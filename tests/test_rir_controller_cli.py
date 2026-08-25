@@ -71,6 +71,7 @@ class RirControllerCliTest(unittest.TestCase):
         (self.root / ".requirements-impact-refiner.json").write_text(
             json.dumps(
                 {
+                    "delivery": "compact",
                     "impact_graph": {
                         "enabled": enabled,
                         "max_seconds": 30,

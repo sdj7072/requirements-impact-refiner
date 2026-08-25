@@ -39,7 +39,7 @@ class PresentationSettingsTest(unittest.TestCase):
             {
                 "audience": "balanced",
                 "audience_source": "default",
-                "delivery": "compact",
+                "delivery": "full",
                 "delivery_source": "default",
                 "flow": "report",
                 "flow_source": "default",
@@ -67,7 +67,7 @@ class PresentationSettingsTest(unittest.TestCase):
             {
                 "audience": "simple",
                 "audience_source": "repository",
-                "delivery": "compact",
+                "delivery": "full",
                 "delivery_source": "default",
                 "flow": "report",
                 "flow_source": "default",
@@ -233,3 +233,47 @@ class FlowSettingTest(unittest.TestCase):
             settings = json.loads(result.stdout)
             self.assertEqual(settings["flow"], "report")
             self.assertEqual(settings["flow_source"], "request")
+
+
+class ReportFlowDeliveryTest(unittest.TestCase):
+    """Report flow answers with the canonical markdown itself, so its
+    delivery default is full — the model relays tool output verbatim instead
+    of reconstructing tables from memory. Explicit configuration still wins."""
+
+    def run_resolver(self, root, *args):
+        import subprocess, sys
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "resolve-settings.py"),
+             "--project-root", str(root), *args],
+            capture_output=True, text=True,
+        )
+
+    def test_report_flow_defaults_delivery_to_full(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as root:
+            settings = json.loads(self.run_resolver(root).stdout)
+            self.assertEqual(settings["flow"], "report")
+            self.assertEqual(settings["delivery"], "full")
+            self.assertEqual(settings["delivery_source"], "default")
+
+    def test_ask_flow_keeps_compact_default(self):
+        import json, tempfile
+        from pathlib import Path as _Path
+        with tempfile.TemporaryDirectory() as root:
+            (_Path(root) / ".requirements-impact-refiner.json").write_text(
+                '{"flow": "ask"}'
+            )
+            settings = json.loads(self.run_resolver(root).stdout)
+            self.assertEqual(settings["delivery"], "compact")
+
+    def test_explicit_compact_config_wins_in_report_flow(self):
+        import json, tempfile
+        from pathlib import Path as _Path
+        with tempfile.TemporaryDirectory() as root:
+            (_Path(root) / ".requirements-impact-refiner.json").write_text(
+                '{"delivery": "compact"}'
+            )
+            settings = json.loads(self.run_resolver(root).stdout)
+            self.assertEqual(settings["flow"], "report")
+            self.assertEqual(settings["delivery"], "compact")
+            self.assertEqual(settings["delivery_source"], "repository")

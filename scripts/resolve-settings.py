@@ -122,13 +122,17 @@ def resolve(
     audience, audience_source = resolve_value(
         "audience", audience_override, config, AUDIENCES, "balanced"
     )
-    delivery, delivery_source = resolve_value(
-        "delivery", delivery_override, config, DELIVERIES, "compact"
-    )
     # The default flow answers with the impact report itself; the scan
     # summary plus a refinement question is an explicit opt-in ("ask").
     flow, flow_source = resolve_value(
         "flow", flow_override, config, FLOWS, "report"
+    )
+    # Report flow relays the canonical markdown verbatim, so its delivery
+    # default is full; reconstructing tables from a compact summary is how
+    # inline copies got silently abbreviated. Explicit config still wins.
+    delivery_default = "full" if flow == "report" else "compact"
+    delivery, delivery_source = resolve_value(
+        "delivery", delivery_override, config, DELIVERIES, delivery_default
     )
     impact_graph, warning = resolve_graph_settings(config)
     resolved: dict[str, object] = {

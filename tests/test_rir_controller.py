@@ -40,6 +40,7 @@ class RirControllerTest(unittest.TestCase):
         (self.root / ".requirements-impact-refiner.json").write_text(
             json.dumps(
                 {
+                    "delivery": "compact",
                     "impact_graph": {
                         "enabled": False,
                         "max_seconds": 30,
@@ -84,6 +85,7 @@ class RirControllerTest(unittest.TestCase):
         (self.root / ".requirements-impact-refiner.json").write_text(
             json.dumps(
                 {
+                    "delivery": "compact",
                     "impact_graph": {
                         "enabled": True,
                         "max_seconds": 30,
@@ -320,6 +322,7 @@ class RirControllerTest(unittest.TestCase):
         (self.root / ".requirements-impact-refiner.json").write_text(
             json.dumps(
                 {
+                    "delivery": "compact",
                     "impact_graph": {
                         "enabled": False,
                         "max_seconds": 30,
