@@ -1,0 +1,177 @@
+{
+  "flows": {
+    "begin": {
+      "rejected": {
+        "exception_type": "ValueError",
+        "message": "invalid adapter: unsupported"
+      },
+      "success": {
+        "draft_canonical_sha256": "5112c8a0128ff832547ba76ff90bcc3be3d56ee8779e44eb361b8e5f53fe8ee2",
+        "result": {
+          "draft_id": "11111111111111111111111111111111",
+          "draft_path": ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json",
+          "graph_receipt_id": null,
+          "previous_sha256": "none",
+          "prior_key_map": null,
+          "prior_state": null,
+          "report_id": "RPT-001",
+          "revision": 1,
+          "scan_id": null,
+          "settings": {
+            "audience": "balanced",
+            "audience_source": "default",
+            "delivery": "compact",
+            "delivery_source": "default",
+            "impact_graph": {
+              "deep": false,
+              "enabled": false,
+              "install_policy": "never",
+              "max_seconds": 30,
+              "providers": [
+                "builtin"
+              ],
+              "target_seconds": 10
+            }
+          }
+        },
+        "result_canonical_sha256": "82b2df049375627555f0e192cfa32134e0843e05e388f9814ee1a577215e4b79"
+      }
+    },
+    "finalize": {
+      "rejected": {
+        "exception_type": "ValueError",
+        "message": "invalid analysis phase"
+      },
+      "success": {
+        "analysis_fixture_sha256": "11d3cdc28cbbc3400a67065b373bc78303d2407cea151bf8f8510676afc875ca",
+        "markdown_canonical_sha256": "0245b2f3a7af219a62e9887121e6459e467fa737a4502b35f3e343107569d39e",
+        "result": {
+          "delivery": "compact",
+          "display_text_sha256": "11ffe28d254b93627f0a6008aadb68a2641598c920c22a9719ac29f61b5543fb",
+          "markdown_path": ".requirements-impact-refiner/reports/RPT-001/revision-0001.md",
+          "markdown_sha256": "0245b2f3a7af219a62e9887121e6459e467fa737a4502b35f3e343107569d39e",
+          "report_id": "RPT-001",
+          "revision": 1,
+          "state_path": ".requirements-impact-refiner/reports/RPT-001/revision-0001.json",
+          "status": "published"
+        },
+        "result_canonical_sha256": "976555265525fedf2b0bd8ef4fe9b7d64f1485c412f8cebcf4046485248b40f6",
+        "state_canonical_sha256": "fdb43c9b4ed09775504b181e5a498109be13bb7227de31aa0f2a182199a4bfc6"
+      }
+    },
+    "trace": {
+      "rejected": {
+        "exception_type": "ValueError",
+        "message": "impact graph is disabled for this draft"
+      },
+      "success": {
+        "receipt_canonical_sha256": "842c0c6fda9c1bb57c33d24f049700711624f6570f7f27a8a2c263d69f93e56d",
+        "result": {
+          "budget_status": "closed",
+          "compact_graph": {
+            "frontier": [],
+            "nodes": [
+              {
+                "confidence": "structural-inferred",
+                "key": "NODE-001",
+                "kind": "api_field",
+                "label": "profile.displayName",
+                "location": "api/profile.py",
+                "risk_domains": [
+                  "interfaces"
+                ]
+              }
+            ],
+            "paths": [],
+            "providers": [
+              {
+                "confidence": "structural-inferred",
+                "name": "builtin",
+                "status": "ready",
+                "version": "builtin-v1"
+              }
+            ],
+            "summary": {
+              "budget_status": "closed",
+              "edges": 0,
+              "nodes": 1,
+              "paths": 0,
+              "timings_ms": {
+                "total": 0
+              },
+              "truncated": {
+                "frontier": 0,
+                "nodes": 0,
+                "paths": 0
+              },
+              "unknown_frontiers": 0
+            }
+          },
+          "receipt_id": "<hex32>",
+          "receipt_path": ".requirements-impact-refiner/graph/11111111111111111111111111111111.json",
+          "receipt_sha256": "<sha256>",
+          "request_sha256": "<sha256>",
+          "seeds": [
+            {
+              "location": "api/profile.py",
+              "term": "profile.displayName"
+            }
+          ]
+        },
+        "result_canonical_sha256": "6b358645110f4c9bc7245399cbfe9346a380600b0985e03ed5455121730feaa3"
+      }
+    }
+  },
+  "metadata": {
+    "baseline_commit": "e8599b3ff4b9870b67ed1ea8e08658e938a209ea",
+    "fixture_filename": "rir-controller-facade-v05.json",
+    "provenance": "Characterized at baseline commit e8599b3; the retained v05 filename does not assert that these bytes came from a historical v0.5 release."
+  },
+  "public_names": [
+    "BeginRequest",
+    "DraftResult",
+    "FinalizeRequest",
+    "FinalizeResult",
+    "ScanRequest",
+    "TraceRequest",
+    "TraceResult",
+    "begin_refinement",
+    "finalize_refinement",
+    "load_draft",
+    "scan_impact",
+    "trace_impact"
+  ],
+  "result_fields": {
+    "DraftResult": [
+      "draft_id",
+      "draft_path",
+      "report_id",
+      "revision",
+      "previous_sha256",
+      "settings",
+      "prior_state",
+      "prior_key_map",
+      "scan_id",
+      "graph_receipt_id"
+    ],
+    "FinalizeResult": [
+      "status",
+      "report_id",
+      "revision",
+      "delivery",
+      "display_text",
+      "state_path",
+      "markdown_path",
+      "markdown_sha256"
+    ],
+    "TraceResult": [
+      "receipt_id",
+      "receipt_path",
+      "receipt_sha256",
+      "compact_graph",
+      "budget_status",
+      "request_sha256",
+      "seeds"
+    ]
+  }
+}
