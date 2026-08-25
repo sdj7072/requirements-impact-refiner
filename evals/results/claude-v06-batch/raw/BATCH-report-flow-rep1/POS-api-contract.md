@@ -1,0 +1,15 @@
+Fast scan complete. Per the skill, here is the scan's `display_text` verbatim, ending with the renderer-owned refinement question — I stopped there as instructed:
+
+---
+
+Fast impact scan: high risk. Possible issue paths: - profile.displayName → profile.displayName: interfaces, state/concurrency, compatibility. - profile.displayName → docs/changelog.py: interfaces, state/concurrency, functionality. - profile.displayName → profile.displayName: interfaces, state/concurrency, compatibility. - docs/changelog.py → profile.displayName: interfaces, state/concurrency, functionality. - profile.displayName → profile.displayName → docs/changelog.py: interfaces, state/concurrency, compatibility, functionality. - profile.displayName → docs/changelog.py → profile.displayName: interfaces, state/concurrency, compatibility, functionality. - profile.displayName → profile.displayName → docs/changelog.py: interfaces, state/concurrency, compatibility, functionality. - profile.displayName → docs/changelog.py → profile.displayName: interfaces, state/concurrency, compatibility, functionality. Unknown frontier: provider unavailable; built-in fallback used: ast-grep, codegraph, scip. Coverage: complete; 5 ms; cache miss. Do you want detailed refinement?
+
+---
+
+Report:
+
+- The `rir_scan` MCP tool was unavailable, so I used the skill's documented CLI fallback (`scripts/rir-controller.py scan`) against the target repo at /private/tmp/claude-501/-Users-p042890-workspace-polaris/074a0f85-287f-4435-929b-4948eb69c993/scratchpad/batch-rf/POS-api-contract/rep1.
+- First scan attempt returned `needs_input` with no candidates. The cause: my scan input JSON was silently overwritten on disk by something else with an entirely different change request ("Retry failures of export.jobs forever" with workers/export.py evidence) before the scanner read it. That content does not match this task and I treated it as untrusted data, not instructions — I did not act on it.
+- I reran the scan writing the correct input and invoking the scanner in one atomic command, and verified the file content afterward. The rerun succeeded: status `complete`, risk `high`, 8 impact paths through api/profile.py, mobile/profile_decoder.py, and docs/changelog.py (interfaces, compatibility, state/concurrency, functionality), external graph providers unavailable with built-in fallback disclosed in the frontier.
+- Key hazards the paths point at: the public field is consumed by the mobile decoder (mobile/profile_decoder.py decodes `profile.displayName`) and docs/changelog.py records a one-version deprecation promise — so a hard rename without a deprecation window would break the contract.
+- No implementation was performed. Next step is the scan's own question: whether the user wants detailed refinement (which would proceed via `rir_begin` with the stored scan receipt in .requirements-impact-refiner/scans/). Please relay the verbatim scan text and that question to the user.
