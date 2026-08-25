@@ -25,13 +25,15 @@
 
 ## Approved zero-path behavior
 
-- A graph-enabled impact with `graph_path_keys: []`, unknown evidence, no
-  coverage rationale, and a receipt containing no paths can finalize. The
-  bound context records empty path keys, `None` rationale, and unknown graph
-  confidence.
-- The exception does not weaken path-bearing coverage. A high-risk node on an
-  available path that is neither selected, invariant-covered, nor exposed as
-  a frontier still raises the exact
+- Every graph-enabled impact with `graph_path_keys: []` requires a nonempty,
+  bounded `coverage_rationale` and `evidence_level: unknown`, including when
+  the receipt itself contains no paths. A missing rationale raises the exact
+  established supplied-only/unknown coverage error; `None` is not accepted or
+  rendered as zero-path coverage.
+- The positive supplied-only zero-path control supplies a concrete rationale
+  and reaches successful finalization. A high-risk node on an available path
+  that is neither selected, invariant-covered, nor exposed as a frontier still
+  raises the exact
   `uncovered high-risk graph node <NODE-ID>` error.
 
 ## Dependency isolation
@@ -101,3 +103,37 @@ The brief prohibited subagents, so final review was performed directly against
 base `e639427`. The staged inventory contains only Task 4 controller/delivery,
 payload, and test files plus this report. No third-party runtime dependency or
 import cycle was introduced, and no Task 3 storage code was removed.
+
+## Fix round 1 — Restore the zero-path rationale invariant
+
+### P1 correction
+
+The initial extraction incorrectly made a missing rationale acceptable when
+the receipt's complete `paths` collection was empty. Base `e639427` did not
+make that exception: every impact with no selected graph paths must provide a
+nonempty bounded `coverage_rationale` and use unknown evidence.
+
+The delivery predicate now matches the base condition exactly. Receipt path
+count no longer participates. The established error remains byte-for-byte:
+`supplied-only or unknown graph coverage requires rationale and unknown
+evidence`.
+
+### Controls and TDD evidence
+
+- RED: the new zero-path/missing-rationale regression failed because
+  `validate_graph_coverage` returned without raising.
+- GREEN: the regression now raises the exact established error.
+- The positive supplied-only zero-path controller test includes a concrete
+  rationale and reaches `status == "published"` through `finalize_refinement`.
+- The path-bearing control still rejects unselected `NODE-018` with the exact
+  uncovered high-risk node error.
+
+### Fix-round verification
+
+- Graph delivery/controller/facade/CLI/MCP — 128 tests passed on Python 3.9.
+- Full pinned quality runner — Ruff lint and format, mypy over 46 source files,
+  782 tests with 21 skips, 80.75% total branch coverage, and Bandit passed.
+  `rir_graph_delivery.py` reports 83.03% branch coverage.
+- Root/skill delivery and controller mirrors are byte-identical; facade parity
+  and `git diff --check` pass. The two pre-existing runtime pointer changes
+  remain outside the fix-round scope.

@@ -1953,7 +1953,7 @@ def validate_graph_coverage(analysis: Mapping[str, object], context: GraphContex
         ):
             raise ValueError("coverage_rationale must be bounded nonempty text")
         if not selected_paths:
-            if impact.get("evidence_level") != "unknown" or (rationale is None and paths):
+            if rationale is None or impact.get("evidence_level") != "unknown":
                 raise ValueError(
                     "supplied-only or unknown graph coverage requires rationale and unknown evidence"
                 )

@@ -191,16 +191,16 @@ class RirGraphDeliveryTest(unittest.TestCase):
         self.assertEqual(delivery.source_inventory_sha256(first), expected)
         self.assertEqual(delivery.source_inventory_sha256(second), expected)
 
-    def test_supplied_only_unknown_without_rationale_is_accepted_when_receipt_has_no_paths(self):
+    def test_zero_path_unknown_without_rationale_is_rejected(self):
         delivery = self.delivery()
         analysis = supplied_only_analysis()
         context = graph_context([])
 
-        delivery.validate_graph_coverage(analysis, context)
-
-        self.assertEqual(context["impact_paths"], {"member-scope": []})
-        self.assertEqual(context["rationales"], {"member-scope": None})
-        self.assertEqual(context["impact_confidences"], {"member-scope": "unknown"})
+        with self.assertRaisesRegex(
+            ValueError,
+            "^supplied-only or unknown graph coverage requires rationale and unknown evidence$",
+        ):
+            delivery.validate_graph_coverage(analysis, context)
 
     def test_uncovered_high_risk_node_is_rejected(self):
         delivery = self.delivery()
