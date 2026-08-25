@@ -41,6 +41,9 @@ DEFAULT_MAX_FILE_BYTES = 1_048_576
 MAX_GRAPH_ID = 999
 IGNORED_DIRECTORIES = frozenset({
     ".git", ".hg", ".svn", ".requirements-impact-refiner",
+    # git worktree checkouts duplicate the whole tree; scanning them floods
+    # the graph with copies of every file (observed on a real repository).
+    ".worktrees", "worktrees",
     "vendor", "build", "dist", "generated",
     "node_modules", ".next", ".venv", "venv", "target", "coverage",
 })

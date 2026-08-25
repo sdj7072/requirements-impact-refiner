@@ -1123,3 +1123,31 @@ class JavaScriptStructureTest(unittest.TestCase):
             directions.get(("page.js", "invoice.js")),
             ("references", "lexical"),
         )
+
+
+class WorktreeExclusionTest(unittest.TestCase):
+    """git worktree checkouts under .worktrees duplicate the entire tree;
+    scanning them floods the graph with copies of every file (observed on a
+    real repository: every impact path pointed into .worktrees)."""
+
+    def test_worktree_copies_are_not_scanned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "api").mkdir()
+            (root / "api" / "profile.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            shadow = root / ".worktrees" / "feature-x" / "api"
+            shadow.mkdir(parents=True)
+            (shadow / "profile.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            result = scan(
+                root,
+                seeds=(BUILTIN.ScanSeed("profile.displayName", "api/profile.py"),),
+            )
+            locations = {node.location for node in result.nodes}
+            self.assertTrue(
+                all(".worktrees" not in (loc or "") for loc in locations),
+                locations,
+            )
