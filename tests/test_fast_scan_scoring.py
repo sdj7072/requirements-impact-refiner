@@ -74,6 +74,28 @@ class FastScanScoringTest(unittest.TestCase):
         self.assertFalse(score.passed)
         self.assertIn("required distant path is missing", score.findings)
 
+    def test_malformed_seeds_are_scored_as_missing_required_evidence(self):
+        module = load()
+        case = module.load_fast_scan_cases()[0]
+        result = {
+            "status": "complete",
+            "elapsed_ms": 17,
+            "display_text": "Fast impact scan",
+            "maximum_path_distance": 3,
+            "controller_calls": ["rir_scan"],
+            "uncovered_high_risk_nodes": [],
+        }
+
+        for malformed_seeds in (None, "seed"):
+            with self.subTest(malformed_seeds=malformed_seeds):
+                score = module.score_fast_scan(
+                    case,
+                    {**result, "seeds": malformed_seeds},
+                )
+
+                self.assertFalse(score.passed)
+                self.assertEqual(score.findings, ("required seeds are missing",))
+
 
 if __name__ == "__main__":
     unittest.main()

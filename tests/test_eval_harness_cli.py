@@ -350,6 +350,51 @@ class EvalHarnessCliTest(unittest.TestCase):
         self.assertEqual(observation.controller_begin_calls, 0)
         self.assertTrue(observation.state_markdown_match)
 
+    def test_smoke_observation_rejects_malformed_compact_state_impacts(self):
+        case = next(case for case in load_all() if case.id == "POS-authorization")
+        slot = ScheduledRun(case, 1)
+        result = RunResult(case.id, 1, "codex", RunStatus.PASS, None, final_output="IMP-001")
+        score = MechanicalScore(case.id, 1, True, ())
+        pointer = json.dumps({"state": "revision-0001.json"}).encode("utf-8")
+        common_payloads = {
+            "smoke prompt": b"prompt",
+            "smoke JSONL": b'{"type":"agent_message"}\n',
+            "smoke final output": b"IMP-001",
+            "smoke controller evidence": b"{}",
+            "smoke metadata": b'{"execution_commands":[]}',
+            "smoke current pointer": pointer,
+        }
+
+        for state in (None, {"impacts": "IMP-001"}, {"impacts": [{"id": 1}]}):
+            with self.subTest(state=state):
+                state_payload = json.dumps(state).encode("utf-8")
+
+                def selected_file(raw_root, path, label, state_payload=state_payload):
+                    payload = (
+                        state_payload if label == "smoke compact state" else common_payloads[label]
+                    )
+                    return payload, hashlib.sha256(payload).hexdigest(), path.as_posix()
+
+                with tempfile.TemporaryDirectory() as temporary:
+                    raw = Path(temporary) / "raw"
+                    (raw / "codex" / case.id / "01" / "workspace-reports" / "RPT-001").mkdir(
+                        parents=True
+                    )
+                    with (
+                        patch(
+                            "evals.harness.run._captured_canonical_report",
+                            return_value=(b"report", None, ()),
+                        ),
+                        patch(
+                            "evals.harness.run._read_selected_file",
+                            side_effect=selected_file,
+                        ),
+                        self.assertRaisesRegex(
+                            ValueError, "smoke compact state impacts are invalid"
+                        ),
+                    ):
+                        _smoke_observation(raw, "codex", slot, result, score)
+
     def test_v04_smoke_treats_none_observation_as_extraction_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "output"
