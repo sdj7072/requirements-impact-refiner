@@ -45,6 +45,42 @@ class QualityConfigurationTest(unittest.TestCase):
         self.assertIn("scripts/rir_mcp_server.py", result.stdout)
         self.assertIn("scripts/install-agent-skill.py", result.stdout)
 
+    @unittest.skipUnless(importlib.util.find_spec("coverage"), "quality environment only")
+    def test_coverage_threshold_rejects_a_79_point_9_percent_report(self):
+        probe = Path("scripts") / "_coverage_precision_probe.py"
+        probe.write_text(
+            "import os\n"
+            + "".join(f"covered_{index} = {index}\n" for index in range(799))
+            + 'if os.environ.get("RIR_COVERAGE_PRECISION_PROBE") == "run":\n'
+            + "".join(f"    missed_{index} = {index}\n" for index in range(201)),
+            encoding="utf-8",
+        )
+        self.addCleanup(probe.unlink, missing_ok=True)
+        with tempfile.TemporaryDirectory() as directory:
+            environment = os.environ.copy()
+            environment["COVERAGE_FILE"] = str(Path(directory) / ".coverage")
+            subprocess.run(
+                [sys.executable, "-m", "coverage", "run", "--branch", str(probe)],
+                check=True,
+                env=environment,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "coverage",
+                    "report",
+                    "--include",
+                    str(probe),
+                    "--fail-under=80",
+                ],
+                text=True,
+                capture_output=True,
+                env=environment,
+            )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_root_only_skill_installer_copies_the_canonical_skill(self):
         installer_path = Path("scripts/install-agent-skill.py")
         specification = importlib.util.spec_from_file_location("skill_installer", installer_path)

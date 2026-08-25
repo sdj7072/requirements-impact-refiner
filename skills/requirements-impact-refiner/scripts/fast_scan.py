@@ -656,8 +656,13 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
         errors.append("graph_receipt must be an object")
     if value["risk_level"] not in _RISKS:
         errors.append("risk_level is invalid")
-    if not isinstance(value["frontier"], list) or len(value["frontier"]) > MAX_FRONTIER:
+    frontier = value["frontier"]
+    if not isinstance(frontier, list) or len(frontier) > MAX_FRONTIER:
         errors.append("frontier exceeds maximum collection size")
+    else:
+        for index, row in enumerate(frontier, start=1):
+            if not _mapping(row):
+                errors.append(f"frontier row {index} must be an object")
     candidates = value["candidates"]
     if not isinstance(candidates, list) or len(candidates) > MAX_CANDIDATES:
         errors.append("candidates exceeds maximum collection size")

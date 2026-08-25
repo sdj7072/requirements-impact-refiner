@@ -405,6 +405,40 @@ class FastScanTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertNotEqual(third.scan_id, first.scan_id)
 
+    def test_malformed_cached_frontier_fails_closed_before_a_cache_hit_is_returned(self):
+        fast_scan = load_fast_scan()
+        self.write("api/profile.py", 'FIELD = "profile.displayName"\n')
+        graph = json.loads(
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(encoding="utf-8")
+        )
+        graph["budget_status"] = "closed"
+        graph["frontier"] = []
+        request = fast_scan.FastScanRequest(self.root, "Rename profile.displayName", (), "balanced")
+        first = fast_scan.execute_fast_scan(
+            request, graph["settings"], "a" * 64, coordinator=lambda *args, **kwargs: graph
+        )
+        cache_path = self.root / ".requirements-impact-refiner/scans" / (first.scan_id + ".json")
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        cached["frontier"] = [1]
+        cache_path.write_text(
+            json.dumps(cached, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            fast_scan.validate_fast_scan_receipt(cached),
+            ("frontier row 1 must be an object",),
+        )
+        with self.assertRaisesRegex(ValueError, "existing fast scan receipt is invalid"):
+            fast_scan.execute_fast_scan(
+                request,
+                graph["settings"],
+                "a" * 64,
+                coordinator=lambda *args, **kwargs: self.fail(
+                    "invalid cache must not scan or return"
+                ),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
