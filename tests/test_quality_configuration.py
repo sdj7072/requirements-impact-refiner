@@ -12,7 +12,7 @@ class QualityConfigurationTest(unittest.TestCase):
             [
                 "bandit==1.9.4",
                 "coverage==7.15.4",
-                "mypy==2.3.1",
+                "mypy==1.18.2",
                 "ruff==0.16.3",
             ],
         )
