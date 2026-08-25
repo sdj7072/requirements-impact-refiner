@@ -43,8 +43,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol, cast
 
-from typing_extensions import TypeGuard
-
 if TYPE_CHECKING:
     from graph_providers import (
         Deadline,
@@ -56,6 +54,7 @@ if TYPE_CHECKING:
     from graph_providers import (
         ProviderSpec as ProviderSpecType,
     )
+    from typing_extensions import TypeGuard
 
 
 class _ProviderContract(Protocol):

@@ -18,8 +18,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, cast
 
-from typing_extensions import TypeGuard
-
 if TYPE_CHECKING:
     from graph_builtin import (
         BuiltInScanResult as BuiltInScanResultType,
@@ -70,6 +68,7 @@ if TYPE_CHECKING:
     from impact_graph import (
         ProviderStatus as ProviderStatusType,
     )
+    from typing_extensions import TypeGuard
 
 
 class _GraphContract(Protocol):
@@ -543,9 +542,7 @@ def _adapter(name: str) -> _Adapter | None:
     if not path.is_file():
         return None
     loaded = _load_sibling(filename, "_rir_" + filename[:-3])
-    if not callable(getattr(loaded, "probe", None)) or not callable(
-        getattr(loaded, "query", None)
-    ):
+    if not callable(getattr(loaded, "probe", None)) or not callable(getattr(loaded, "query", None)):
         raise ImportError("provider adapter contract is incomplete")
     return cast(_Adapter, loaded)
 

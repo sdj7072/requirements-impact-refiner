@@ -9,8 +9,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
-from typing_extensions import TypeGuard
+if TYPE_CHECKING:
+    from typing_extensions import TypeGuard
 
 MAX_RECEIPT_BYTES = 1_048_576
 MAX_STRING_LENGTH = 4_096

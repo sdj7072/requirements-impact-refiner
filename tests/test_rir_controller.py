@@ -369,6 +369,50 @@ class RirControllerTest(unittest.TestCase):
                 )
             )
 
+    def test_receipt_payload_guard_rejects_valid_dataclass_receipt(self):
+        settings = CONTROLLER.GRAPH.GraphSettings()
+        receipt = CONTROLLER.GRAPH.GraphReceipt(
+            "0" * 32,
+            "1" * 32,
+            "2" * 64,
+            "3" * 64,
+            settings,
+            (
+                CONTROLLER.GRAPH.ProviderStatus(
+                    "builtin", "ready", "verified-source", "builtin-v1", None
+                ),
+            ),
+            (),
+            (),
+            (),
+            (),
+            {"total": 0},
+            "closed",
+            {"status": "miss", "key": "0" * 64, "invalidated_nodes": []},
+        )
+        self.assertEqual(CONTROLLER.GRAPH.validate_receipt(receipt), ())
+        self.assertFalse(CONTROLLER._is_receipt_payload(receipt))
+
+    def test_trace_rejects_nonmapping_draft_settings_with_stable_error(self):
+        self.enable_builtin_graph()
+        for index, malformed in enumerate((None, "not-settings")):
+            with self.subTest(malformed=malformed):
+                draft = CONTROLLER.begin_refinement(
+                    self.request(request=f"Malformed settings {index}")
+                )
+                stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+                stored["settings"] = malformed
+                draft.draft_path.write_bytes(CONTROLLER._canonical_bytes(stored))
+
+                with self.assertRaisesRegex(ValueError, "^draft graph settings are invalid$"):
+                    CONTROLLER.trace_impact(
+                        CONTROLLER.TraceRequest(
+                            self.root,
+                            draft.draft_id,
+                            (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                        )
+                    )
+
     def test_incomplete_graph_coordinator_sibling_fails_closed(self):
         script = r"""
 import hashlib

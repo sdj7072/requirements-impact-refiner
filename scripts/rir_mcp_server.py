@@ -3,17 +3,211 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import json
 import re
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
-
-from typing_extensions import TypeGuard
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 if TYPE_CHECKING:
-    import payload_identity
-    import rir_controller
+    from typing_extensions import TypeGuard
+
+
+class _PayloadIdentityContract(Protocol):
+    def payload_sha256(self, plugin_root: Path) -> str: ...
+
+
+class _BeginRequestFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        repo_root: Path,
+        request: str,
+        repository_evidence: tuple[str, ...],
+        adapter: str,
+        audience_override: str | None,
+        delivery_override: str | None,
+        scan_id: str | None,
+    ) -> object: ...
+
+
+class _FinalizeRequestFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        repo_root: Path,
+        draft_id: str,
+        analysis: Mapping[str, object],
+        graph_receipt_id: str | None,
+    ) -> object: ...
+
+
+class _ScanRequestFactory(Protocol):
+    def __call__(
+        self,
+        repo_root: Path,
+        change_request: str,
+        evidence: tuple[str, ...],
+        audience_override: str | None,
+    ) -> object: ...
+
+
+class _TraceSeedFactory(Protocol):
+    def __call__(self, term: str, location: str | None) -> object: ...
+
+
+class _TraceRequestFactory(Protocol):
+    def __call__(self, *, repo_root: Path, draft_id: str, seeds: tuple[object, ...]) -> object: ...
+
+
+class _ControllerContract(Protocol):
+    ADAPTERS: set[str]
+    BeginRequest: _BeginRequestFactory
+    FinalizeRequest: _FinalizeRequestFactory
+    ScanRequest: _ScanRequestFactory
+    TraceRequest: _TraceRequestFactory
+    TraceSeed: _TraceSeedFactory
+
+    def begin_refinement(self, request: object) -> object: ...
+
+    def finalize_refinement(self, request: object) -> object: ...
+
+    def scan_impact(self, request: object) -> object: ...
+
+    def trace_impact(self, request: object) -> object: ...
+
+
+class _BeginResult(Protocol):
+    draft_id: str
+    draft_path: Path
+    report_id: str
+    revision: int
+    previous_sha256: str
+    settings: Mapping[str, object]
+    prior_state: Mapping[str, object] | None
+    prior_key_map: Mapping[str, object] | None
+    scan_id: str | None
+    graph_receipt_id: str | None
+
+
+class _FinalizeResult(Protocol):
+    status: str
+    report_id: str
+    revision: int
+    delivery: str
+    display_text: str
+    state_path: Path
+    markdown_path: Path
+    markdown_sha256: str
+
+
+class _ScanResult(Protocol):
+    status: str
+    scan_id: str
+    receipt_id: str
+    receipt_sha256: str
+    display_text: str
+    risk_level: str
+    paths: Sequence[Mapping[str, object]]
+    frontier: Sequence[Mapping[str, object]]
+    candidates: Sequence[Mapping[str, object]]
+    elapsed_ms: int
+    cache_status: str
+    can_promote: bool
+
+
+class _TraceSeedResult(Protocol):
+    term: str
+    location: str | None
+
+
+class _TraceResult(Protocol):
+    receipt_id: str
+    receipt_path: Path
+    receipt_sha256: str
+    compact_graph: Mapping[str, object]
+    budget_status: str
+    request_sha256: str
+    seeds: Sequence[_TraceSeedResult]
+
+
+def _callables(value: object, names: tuple[str, ...]) -> bool:
+    return all(callable(getattr(value, name, None)) for name in names)
+
+
+def _has_parameters(value: object, names: tuple[str, ...]) -> bool:
+    if not callable(value):
+        return False
+    try:
+        return tuple(inspect.signature(value).parameters) == names
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_payload_identity_contract(value: object) -> bool:
+    return _has_parameters(getattr(value, "payload_sha256", None), ("plugin_root",))
+
+
+def _is_controller_contract(value: object) -> bool:
+    adapters = getattr(value, "ADAPTERS", None)
+    return (
+        isinstance(adapters, set)
+        and all(isinstance(adapter, str) for adapter in adapters)
+        and _callables(
+            value,
+            (
+                "BeginRequest",
+                "FinalizeRequest",
+                "ScanRequest",
+                "TraceRequest",
+                "TraceSeed",
+                "begin_refinement",
+                "finalize_refinement",
+                "scan_impact",
+                "trace_impact",
+            ),
+        )
+        and _has_parameters(
+            getattr(value, "BeginRequest", None),
+            (
+                "repo_root",
+                "request",
+                "repository_evidence",
+                "adapter",
+                "audience_override",
+                "delivery_override",
+                "scan_id",
+            ),
+        )
+        and _has_parameters(
+            getattr(value, "FinalizeRequest", None),
+            ("repo_root", "draft_id", "analysis", "graph_receipt_id"),
+        )
+        and _has_parameters(
+            getattr(value, "ScanRequest", None),
+            ("repo_root", "change_request", "evidence", "audience_override"),
+        )
+        and _has_parameters(
+            getattr(value, "TraceRequest", None), ("repo_root", "draft_id", "seeds")
+        )
+        and _has_parameters(getattr(value, "TraceSeed", None), ("term", "location"))
+        and all(
+            _has_parameters(getattr(value, name, None), ("request",))
+            for name in (
+                "begin_refinement",
+                "finalize_refinement",
+                "scan_impact",
+                "trace_impact",
+            )
+        )
+    )
+
+
+payload_identity: _PayloadIdentityContract
+rir_controller: _ControllerContract
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -50,28 +244,14 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 if not TYPE_CHECKING:
-    payload_identity = importlib.import_module("payload_identity")
-    rir_controller = importlib.import_module("rir_controller")
-    if not callable(getattr(payload_identity, "payload_sha256", None)):
+    _loaded_payload_identity = importlib.import_module("payload_identity")
+    _loaded_controller = importlib.import_module("rir_controller")
+    if not _is_payload_identity_contract(_loaded_payload_identity):
         raise ImportError("payload identity sibling contract is incomplete")
-    if (
-        not all(
-            isinstance(getattr(rir_controller, name, None), type)
-            for name in (
-                "BeginRequest",
-                "FinalizeRequest",
-                "ScanRequest",
-                "TraceRequest",
-                "TraceSeed",
-            )
-        )
-        or not all(
-            callable(getattr(rir_controller, name, None))
-            for name in ("begin_refinement", "finalize_refinement", "scan_impact", "trace_impact")
-        )
-        or not isinstance(getattr(rir_controller, "ADAPTERS", None), set)
-    ):
+    if not _is_controller_contract(_loaded_controller):
         raise ImportError("controller sibling contract is incomplete")
+    payload_identity = cast(_PayloadIdentityContract, _loaded_payload_identity)
+    rir_controller = cast(_ControllerContract, _loaded_controller)
 
 MAX_LINE_BYTES = 2 * 1024 * 1024
 PROTOCOL_VERSION = "2025-06-18"
@@ -81,24 +261,36 @@ _analysis_schema: object = json.loads(
 if not isinstance(_analysis_schema, dict):
     raise ValueError("controller analysis schema must contain an object")
 ANALYSIS_SCHEMA: dict[str, object] = _analysis_schema
-INSTALLED_PAYLOAD_SHA256 = payload_identity.payload_sha256(SCRIPT_DIR.parent)
+_installed_payload_sha256 = payload_identity.payload_sha256(SCRIPT_DIR.parent)
+if (
+    not isinstance(_installed_payload_sha256, str)
+    or re.fullmatch(r"[0-9a-f]{64}", _installed_payload_sha256) is None
+):
+    raise ImportError("payload identity sibling result contract is incomplete")
+INSTALLED_PAYLOAD_SHA256 = _installed_payload_sha256
 
 
-class ScanArguments(TypedDict, total=False):
-    repo_root: str
-    change_request: str
+class _OptionalScanArguments(TypedDict, total=False):
     evidence: list[str]
     presentation: str
 
 
-class BeginArguments(TypedDict, total=False):
+class ScanArguments(_OptionalScanArguments):
+    repo_root: str
+    change_request: str
+
+
+class _OptionalBeginArguments(TypedDict, total=False):
+    audience_override: str | None
+    delivery_override: str | None
+    scan_id: str | None
+
+
+class BeginArguments(_OptionalBeginArguments):
     repo_root: str
     request: str
     repository_evidence: list[str]
     adapter: str
-    audience_override: str | None
-    delivery_override: str | None
-    scan_id: str | None
 
 
 class TraceSeedArguments(TypedDict):
@@ -112,11 +304,14 @@ class TraceArguments(TypedDict):
     seeds: list[TraceSeedArguments]
 
 
-class FinalizeArguments(TypedDict, total=False):
+class _OptionalFinalizeArguments(TypedDict, total=False):
+    graph_receipt_id: str
+
+
+class FinalizeArguments(_OptionalFinalizeArguments):
     repo_root: str
     draft_id: str
     analysis: dict[str, object]
-    graph_receipt_id: str
 
 
 def _is_string_list(value: object) -> TypeGuard[list[str]]:
@@ -127,9 +322,18 @@ def _is_optional_string(value: object) -> TypeGuard[str | None]:
     return value is None or isinstance(value, str)
 
 
+def _exact_keys(
+    value: object, required: frozenset[str], optional: frozenset[str] = frozenset()
+) -> bool:
+    return isinstance(value, dict) and required <= set(value) and set(value) <= required | optional
+
+
 def _is_scan_arguments(value: object) -> TypeGuard[ScanArguments]:
+    required = frozenset({"repo_root", "change_request"})
+    optional = frozenset({"evidence", "presentation"})
     return (
-        isinstance(value, dict)
+        _exact_keys(value, required, optional)
+        and isinstance(value, dict)
         and isinstance(value.get("repo_root"), str)
         and isinstance(value.get("change_request"), str)
         and _is_string_list(value.get("evidence", []))
@@ -138,8 +342,11 @@ def _is_scan_arguments(value: object) -> TypeGuard[ScanArguments]:
 
 
 def _is_begin_arguments(value: object) -> TypeGuard[BeginArguments]:
+    required = frozenset({"repo_root", "request", "repository_evidence", "adapter"})
+    optional = frozenset({"audience_override", "delivery_override", "scan_id"})
     return (
-        isinstance(value, dict)
+        _exact_keys(value, required, optional)
+        and isinstance(value, dict)
         and isinstance(value.get("repo_root"), str)
         and isinstance(value.get("request"), str)
         and _is_string_list(value.get("repository_evidence"))
@@ -152,7 +359,8 @@ def _is_begin_arguments(value: object) -> TypeGuard[BeginArguments]:
 
 def _is_trace_seed(value: object) -> TypeGuard[TraceSeedArguments]:
     return (
-        isinstance(value, dict)
+        _exact_keys(value, frozenset({"term", "location"}))
+        and isinstance(value, dict)
         and isinstance(value.get("term"), str)
         and _is_optional_string(value.get("location"))
     )
@@ -161,7 +369,8 @@ def _is_trace_seed(value: object) -> TypeGuard[TraceSeedArguments]:
 def _is_trace_arguments(value: object) -> TypeGuard[TraceArguments]:
     seeds = value.get("seeds") if isinstance(value, dict) else None
     return (
-        isinstance(value, dict)
+        _exact_keys(value, frozenset({"repo_root", "draft_id", "seeds"}))
+        and isinstance(value, dict)
         and isinstance(value.get("repo_root"), str)
         and isinstance(value.get("draft_id"), str)
         and isinstance(seeds, list)
@@ -170,12 +379,121 @@ def _is_trace_arguments(value: object) -> TypeGuard[TraceArguments]:
 
 
 def _is_finalize_arguments(value: object) -> TypeGuard[FinalizeArguments]:
+    required = frozenset({"repo_root", "draft_id", "analysis"})
+    optional = frozenset({"graph_receipt_id"})
     return (
-        isinstance(value, dict)
+        _exact_keys(value, required, optional)
+        and isinstance(value, dict)
         and isinstance(value.get("repo_root"), str)
         and isinstance(value.get("draft_id"), str)
         and isinstance(value.get("analysis"), dict)
         and _is_optional_string(value.get("graph_receipt_id"))
+    )
+
+
+def _is_begin_result(value: object) -> TypeGuard[_BeginResult]:
+    revision = getattr(value, "revision", None)
+    return (
+        isinstance(getattr(value, "draft_id", None), str)
+        and isinstance(getattr(value, "draft_path", None), Path)
+        and isinstance(getattr(value, "report_id", None), str)
+        and isinstance(revision, int)
+        and not isinstance(revision, bool)
+        and isinstance(getattr(value, "previous_sha256", None), str)
+        and _string_key_mapping(getattr(value, "settings", None))
+        and all(
+            hasattr(value, name)
+            for name in ("prior_state", "prior_key_map", "scan_id", "graph_receipt_id")
+        )
+        and (
+            getattr(value, "prior_state", None) is None
+            or _string_key_mapping(getattr(value, "prior_state", None))
+        )
+        and (
+            getattr(value, "prior_key_map", None) is None
+            or _string_key_mapping(getattr(value, "prior_key_map", None))
+        )
+        and _is_optional_string(getattr(value, "scan_id", None))
+        and _is_optional_string(getattr(value, "graph_receipt_id", None))
+    )
+
+
+def _is_finalize_result(value: object) -> TypeGuard[_FinalizeResult]:
+    revision = getattr(value, "revision", None)
+    return (
+        all(
+            isinstance(getattr(value, name, None), str)
+            for name in (
+                "status",
+                "report_id",
+                "delivery",
+                "display_text",
+                "markdown_sha256",
+            )
+        )
+        and isinstance(revision, int)
+        and not isinstance(revision, bool)
+        and isinstance(getattr(value, "state_path", None), Path)
+        and isinstance(getattr(value, "markdown_path", None), Path)
+    )
+
+
+def _string_key_mapping(value: object) -> bool:
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
+
+
+def _mapping_sequence(value: object) -> bool:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes))
+        and all(_string_key_mapping(item) for item in value)
+    )
+
+
+def _is_scan_result(value: object) -> TypeGuard[_ScanResult]:
+    elapsed_ms = getattr(value, "elapsed_ms", None)
+    return (
+        all(
+            isinstance(getattr(value, name, None), str)
+            for name in (
+                "status",
+                "scan_id",
+                "receipt_id",
+                "receipt_sha256",
+                "display_text",
+                "risk_level",
+                "cache_status",
+            )
+        )
+        and _mapping_sequence(getattr(value, "paths", None))
+        and _mapping_sequence(getattr(value, "frontier", None))
+        and _mapping_sequence(getattr(value, "candidates", None))
+        and isinstance(elapsed_ms, int)
+        and not isinstance(elapsed_ms, bool)
+        and isinstance(getattr(value, "can_promote", None), bool)
+    )
+
+
+def _is_trace_seed_result(value: object) -> TypeGuard[_TraceSeedResult]:
+    return (
+        hasattr(value, "location")
+        and isinstance(getattr(value, "term", None), str)
+        and _is_optional_string(getattr(value, "location", None))
+    )
+
+
+def _is_trace_result(value: object) -> TypeGuard[_TraceResult]:
+    seeds = getattr(value, "seeds", None)
+    return (
+        all(
+            isinstance(getattr(value, name, None), str)
+            for name in ("receipt_id", "receipt_sha256", "budget_status", "request_sha256")
+        )
+        and isinstance(getattr(value, "receipt_path", None), Path)
+        and _string_key_mapping(getattr(value, "compact_graph", None))
+        and isinstance(seeds, Sequence)
+        and not isinstance(seeds, (str, bytes))
+        and all(_is_trace_seed_result(seed) for seed in seeds)
     )
 
 
@@ -395,6 +713,8 @@ def _begin(arguments: object) -> dict[str, object]:
             scan_id=arguments.get("scan_id"),
         )
     )
+    if not _is_begin_result(result):
+        raise ValueError("controller begin result contract is incomplete")
     root = Path(arguments["repo_root"]).resolve()
     prior_state = result.prior_state if isinstance(result.prior_state, dict) else {}
     prior_key_map = result.prior_key_map if isinstance(result.prior_key_map, dict) else {}
@@ -529,6 +849,8 @@ def _finalize(arguments: object) -> dict[str, object]:
             graph_receipt_id=arguments.get("graph_receipt_id"),
         )
     )
+    if not _is_finalize_result(result):
+        raise ValueError("controller finalize result contract is incomplete")
     root = Path(arguments["repo_root"]).resolve()
     structured = {
         "status": result.status,
@@ -559,6 +881,8 @@ def _scan(arguments: object) -> dict[str, object]:
             arguments.get("presentation"),
         )
     )
+    if not _is_scan_result(result):
+        raise ValueError("controller scan result contract is incomplete")
     structured = {
         "status": result.status,
         "scan_id": result.scan_id,
@@ -593,6 +917,8 @@ def _trace(arguments: object) -> dict[str, object]:
             ),
         )
     )
+    if not _is_trace_result(result):
+        raise ValueError("controller trace result contract is incomplete")
     root = Path(arguments["repo_root"]).resolve()
     structured = {
         "receipt_id": result.receipt_id,

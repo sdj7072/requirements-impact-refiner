@@ -14,9 +14,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
-from typing_extensions import TypedDict, TypeGuard
+if TYPE_CHECKING:
+    from typing_extensions import TypeGuard
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -839,7 +840,11 @@ def execute_fast_scan(
     if existing_payload is not None:
         existing_value: object = json.loads(existing_payload)
         errors = validate_fast_scan_receipt(existing_value)
-        if not _mapping(existing_value) or errors or existing_value.get("request_sha256") != request_sha:
+        if (
+            not _mapping(existing_value)
+            or errors
+            or existing_value.get("request_sha256") != request_sha
+        ):
             raise ValueError("existing fast scan receipt is invalid")
         existing = cast(_StoredFastScan, existing_value)
         rendered = dict(existing)
@@ -952,9 +957,7 @@ def prepare_fast_scan_identity(
     root = _root(request.repo_root)
     if not isinstance(payload_sha256, str) or _HEX64.fullmatch(payload_sha256) is None:
         raise ValueError("payload_sha256 must be 64 lowercase hex characters")
-    settings = graph_coordinator.GraphSettings(
-        **cast(_GraphSettingsArgs, dict(graph_settings))
-    )
+    settings = graph_coordinator.GraphSettings(**cast(_GraphSettingsArgs, dict(graph_settings)))
     deadline = graph_coordinator.Deadline(time, settings.max_seconds)
     seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
     source_inventory = _inventory(root, deadline)

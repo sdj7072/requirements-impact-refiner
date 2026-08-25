@@ -21,8 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict
 
-from typing_extensions import TypeGuard
-
 if TYPE_CHECKING:
     from graph_builtin import ScanSeed as ScanSeedType
     from graph_coordinator import SourceInventory as SourceInventoryType
@@ -30,6 +28,7 @@ if TYPE_CHECKING:
     from impact_graph import GraphReceipt as GraphReceiptType
     from impact_graph import GraphSettings as GraphSettingsType
     from impact_graph import ProviderStatus as ProviderStatusType
+    from typing_extensions import TypeGuard
 
 
 class _FcntlContract(Protocol):
@@ -462,7 +461,7 @@ TraceSeed = GRAPH_COORDINATOR.ScanSeed
 
 
 def _is_receipt_payload(value: object) -> TypeGuard[ReceiptPayload]:
-    return not GRAPH.validate_receipt(value)
+    return isinstance(value, dict) and not GRAPH.validate_receipt(value)
 
 
 def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, str]]:

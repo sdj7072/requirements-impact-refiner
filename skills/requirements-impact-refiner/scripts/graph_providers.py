@@ -54,6 +54,7 @@ from typing import BinaryIO, Protocol, cast
 class Clock(Protocol):
     def monotonic(self) -> float: ...
 
+
 STDOUT_LIMIT = 4 * 1024 * 1024
 STDERR_LIMIT = 256 * 1024
 MAX_ARGUMENTS = 128

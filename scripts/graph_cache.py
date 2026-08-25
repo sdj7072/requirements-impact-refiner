@@ -14,9 +14,10 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
-from typing_extensions import TypeGuard
+if TYPE_CHECKING:
+    from typing_extensions import TypeGuard
 
 
 class _GraphCacheContract(Protocol):
@@ -322,8 +323,7 @@ def invalidate(
     direct = {
         node_id
         for node in nodes
-        if node.get("location") in changed_paths
-        and isinstance((node_id := node.get("id")), str)
+        if node.get("location") in changed_paths and isinstance((node_id := node.get("id")), str)
     }
     invalidated = set(direct)
     adjacency: dict[str, set[str]] = {}

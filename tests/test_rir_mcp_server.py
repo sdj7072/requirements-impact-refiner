@@ -5,8 +5,10 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     import fcntl
@@ -24,6 +26,94 @@ def request(identifier, method, params):
 
 
 class RirMcpServerTest(unittest.TestCase):
+    def load_server_module(self, name="_rir_mcp_test"):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(name, SERVER)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def test_stdlib_only_import_smoke_has_no_site_packages(self):
+        environment = dict(os.environ)
+        environment.pop("PYTHONPATH", None)
+        environment["PYTHONNOUSERSITE"] = "1"
+        for script in (
+            ROOT / "scripts/rir_controller.py",
+            ROOT / "skills/requirements-impact-refiner/scripts/rir_controller.py",
+            SERVER,
+        ):
+            with self.subTest(script=script.name):
+                result = subprocess.run(
+                    [sys.executable, "-S", str(script)],
+                    text=True,
+                    input="",
+                    capture_output=True,
+                    check=False,
+                    env=environment,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_trace_seed_guard_requires_exact_location_key(self):
+        module = self.load_server_module("_rir_mcp_trace_seed_guard")
+        self.assertFalse(module._is_trace_seed({"term": "profile.displayName"}))
+        self.assertTrue(module._is_trace_seed({"term": "profile.displayName", "location": None}))
+
+    def test_malformed_controller_results_fail_closed_before_field_access(self):
+        module = self.load_server_module("_rir_mcp_result_guard")
+        with mock.patch.object(module.rir_controller, "scan_impact", return_value=object()):
+            with self.assertRaisesRegex(
+                ValueError, "controller scan result contract is incomplete"
+            ):
+                module._scan(
+                    {
+                        "repo_root": str(ROOT),
+                        "change_request": "Change the profile contract",
+                    }
+                )
+
+        malformed_trace = types.SimpleNamespace(
+            receipt_id="0" * 32,
+            receipt_path=ROOT,
+            receipt_sha256="0" * 64,
+            compact_graph={},
+            budget_status="closed",
+            request_sha256="0" * 64,
+            seeds=(types.SimpleNamespace(term="profile.displayName"),),
+        )
+        self.assertFalse(module._is_trace_result(malformed_trace))
+
+    def test_malformed_payload_identity_return_fails_closed(self):
+        script = r"""
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(path.parent))
+fake = types.ModuleType("payload_identity")
+fake.payload_sha256 = lambda plugin_root: object()
+sys.modules["payload_identity"] = fake
+spec = importlib.util.spec_from_file_location("_mcp_payload_guard", path)
+module = importlib.util.module_from_spec(spec)
+try:
+    spec.loader.exec_module(module)
+except ImportError as error:
+    if str(error) != "payload identity sibling result contract is incomplete":
+        raise AssertionError(str(error))
+else:
+    raise AssertionError("malformed payload identity result was accepted")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SERVER)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def write_graph_config(self, root, enabled):
         (root / ".requirements-impact-refiner.json").write_text(
             json.dumps(

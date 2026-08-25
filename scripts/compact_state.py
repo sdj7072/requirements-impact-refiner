@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Collection, Sequence
-from typing import TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
-from typing_extensions import TypeGuard
+if TYPE_CHECKING:
+    from typing_extensions import TypeGuard
 
 
 class ReportState(TypedDict):

@@ -16,10 +16,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, cast
 
-from typing_extensions import TypeGuard
-
 if TYPE_CHECKING:
     from impact_graph import FrontierEntry, GraphEdge, GraphNode, GraphPath
+    from typing_extensions import TypeGuard
 
 
 class _GraphContract(Protocol):

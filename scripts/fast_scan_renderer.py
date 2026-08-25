@@ -1,9 +1,13 @@
 """Bounded user-facing rendering for Fast Scan receipts."""
 
+from __future__ import annotations
+
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
-from typing_extensions import TypeGuard
+if TYPE_CHECKING:
+    from typing_extensions import TypeGuard
 
 WORD_LIMIT = 180
 AUDIENCES = {"simple", "balanced", "technical"}

@@ -42,9 +42,7 @@ import stat
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
-
-from typing_extensions import TypedDict, TypeGuard
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 if TYPE_CHECKING:
     from graph_providers import (
@@ -57,6 +55,7 @@ if TYPE_CHECKING:
     from graph_providers import (
         ProviderSpec as ProviderSpecType,
     )
+    from typing_extensions import TypeGuard
 
 
 class _ProviderContract(Protocol):
@@ -123,6 +122,8 @@ def _load(filename: str, name: str) -> object:
 _loaded_providers = _load("graph_providers.py", "_rir_graph_providers")
 _loaded_common = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
 _loaded_codegraph = _load("graph_adapter_codegraph.py", "_rir_graph_adapter_codegraph")
+
+
 def _is_provider_contract(value: object) -> TypeGuard[_ProviderContract]:
     return all(
         isinstance(getattr(value, name, None), type)
@@ -463,9 +464,7 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                 nodes[row["key"]] = row
             for edge_row in parsed_edges:
                 rewritten = dict(edge_row)
-                rewritten["evidence"] = edge_row["evidence"].replace(
-                    "CodeGraph ", "Joern ", 1
-                )
+                rewritten["evidence"] = edge_row["evidence"].replace("CodeGraph ", "Joern ", 1)
                 signature = (
                     rewritten["source"],
                     rewritten["target"],
