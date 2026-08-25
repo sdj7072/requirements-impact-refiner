@@ -896,55 +896,81 @@ def _next_report_id(root: Path) -> str:
     raise ValueError("no report IDs remain")
 
 
-def _current_lineage(root: Path):
-    reports = root / ".requirements-impact-refiner" / "reports"
-    if not reports.exists():
-        return None
-    if reports.is_symlink() or not reports.is_dir():
-        raise ValueError("report root must be a real directory")
-    report_ids = sorted(
-        path.name
-        for path in reports.iterdir()
-        if path.is_dir()
-        and not path.is_symlink()
-        and re.fullmatch(r"RPT-\d{3}", path.name)
-        and (path / "current.json").is_file()
+def _is_lineage_contract(value: object) -> bool:
+    lineage_storage = getattr(value, "STORAGE", None)
+    lineage_report_store = getattr(value, "REPORT_STORE", None)
+    lineage_compact_state = getattr(value, "COMPACT_STATE", None)
+    lineage_renderer = getattr(value, "IMPACT_RENDERER", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_lineage.py")
+        and _module_uses_sibling(getattr(value, "CONTRACTS", None), SCRIPT_DIR / "rir_contracts.py")
+        and _is_controller_contracts_contract(getattr(value, "CONTRACTS", None))
+        and _module_uses_sibling(lineage_storage, SCRIPT_DIR / "rir_storage.py")
+        and _is_controller_storage_contract(lineage_storage)
+        and _module_uses_sibling(lineage_compact_state, SCRIPT_DIR / "compact_state.py")
+        and _module_uses_sibling(lineage_renderer, SCRIPT_DIR / "impact_renderer.py")
+        and _module_uses_sibling(lineage_report_store, SCRIPT_DIR / "report_store.py")
+        and getattr(lineage_storage, "report_store", None) is lineage_report_store
+        and getattr(lineage_report_store, "compact_state", None) is lineage_compact_state
+        and getattr(lineage_report_store, "impact_renderer", None) is lineage_renderer
+        and _callables(
+            value,
+            ("current_lineage", "legacy_key_map", "allocate_ids", "map_keys", "build_state"),
+        )
     )
-    if not report_ids:
-        return None
-    if len(report_ids) != 1:
-        raise ValueError("multiple current reports require an explicit report ID")
-    current = report_store.load_current(root, report_ids[0])
-    if current is None:
-        return None
-    prior_state, errors = compact_state.load_state_bytes(current.state_path.read_bytes())
-    if errors or prior_state is None:
-        raise ValueError("current report state is invalid")
-    key_map: Mapping[str, object] | None = _load_controller_metadata(current)
-    if key_map is None:
-        key_map = _legacy_key_map(prior_state)
-    return current, prior_state, key_map
 
 
-def _legacy_key_map(state: Mapping[str, object]) -> dict[str, dict[str, str]]:
-    sections: dict[str, tuple[object, str]] = {
-        "invariants": (state.get("current_behavior", []), "inv"),
-        "impacts": (state.get("impacts", []), "imp"),
-        "decisions": (state.get("decisions", []), "dec"),
-        "criteria": (state.get("criteria", []), "ac"),
-    }
-    result: dict[str, dict[str, str]] = {}
-    for name, (rows, prefix) in sections.items():
-        if not isinstance(rows, list):
-            raise ValueError("current report cannot derive controller key lineage")
-        mapping: dict[str, str] = {}
-        for row in rows:
-            identifier = row.get("id") if isinstance(row, dict) else None
-            if not isinstance(identifier, str):
-                raise ValueError("current report cannot derive controller key lineage")
-            mapping[f"legacy-{prefix}-{identifier.rsplit('-', 1)[-1].lower()}"] = identifier
-        result[name] = mapping
-    return result
+def _load_registered_lineage(module_name: str, expected: Path) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed lineage sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed lineage sibling") from error
+    if not _is_lineage_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("lineage sibling contract is incomplete")
+    return module
+
+
+def _load_lineage() -> object:
+    sibling = SCRIPT_DIR / "rir_lineage.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("lineage sibling is unsafe")
+    module_name = (
+        "_rir_controller_lineage_" + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    )
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    canonical = sys.modules.get("rir_lineage")
+    if canonical is not None and _is_lineage_contract(canonical):
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("lineage sibling is unsafe")
+        if not _is_lineage_contract(hashed):
+            raise ImportError("lineage sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("lineage sibling is unsafe")
+        if not _is_lineage_contract(hashed):
+            raise ImportError("lineage sibling contract is incomplete")
+        if "rir_lineage" not in sys.modules:
+            sys.modules["rir_lineage"] = cast(ModuleType, hashed)
+        return hashed
+    target_name = "rir_lineage" if canonical is None else module_name
+    return _load_registered_lineage(target_name, expected)
+
+
+LINEAGE = cast(Any, _load_lineage())
+_current_lineage = LINEAGE.current_lineage
+_legacy_key_map = LINEAGE.legacy_key_map
 
 
 def _payload_sha256() -> str:
@@ -1321,416 +1347,107 @@ def trace_impact(request: TraceRequest) -> TraceResult:
     return GRAPH_DELIVERY.trace_impact(request, _runtime=_graph_delivery_runtime())
 
 
-def _ids(rows, prefix, prior=None):
-    prior = {} if prior is None else dict(prior)
-    result = {}
-    used_numbers = {
-        int(identifier.rsplit("-", 1)[1])
-        for identifier in prior.values()
-        if isinstance(identifier, str) and re.fullmatch(rf"{prefix}-\d{{3}}", identifier)
-    }
-    next_number = 1
-    for row in rows:
-        key = row["key"]
-        if key in prior:
-            result[key] = prior[key]
-            continue
-        while next_number in used_numbers:
-            next_number += 1
-        result[key] = f"{prefix}-{next_number:03d}"
-        used_numbers.add(next_number)
-        next_number += 1
-    return result
+_ids = LINEAGE.allocate_ids
+_map_keys = LINEAGE.map_keys
+_build_state = LINEAGE.build_state
 
 
-def _map_keys(values, mapping, label):
-    result = []
-    for value in values:
-        key = _local_key(value, label)
-        if key not in mapping:
-            raise ValueError(f"unknown {label} key {key}")
-        result.append(mapping[key])
-    return result
-
-
-def _build_state(draft, analysis, graph_context=None):
-    _validate_analysis(analysis)
-    prior_state = draft.get("prior_state")
-    prior_key_map = draft.get("prior_key_map") or {}
-    requirement_id = (
-        prior_state["original_requirement"]["id"] if isinstance(prior_state, dict) else "REQ-001"
+def _is_finalize_contract(value: object) -> bool:
+    finalize_lineage = getattr(value, "LINEAGE", None)
+    finalize_storage = getattr(value, "STORAGE", None)
+    finalize_report_store = getattr(value, "REPORT_STORE", None)
+    finalize_graph_delivery = getattr(value, "GRAPH_DELIVERY", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_finalize.py")
+        and _module_uses_sibling(finalize_lineage, SCRIPT_DIR / "rir_lineage.py")
+        and _is_lineage_contract(finalize_lineage)
+        and _module_uses_sibling(getattr(value, "CONTRACTS", None), SCRIPT_DIR / "rir_contracts.py")
+        and _is_controller_contracts_contract(getattr(value, "CONTRACTS", None))
+        and _module_uses_sibling(finalize_storage, SCRIPT_DIR / "rir_storage.py")
+        and _is_controller_storage_contract(finalize_storage)
+        and _module_uses_sibling(finalize_report_store, SCRIPT_DIR / "report_store.py")
+        and getattr(finalize_storage, "report_store", None) is finalize_report_store
+        and _module_uses_sibling(finalize_graph_delivery, SCRIPT_DIR / "rir_graph_delivery.py")
+        and _is_graph_delivery_contract(finalize_graph_delivery)
+        and callable(getattr(value, "finalize_refinement", None))
     )
-    if prior_key_map:
-        missing_impacts = sorted(
-            set(prior_key_map.get("impacts", {})) - {row["key"] for row in analysis["impacts"]}
-        )
-        if missing_impacts:
-            raise ValueError(f"impact key disappeared: {missing_impacts[0]}")
-    invariant_ids = _ids(analysis["invariants"], "INV", prior_key_map.get("invariants"))
-    impact_ids = _ids(analysis["impacts"], "IMP", prior_key_map.get("impacts"))
-    decision_ids = _ids(analysis["decisions"], "DEC", prior_key_map.get("decisions"))
-    criterion_ids = _ids(analysis["criteria"], "AC", prior_key_map.get("criteria"))
-    key_map = {
-        "invariants": invariant_ids,
-        "impacts": impact_ids,
-        "decisions": decision_ids,
-        "criteria": criterion_ids,
-    }
-    impacts = []
-    for row in analysis["impacts"]:
-        impacts.append(
-            {
-                "id": impact_ids[row["key"]],
-                "requirement": requirement_id,
-                "category": row["category"],
-                "severity": row["severity"],
-                "state": row["state"],
-                "evidence_level": row["evidence_level"],
-                "evidence": row["evidence"],
-                "invariants": _map_keys(row["invariant_keys"], invariant_ids, "invariant"),
-                "decisions": _map_keys(row["decision_keys"], decision_ids, "decision"),
-                "criteria": _map_keys(row["criterion_keys"], criterion_ids, "criterion"),
-            }
-        )
-    current_behavior = [
-        {
-            "id": invariant_ids[row["key"]],
-            "behavior": row["behavior"],
-            "evidence_level": row["evidence_level"],
-            "evidence": row["evidence"],
-        }
-        for row in analysis["invariants"]
-    ]
-    preserved = []
-    for row in analysis["invariants"]:
-        affected = [
-            impact_ids[impact["key"]]
-            for impact in analysis["impacts"]
-            if row["key"] in impact["invariant_keys"]
-        ]
-        preserved.append(
-            {
-                "id": invariant_ids[row["key"]],
-                "requirement": requirement_id,
-                "impacts": affected,
-                "evidence": row["evidence"],
-            }
-        )
-    decisions = [
-        {
-            "id": decision_ids[row["key"]],
-            "choice": row["choice"],
-            "requirement": requirement_id,
-            "accepted_impacts": _map_keys(row["accepted_impact_keys"], impact_ids, "impact"),
-            "rationale": row["rationale"],
-        }
-        for row in analysis["decisions"]
-    ]
-    criteria = [
-        {
-            "id": criterion_ids[row["key"]],
-            "requirement": requirement_id,
-            "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
-            "invariant": _map_keys([row["invariant_key"]], invariant_ids, "invariant")[0],
-            "criterion": row["criterion"],
-            "evidence": row["evidence"],
-        }
-        for row in analysis["criteria"]
-    ]
-    decision_needed = None
-    if analysis["phase"] == "pre-decision":
-        decision_needed = {
-            "question": analysis["decision_needed"]["question"],
-            "options": [
-                {
-                    "option": row["option"],
-                    "impacts": _map_keys(row["impact_keys"], impact_ids, "impact"),
-                    "tradeoff": row["tradeoff"],
-                }
-                for row in analysis["decision_needed"]["options"]
-            ],
-        }
-    unresolved = [
-        {
-            "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
-            "state": row["state"],
-            "rationale": row["rationale"],
-            "decision": None
-            if row["decision_key"] is None
-            else _map_keys([row["decision_key"]], decision_ids, "decision")[0],
-            "owner": row["owner"],
-        }
-        for row in analysis["unresolved"]
-    ]
-    remaining = [
-        row["id"] for row in impacts if row["state"] in {"accepted", "deferred", "blocked"}
-    ]
-    if not remaining:
-        remaining = [row["id"] for row in impacts]
-    all_report_ids = [
-        requirement_id,
-        *list(invariant_ids.values()),
-        *list(impact_ids.values()),
-        *list(decision_ids.values()),
-    ]
-    summary = [
-        {
-            "impact_id": impact_ids[row["key"]],
-            **row["summary"],
-            "severity": row["severity"],
-            "status": row["state"],
-        }
-        for row in analysis["impacts"]
-    ]
-    first_decision = decisions[0]["id"] if decisions else None
-    delta: dict[str, list[str]] = {category: [] for category in compact_state.DELTA_CATEGORIES}
-    if prior_state is None:
-        delta["new"] = list(impact_ids.values())
-    else:
-        previous_states = {row["id"]: row["state"] for row in prior_state["impacts"]}
-        terminal = {"resolved", "accepted", "superseded"}
-        active = {"detected", "refining", "mitigated", "deferred", "blocked"}
-        state_category = {
-            "detected": "unchanged",
-            "refining": "unchanged",
-            "mitigated": "mitigated",
-            "resolved": "resolved",
-            "accepted": "accepted",
-            "deferred": "deferred",
-            "blocked": "blocked",
-            "superseded": "superseded",
-        }
-        for impact in impacts:
-            previous = previous_states.get(impact["id"])
-            if previous is None:
-                category = "new"
-            elif previous == impact["state"]:
-                category = "unchanged"
-            elif previous in terminal and impact["state"] in active:
-                category = "reopened"
-            else:
-                category = state_category[impact["state"]]
-            delta[category].append(impact["id"])
-    prior_history = []
-    if prior_state is not None:
-        current_decision_ids = set(decision_ids.values())
-        for prior_row in prior_state["history"]:
-            history_row = dict(prior_row)
-            historical_decision = history_row.get("decision")
-            if (
-                analysis["phase"] == "pre-decision"
-                and isinstance(historical_decision, str)
-                and historical_decision not in current_decision_ids
-            ):
-                history_row["decision"] = None
-                history_row["summary"] = (
-                    f"{history_row['summary']} The historical decision remains "
-                    "authoritative in the prior immutable revision."
-                )
-            prior_history.append(history_row)
-    original_requirement = (
-        {
-            "id": requirement_id,
-            "request": draft["request"],
-            "source": "User request and supplied repository evidence.",
-        }
-        if prior_state is None
-        else prior_state["original_requirement"]
+
+
+def _load_registered_finalize(module_name: str, expected: Path) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed finalize sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed finalize sibling") from error
+    if not _is_finalize_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("finalize sibling contract is incomplete")
+    return module
+
+
+def _load_finalize() -> object:
+    sibling = SCRIPT_DIR / "rir_finalize.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("finalize sibling is unsafe")
+    module_name = (
+        "_rir_controller_finalize_" + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
     )
-    if draft.get("adapter") == "superpowers":
-        handoff_workflow = SUPERPOWERS_HANDOFF_MARKER
-    elif analysis["phase"] == "pre-decision" or any(row["state"] == "blocked" for row in impacts):
-        handoff_workflow = "Not ready"
-    else:
-        handoff_workflow = analysis["workflow"]
-    scope = list(analysis["scope"])
-    structured_paths = []
-    if graph_context is not None:
-        receipt = graph_context["receipt"]
-        receipt_nodes = {row["id"]: row for row in receipt["nodes"]}
-        receipt_edges = {row["id"]: row for row in receipt["edges"]}
-        receipt_paths = {row["id"]: row for row in receipt["paths"]}
-        for row in analysis["impacts"]:
-            path_descriptions = []
-            path_provenance = []
-            impact_paths = []
-            for path_key in graph_context["impact_paths"][row["key"]]:
-                path = receipt_paths[path_key]
-                labels = [receipt_nodes[node]["label"] for node in path["nodes"]]
-                path_descriptions.append(f"{path_key}: " + " → ".join(labels))
-                path_provenance.append(
-                    f"{path_key}: {_path_provenance(path, receipt_nodes, receipt_edges)}"
-                )
-                impact_paths.append(_structured_path(path, receipt_nodes, receipt_edges))
-            if impact_paths:
-                structured_paths.append(
-                    {
-                        "impact": impact_ids[row["key"]],
-                        "paths": impact_paths,
-                    }
-                )
-            rationale = graph_context["rationales"].get(row["key"])
-            scope.append(
-                {
-                    "boundary": f"Graph paths for {impact_ids[row['key']]}",
-                    "evidence": " || ".join(path_descriptions)
-                    if path_descriptions
-                    else str(rationale),
-                    "confidence": (
-                        " || ".join(path_provenance)
-                        if path_provenance
-                        else "provider unavailable; confidence unknown; location unavailable"
-                    ),
-                }
-            )
-        provider_summary = [f"{row['name']} ({row['status']})" for row in receipt["providers"]]
-        elapsed = int(receipt["timings_ms"].get("total", 0))
-        frontier_ids = ",".join(row["id"] for row in receipt["frontier"]) or "none"
-        scope.append(
-            {
-                "boundary": "Impact graph coverage",
-                "evidence": (
-                    f"Impact scan: {elapsed / 1000:.1f} s · "
-                    f"{' + '.join(provider_summary) or 'no provider'} · "
-                    f"{len(receipt['nodes'])} nodes / {len(receipt['edges'])} edges · "
-                    f"{len(receipt['frontier'])} unknown frontiers"
-                ),
-                "confidence": (
-                    f"{receipt['budget_status']}; receipt {receipt['receipt_id']}; "
-                    f"sha256 {graph_context['sha256']}; frontier {frontier_ids}"
-                ),
-            }
-        )
-        if len(scope) > 128:
-            raise ValueError("scope has too many rows after graph coverage injection")
-        if any(
-            len(value.encode("utf-8")) > MAX_STRING_BYTES
-            for row in scope
-            for value in row.values()
-            if isinstance(value, str)
-        ):
-            raise ValueError("graph coverage scope exceeds string limit")
-    state = {
-        "schema_version": 1,
-        "report": {
-            "id": draft["report_id"],
-            "revision": draft["revision"],
-            "previous_sha256": draft["previous_sha256"],
-            "phase": analysis["phase"],
-        },
-        "settings": draft["settings"],
-        "original_requirement": original_requirement,
-        "refined_requirement": {
-            "id": requirement_id,
-            "revision": analysis["refined_requirement"],
-            "decision": first_decision,
-            "supersedes": [],
-        },
-        "current_behavior": current_behavior,
-        "preserved_invariants": preserved,
-        "impacts": impacts,
-        "decision_needed": decision_needed,
-        "decisions": decisions,
-        "delta": delta,
-        "history": [
-            *prior_history,
-            {
-                "requirement": requirement_id,
-                "revision": analysis["refined_requirement"],
-                "decision": first_decision,
-                "superseded_impacts": [],
-                "summary": "Controller-created refinement revision.",
-            },
-        ],
-        "criteria": criteria,
-        "unresolved": unresolved,
-        "scope": scope,
-        "handoff": {
-            "refined_requirement": requirement_id
-            if analysis["phase"] == "post-decision"
-            else "Not ready until the pending decision is selected.",
-            "report_ids": all_report_ids,
-            "remaining_risks": remaining,
-            "criteria": list(criterion_ids.values()),
-            "workflow": handoff_workflow,
-        },
-        "summary": summary,
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    canonical = sys.modules.get("rir_finalize")
+    if canonical is not None and _is_finalize_contract(canonical):
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("finalize sibling is unsafe")
+        if not _is_finalize_contract(hashed):
+            raise ImportError("finalize sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("finalize sibling is unsafe")
+        if not _is_finalize_contract(hashed):
+            raise ImportError("finalize sibling contract is incomplete")
+        if "rir_finalize" not in sys.modules:
+            sys.modules["rir_finalize"] = cast(ModuleType, hashed)
+        return hashed
+    target_name = "rir_finalize" if canonical is None else module_name
+    return _load_registered_finalize(target_name, expected)
+
+
+FINALIZE = cast(Any, _load_finalize())
+
+
+def _finalize_runtime() -> dict[str, object]:
+    return {
+        "root_path": _root,
+        "bounded_bytes": _bounded,
+        "max_finalize_bytes": MAX_FINALIZE_BYTES,
+        "load_draft": load_draft,
+        "report_lock": _report_lock,
+        "load_graph_context": _load_graph_context,
+        "load_promoted_scan_context": _load_promoted_scan_context,
+        "validate_analysis": _validate_analysis,
+        "validate_graph_coverage": _validate_graph_coverage,
+        "build_state": _build_state,
+        "canonical_bytes": _canonical_bytes,
+        "write_controller_metadata": _write_controller_metadata,
+        "publish_revision": report_store.publish_revision,
+        "report_store_error": report_store.ReportStoreError,
+        "load_state_bytes": compact_state.load_state_bytes,
+        "render_compact": impact_renderer.render_compact,
+        "render_markdown": impact_renderer.render_markdown,
+        "draft_path": _draft_path,
+        "consume_draft": _consume,
+        "result_type": FinalizeResult,
     }
-    if structured_paths:
-        state["graph_paths"] = structured_paths
-    errors = compact_state.validate_state(state)
-    if errors:
-        raise ValueError("; ".join(errors))
-    return state, key_map
 
 
 def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
-    root = _root(request.repo_root)
-    _bounded(request.analysis, MAX_FINALIZE_BYTES, "finalize input")
-    draft = load_draft(root, request.draft_id)
-    if draft.get("consumed") is True:
-        raise ValueError("draft is already consumed")
-    with _report_lock(root, str(draft["report_id"])):
-        draft = load_draft(root, request.draft_id)
-        if draft.get("consumed") is True:
-            raise ValueError("draft is already consumed")
-        settings_value = draft.get("settings")
-        graph_settings = (
-            settings_value.get("impact_graph") if isinstance(settings_value, dict) else None
-        )
-        if not isinstance(graph_settings, dict):
-            raise ValueError("draft graph settings are invalid")
-        graph_context: GraphContext | None = None
-        if graph_settings.get("enabled") is True:
-            graph_context = (
-                _load_promoted_scan_context(root, draft, request.graph_receipt_id)
-                if draft.get("promoted_scan") is not None
-                else _load_graph_context(root, draft, request.graph_receipt_id)
-            )
-            _validate_analysis(request.analysis)
-            _validate_graph_coverage(request.analysis, graph_context)
-        elif request.graph_receipt_id is not None:
-            raise ValueError("graph_receipt_id is not allowed when impact graph is disabled")
-        state, key_map = _build_state(draft, request.analysis, graph_context)
-        state_bytes = _canonical_bytes(state)
-        _write_controller_metadata(
-            root,
-            draft,
-            state_bytes,
-            key_map,
-            None
-            if graph_context is None
-            else {
-                "receipt_id": graph_context["receipt"]["receipt_id"],
-                "sha256": graph_context["sha256"],
-            },
-        )
-        try:
-            published = report_store.publish_revision(root, state_bytes, resume_partial=True)
-        except (FileExistsError, report_store.ReportStoreError) as error:
-            raise ValueError(f"controller publication failed: {error}") from error
-        stored_state, errors = compact_state.load_state_bytes(published.state_path.read_bytes())
-        if errors or stored_state is None:
-            raise ValueError("published state could not be verified")
-        stored_settings = stored_state.get("settings")
-        delivery = stored_settings.get("delivery") if isinstance(stored_settings, dict) else None
-        if not isinstance(delivery, str):
-            raise ValueError("published state could not be verified")
-        display = (
-            impact_renderer.render_compact(stored_state)
-            if delivery == "compact"
-            else impact_renderer.render_markdown(stored_state)
-        )
-        if display.endswith("\n"):
-            display = display[:-1]
-        _consume(_draft_path(root, request.draft_id), draft, published, key_map)
-    return FinalizeResult(
-        status="published",
-        report_id=published.report_id,
-        revision=published.revision,
-        delivery=delivery,
-        display_text=display,
-        state_path=published.state_path,
-        markdown_path=published.markdown_path,
-        markdown_sha256=published.markdown_sha256,
-    )
+    return FINALIZE.finalize_refinement(request, _runtime=_finalize_runtime())

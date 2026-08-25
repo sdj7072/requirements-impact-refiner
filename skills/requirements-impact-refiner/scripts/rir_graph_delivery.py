@@ -2320,3 +2320,4 @@ _new_trace_intent = new_trace_intent
 _validate_trace_intent = validate_trace_intent
 _load_graph_context = load_graph_context
 _validate_graph_coverage = validate_graph_coverage
+verify_receipt_sources = _verify_receipt_sources

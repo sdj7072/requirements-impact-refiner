@@ -167,6 +167,8 @@ class PackagingTest(unittest.TestCase):
             "scripts/rir_mcp_server.py",
             "scripts/rir_controller.py",
             "scripts/rir_contracts.py",
+            "scripts/rir_finalize.py",
+            "scripts/rir_lineage.py",
             "scripts/rir_storage.py",
             "scripts/compact_state.py",
             "scripts/impact_graph.py",
