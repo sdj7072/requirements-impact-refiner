@@ -955,3 +955,73 @@ class StructuralEdgeSurvivalTest(unittest.TestCase):
             }
             self.assertGreaterEqual(len(result.edges), 999)
             self.assertEqual(kinds.get(("app.py", "blobstore.py")), "imports")
+
+
+class JavaScriptStructureTest(unittest.TestCase):
+    """JS/TS files get structural signals from masked-source analysis:
+    import edges may only land on script-family files, exported names act
+    as definitions, and comment/string mentions never earn structure."""
+
+    def edge_map(self, files, seed_term, seed_location):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative, content in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed(seed_term, seed_location),)
+            )
+            locations = {node.id: node.location for node in result.nodes}
+            return {
+                (locations[edge.source], locations[edge.target]):
+                (edge.kind, edge.confidence)
+                for edge in result.edges
+            }
+
+    def test_js_import_cannot_land_on_a_document(self):
+        directions = self.edge_map(
+            {
+                "app.ts": 'import { helper } from "./billing";\nconst v = helper();\n',
+                "billing.ts": "export function helper() { return 1; }\n",
+                "docs/billing-notes.md": "# billing notes\nhelper docs here\n",
+            },
+            "helper",
+            "app.ts",
+        )
+        self.assertEqual(
+            directions.get(("app.ts", "billing.ts")),
+            ("imports", "structural-inferred"),
+        )
+        self.assertEqual(
+            directions.get(("app.ts", "docs/billing-notes.md"), ("references", "lexical"))[1],
+            "lexical",
+        )
+
+    def test_use_of_exported_name_is_structural(self):
+        directions = self.edge_map(
+            {
+                "page.js": "const total = computeInvoiceTotal(cart);\n",
+                "invoice.js": "export function computeInvoiceTotal(cart) { return 0; }\n",
+            },
+            "computeInvoiceTotal",
+            "page.js",
+        )
+        self.assertEqual(
+            directions.get(("page.js", "invoice.js")),
+            ("references", "structural-inferred"),
+        )
+
+    def test_comment_mention_of_export_stays_lexical(self):
+        directions = self.edge_map(
+            {
+                "page.js": "// computeInvoiceTotal is documented elsewhere\nconst other_shared_token = 1;\n",
+                "invoice.js": "export function computeInvoiceTotal(cart) { return 0; }\nconst other_shared_token = 2;\n",
+            },
+            "other_shared_token",
+            "page.js",
+        )
+        self.assertEqual(
+            directions.get(("page.js", "invoice.js")),
+            ("references", "lexical"),
+        )

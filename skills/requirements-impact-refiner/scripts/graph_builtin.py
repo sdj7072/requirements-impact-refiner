@@ -516,10 +516,10 @@ def _import_modules(text: str) -> frozenset[str]:
     return frozenset(modules)
 
 
-class PythonStructure:
-    """Genuine structure parsed from the stdlib ast module: import module
-    specifiers, defined names, and loaded names. None when the source does
-    not parse — the scan then falls back to lexical evidence honestly."""
+class LanguageStructure:
+    """Genuine structure for a source file: import module specifiers,
+    defined names, and used names. None when the source cannot be
+    analyzed — the scan then falls back to lexical evidence honestly."""
 
     __slots__ = ("modules", "defs", "uses")
 
@@ -527,6 +527,37 @@ class PythonStructure:
         self.modules = modules
         self.defs = defs
         self.uses = uses
+
+
+_SCRIPT_SUFFIXES = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
+_JS_EXPORT = re.compile(
+    r"(?m)^\s*export\s+(?:default\s+)?"
+    r"(?:async\s+)?(?:function\*?|class|const|let|var)\s+"
+    r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]{2,})"
+)
+_JS_COMMONJS_EXPORT = re.compile(
+    r"(?:module\.)?exports\.(?P<name>[A-Za-z_$][A-Za-z0-9_$]{2,})\s*="
+)
+_JS_IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]{2,}")
+
+
+def _javascript_structure(text: str):
+    """Structural signals for script-family files: exported names are
+    definitions, identifiers in masked code are uses. Comments and string
+    literals never contribute — the mask excludes them."""
+    masked = _without_javascript_comments(text)
+    code = _javascript_code_mask(text)
+    defs = set()
+    uses = set()
+    for pattern in (_JS_EXPORT, _JS_COMMONJS_EXPORT):
+        for match in pattern.finditer(masked):
+            if code[match.start("name")]:
+                defs.add(match.group("name"))
+    for match in _JS_IDENTIFIER.finditer(masked):
+        if code[match.start()]:
+            uses.add(match.group(0))
+    uses -= defs
+    return LanguageStructure(_import_modules(text), frozenset(defs), frozenset(uses))
 
 
 def _python_structure(text: str):
@@ -577,7 +608,7 @@ def _python_structure(text: str):
             if len(collapsed) >= 3:
                 modules.add(collapsed)
     minimum = 3
-    return PythonStructure(
+    return LanguageStructure(
         frozenset(modules),
         frozenset(name for name in defs if len(name) >= minimum),
         frozenset(name for name in uses if len(name) >= minimum),
@@ -802,9 +833,12 @@ def scan_repository(
         safe_text, found_sensitive = _redact_sensitive_literals(text)
         sensitive_literals.update(found_sensitive)
         categories = _term_categories(safe_text)
-        structure = (
-            _python_structure(safe_text) if relative.endswith(".py") else None
-        )
+        if relative.endswith(".py"):
+            structure = _python_structure(safe_text)
+        elif relative.endswith(_SCRIPT_SUFFIXES):
+            structure = _javascript_structure(safe_text)
+        else:
+            structure = None
         modules = (
             structure.modules if structure is not None
             else _import_modules(safe_text)
@@ -861,9 +895,14 @@ def scan_repository(
             #    structural evidence and needs no token co-occurrence. A
             #    python import can only land on a python file — a document
             #    whose stem merely contains the module name is not a module.
-            plausible_import_target = (
-                not source.endswith(".py") or target.endswith(".py")
-            )
+            if source.endswith(".py"):
+                plausible_import_target = target.endswith(".py")
+            elif source.endswith(_SCRIPT_SUFFIXES):
+                plausible_import_target = target.endswith(
+                    _SCRIPT_SUFFIXES + (".json",)
+                )
+            else:
+                plausible_import_target = True
             if plausible_import_target and _module_resolves_to_target(
                 target, source_modules
             ):
