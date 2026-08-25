@@ -582,6 +582,8 @@ class MirrorGuardCoverageTest(unittest.TestCase):
             "graph_providers.py",
             "graph_adapter_joern.py",
             "graph_adapter_ast_grep.py",
+            "impact_graph.py",
+            "graph_cache.py",
         )
         for name in consumers:
             with self.subTest(script=name):

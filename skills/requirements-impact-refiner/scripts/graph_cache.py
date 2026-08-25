@@ -59,6 +59,7 @@ if not _is_graph_cache_contract(_loaded_graph):
     raise ImportError("impact graph cache contract is incomplete")
 GRAPH = cast(_GraphCacheContract, _loaded_graph)
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+_MAX_JSON_DEPTH = 64
 _CACHE_COMPONENTS = (
     ".requirements-impact-refiner",
     "cache",
@@ -89,6 +90,30 @@ _IDENTITY_FIELDS = frozenset(
 )
 _INVENTORY_REASONS = frozenset({"deadline", "collection-limit", "traversal", "unreadable-source"})
 MAX_CACHE_BYTES = GRAPH.MAX_RECEIPT_BYTES * 2
+
+
+def _json_depth(text: str) -> int:
+    """Return peak JSON container nesting without invoking the decoder."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            peak = max(peak, depth)
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
 
 
 def _mapping(value: object) -> TypeGuard[Mapping[str, object]]:
@@ -177,8 +202,11 @@ def _cache_directory(root: Path, create: bool) -> Path | None:
 
 
 def _normalize_receipt(value: object) -> tuple[dict[str, object], bytes]:
-    canonical = GRAPH.canonical_receipt_bytes(value)
-    normalized, errors = GRAPH.load_receipt_bytes(canonical)
+    try:
+        canonical = GRAPH.canonical_receipt_bytes(value)
+        normalized, errors = GRAPH.load_receipt_bytes(canonical)
+    except (RecursionError, TypeError, ValueError) as error:
+        raise ValueError("invalid graph receipt") from error
     if errors or normalized is None:
         raise ValueError("invalid graph receipt")
     return cast(dict[str, object], normalized), canonical
@@ -192,17 +220,15 @@ def _identity(
     inventory_complete: bool,
     inventory_reason: str | None,
 ):
-    if (
-        not isinstance(schema_version, int)
-        or isinstance(schema_version, bool)
-        or schema_version < 1
-    ):
+    if type(schema_version) is not int or schema_version < 1:
         raise ValueError("schema_version must be a positive integer")
     if not isinstance(inventory_complete, bool):
         raise ValueError("inventory_complete must be boolean")
-    if (inventory_complete and inventory_reason is not None) or (
-        not inventory_complete and inventory_reason not in _INVENTORY_REASONS
-    ):
+    if inventory_complete:
+        reason_valid = inventory_reason is None
+    else:
+        reason_valid = isinstance(inventory_reason, str) and inventory_reason in _INVENTORY_REASONS
+    if not reason_valid:
         raise ValueError("inventory completeness reason is invalid")
     return {
         "graph_schema_version": schema_version,
@@ -363,12 +389,16 @@ def _read_artifact(path: Path) -> dict[str, object] | None:
         return None
     try:
         payload = path.read_bytes()
-        value = json.loads(payload.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        text = payload.decode("utf-8")
+        if _json_depth(text) > _MAX_JSON_DEPTH:
+            return None
+        value = json.loads(text)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError, TypeError):
         return None
     if not isinstance(value, dict) or set(value) != _CACHE_FIELDS:
         return None
-    if value.get("cache_schema_version") != 1:
+    cache_schema_version = value.get("cache_schema_version")
+    if type(cache_schema_version) is not int or cache_schema_version != 1:
         return None
     return cast(dict[str, object], value)
 
@@ -385,7 +415,7 @@ def load(
         root = _root(repo_root)
         current = _source_digests(source_digests)
         cache_dir = _cache_directory(root, False)
-    except ValueError:
+    except (RecursionError, TypeError, ValueError):
         return _miss(key)
     if cache_dir is None:
         return _miss(key)
@@ -416,11 +446,13 @@ def load(
         return _miss(key)
     complete = identity.get("source_inventory_complete")
     reason = identity.get("source_inventory_reason")
-    if (
-        not isinstance(complete, bool)
-        or (complete and reason is not None)
-        or (not complete and reason not in _INVENTORY_REASONS)
-    ):
+    if not isinstance(complete, bool):
+        return _miss(key)
+    if complete:
+        reason_valid = reason is None
+    else:
+        reason_valid = isinstance(reason, str) and reason in _INVENTORY_REASONS
+    if not reason_valid:
         return _miss(key)
     if any(
         identity.get(name) != normalized.get(name)
@@ -432,13 +464,13 @@ def load(
     if identity.get("providers") != normalized["providers"]:
         return _miss(key)
     schema_version = identity.get("graph_schema_version")
-    if (
-        not isinstance(schema_version, int)
-        or isinstance(schema_version, bool)
-        or schema_version < 1
-    ):
+    if type(schema_version) is not int or schema_version < 1:
         return _miss(key)
-    if hashlib.sha256(_canonical_json(identity)).hexdigest() != key:
+    try:
+        identity_key = hashlib.sha256(_canonical_json(identity)).hexdigest()
+    except (RecursionError, TypeError, ValueError):
+        return _miss(key)
+    if identity_key != key:
         return _miss(key)
     if not complete:
         return _miss(key)

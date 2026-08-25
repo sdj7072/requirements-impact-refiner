@@ -147,7 +147,12 @@ def load_current(repo_root: Path, report_id: str) -> CurrentRevision | None:
         raise ReportStoreUnavailable(f"cannot read current pointer: {error}") from error
     if not isinstance(pointer, dict) or set(pointer) != POINTER_KEYS:
         raise ReportStoreUnavailable("current pointer has an invalid schema")
-    if pointer.get("schema_version") != 1 or pointer.get("report_id") != report_id:
+    pointer_schema_version = pointer.get("schema_version")
+    if (
+        type(pointer_schema_version) is not int
+        or pointer_schema_version != 1
+        or pointer.get("report_id") != report_id
+    ):
         raise ReportStoreUnavailable("current pointer identity is invalid")
     revision = pointer.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:

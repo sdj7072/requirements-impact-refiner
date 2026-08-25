@@ -106,12 +106,19 @@ class DocumentationTest(unittest.TestCase):
         )
         self.assertIsNotNone(quality_job, "CI must keep quality independent from the test matrix")
         self.assertNotIn("matrix:", quality_job.group("body"))
+        self.assertNotIn("needs:", quality_job.group("body"))
         self.assertRegex(quality_job.group("body"), r'python-version:\s*["\']3\.13["\']')
         self.assertIn("pip install -r requirements-quality.txt", quality_job.group("body"))
         self.assertIn("python scripts/run-quality-gates.py", quality_job.group("body"))
 
     def test_quality_workflow_is_documented_for_local_python_313(self):
         """Keep the CI and local quality contract usable in every public language."""
+        mypy_relations = {
+            "README.md": "`mypy==1.18.2` runs in the Python 3.13 quality job while checking Python 3.9 source compatibility.",
+            "README.ko.md": "`mypy==1.18.2`는 Python 3.13 품질 작업에서 실행되며 Python 3.9 소스 호환성을 검사합니다.",
+            "README.ja.md": "`mypy==1.18.2` は Python 3.13 の品質ジョブで実行され、Python 3.9 のソース互換性を検査します。",
+            "CONTRIBUTING.md": "`mypy==1.18.2` runs in the Python 3.13 quality job while checking Python 3.9 source compatibility.",
+        }
         required = (
             "3.9",
             "3.11",
@@ -131,6 +138,9 @@ class DocumentationTest(unittest.TestCase):
             text = (ROOT / name).read_text(encoding="utf-8")
             for token in required:
                 self.assertIn(token, text, f"{token} missing from {name}")
+            self.assertIn(
+                mypy_relations[name], text, f"Mypy runtime/target relation missing from {name}"
+            )
             self.assertRegex(text, r"(?:root|루트|ルート).{0,120}`scripts`.{0,120}`evals/harness`")
             self.assertRegex(
                 text,

@@ -234,7 +234,7 @@ python3.13 -m venv .quality-venv
 ```
 
 exact pin は `bandit==1.9.4`、`coverage==7.15.4`、`mypy==1.18.2`、
-`ruff==0.16.3` です。Coverage はルートの `scripts` と `evals/harness` の
+`ruff==0.16.3` です。`mypy==1.18.2` は Python 3.13 の品質ジョブで実行され、Python 3.9 のソース互換性を検査します。Coverage はルートの `scripts` と `evals/harness` の
 source tree に適用され、少なくとも 80% 必要です。Bandit は `-ll` により
 すべての confidence level で medium-or-higher severity を報告します。
 

@@ -234,7 +234,7 @@ python3.13 -m venv .quality-venv
 ```
 
 정확한 pin은 `bandit==1.9.4`, `coverage==7.15.4`, `mypy==1.18.2`,
-`ruff==0.16.3`입니다. Coverage는 루트 `scripts`와 `evals/harness` 소스 트리에
+`ruff==0.16.3`입니다. `mypy==1.18.2`는 Python 3.13 품질 작업에서 실행되며 Python 3.9 소스 호환성을 검사합니다. Coverage는 루트 `scripts`와 `evals/harness` 소스 트리에
 적용되며 최소 80%여야 합니다. Bandit은 `-ll`로 모든 confidence level에서
 medium-or-higher severity를 보고합니다.
 

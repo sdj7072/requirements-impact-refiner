@@ -586,9 +586,11 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
     if _REQUIRED_KEYS - keys:
         return tuple(errors)
 
-    if value["schema_version"] != 1:
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
         errors.append("schema_version must be 1")
-    if value["status"] not in _STATUSES:
+    status = value["status"]
+    status_valid = isinstance(status, str) and status in _STATUSES
+    if not status_valid:
         errors.append("status is invalid")
     for key in ("scan_id", "receipt_id"):
         identifier = value[key]
@@ -602,9 +604,12 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
         errors.append("settings must be an object")
 
     inventory = value["source_inventory"]
+    inventory_valid = False
+    inventory_complete_valid = False
     if not _mapping(inventory) or set(inventory) != {"digests", "complete", "reason"}:
         errors.append("source_inventory must have exact fields")
     else:
+        inventory_valid = True
         digests = inventory["digests"]
         if not _mapping(digests):
             errors.append("source_inventory digests must be an object")
@@ -617,14 +622,19 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
                 ):
                     errors.append("source_inventory contains an unsafe path or digest")
                     break
-        if not isinstance(inventory["complete"], bool):
+        inventory_complete = inventory["complete"]
+        inventory_complete_valid = isinstance(inventory_complete, bool)
+        if not inventory_complete_valid:
             errors.append("source_inventory complete must be boolean")
-        if inventory["reason"] is not None and not _string(inventory["reason"]):
+        inventory_reason = inventory["reason"]
+        inventory_reason_valid = inventory_reason is None or _string(inventory_reason)
+        if not inventory_reason_valid:
             errors.append("source_inventory reason must be null or nonblank text")
-        if inventory["complete"] is True and inventory["reason"] is not None:
-            errors.append("complete source_inventory cannot have a reason")
-        if inventory["complete"] is False and inventory["reason"] is None:
-            errors.append("incomplete source_inventory requires a reason")
+        if inventory_complete_valid and inventory_reason_valid:
+            if inventory_complete is True and inventory_reason is not None:
+                errors.append("complete source_inventory cannot have a reason")
+            if inventory_complete is False and inventory_reason is None:
+                errors.append("incomplete source_inventory requires a reason")
 
     seeds = value["seeds"]
     if not isinstance(seeds, list) or len(seeds) > MAX_SEEDS:
@@ -635,26 +645,33 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
             if not _mapping(row) or set(row) != _SEED_KEYS:
                 errors.append(f"seed row {index} must have exact fields")
                 continue
-            if not _string(row["term"]):
+            term = row["term"]
+            term_valid = _string(term)
+            if not term_valid:
                 errors.append(f"seed row {index} term must be nonblank")
             seed_location = row["location"]
-            if seed_location is not None and not _safe_relative(seed_location):
+            location_valid = seed_location is None or _safe_relative(seed_location)
+            if not location_valid:
                 errors.append(f"seed row {index} location is unsafe")
-            if not _string(row["derivation"]):
+            derivation = row["derivation"]
+            if not _string(derivation):
                 errors.append(f"seed row {index} derivation must be nonblank")
             digest = row["source_sha256"]
             if digest is not None and (
                 not isinstance(digest, str) or _HEX64.fullmatch(digest) is None
             ):
                 errors.append(f"seed row {index} source_sha256 is invalid")
-            identity = (row.get("term"), seed_location)
-            if identity in identities:
-                errors.append(f"duplicate seed row {index}")
-            identities.add(identity)
+            if term_valid and location_valid:
+                identity = (term, seed_location)
+                if identity in identities:
+                    errors.append(f"duplicate seed row {index}")
+                identities.add(identity)
 
-    if not _mapping(value["graph_receipt"]):
+    graph_receipt_valid = _mapping(value["graph_receipt"])
+    if not graph_receipt_valid:
         errors.append("graph_receipt must be an object")
-    if value["risk_level"] not in _RISKS:
+    risk_level = value["risk_level"]
+    if not isinstance(risk_level, str) or risk_level not in _RISKS:
         errors.append("risk_level is invalid")
     frontier = value["frontier"]
     if not isinstance(frontier, list) or len(frontier) > MAX_FRONTIER:
@@ -675,16 +692,15 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
                 errors.append(f"candidate row {index} must be substantive")
             if row["location"] is not None and not _safe_relative(row["location"]):
                 errors.append(f"candidate row {index} location is unsafe")
-    if (
-        not isinstance(value["elapsed_ms"], int)
-        or isinstance(value["elapsed_ms"], bool)
-        or value["elapsed_ms"] < 0
-        or value["elapsed_ms"] > 30_000
-    ):
+    elapsed_ms = value["elapsed_ms"]
+    if type(elapsed_ms) is not int or elapsed_ms < 0 or elapsed_ms > 30_000:
         errors.append("elapsed_ms must be an integer from 0 to 30000")
-    if value["cache_status"] not in _CACHE:
+    cache_status = value["cache_status"]
+    if not isinstance(cache_status, str) or cache_status not in _CACHE:
         errors.append("cache_status is invalid")
-    if not isinstance(value["can_promote"], bool):
+    can_promote = value["can_promote"]
+    can_promote_valid = isinstance(can_promote, bool)
+    if not can_promote_valid:
         errors.append("can_promote must be boolean")
     if (
         not isinstance(value["created_at"], str)
@@ -692,39 +708,49 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
     ):
         errors.append("created_at must be RFC 3339 UTC text")
 
-    status = value["status"]
-    if status == "needs_input":
-        if value["can_promote"]:
+    if status_valid and status == "needs_input":
+        if can_promote_valid and can_promote:
             errors.append("needs_input scan cannot be promoted")
-        if value["seeds"] or value["graph_receipt"]:
+        if isinstance(seeds, list) and (seeds or (graph_receipt_valid and value["graph_receipt"])):
             errors.append("needs_input scan cannot contain graph evidence")
-        if value["risk_level"] != "unknown":
+        if isinstance(risk_level, str) and risk_level in _RISKS and risk_level != "unknown":
             errors.append("needs_input risk_level must be unknown")
-    elif status == "partial":
-        if value["can_promote"]:
+    elif status_valid and status == "partial":
+        if can_promote_valid and can_promote:
             errors.append("partial scan cannot be promoted")
-        if value["candidates"]:
+        if isinstance(candidates, list) and candidates:
             errors.append("partial scan cannot contain candidates")
-    elif status == "complete":
-        if not value["can_promote"]:
+    elif status_valid and status == "complete":
+        if can_promote_valid and not can_promote:
             errors.append("complete scan must be promotable")
-        if value["candidates"]:
+        if isinstance(candidates, list) and candidates:
             errors.append("complete scan cannot contain candidates")
-        if not value["graph_receipt"]:
+        if graph_receipt_valid and not value["graph_receipt"]:
             errors.append("complete scan requires graph_receipt")
-        if _mapping(inventory) and inventory.get("complete") is not True:
+        if (
+            inventory_valid
+            and inventory_complete_valid
+            and _mapping(inventory)
+            and inventory.get("complete") is not True
+        ):
             errors.append("complete scan requires complete source inventory")
     return tuple(errors)
 
 
 def canonical_fast_scan_bytes(value: Mapping[str, object] | FastScanReceipt) -> bytes:
-    mapping = value.to_mapping() if isinstance(value, FastScanReceipt) else value
-    errors = validate_fast_scan_receipt(mapping)
+    try:
+        mapping = value.to_mapping() if isinstance(value, FastScanReceipt) else value
+        errors = validate_fast_scan_receipt(mapping)
+    except (RecursionError, TypeError) as error:
+        raise ValueError("invalid fast scan receipt: malformed value") from error
     if errors:
         raise ValueError("invalid fast scan receipt: " + "; ".join(errors))
-    return json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-        "utf-8"
-    )
+    try:
+        return json.dumps(
+            mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except (RecursionError, TypeError, ValueError) as error:
+        raise ValueError("invalid fast scan receipt: value is not canonical JSON") from error
 
 
 def _graph_mapping(value: object) -> dict[str, object]:
@@ -897,7 +923,6 @@ def execute_fast_scan(
         # every frontier entry is that disclosure. Any other frontier
         # reason (coverage gap, deadline, disagreement) keeps the scan
         # partial and unpromotable.
-        graph.get("frontier", [])
         only_provider_gaps = _only_expected_provider_gap(graph)
         status = (
             "complete"
@@ -962,7 +987,14 @@ def prepare_fast_scan_identity(
     root = _root(request.repo_root)
     if not isinstance(payload_sha256, str) or _HEX64.fullmatch(payload_sha256) is None:
         raise ValueError("payload_sha256 must be 64 lowercase hex characters")
-    settings = graph_coordinator.GraphSettings(**cast(_GraphSettingsArgs, dict(graph_settings)))
+    settings_mapping = dict(graph_settings)
+    settings_errors: list[str] = []
+    graph_coordinator.GRAPH._validate_settings(settings_mapping, settings_errors)
+    if settings_errors:
+        raise ValueError("invalid graph settings: " + "; ".join(settings_errors))
+    constructor_mapping = dict(settings_mapping)
+    constructor_mapping["providers"] = tuple(cast(list[str], settings_mapping["providers"]))
+    settings = graph_coordinator.GraphSettings(**cast(_GraphSettingsArgs, constructor_mapping))
     deadline = graph_coordinator.Deadline(time, settings.max_seconds)
     seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
     source_inventory = _inventory(root, deadline)

@@ -129,6 +129,34 @@ class ReportStoreTest(unittest.TestCase):
 
         self.assertEqual(STORE.load_current(self.root, "RPT-001").revision, 1)
 
+    def test_state_and_pointer_schema_versions_require_the_exact_integer_one(self):
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(boundary="publish", sentinel=sentinel):
+                state = self.state()
+                state["schema_version"] = sentinel
+                with tempfile.TemporaryDirectory() as temporary:
+                    if valid:
+                        published = STORE.publish_revision(Path(temporary), canonical_json(state))
+                        self.assertEqual(published.revision, 1)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "schema_version must be 1"):
+                            STORE.publish_revision(Path(temporary), canonical_json(state))
+
+        published = STORE.publish_revision(self.root, self.state_bytes())
+        baseline = json.loads(published.pointer_path.read_text(encoding="utf-8"))
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(boundary="load", sentinel=sentinel):
+                pointer = dict(baseline)
+                pointer["schema_version"] = sentinel
+                published.pointer_path.write_bytes(canonical_json(pointer))
+                if valid:
+                    self.assertEqual(STORE.load_current(self.root, "RPT-001").revision, 1)
+                else:
+                    with self.assertRaisesRegex(
+                        STORE.ReportStoreUnavailable, "current pointer identity is invalid"
+                    ):
+                        STORE.load_current(self.root, "RPT-001")
+
     def test_store_rejects_traversal_and_external_symlink(self):
         for report_id in ("../escape", "/tmp/escape", "RPT-001/../../escape"):
             with self.subTest(report_id=report_id):

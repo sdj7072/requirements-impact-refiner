@@ -22,6 +22,7 @@ MAX_PATHS = 256
 MAX_FRONTIER = 256
 MAX_PROVIDERS = 16
 MAX_COLLECTION_LENGTH = 64
+_MAX_JSON_DEPTH = 64
 
 NODE_KINDS = frozenset(
     {
@@ -105,6 +106,30 @@ _ID_PATTERNS = {
 _HEX32 = re.compile(r"[0-9a-f]{32}")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _CONFIDENCE_RANK = {value: index for index, value in enumerate(CONFIDENCES)}
+
+
+def _json_depth(text: str) -> int:
+    """Return peak JSON container nesting without invoking the decoder."""
+    depth = 0
+    peak = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            peak = max(peak, depth)
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    return peak
 
 
 def _tuples(values: Sequence[str]) -> tuple[str, ...]:
@@ -273,12 +298,16 @@ def _string(value: object, *, allow_empty: bool = False) -> TypeGuard[str]:
     )
 
 
+def _exact_int(value: object) -> TypeGuard[int]:
+    return type(value) is int
+
+
 def _confidence(value: object) -> TypeGuard[str]:
-    return value in CONFIDENCES
+    return isinstance(value, str) and value in CONFIDENCES
 
 
 def _known_provider(value: object, providers: Mapping[str, object]) -> TypeGuard[str]:
-    return value in providers
+    return isinstance(value, str) and value in providers
 
 
 def _safe_path(value: object) -> bool:
@@ -295,17 +324,22 @@ def _safe_path(value: object) -> bool:
 
 def _string_list(
     value: object, label: str, errors: list[str], allowed: frozenset[str] | None = None
-) -> None:
+) -> bool:
     if not isinstance(value, list):
         errors.append(f"{label} must be an array")
-        return
+        return False
+    valid = True
     if len(value) > MAX_COLLECTION_LENGTH:
         errors.append(f"{label} exceeds maximum collection size")
+        valid = False
     for item in value:
         if not _string(item):
             errors.append(f"{label} must contain non-empty strings")
+            valid = False
         elif allowed is not None and item not in allowed:
             errors.append(f"{label} has invalid value {item}")
+            valid = False
+    return valid
 
 
 def _validate_settings(value: object, errors: list[str]) -> None:
@@ -315,15 +349,19 @@ def _validate_settings(value: object, errors: list[str]) -> None:
         errors.append("settings enabled must be boolean")
     if not isinstance(value.get("deep"), bool):
         errors.append("settings deep must be boolean")
-    for name in ("max_seconds", "target_seconds"):
-        current = value.get(name)
-        if not isinstance(current, int) or isinstance(current, bool) or current < 1:
-            errors.append(f"settings {name} must be a positive integer")
     maximum = value.get("max_seconds")
     target = value.get("target_seconds")
-    if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > 30:
+    maximum_number = maximum if _exact_int(maximum) else 0
+    target_number = target if _exact_int(target) else 0
+    maximum_valid = _exact_int(maximum) and maximum_number >= 1
+    target_valid = _exact_int(target) and target_number >= 1
+    if not maximum_valid:
+        errors.append("settings max_seconds must be a positive integer")
+    if not target_valid:
+        errors.append("settings target_seconds must be a positive integer")
+    if maximum_valid and maximum_number > 30:
         errors.append("settings max_seconds must not exceed 30")
-    if isinstance(maximum, int) and isinstance(target, int) and target > maximum:
+    if maximum_valid and maximum_number <= 30 and target_valid and target_number > maximum_number:
         errors.append("settings target_seconds must not exceed max_seconds")
     providers = value.get("providers")
     if (
@@ -334,7 +372,7 @@ def _validate_settings(value: object, errors: list[str]) -> None:
         or len(set(providers)) != len(providers)
     ):
         errors.append("settings providers must be a non-empty list of unique names")
-    if value.get("install_policy") != "never":
+    if not isinstance(value.get("install_policy"), str) or value.get("install_policy") != "never":
         errors.append(f"settings has invalid install_policy {value.get('install_policy')}")
 
 
@@ -462,7 +500,7 @@ def validate_receipt(value: object) -> tuple[str, ...]:
     errors.extend(f"unknown top-level key {key}" for key in sorted(set(receipt) - TOP_LEVEL_KEYS))
     if errors:
         return tuple(errors)
-    if receipt["schema_version"] != 1:
+    if type(receipt["schema_version"]) is not int or receipt["schema_version"] != 1:
         errors.append("schema_version must be 1")
     for name, length in (
         ("receipt_id", 32),
@@ -486,12 +524,12 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         if provider_name in providers:
             errors.append(f"duplicate provider {provider_name}")
         providers[provider_name] = row
-        if row.get("status") not in PROVIDER_STATUSES:
-            errors.append(f"provider {provider_name} has invalid status {row.get('status')}")
-        if row.get("confidence") not in CONFIDENCES:
-            errors.append(
-                f"provider {provider_name} has invalid confidence {row.get('confidence')}"
-            )
+        provider_status = row.get("status")
+        if not isinstance(provider_status, str) or provider_status not in PROVIDER_STATUSES:
+            errors.append(f"provider {provider_name} has invalid status {provider_status}")
+        provider_confidence = row.get("confidence")
+        if not _confidence(provider_confidence):
+            errors.append(f"provider {provider_name} has invalid confidence {provider_confidence}")
         for field in ("version", "executable_sha256"):
             current = row.get(field)
             if current is not None and not _string(current):
@@ -523,8 +561,9 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         if identifier in nodes:
             errors.append(f"duplicate graph node {identifier}")
         nodes[identifier] = row
-        if row.get("kind") not in NODE_KINDS:
-            errors.append(f"node {identifier} has invalid kind {row.get('kind')}")
+        node_kind = row.get("kind")
+        if not isinstance(node_kind, str) or node_kind not in NODE_KINDS:
+            errors.append(f"node {identifier} has invalid kind {node_kind}")
         label = row.get("label")
         if isinstance(label, str) and len(label) > MAX_STRING_LENGTH:
             errors.append(f"node {identifier} label exceeds maximum length")
@@ -577,10 +616,12 @@ def validate_receipt(value: object) -> tuple[str, ...]:
             errors.append(f"duplicate graph edge {identifier}")
         edges[identifier] = row
         for field in ("source", "target"):
-            if row.get(field) not in nodes:
-                errors.append(f"edge {identifier} references unknown graph node {row.get(field)}")
-        if row.get("kind") not in EDGE_KINDS:
-            errors.append(f"edge {identifier} has invalid kind {row.get('kind')}")
+            reference = row.get(field)
+            if not isinstance(reference, str) or reference not in nodes:
+                errors.append(f"edge {identifier} references unknown graph node {reference}")
+        edge_kind = row.get("kind")
+        if not isinstance(edge_kind, str) or edge_kind not in EDGE_KINDS:
+            errors.append(f"edge {identifier} has invalid kind {edge_kind}")
         location = row.get("location")
         if location is not None and not _safe_path(location):
             errors.append(f"edge {identifier} has unsafe location {location}")
@@ -617,31 +658,37 @@ def validate_receipt(value: object) -> tuple[str, ...]:
             errors.append(f"duplicate graph path {identifier}")
         paths.add(identifier)
         node_ids, edge_ids = row.get("nodes"), row.get("edges")
-        _string_list(node_ids, f"path {identifier} nodes", errors)
-        _string_list(edge_ids, f"path {identifier} edges", errors)
-        if isinstance(node_ids, list):
+        node_ids_valid = _string_list(node_ids, f"path {identifier} nodes", errors)
+        edge_ids_valid = _string_list(edge_ids, f"path {identifier} edges", errors)
+        if node_ids_valid and isinstance(node_ids, list):
             for node in node_ids:
                 if node not in nodes:
                     errors.append(f"unknown graph node {node}")
-        if isinstance(edge_ids, list):
+        if edge_ids_valid and isinstance(edge_ids, list):
             for edge in edge_ids:
                 if edge not in edges:
                     errors.append(f"unknown graph edge {edge}")
         if (
-            not isinstance(node_ids, list)
-            or not isinstance(edge_ids, list)
-            or not edge_ids
-            or len(node_ids) != len(edge_ids) + 1
+            node_ids_valid
+            and edge_ids_valid
+            and isinstance(node_ids, list)
+            and isinstance(edge_ids, list)
         ):
-            errors.append(f"path {identifier} requires contiguous node and edge evidence")
-        elif all(edge in edges for edge in edge_ids):
-            for index, edge in enumerate(edge_ids):
-                if (
-                    edges[edge].get("source") != node_ids[index]
-                    or edges[edge].get("target") != node_ids[index + 1]
-                ):
-                    errors.append(f"path {identifier} edge {edge} does not connect declared nodes")
-        if row.get("distance") != len(edge_ids) if isinstance(edge_ids, list) else True:
+            if not edge_ids or len(node_ids) != len(edge_ids) + 1:
+                errors.append(f"path {identifier} requires contiguous node and edge evidence")
+            elif all(edge in edges for edge in edge_ids):
+                for index, edge in enumerate(edge_ids):
+                    if (
+                        edges[edge].get("source") != node_ids[index]
+                        or edges[edge].get("target") != node_ids[index + 1]
+                    ):
+                        errors.append(
+                            f"path {identifier} edge {edge} does not connect declared nodes"
+                        )
+        distance = row.get("distance")
+        if type(distance) is not int:
+            errors.append(f"path {identifier} distance must equal edge count")
+        elif edge_ids_valid and isinstance(edge_ids, list) and distance != len(edge_ids):
             errors.append(f"path {identifier} distance must equal edge count")
         _string_list(
             row.get("risk_domains"), f"path {identifier} risk_domains", errors, RISK_DOMAINS
@@ -659,16 +706,19 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         if identifier in frontier:
             errors.append(f"duplicate frontier {identifier}")
         frontier.add(identifier)
-        if row.get("node") not in nodes:
-            errors.append(f"frontier {identifier} references unknown graph node {row.get('node')}")
+        frontier_node = row.get("node")
+        if not isinstance(frontier_node, str) or frontier_node not in nodes:
+            errors.append(f"frontier {identifier} references unknown graph node {frontier_node}")
         if not _string(row.get("reason")):
             errors.append(f"frontier {identifier} requires a reason")
         _string_list(
             row.get("risk_domains"), f"frontier {identifier} risk_domains", errors, RISK_DOMAINS
         )
-    if receipt["budget_status"] not in BUDGET_STATUSES:
-        errors.append(f"invalid budget_status {receipt['budget_status']}")
-    if receipt["budget_status"] != "closed" and not frontier_rows:
+    budget_status = receipt["budget_status"]
+    budget_status_valid = isinstance(budget_status, str) and budget_status in BUDGET_STATUSES
+    if not budget_status_valid:
+        errors.append(f"invalid budget_status {budget_status}")
+    elif budget_status != "closed" and not frontier_rows:
         errors.append("non-closed receipt requires an unknown frontier")
 
     timings = receipt["timings_ms"]
@@ -689,13 +739,14 @@ def validate_receipt(value: object) -> tuple[str, ...]:
     cache = receipt["cache"]
     cache_fields = {"status", "key", "invalidated_nodes"}
     if _keys(errors, "cache", cache, cache_fields) and _mapping(cache):
-        if cache.get("status") not in CACHE_STATUSES:
-            errors.append(f"cache has invalid status {cache.get('status')}")
+        cache_status = cache.get("status")
+        if not isinstance(cache_status, str) or cache_status not in CACHE_STATUSES:
+            errors.append(f"cache has invalid status {cache_status}")
         if not _valid_hash(cache.get("key"), 64):
             errors.append("cache key must be a lowercase SHA-256 hex string")
         invalidated = cache.get("invalidated_nodes")
-        _string_list(invalidated, "cache invalidated_nodes", errors)
-        if isinstance(invalidated, list):
+        invalidated_valid = _string_list(invalidated, "cache invalidated_nodes", errors)
+        if invalidated_valid and isinstance(invalidated, list):
             for node in invalidated:
                 if node not in nodes:
                     errors.append(f"cache references unknown graph node {node}")
@@ -709,24 +760,37 @@ def load_receipt_bytes(payload: bytes) -> tuple[dict[str, object] | None, tuple[
     if len(payload) > MAX_RECEIPT_BYTES:
         return None, ("receipt exceeds maximum byte size",)
     try:
-        value = json.loads(payload.decode("utf-8"))
+        text = payload.decode("utf-8")
     except UnicodeDecodeError:
         return None, ("receipt must be UTF-8",)
-    except json.JSONDecodeError:
+    if _json_depth(text) > _MAX_JSON_DEPTH:
+        return None, ("receipt exceeds maximum JSON nesting depth",)
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, RecursionError, TypeError):
         return None, ("receipt must contain valid JSON",)
-    errors = validate_receipt(value)
+    try:
+        errors = validate_receipt(value)
+    except (RecursionError, TypeError):
+        return None, ("receipt contains malformed values",)
     return (value, errors) if not errors else (None, errors)
 
 
 def canonical_receipt_bytes(value: Mapping[str, object] | GraphReceipt) -> bytes:
     """Return the single stable JSON representation used for receipt digests."""
-    receipt = _receipt_mapping(value)
-    errors = validate_receipt(receipt)
+    try:
+        receipt = _receipt_mapping(value)
+        errors = validate_receipt(receipt)
+    except (RecursionError, TypeError) as error:
+        raise ValueError("invalid graph receipt: malformed value") from error
     if errors:
         raise ValueError("invalid graph receipt: " + "; ".join(errors))
-    payload = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-        "utf-8"
-    )
+    try:
+        payload = json.dumps(
+            receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except (RecursionError, TypeError, ValueError) as error:
+        raise ValueError("invalid graph receipt: value is not canonical JSON") from error
     if len(payload) > MAX_RECEIPT_BYTES:
         raise ValueError("canonical graph receipt exceeds maximum byte size")
     return payload

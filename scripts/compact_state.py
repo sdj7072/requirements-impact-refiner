@@ -445,7 +445,7 @@ def validate_structure(value: object) -> list[str]:
     )
     if errors:
         return errors
-    if value["schema_version"] != 1:
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
         errors.append("schema_version must be 1")
     for name, fields in OBJECT_FIELDS.items():
         current = value[name]

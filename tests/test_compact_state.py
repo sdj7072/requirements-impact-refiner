@@ -178,6 +178,20 @@ class CompactStateTest(unittest.TestCase):
         self.assertIsNone(value)
         self.assertIn("state must contain a JSON object", errors)
 
+    def test_schema_version_requires_the_exact_integer_one_at_load_boundary(self):
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(sentinel=sentinel):
+                state = self.fixture()
+                state["schema_version"] = sentinel
+
+                value, errors = COMPACT.load_state_bytes(json.dumps(state).encode("utf-8"))
+
+                self.assertIsNotNone(value)
+                if valid:
+                    self.assertEqual(errors, [])
+                else:
+                    self.assertIn("schema_version must be 1", errors)
+
     def test_decision_and_option_relationships_are_substantive(self):
         post = self.fixture()
         post["decisions"][0]["rationale"] = ""

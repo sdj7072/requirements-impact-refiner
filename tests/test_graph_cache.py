@@ -363,6 +363,75 @@ class GraphCacheTest(unittest.TestCase):
         os.symlink(target, second.artifact)
         self.assertEqual(CACHE.load(self.root, second.key, digests()).status, "miss")
 
+    def test_cache_schema_version_requires_the_exact_integer_one(self):
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(boundary="publish", sentinel=sentinel):
+                if valid:
+                    self.assertEqual(
+                        CACHE.publish(
+                            self.root, receipt(), digests(), schema_version=sentinel
+                        ).status,
+                        "miss",
+                    )
+                else:
+                    with self.assertRaisesRegex(ValueError, "schema_version"):
+                        CACHE.publish(self.root, receipt(), digests(), schema_version=sentinel)
+
+        published = CACHE.publish(self.root, receipt(), digests())
+        baseline = json.loads(published.artifact.read_text(encoding="utf-8"))
+        for sentinel, expected in ((True, "miss"), (1.0, "miss"), ("1", "miss"), (1, "hit")):
+            with self.subTest(boundary="load", sentinel=sentinel):
+                payload = dict(baseline)
+                payload["cache_schema_version"] = sentinel
+                published.artifact.write_text(
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(CACHE.load(self.root, published.key, digests()).status, expected)
+
+    def test_unhashable_inventory_reason_and_graph_fields_are_cache_misses(self):
+        incomplete = CACHE.publish(
+            self.root,
+            receipt(),
+            digests(),
+            inventory_complete=False,
+            inventory_reason="deadline",
+        )
+        baseline = json.loads(incomplete.artifact.read_text(encoding="utf-8"))
+        cases = (
+            (("identity", "source_inventory_reason"), []),
+            (("identity", "source_inventory_reason"), {}),
+            (("receipt", "nodes", 0, "kind"), []),
+            (("receipt", "cache", "status"), {}),
+        )
+        for path, malformed in cases:
+            with self.subTest(path=path, malformed=malformed):
+                payload = json.loads(json.dumps(baseline))
+                target = payload
+                for component in path[:-1]:
+                    target = target[component]
+                target[path[-1]] = malformed
+                incomplete.artifact.write_text(
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(CACHE.load(self.root, incomplete.key, digests()).status, "miss")
+
+    def test_over_deep_cache_json_is_rejected_before_decoder_invocation(self):
+        published = CACHE.publish(self.root, receipt(), digests())
+        published.artifact.write_text("[" * 65 + "0" + "]" * 65, encoding="utf-8")
+
+        with mock.patch.object(
+            CACHE.json,
+            "loads",
+            side_effect=AssertionError("over-deep JSON reached the decoder"),
+        ):
+            loaded = CACHE.load(self.root, published.key, digests())
+
+        self.assertEqual(loaded.status, "miss")
+
     def test_receipt_cannot_diverge_from_the_keyed_identity(self):
         published = CACHE.publish(self.root, receipt(), digests())
         payload = json.loads(published.artifact.read_text(encoding="utf-8"))

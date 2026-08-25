@@ -192,6 +192,160 @@ class RirMcpServerTest(unittest.TestCase):
         )
         self.assertFalse(module._is_trace_result(malformed_trace))
 
+    def test_controller_result_paths_are_strictly_repository_contained(self):
+        module = self.load_server_module("_rir_mcp_result_path_guard")
+        analysis = json.loads(
+            (FIXTURES / "controller-analysis-pre-decision.json").read_text(encoding="utf-8")
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            repo = base / "repo"
+            artifacts = repo / "artifacts"
+            nested = repo / "nested"
+            artifacts.mkdir(parents=True)
+            nested.mkdir()
+            contained = {}
+            for name in ("draft", "state", "markdown", "receipt"):
+                path = artifacts / f"{name}.json"
+                path.write_text(name, encoding="utf-8")
+                contained[name] = path
+            outside = base / "outside.json"
+            outside.write_text("outside", encoding="utf-8")
+            symlink_escape = repo / "symlink-escape.json"
+            symlink_escape.symlink_to(outside)
+            invalid_paths = (
+                ("traversal", nested / ".." / ".." / outside.name),
+                ("absolute-outside", outside.resolve()),
+                ("missing", repo / "missing.json"),
+                ("symlink-escape", symlink_escape),
+            )
+            begin_arguments = {
+                "repo_root": str(repo),
+                "request": "Change the profile contract",
+                "repository_evidence": [],
+                "adapter": "generic",
+            }
+            finalize_arguments = {
+                "repo_root": str(repo),
+                "draft_id": "0" * 32,
+                "analysis": analysis,
+            }
+            trace_arguments = {
+                "repo_root": str(repo),
+                "draft_id": "0" * 32,
+                "seeds": [{"term": "profile.displayName", "location": None}],
+            }
+            begin_result = {
+                "draft_id": "0" * 32,
+                "draft_path": contained["draft"],
+                "report_id": "RPT-001",
+                "revision": 1,
+                "previous_sha256": "none",
+                "settings": {"audience": "balanced", "delivery": "compact"},
+                "prior_state": None,
+                "prior_key_map": None,
+                "scan_id": None,
+                "graph_receipt_id": None,
+            }
+            finalize_result = {
+                "status": "published",
+                "report_id": "RPT-001",
+                "revision": 1,
+                "delivery": "compact",
+                "display_text": "published",
+                "state_path": contained["state"],
+                "markdown_path": contained["markdown"],
+                "markdown_sha256": "1" * 64,
+            }
+            trace_result = {
+                "receipt_id": "2" * 32,
+                "receipt_path": contained["receipt"],
+                "receipt_sha256": "3" * 64,
+                "compact_graph": {},
+                "budget_status": "closed",
+                "request_sha256": "4" * 64,
+                "seeds": (types.SimpleNamespace(term="profile.displayName", location=None),),
+            }
+            cases = (
+                (
+                    "rir_begin",
+                    "begin_refinement",
+                    "draft_path",
+                    begin_arguments,
+                    begin_result,
+                    contained["draft"],
+                ),
+                (
+                    "rir_finalize",
+                    "finalize_refinement",
+                    "state_path",
+                    finalize_arguments,
+                    finalize_result,
+                    contained["state"],
+                ),
+                (
+                    "rir_finalize",
+                    "finalize_refinement",
+                    "markdown_path",
+                    finalize_arguments,
+                    finalize_result,
+                    contained["markdown"],
+                ),
+                (
+                    "rir_trace_impact",
+                    "trace_impact",
+                    "receipt_path",
+                    trace_arguments,
+                    trace_result,
+                    contained["receipt"],
+                ),
+            )
+            identifier = 0
+            for tool_name, operation, field, arguments, baseline, valid_path in cases:
+                for path_kind, invalid_path in invalid_paths:
+                    identifier += 1
+                    with self.subTest(tool=tool_name, field=field, path_kind=path_kind):
+                        result_values = dict(baseline)
+                        result_values[field] = invalid_path
+                        with mock.patch.object(
+                            module.rir_controller,
+                            operation,
+                            return_value=types.SimpleNamespace(**result_values),
+                        ):
+                            reply = module.handle(
+                                request(
+                                    identifier,
+                                    "tools/call",
+                                    {"name": tool_name, "arguments": arguments},
+                                )
+                            )
+
+                        self.assertEqual(
+                            reply["error"],
+                            {"code": -32603, "message": "controller operation failed"},
+                        )
+                        self.assertNotIn(str(base), json.dumps(reply, sort_keys=True))
+
+                identifier += 1
+                with self.subTest(tool=tool_name, field=field, path_kind="contained"):
+                    result_values = dict(baseline)
+                    result_values[field] = valid_path
+                    with mock.patch.object(
+                        module.rir_controller,
+                        operation,
+                        return_value=types.SimpleNamespace(**result_values),
+                    ):
+                        reply = module.handle(
+                            request(
+                                identifier,
+                                "tools/call",
+                                {"name": tool_name, "arguments": arguments},
+                            )
+                        )
+
+                    expected = valid_path.resolve().relative_to(repo.resolve()).as_posix()
+                    self.assertEqual(reply["result"]["structuredContent"][field], expected)
+
     def test_malformed_payload_identity_return_fails_closed(self):
         script = r"""
 import importlib.util

@@ -182,6 +182,24 @@ class _ControllerContractError(RuntimeError):
     """A validated MCP request received an invalid controller sibling result."""
 
 
+def _repository_result_path(repo_root: str, result_path: Path) -> str:
+    """Return a resolved repository-relative artifact path or fail closed."""
+    if ".." in result_path.parts:
+        raise _ControllerContractError("controller result path contract is invalid")
+    try:
+        root = Path(repo_root).resolve(strict=True)
+        if not root.is_dir():
+            raise OSError("repository root is not a directory")
+        candidate = result_path if result_path.is_absolute() else root / result_path
+        resolved = candidate.resolve(strict=True)
+        relative = resolved.relative_to(root)
+        if not resolved.is_file():
+            raise OSError("controller result is not a regular file")
+    except (OSError, RuntimeError, ValueError) as error:
+        raise _ControllerContractError("controller result path contract is invalid") from error
+    return relative.as_posix()
+
+
 def _callables(value: object, names: tuple[str, ...]) -> bool:
     return all(callable(getattr(value, name, None)) for name in names)
 
@@ -857,7 +875,7 @@ def _begin(arguments: object) -> dict[str, object]:
     )
     if not _is_begin_result(result):
         raise _ControllerContractError("controller begin result contract is incomplete")
-    root = Path(arguments["repo_root"]).resolve()
+    draft_path = _repository_result_path(arguments["repo_root"], result.draft_path)
     prior_state = result.prior_state
     prior_key_map = result.prior_key_map
     key_maps = (
@@ -932,7 +950,7 @@ def _begin(arguments: object) -> dict[str, object]:
         )
     structured = {
         "draft_id": result.draft_id,
-        "draft_path": result.draft_path.relative_to(root).as_posix(),
+        "draft_path": draft_path,
         "report_id": result.report_id,
         "revision": result.revision,
         "previous_sha256": result.previous_sha256,
@@ -995,15 +1013,16 @@ def _finalize(arguments: object) -> dict[str, object]:
     )
     if not _is_finalize_result(result):
         raise _ControllerContractError("controller finalize result contract is incomplete")
-    root = Path(arguments["repo_root"]).resolve()
+    state_path = _repository_result_path(arguments["repo_root"], result.state_path)
+    markdown_path = _repository_result_path(arguments["repo_root"], result.markdown_path)
     structured = {
         "status": result.status,
         "report_id": result.report_id,
         "revision": result.revision,
         "delivery": result.delivery,
         "display_text": result.display_text,
-        "state_path": result.state_path.relative_to(root).as_posix(),
-        "markdown_path": result.markdown_path.relative_to(root).as_posix(),
+        "state_path": state_path,
+        "markdown_path": markdown_path,
         "markdown_sha256": result.markdown_sha256,
     }
     return {
@@ -1063,10 +1082,10 @@ def _trace(arguments: object) -> dict[str, object]:
     )
     if not _is_trace_result(result):
         raise _ControllerContractError("controller trace result contract is incomplete")
-    root = Path(arguments["repo_root"]).resolve()
+    receipt_path = _repository_result_path(arguments["repo_root"], result.receipt_path)
     structured = {
         "receipt_id": result.receipt_id,
-        "receipt_path": result.receipt_path.relative_to(root).as_posix(),
+        "receipt_path": receipt_path,
         "receipt_sha256": result.receipt_sha256,
         "compact_graph": result.compact_graph,
         "budget_status": result.budget_status,

@@ -4,6 +4,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -83,6 +84,73 @@ class ImpactGraphTest(unittest.TestCase):
         errors = GRAPH.validate_receipt(value)
 
         self.assertIn("provider builtin has invalid confidence ['lexical']", errors)
+
+    def test_unhashable_scalar_and_reference_fields_fail_closed(self):
+        cases = (
+            (("providers", 0, "status"), [], "provider builtin has invalid status"),
+            (("nodes", 0, "kind"), {}, "node NODE-001 has invalid kind"),
+            (("nodes", 0, "provider"), [], "references unknown provider"),
+            (("edges", 0, "source"), {}, "references unknown graph node"),
+            (("paths", 0, "nodes", 0), [], "path PATH-001 nodes must contain"),
+            (("frontier", 0, "node"), {}, "references unknown graph node"),
+            (("budget_status",), [], "invalid budget_status"),
+            (("cache", "status"), {}, "cache has invalid status"),
+            (
+                ("cache", "invalidated_nodes", 0),
+                [],
+                "cache invalidated_nodes must contain",
+            ),
+        )
+        for path, malformed, expected in cases:
+            with self.subTest(path=path, malformed=malformed):
+                value = fixture()
+                if path == ("cache", "invalidated_nodes", 0):
+                    value["cache"]["invalidated_nodes"] = ["NODE-001"]
+                target = value
+                for component in path[:-1]:
+                    target = target[component]
+                target[path[-1]] = malformed
+
+                errors = GRAPH.validate_receipt(value)
+
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_schema_version_requires_the_exact_integer_one_at_load_boundary(self):
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(sentinel=sentinel):
+                value = fixture()
+                value["schema_version"] = sentinel
+                payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
+
+                loaded, errors = GRAPH.load_receipt_bytes(payload)
+
+                if valid:
+                    self.assertEqual(errors, ())
+                    self.assertEqual(loaded, value)
+                else:
+                    self.assertIsNone(loaded)
+                    self.assertIn("schema_version must be 1", errors)
+
+    def test_over_deep_json_is_rejected_before_decoder_invocation(self):
+        payload = ("[" * 65 + "0" + "]" * 65).encode("utf-8")
+        with mock.patch.object(
+            GRAPH.json,
+            "loads",
+            side_effect=AssertionError("over-deep JSON reached the decoder"),
+        ):
+            loaded, errors = GRAPH.load_receipt_bytes(payload)
+
+        self.assertIsNone(loaded)
+        self.assertEqual(errors, ("receipt exceeds maximum JSON nesting depth",))
+
+    def test_malformed_recursive_canonical_value_is_a_validation_error(self):
+        value = fixture()
+        recursive = []
+        recursive.append(recursive)
+        value["cache"]["invalidated_nodes"] = recursive
+
+        with self.assertRaisesRegex(ValueError, "^invalid graph receipt:"):
+            GRAPH.canonical_receipt_bytes(value)
 
     def test_receipt_requires_sha_inputs(self):
         value = fixture()

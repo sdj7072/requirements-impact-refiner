@@ -26,7 +26,7 @@ python3.13 -m venv .quality-venv
 ```
 
 Those pins are `bandit==1.9.4`, `coverage==7.15.4`, `mypy==1.18.2`, and
-`ruff==0.16.3`. Coverage applies to the root `scripts` and `evals/harness`
+`ruff==0.16.3`. `mypy==1.18.2` runs in the Python 3.13 quality job while checking Python 3.9 source compatibility. Coverage applies to the root `scripts` and `evals/harness`
 source trees and requires at least 80%. Bandit reports medium-or-higher severity
 at every confidence level via `-ll`.
 

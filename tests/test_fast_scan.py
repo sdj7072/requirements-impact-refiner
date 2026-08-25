@@ -266,6 +266,58 @@ class FastScanTest(unittest.TestCase):
         complete["cache_status"] = "miss"
         self.assertEqual(fast_scan.validate_fast_scan_receipt(complete), ())
 
+    def test_unhashable_status_risk_cache_inventory_and_seed_identity_fail_closed(self):
+        fast_scan = load_fast_scan()
+        cases = (
+            (("status",), [], "status is invalid"),
+            (("risk_level",), {}, "risk_level is invalid"),
+            (("cache_status",), [], "cache_status is invalid"),
+            (
+                ("source_inventory", "reason"),
+                {},
+                "source_inventory reason must be null or nonblank text",
+            ),
+            (("seeds", 0, "term"), [], "seed row 1 term must be nonblank"),
+            (("seeds", 0, "location"), {}, "seed row 1 location is unsafe"),
+        )
+        for path, malformed, expected in cases:
+            with self.subTest(path=path, malformed=malformed):
+                value = self.receipt()
+                if path[0] == "seeds":
+                    value["seeds"] = [
+                        {
+                            "term": "profile.displayName",
+                            "location": "api/profile.py",
+                            "derivation": "repository-match",
+                            "source_sha256": "5" * 64,
+                        }
+                    ]
+                target = value
+                for component in path[:-1]:
+                    target = target[component]
+                target[path[-1]] = malformed
+
+                errors = fast_scan.validate_fast_scan_receipt(value)
+
+                self.assertIn(expected, errors)
+
+    def test_schema_version_requires_the_exact_integer_one(self):
+        fast_scan = load_fast_scan()
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(sentinel=sentinel):
+                value = self.receipt()
+                value["schema_version"] = sentinel
+
+                errors = fast_scan.validate_fast_scan_receipt(value)
+
+                if valid:
+                    self.assertEqual(errors, ())
+                    self.assertEqual(json.loads(fast_scan.canonical_fast_scan_bytes(value)), value)
+                else:
+                    self.assertIn("schema_version must be 1", errors)
+                    with self.assertRaisesRegex(ValueError, "invalid fast scan receipt"):
+                        fast_scan.canonical_fast_scan_bytes(value)
+
     def test_canonical_receipt_bytes_are_stable_utf8_and_no_terminal_newline(self):
         fast_scan = load_fast_scan()
         value = self.receipt()
@@ -370,6 +422,26 @@ class FastScanTest(unittest.TestCase):
         )
         self.assertEqual(result.status, "needs_input")
         self.assertFalse(result.can_promote)
+
+    def test_prepare_identity_validates_list_providers_and_normalizes_to_tuple(self):
+        fast_scan = load_fast_scan()
+        settings = {
+            "enabled": True,
+            "max_seconds": 30,
+            "target_seconds": 10,
+            "providers": ["builtin"],
+            "install_policy": "never",
+            "deep": False,
+        }
+        request = fast_scan.FastScanRequest(self.root, "make it nicer", (), "simple")
+
+        prepared = fast_scan.prepare_fast_scan_identity(request, settings, "a" * 64)
+
+        self.assertEqual(prepared.settings.providers, ("builtin",))
+        invalid = copy.deepcopy(settings)
+        invalid["providers"] = [{}]
+        with self.assertRaisesRegex(ValueError, "invalid graph settings"):
+            fast_scan.prepare_fast_scan_identity(request, invalid, "a" * 64)
 
     def test_execute_reuses_exact_scan_and_source_mutation_invalidates_it(self):
         fast_scan = load_fast_scan()
