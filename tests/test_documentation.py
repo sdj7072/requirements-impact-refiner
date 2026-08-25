@@ -168,7 +168,7 @@ class DocumentationTest(unittest.TestCase):
     def test_top_release_descriptions_identify_the_current_patch_release(self):
         for name in READMES:
             description = (ROOT / name).read_text(encoding="utf-8").splitlines()[4]
-            self.assertIn("`0.5.0`", description, name)
+            self.assertIn("`0.6.0`", description, name)
             self.assertNotIn("`0.3.0`", description, name)
 
     def test_presentation_modes_and_repository_setting_are_documented(self):

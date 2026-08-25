@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.5.0`은 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 **Public Preview** 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.6.0`은 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 **Public Preview** 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -154,7 +154,7 @@ Revision 1 기준선에서는 두 영향을 모두 `new`로 기록합니다. 다
 | Codex skill quick validator | local system snapshot | `blocked` | PyYAML이 없습니다. 정적 검사에서 이 검증기의 허용 키 목록에 Agent Skills의 `compatibility` 키도 빠져 있음을 확인했으며 실행 통과로 주장하지 않습니다. |
 | Codex plugin validator | local system snapshot | `blocked` | `ModuleNotFoundError: yaml`에서 실행이 중단되었습니다. manifest 테스트를 이 검증기의 통과로 대체하지 않습니다. |
 | Claude Code standalone | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 구조 프로브만 수행했으며, 인증된 Claude 동작 평가는 실행하지 않았습니다. |
-| Claude Code with Superpowers | `2.1.237 (Claude Code)` subagent smoke; RIR `0.5.0` | `not verified` | claude-code 모드 13개 케이스에 대한 1회 반복 동작 스모크: 음성 5/5 기계 통과(경계 케이스인 planning이 제외 규칙을 문구 그대로 인용), 양성 0/8 — v0.5 Fast Scan 경로는 1턴 하네스가 보내지 않는 확인을 기다리므로 8건 중 7건이 scan → needs_input → 질문 → 정지를 문서 그대로 수행했고 1건은 스킬을 사용하지 않았습니다. 원본 출력과 스코어카드는 [`evals/results/claude-v0.5-smoke/`](evals/results/claude-v0.5-smoke/scorecard.md)에 있습니다. |
+| Claude Code with Superpowers | `2.1.237 (Claude Code)` subagent smoke; RIR `0.6.0` | `not verified` | claude-code 모드 13개 케이스에 대한 1회 반복 동작 스모크: 음성 5/5 기계 통과(경계 케이스인 planning이 제외 규칙을 문구 그대로 인용), 양성 0/8 — v0.5 Fast Scan 경로는 1턴 하네스가 보내지 않는 확인을 기다리므로 8건 중 7건이 scan → needs_input → 질문 → 정지를 문서 그대로 수행했고 1건은 스킬을 사용하지 않았습니다. 원본 출력과 스코어카드는 [`evals/results/claude-v0.5-smoke/`](evals/results/claude-v0.5-smoke/scorecard.md)에 있습니다. |
 | Claude Code with `feature-dev` | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 구조 프로브만 수행했으며 `feature-dev` 동작 호환성은 계속 차단됩니다. |
 | Claude Code with Spec Kit | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | 구조 프로브만 수행했으며 Spec Kit 동작 호환성은 계속 차단됩니다. |
 | Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | 이름이 지정되거나 구성된 일반 하네스 실행 파일이 없습니다. |

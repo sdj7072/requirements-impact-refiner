@@ -50,7 +50,7 @@ class MarketplaceDistributionTest(unittest.TestCase):
         for entry in (codex_entry, claude_entry):
             self.assertEqual(entry["name"], codex_plugin["name"])
         self.assertEqual(claude_entry["version"], codex_plugin["version"])
-        self.assertEqual(claude_entry["version"], "0.5.0")
+        self.assertEqual(claude_entry["version"], "0.6.0")
         self.assertEqual(claude_entry["description"], codex_plugin["description"])
         self.assertEqual(codex_plugin["name"], claude_plugin["name"])
 

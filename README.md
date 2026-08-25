@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.5.0` is a **Public Preview** repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.6.0` is a **Public Preview** repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
@@ -154,7 +154,7 @@ Compatibility claims below are limited to preserved evaluation evidence. The his
 | Codex skill quick validator | local system snapshot | `blocked` | PyYAML is absent. Static audit also found that this validator's allowed-key list omits the Agent Skills `compatibility` key; no executed pass is claimed. |
 | Codex plugin validator | local system snapshot | `blocked` | Execution stopped at `ModuleNotFoundError: yaml`; manifest tests are not substituted for this validator. |
 | Claude Code standalone | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; no authenticated Claude behavioral evaluation ran. |
-| Claude Code with Superpowers | `2.1.237 (Claude Code)` subagent smoke; RIR `0.5.0` | `not verified` | Single-repetition behavioral smoke over the 13 claude-code cases: negatives 5/5 mechanical passes (the near-boundary planning case cited the exclusion rule verbatim); positives 0/8 produced a one-turn canonical report because the v0.5 Fast Scan path stops for the confirmation a one-turn harness never sends — 7/8 ran scan → needs_input → ask → stop exactly as documented, 1/8 did not engage the skill. Raw outputs and scorecard in [`evals/results/claude-v0.5-smoke/`](evals/results/claude-v0.5-smoke/scorecard.md). |
+| Claude Code with Superpowers | `2.1.237 (Claude Code)` subagent smoke; RIR `0.6.0` | `not verified` | Single-repetition behavioral smoke over the 13 claude-code cases: negatives 5/5 mechanical passes (the near-boundary planning case cited the exclusion rule verbatim); positives 0/8 produced a one-turn canonical report because the v0.5 Fast Scan path stops for the confirmation a one-turn harness never sends — 7/8 ran scan → needs_input → ask → stop exactly as documented, 1/8 did not engage the skill. Raw outputs and scorecard in [`evals/results/claude-v0.5-smoke/`](evals/results/claude-v0.5-smoke/scorecard.md). |
 | Claude Code with `feature-dev` | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; `feature-dev` behavioral compatibility remains blocked. |
 | Claude Code with Spec Kit | `2.1.228 (Claude Code)`; RIR `0.3.1` structural probe | `blocked` | Structural probe only; Spec Kit behavioral compatibility remains blocked. |
 | Generic Agent Skills-compatible harness | client/version unavailable | `blocked` | No named or configured generic harness executable was available. |
