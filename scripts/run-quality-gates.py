@@ -41,7 +41,6 @@ GATES = (
         "-x",
         "tests,evals/results",
         "-ll",
-        "-ii",
     ),
 )
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "graph_coordinator.py"
+MODULE_PATH = ROOT / "scripts" / "graph_coordinator.py"
 SPEC = importlib.util.spec_from_file_location("graph_coordinator", MODULE_PATH)
 COORDINATOR = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = COORDINATOR

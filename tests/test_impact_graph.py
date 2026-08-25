@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
-MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "impact_graph.py"
+MODULE_PATH = ROOT / "scripts" / "impact_graph.py"
 SPEC = importlib.util.spec_from_file_location("impact_graph", MODULE_PATH)
 GRAPH = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = GRAPH

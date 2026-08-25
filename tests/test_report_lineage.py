@@ -8,7 +8,7 @@ from pathlib import Path
 from tests.test_validate_impact_report import VALID_REPORT, VALIDATOR
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "validate-impact-report.py"
+SCRIPT = ROOT / "scripts" / "validate-impact-report.py"
 
 
 IMPACT_ROW = (

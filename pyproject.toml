@@ -57,9 +57,8 @@ no_implicit_optional = true
 
 [tool.coverage.run]
 branch = true
-# Root scripts are byte-identical fallbacks for the canonical skill scripts;
-# measure each implementation once to avoid double-counting mirror files.
-source = ["skills/requirements-impact-refiner/scripts", "evals/harness"]
+# Root scripts are the complete shipped set; installed-skill copies are mirrors.
+source = ["scripts", "evals/harness"]
 
 [tool.coverage.report]
 omit = ["tests/*"]

@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 
 
-def load_canonical_runner():
-    runner_path = Path("skills/requirements-impact-refiner/scripts/run-quality-gates.py")
+def load_quality_runner():
+    runner_path = Path("scripts/run-quality-gates.py")
     specification = importlib.util.spec_from_file_location("quality_runner", runner_path)
     if specification is None or specification.loader is None:
         raise RuntimeError(f"could not load quality runner from {runner_path}")
@@ -19,7 +19,7 @@ def load_canonical_runner():
     return module
 
 
-QUALITY_RUNNER = load_canonical_runner()
+QUALITY_RUNNER = load_quality_runner()
 
 
 class QualityRunnerTest(unittest.TestCase):
@@ -40,11 +40,11 @@ class QualityRunnerTest(unittest.TestCase):
                 "coverage run --branch -m unittest discover -s tests -q",
                 "coverage report --fail-under=80",
                 "bandit -q -r scripts skills/requirements-impact-refiner/scripts evals/harness "
-                "-x tests,evals/results -ll -ii",
+                "-x tests,evals/results -ll",
             ],
         )
 
-    def test_canonical_runner_print_mode_matches_the_command_contract(self):
+    def test_runner_print_mode_matches_the_command_contract(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             exit_code = QUALITY_RUNNER.main(["--print-commands"])
@@ -59,7 +59,7 @@ class QualityRunnerTest(unittest.TestCase):
                 "coverage run --branch -m unittest discover -s tests -q",
                 "coverage report --fail-under=80",
                 "bandit -q -r scripts skills/requirements-impact-refiner/scripts evals/harness "
-                "-x tests,evals/results -ll -ii",
+                "-x tests,evals/results -ll",
             ],
         )
 

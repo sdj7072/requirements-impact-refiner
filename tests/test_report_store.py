@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+SCRIPTS = ROOT / "scripts"
 FIXTURE = ROOT / "tests" / "fixtures" / "compact-state-post-decision.json"
 
 

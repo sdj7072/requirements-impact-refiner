@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "rir-controller.py"
+CLI = ROOT / "scripts" / "rir-controller.py"
 FIXTURES = ROOT / "tests" / "fixtures"
 
 

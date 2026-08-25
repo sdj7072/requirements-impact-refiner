@@ -1,3 +1,8 @@
+import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -5,6 +10,54 @@ from scripts import payload_identity
 
 
 class QualityConfigurationTest(unittest.TestCase):
+    def test_coverage_measures_root_scripts_and_harness_exactly_once(self):
+        configuration = Path("pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('source = ["scripts", "evals/harness"]', configuration)
+
+    @unittest.skipUnless(importlib.util.find_spec("coverage"), "quality environment only")
+    def test_coverage_report_includes_root_only_shipped_scripts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            probe = directory_path / "coverage_probe.py"
+            probe.write_text(
+                "import runpy\n"
+                "import sys\n"
+                "sys.path.insert(0, '.')\n"
+                "import scripts.rir_mcp_server\n"
+                "runpy.run_path('scripts/install-agent-skill.py')\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["COVERAGE_FILE"] = str(directory_path / ".coverage")
+            subprocess.run(
+                [sys.executable, "-m", "coverage", "run", "--branch", str(probe)],
+                check=True,
+                env=environment,
+            )
+            result = subprocess.run(
+                [sys.executable, "-m", "coverage", "report", "--fail-under=0"],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=environment,
+            )
+
+        self.assertIn("scripts/rir_mcp_server.py", result.stdout)
+        self.assertIn("scripts/install-agent-skill.py", result.stdout)
+
+    def test_root_only_skill_installer_copies_the_canonical_skill(self):
+        installer_path = Path("scripts/install-agent-skill.py")
+        specification = importlib.util.spec_from_file_location("skill_installer", installer_path)
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as directory:
+            destination = module.install(Path(directory))
+            self.assertEqual(destination.name, "requirements-impact-refiner")
+            self.assertTrue((destination / "SKILL.md").is_file())
+
     def test_quality_requirements_are_exactly_pinned(self):
         rows = Path("requirements-quality.txt").read_text().splitlines()
         self.assertEqual(

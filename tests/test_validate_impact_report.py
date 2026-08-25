@@ -7,9 +7,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = (
-    ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "validate-impact-report.py"
-)
+SCRIPT_PATH = ROOT / "scripts" / "validate-impact-report.py"
 SPEC = importlib.util.spec_from_file_location("validate_impact_report", SCRIPT_PATH)
 VALIDATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATOR)
@@ -1055,9 +1053,7 @@ class CalculateDeltaGuardTest(unittest.TestCase):
     lifecycle state, not a raw KeyError."""
 
     def test_invalid_state_raises_value_error(self):
-        module_path = (
-            ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "impact_report.py"
-        )
+        module_path = ROOT / "scripts" / "impact_report.py"
         spec = importlib.util.spec_from_file_location("impact_report_guard", module_path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module

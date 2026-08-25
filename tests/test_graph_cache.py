@@ -9,14 +9,14 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "graph_cache.py"
+MODULE_PATH = ROOT / "scripts" / "graph_cache.py"
 SPEC = importlib.util.spec_from_file_location("graph_cache", MODULE_PATH)
 CACHE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = CACHE
 SPEC.loader.exec_module(CACHE)
 BUILTIN_SPEC = importlib.util.spec_from_file_location(
     "graph_builtin_cache_integration",
-    ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "graph_builtin.py",
+    ROOT / "scripts" / "graph_builtin.py",
 )
 BUILTIN = importlib.util.module_from_spec(BUILTIN_SPEC)
 sys.modules[BUILTIN_SPEC.name] = BUILTIN

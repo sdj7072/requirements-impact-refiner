@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_ROOT = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+SCRIPT_ROOT = ROOT / "scripts"
 FIXTURES = ROOT / "tests" / "fixtures" / "providers"
 
 

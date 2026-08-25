@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL_SCRIPTS = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+SKILL_SCRIPTS = ROOT / "scripts"
 
 
 def load_module(name, path):

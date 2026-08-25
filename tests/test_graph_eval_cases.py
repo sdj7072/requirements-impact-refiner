@@ -70,7 +70,7 @@ class GraphEvalCasesTest(unittest.TestCase):
     def test_each_positive_fixture_mechanically_contains_its_distant_path(self):
         from evals.harness.adapters.codex import CodexAdapter
 
-        path = ROOT / "skills/requirements-impact-refiner/scripts/graph_builtin.py"
+        path = ROOT / "scripts/graph_builtin.py"
         spec = importlib.util.spec_from_file_location("task7_graph_fixture_scan", path)
         scanner = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = scanner

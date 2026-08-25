@@ -8,7 +8,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "graph-project"
-MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "graph_builtin.py"
+MODULE_PATH = ROOT / "scripts" / "graph_builtin.py"
 SPEC = importlib.util.spec_from_file_location("graph_builtin", MODULE_PATH)
 BUILTIN = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = BUILTIN

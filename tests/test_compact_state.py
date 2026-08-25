@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
-MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "compact_state.py"
+MODULE_PATH = ROOT / "scripts" / "compact_state.py"
 SPEC = importlib.util.spec_from_file_location("compact_state", MODULE_PATH)
 COMPACT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COMPACT)

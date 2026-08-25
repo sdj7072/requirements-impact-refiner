@@ -33,7 +33,7 @@ class FastScanEvalCaseTest(unittest.TestCase):
     def test_real_controller_runs_five_fixtures_and_negative_stays_zero_call(self):
         spec = importlib.util.spec_from_file_location(
             "fast_scan_eval_controller",
-            ROOT / "skills/requirements-impact-refiner/scripts/rir_controller.py",
+            ROOT / "scripts/rir_controller.py",
         )
         controller = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = controller
