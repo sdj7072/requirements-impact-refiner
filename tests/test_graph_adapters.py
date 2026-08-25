@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -27,6 +28,99 @@ AST_GREP = load_module("graph_adapter_ast_grep", "graph_adapter_ast_grep.py")
 CODEGRAPH = load_module("graph_adapter_codegraph", "graph_adapter_codegraph.py")
 SCIP = load_module("graph_adapter_scip", "graph_adapter_scip.py")
 JOERN = load_module("graph_adapter_joern", "graph_adapter_joern.py")
+
+
+class DynamicSiblingContractTest(unittest.TestCase):
+    def test_malformed_injected_siblings_raise_exact_import_errors(self):
+        cases = (
+            (
+                "graph_builtin.py",
+                (("_rir_impact_graph", "impact_graph.py", "MAX_NODES"),),
+                "impact graph contract is incomplete",
+            ),
+            (
+                "graph_cache.py",
+                (("_rir_impact_graph", "impact_graph.py", "_safe_path"),),
+                "impact graph cache contract is incomplete",
+            ),
+            (
+                "graph_coordinator.py",
+                (("_rir_graph_providers", "graph_providers.py", "PROVIDER_PRIORITY"),),
+                "graph sibling contract is incomplete",
+            ),
+            (
+                "graph_adapter_ast_grep.py",
+                (("_rir_graph_providers", "graph_providers.py", "run_provider"),),
+                "graph provider contract is incomplete",
+            ),
+            (
+                "graph_adapter_codegraph.py",
+                (
+                    ("_rir_graph_providers", "graph_providers.py", None),
+                    ("_rir_graph_adapter_ast_grep", "graph_adapter_ast_grep.py", "_source_proof"),
+                ),
+                "ast-grep adapter contract is incomplete",
+            ),
+            (
+                "graph_adapter_joern.py",
+                (
+                    ("_rir_graph_providers", "graph_providers.py", None),
+                    ("_rir_graph_adapter_ast_grep", "graph_adapter_ast_grep.py", None),
+                    ("_rir_graph_adapter_codegraph", "graph_adapter_codegraph.py", "_parse_explore"),
+                ),
+                "CodeGraph adapter contract is incomplete",
+            ),
+            (
+                "graph_adapter_scip.py",
+                (("_rir_graph_providers", "graph_providers.py", "create_private_root"),),
+                "graph provider contract is incomplete",
+            ),
+        )
+        script = r'''
+import importlib.util
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+target = sys.argv[2]
+dependencies = [part.split("|", 2) for part in sys.argv[3].split(";") if part]
+expected = sys.argv[4]
+
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, root / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+for name, filename, missing in dependencies:
+    module = load(name, filename)
+    if missing:
+        delattr(module, missing)
+
+try:
+    load("_rir_contract_target", target)
+except Exception as error:
+    if type(error) is not ImportError:
+        raise AssertionError(type(error).__name__ + ": " + str(error))
+    if str(error) != expected:
+        raise AssertionError(repr(str(error)))
+else:
+    raise AssertionError("malformed injected sibling was accepted")
+'''
+        for target, dependencies, expected in cases:
+            encoded = ";".join(
+                "|".join((name, filename, missing or ""))
+                for name, filename, missing in dependencies
+            )
+            with self.subTest(target=target):
+                completed = subprocess.run(
+                    [sys.executable, "-c", script, str(SCRIPT_ROOT), target, encoded, expected],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
 
 
 class FakeClock:

@@ -14,10 +14,29 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
+
+from typing_extensions import TypeGuard
+
+if TYPE_CHECKING:
+    from impact_graph import FrontierEntry, GraphEdge, GraphNode, GraphPath
 
 
-def _load_graph_contract():
+class _GraphContract(Protocol):
+    GraphNode: type[GraphNode]
+    GraphEdge: type[GraphEdge]
+    GraphPath: type[GraphPath]
+    FrontierEntry: type[FrontierEntry]
+    MAX_EDGES: int
+    MAX_FRONTIER: int
+    MAX_NODES: int
+    MAX_PATHS: int
+    MAX_STRING_LENGTH: int
+
+    def _safe_path(self, value: object) -> bool: ...
+
+
+def _load_graph_contract() -> object:
     name = "_rir_impact_graph"
     loaded = sys.modules.get(name)
     if loaded is not None:
@@ -32,13 +51,31 @@ def _load_graph_contract():
     return module
 
 
-GRAPH = _load_graph_contract()
-for _contract_class in ("GraphNode", "GraphEdge", "GraphPath", "FrontierEntry"):
-    if not isinstance(getattr(GRAPH, _contract_class, None), type):
-        raise ImportError("impact graph contract is incomplete")
-if TYPE_CHECKING:
-    from impact_graph import FrontierEntry, GraphEdge, GraphNode, GraphPath
-else:
+def _is_graph_contract(value: object) -> TypeGuard[_GraphContract]:
+    return (
+        all(
+            isinstance(getattr(value, name, None), type)
+            for name in ("GraphNode", "GraphEdge", "GraphPath", "FrontierEntry")
+        )
+        and all(
+            isinstance(getattr(value, name, None), int)
+            for name in (
+                "MAX_EDGES",
+                "MAX_FRONTIER",
+                "MAX_NODES",
+                "MAX_PATHS",
+                "MAX_STRING_LENGTH",
+            )
+        )
+        and callable(getattr(value, "_safe_path", None))
+    )
+
+
+_loaded_graph = _load_graph_contract()
+if not _is_graph_contract(_loaded_graph):
+    raise ImportError("impact graph contract is incomplete")
+GRAPH = cast(_GraphContract, _loaded_graph)
+if not TYPE_CHECKING:
     GraphNode = GRAPH.GraphNode
     GraphEdge = GRAPH.GraphEdge
     GraphPath = GRAPH.GraphPath

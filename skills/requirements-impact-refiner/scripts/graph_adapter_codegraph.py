@@ -7,12 +7,60 @@ import hashlib
 import importlib.util
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
+
+from typing_extensions import TypedDict, TypeGuard
+
+if TYPE_CHECKING:
+    from graph_providers import (
+        Deadline,
+        ProviderProbe,
+        ProviderQuery,
+        ProviderResult,
+        ProviderSpec,
+    )
+    from graph_providers import (
+        ProviderSpec as ProviderSpecType,
+    )
 
 
-def _load(filename, name):
+class _ProviderContract(Protocol):
+    ProviderProbe: type[ProviderProbe]
+    ProviderResult: type[ProviderResult]
+    ProviderSpec: type[ProviderSpec]
+
+    def run_provider(
+        self,
+        spec: ProviderSpecType,
+        arguments: Sequence[str],
+        repo_root: Path | str,
+        deadline: Deadline,
+        *,
+        runner: object = None,
+        expect_json: bool = False,
+    ) -> ProviderQuery: ...
+
+
+class _SourceProof(TypedDict):
+    excerpt: str
+    sha256: str
+
+
+class _CommonContract(Protocol):
+    def _risk_domains(self, path: object, label: str = "") -> tuple[str, ...]: ...
+
+    def _safe_relative(self, value: object) -> str | None: ...
+
+    def _source_proof(
+        self, root: Path, relative: str, source_range: Sequence[int]
+    ) -> _SourceProof: ...
+
+    def source_fingerprint(self, root: Path) -> str | None: ...
+
+
+def _load(filename: str, name: str) -> object:
     loaded = sys.modules.get(name)
     if loaded is not None:
         return loaded
@@ -26,16 +74,29 @@ def _load(filename, name):
     return module
 
 
-PROVIDERS = _load("graph_providers.py", "_rir_graph_providers")
-COMMON = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
-if any(
-    not isinstance(getattr(PROVIDERS, name, None), type)
-    for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
-) or not callable(getattr(PROVIDERS, "run_provider", None)):
+_loaded_providers = _load("graph_providers.py", "_rir_graph_providers")
+_loaded_common = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
+def _is_provider_contract(value: object) -> TypeGuard[_ProviderContract]:
+    return all(
+        isinstance(getattr(value, name, None), type)
+        for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+    ) and callable(getattr(value, "run_provider", None))
+
+
+def _is_common_contract(value: object) -> TypeGuard[_CommonContract]:
+    return all(
+        callable(getattr(value, name, None))
+        for name in ("_risk_domains", "_safe_relative", "_source_proof", "source_fingerprint")
+    )
+
+
+if not _is_provider_contract(_loaded_providers):
     raise ImportError("graph provider contract is incomplete")
-if TYPE_CHECKING:
-    from graph_providers import ProviderProbe, ProviderResult, ProviderSpec
-else:
+if not _is_common_contract(_loaded_common):
+    raise ImportError("ast-grep adapter contract is incomplete")
+PROVIDERS = cast(_ProviderContract, _loaded_providers)
+COMMON = cast(_CommonContract, _loaded_common)
+if not TYPE_CHECKING:
     ProviderProbe = PROVIDERS.ProviderProbe
     ProviderResult = PROVIDERS.ProviderResult
     ProviderSpec = PROVIDERS.ProviderSpec

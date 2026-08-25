@@ -39,12 +39,43 @@ import os
 import re
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
+
+from typing_extensions import TypeGuard
+
+if TYPE_CHECKING:
+    from graph_providers import (
+        Deadline,
+        ProviderProbe,
+        ProviderQuery,
+        ProviderResult,
+        ProviderSpec,
+    )
+    from graph_providers import (
+        ProviderSpec as ProviderSpecType,
+    )
 
 
-def _load_providers():
+class _ProviderContract(Protocol):
+    ProviderProbe: type[ProviderProbe]
+    ProviderResult: type[ProviderResult]
+    ProviderSpec: type[ProviderSpec]
+
+    def run_provider(
+        self,
+        spec: ProviderSpecType,
+        arguments: Sequence[str],
+        repo_root: Path | str,
+        deadline: Deadline,
+        *,
+        runner: object = None,
+        expect_json: bool = False,
+    ) -> ProviderQuery: ...
+
+
+def _load_providers() -> object:
     name = "_rir_graph_providers"
     loaded = sys.modules.get(name)
     if loaded is not None:
@@ -59,15 +90,18 @@ def _load_providers():
     return module
 
 
-PROVIDERS = _load_providers()
-if any(
-    not isinstance(getattr(PROVIDERS, name, None), type)
-    for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
-) or not callable(getattr(PROVIDERS, "run_provider", None)):
+def _is_provider_contract(value: object) -> TypeGuard[_ProviderContract]:
+    return all(
+        isinstance(getattr(value, name, None), type)
+        for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+    ) and callable(getattr(value, "run_provider", None))
+
+
+_loaded_providers = _load_providers()
+if not _is_provider_contract(_loaded_providers):
     raise ImportError("graph provider contract is incomplete")
-if TYPE_CHECKING:
-    from graph_providers import ProviderProbe, ProviderResult, ProviderSpec
-else:
+PROVIDERS = cast(_ProviderContract, _loaded_providers)
+if not TYPE_CHECKING:
     ProviderProbe = PROVIDERS.ProviderProbe
     ProviderResult = PROVIDERS.ProviderResult
     ProviderSpec = PROVIDERS.ProviderSpec

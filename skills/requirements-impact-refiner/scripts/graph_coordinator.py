@@ -12,14 +12,183 @@ import stat
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, cast
 
+from typing_extensions import TypeGuard
 
-def _load_sibling(filename, module_name):
+if TYPE_CHECKING:
+    from graph_builtin import (
+        BuiltInScanResult as BuiltInScanResultType,
+    )
+    from graph_builtin import ScanLimits, ScanSeed
+    from graph_builtin import (
+        ScanLimits as ScanLimitsType,
+    )
+    from graph_builtin import (
+        ScanSeed as ScanSeedType,
+    )
+    from graph_cache import CacheResult as CacheResultType
+    from graph_providers import Deadline, ProviderProbe, ProviderQuery, ProviderResult, ProviderSpec
+    from graph_providers import (
+        Deadline as DeadlineType,
+    )
+    from graph_providers import (
+        ProviderProbe as ProviderProbeType,
+    )
+    from graph_providers import (
+        ProviderQuery as ProviderQueryType,
+    )
+    from graph_providers import (
+        ProviderResult as ProviderResultType,
+    )
+    from graph_providers import (
+        ProviderSpec as ProviderSpecType,
+    )
+    from impact_graph import (
+        FrontierEntry as FrontierEntryType,
+    )
+    from impact_graph import (
+        GraphEdge as GraphEdgeType,
+    )
+    from impact_graph import (
+        GraphNode as GraphNodeType,
+    )
+    from impact_graph import (
+        GraphPath as GraphPathType,
+    )
+    from impact_graph import (
+        GraphReceipt as GraphReceiptType,
+    )
+    from impact_graph import GraphSettings
+    from impact_graph import (
+        GraphSettings as GraphSettingsType,
+    )
+    from impact_graph import (
+        ProviderStatus as ProviderStatusType,
+    )
+
+
+class _GraphContract(Protocol):
+    GraphSettings: type[GraphSettingsType]
+    ProviderStatus: type[ProviderStatusType]
+    GraphNode: type[GraphNodeType]
+    GraphEdge: type[GraphEdgeType]
+    GraphPath: type[GraphPathType]
+    FrontierEntry: type[FrontierEntryType]
+    GraphReceipt: type[GraphReceiptType]
+    CONFIDENCES: Sequence[str]
+    EDGE_KINDS: frozenset[str]
+    NODE_KINDS: frozenset[str]
+    RISK_DOMAINS: frozenset[str]
+    MAX_EDGES: int
+    MAX_FRONTIER: int
+    MAX_NODES: int
+    MAX_PATHS: int
+    MAX_RECEIPT_BYTES: int
+    MAX_STRING_LENGTH: int
+
+    def _safe_path(self, value: object) -> bool: ...
+
+    def _validate_settings(self, value: Mapping[str, object], errors: list[str]) -> None: ...
+
+    def canonical_receipt_bytes(self, value: object) -> bytes: ...
+
+    def load_receipt_bytes(
+        self, payload: bytes
+    ) -> tuple[dict[str, object] | None, tuple[str, ...]]: ...
+
+
+class _BuiltinContract(Protocol):
+    ScanSeed: type[ScanSeedType]
+    ScanLimits: type[ScanLimitsType]
+    BuiltInScanResult: type[BuiltInScanResultType]
+    DEFAULT_MAX_FILE_BYTES: int
+
+    def _read_regular_file(
+        self,
+        root: Path,
+        relative: str,
+        maximum: int,
+        remaining: int | None = None,
+        read_allowed: bool = True,
+    ) -> tuple[bytes | None, str | None]: ...
+
+    def _safe_graph_text(self, value: str, sensitive_literals: Sequence[str] = ()) -> str: ...
+
+    def _walk_files(
+        self,
+        root: Path,
+        expired: Callable[[], bool],
+        skipped: dict[str, str],
+        traversal_errors: list[str],
+    ) -> Iterable[tuple[Path, str]]: ...
+
+    def scan_repository(
+        self,
+        repo_root: Path | str,
+        seeds: Sequence[ScanSeedType],
+        limits: ScanLimitsType,
+        clock: object,
+    ) -> BuiltInScanResultType: ...
+
+
+class _CacheContract(Protocol):
+    CacheResult: type[CacheResultType]
+
+    def _source_digests(self, value: Mapping[str, str]) -> dict[str, str]: ...
+
+    def load(
+        self, repo_root: Path | str, key: str, source_digests: Mapping[str, str]
+    ) -> CacheResultType: ...
+
+    def publish(
+        self,
+        repo_root: Path | str,
+        receipt: object,
+        source_digests: Mapping[str, str],
+        *,
+        schema_version: int = 1,
+        inventory_complete: bool = True,
+        inventory_reason: str | None = None,
+    ) -> CacheResultType: ...
+
+
+class _ProviderContract(Protocol):
+    PROVIDER_PRIORITY: tuple[str, ...]
+    Deadline: type[DeadlineType]
+    ProviderProbe: type[ProviderProbeType]
+    ProviderQuery: type[ProviderQueryType]
+    ProviderResult: type[ProviderResultType]
+    ProviderSpec: type[ProviderSpecType]
+
+    def discover_providers(
+        self,
+        repo_root: Path | str,
+        requested: Sequence[str] = ("auto",),
+        deadline: DeadlineType | None = None,
+        *,
+        runner: object = None,
+        search_path: str | None = None,
+        deep: bool = False,
+    ) -> tuple[ProviderProbeType, ...]: ...
+
+    def run_provider(
+        self,
+        spec: ProviderSpecType,
+        arguments: Sequence[str],
+        repo_root: Path | str,
+        deadline: DeadlineType,
+        *,
+        runner: object = None,
+        expect_json: bool = False,
+    ) -> ProviderQueryType: ...
+
+
+def _load_sibling(filename: str, module_name: str) -> object:
     loaded = sys.modules.get(module_name)
     if loaded is not None:
         return loaded
@@ -33,31 +202,99 @@ def _load_sibling(filename, module_name):
     return module
 
 
-GRAPH = _load_sibling("impact_graph.py", "_rir_impact_graph")
-BUILTIN = _load_sibling("graph_builtin.py", "_rir_graph_builtin")
-CACHE = _load_sibling("graph_cache.py", "_rir_graph_cache")
-PROVIDERS = _load_sibling("graph_providers.py", "_rir_graph_providers")
+def _classes(value: object, names: Sequence[str]) -> bool:
+    return all(isinstance(getattr(value, name, None), type) for name in names)
 
-for _module, _classes, _functions in (
-    (GRAPH, ("GraphSettings",), ("canonical_receipt_bytes", "load_receipt_bytes")),
-    (BUILTIN, ("ScanSeed", "ScanLimits", "BuiltInScanResult"), ("scan_repository",)),
-    (CACHE, ("CacheResult",), ("load", "publish", "_source_digests")),
-    (
-        PROVIDERS,
-        ("Deadline", "ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec"),
-        ("discover_providers", "run_provider"),
-    ),
-):
-    if any(not isinstance(getattr(_module, name, None), type) for name in _classes) or any(
-        not callable(getattr(_module, name, None)) for name in _functions
-    ):
-        raise ImportError("graph sibling contract is incomplete")
 
-if TYPE_CHECKING:
-    from graph_builtin import ScanLimits, ScanSeed
-    from graph_providers import Deadline, ProviderProbe, ProviderQuery, ProviderResult, ProviderSpec
-    from impact_graph import GraphSettings
-else:
+def _callables(value: object, names: Sequence[str]) -> bool:
+    return all(callable(getattr(value, name, None)) for name in names)
+
+
+def _is_graph_contract(value: object) -> TypeGuard[_GraphContract]:
+    return (
+        _classes(
+            value,
+            (
+                "GraphSettings",
+                "ProviderStatus",
+                "GraphNode",
+                "GraphEdge",
+                "GraphPath",
+                "FrontierEntry",
+                "GraphReceipt",
+            ),
+        )
+        and all(
+            isinstance(getattr(value, name, None), int)
+            for name in (
+                "MAX_EDGES",
+                "MAX_FRONTIER",
+                "MAX_NODES",
+                "MAX_PATHS",
+                "MAX_RECEIPT_BYTES",
+                "MAX_STRING_LENGTH",
+            )
+        )
+        and isinstance(getattr(value, "CONFIDENCES", None), Sequence)
+        and all(
+            isinstance(getattr(value, name, None), frozenset)
+            for name in ("EDGE_KINDS", "NODE_KINDS", "RISK_DOMAINS")
+        )
+        and _callables(
+            value,
+            ("_safe_path", "_validate_settings", "canonical_receipt_bytes", "load_receipt_bytes"),
+        )
+    )
+
+
+def _is_builtin_contract(value: object) -> TypeGuard[_BuiltinContract]:
+    return (
+        _classes(value, ("ScanSeed", "ScanLimits", "BuiltInScanResult"))
+        and isinstance(getattr(value, "DEFAULT_MAX_FILE_BYTES", None), int)
+        and _callables(
+            value,
+            ("_read_regular_file", "_safe_graph_text", "_walk_files", "scan_repository"),
+        )
+    )
+
+
+def _is_cache_contract(value: object) -> TypeGuard[_CacheContract]:
+    return _classes(value, ("CacheResult",)) and _callables(
+        value, ("_source_digests", "load", "publish")
+    )
+
+
+def _is_provider_contract(value: object) -> TypeGuard[_ProviderContract]:
+    priority = getattr(value, "PROVIDER_PRIORITY", None)
+    return (
+        isinstance(priority, tuple)
+        and all(isinstance(item, str) for item in priority)
+        and _classes(
+            value,
+            ("Deadline", "ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec"),
+        )
+        and _callables(value, ("discover_providers", "run_provider"))
+    )
+
+
+_loaded_graph = _load_sibling("impact_graph.py", "_rir_impact_graph")
+_loaded_builtin = _load_sibling("graph_builtin.py", "_rir_graph_builtin")
+_loaded_cache = _load_sibling("graph_cache.py", "_rir_graph_cache")
+_loaded_providers = _load_sibling("graph_providers.py", "_rir_graph_providers")
+if not _is_graph_contract(_loaded_graph):
+    raise ImportError("graph sibling contract is incomplete")
+if not _is_builtin_contract(_loaded_builtin):
+    raise ImportError("graph sibling contract is incomplete")
+if not _is_cache_contract(_loaded_cache):
+    raise ImportError("graph sibling contract is incomplete")
+if not _is_provider_contract(_loaded_providers):
+    raise ImportError("graph sibling contract is incomplete")
+GRAPH = cast(_GraphContract, _loaded_graph)
+BUILTIN = cast(_BuiltinContract, _loaded_builtin)
+CACHE = cast(_CacheContract, _loaded_cache)
+PROVIDERS = cast(_ProviderContract, _loaded_providers)
+
+if not TYPE_CHECKING:
     Deadline = PROVIDERS.Deadline
     ProviderProbe = PROVIDERS.ProviderProbe
     ProviderQuery = PROVIDERS.ProviderQuery

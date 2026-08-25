@@ -14,12 +14,24 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
 from typing_extensions import TypeGuard
 
 
-def _load_graph_contract():
+class _GraphCacheContract(Protocol):
+    MAX_RECEIPT_BYTES: int
+
+    def _safe_path(self, value: object) -> bool: ...
+
+    def canonical_receipt_bytes(self, value: object) -> bytes: ...
+
+    def load_receipt_bytes(
+        self, payload: bytes
+    ) -> tuple[dict[str, object] | None, tuple[str, ...]]: ...
+
+
+def _load_graph_contract() -> object:
     name = "_rir_impact_graph"
     loaded = sys.modules.get(name)
     if loaded is not None:
@@ -34,12 +46,17 @@ def _load_graph_contract():
     return module
 
 
-GRAPH = _load_graph_contract()
-if not isinstance(getattr(GRAPH, "MAX_RECEIPT_BYTES", None), int) or not all(
-    callable(getattr(GRAPH, name, None))
-    for name in ("canonical_receipt_bytes", "load_receipt_bytes")
-):
+def _is_graph_cache_contract(value: object) -> TypeGuard[_GraphCacheContract]:
+    return isinstance(getattr(value, "MAX_RECEIPT_BYTES", None), int) and all(
+        callable(getattr(value, name, None))
+        for name in ("_safe_path", "canonical_receipt_bytes", "load_receipt_bytes")
+    )
+
+
+_loaded_graph = _load_graph_contract()
+if not _is_graph_cache_contract(_loaded_graph):
     raise ImportError("impact graph cache contract is incomplete")
+GRAPH = cast(_GraphCacheContract, _loaded_graph)
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _CACHE_COMPONENTS = (
     ".requirements-impact-refiner",

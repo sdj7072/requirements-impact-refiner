@@ -40,12 +40,73 @@ import os
 import re
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
+
+from typing_extensions import TypedDict, TypeGuard
+
+if TYPE_CHECKING:
+    from graph_providers import (
+        Deadline,
+        ProviderProbe,
+        ProviderQuery,
+        ProviderResult,
+        ProviderSpec,
+    )
+    from graph_providers import (
+        ProviderSpec as ProviderSpecType,
+    )
 
 
-def _load(filename, name):
+class _ProviderContract(Protocol):
+    ProviderProbe: type[ProviderProbe]
+    ProviderResult: type[ProviderResult]
+    ProviderSpec: type[ProviderSpec]
+
+    def run_provider(
+        self,
+        spec: ProviderSpecType,
+        arguments: Sequence[str],
+        repo_root: Path | str,
+        deadline: Deadline,
+        *,
+        runner: object = None,
+        expect_json: bool = False,
+    ) -> ProviderQuery: ...
+
+
+class _CommonContract(Protocol):
+    def source_fingerprint(self, root: Path) -> str | None: ...
+
+
+class _CandidateNode(TypedDict):
+    key: str
+    kind: str
+    label: str
+    location: str | None
+    confidence: str
+    source_sha256: str
+    risk_domains: tuple[str, ...]
+
+
+class _CandidateEdge(TypedDict):
+    source: str
+    target: str
+    kind: str
+    location: str | None
+    evidence: str
+    confidence: str
+    source_sha256: str
+
+
+class _CodeGraphContract(Protocol):
+    def _parse_explore(
+        self, value: object, root: Path, fingerprint: str
+    ) -> tuple[tuple[_CandidateNode, ...], tuple[_CandidateEdge, ...]]: ...
+
+
+def _load(filename: str, name: str) -> object:
     loaded = sys.modules.get(name)
     if loaded is not None:
         return loaded
@@ -59,17 +120,34 @@ def _load(filename, name):
     return module
 
 
-PROVIDERS = _load("graph_providers.py", "_rir_graph_providers")
-COMMON = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
-CODEGRAPH = _load("graph_adapter_codegraph.py", "_rir_graph_adapter_codegraph")
-if any(
-    not isinstance(getattr(PROVIDERS, name, None), type)
-    for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
-) or not callable(getattr(PROVIDERS, "run_provider", None)):
+_loaded_providers = _load("graph_providers.py", "_rir_graph_providers")
+_loaded_common = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
+_loaded_codegraph = _load("graph_adapter_codegraph.py", "_rir_graph_adapter_codegraph")
+def _is_provider_contract(value: object) -> TypeGuard[_ProviderContract]:
+    return all(
+        isinstance(getattr(value, name, None), type)
+        for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+    ) and callable(getattr(value, "run_provider", None))
+
+
+def _is_common_contract(value: object) -> TypeGuard[_CommonContract]:
+    return callable(getattr(value, "source_fingerprint", None))
+
+
+def _is_codegraph_contract(value: object) -> TypeGuard[_CodeGraphContract]:
+    return callable(getattr(value, "_parse_explore", None))
+
+
+if not _is_provider_contract(_loaded_providers):
     raise ImportError("graph provider contract is incomplete")
-if TYPE_CHECKING:
-    from graph_providers import ProviderProbe, ProviderResult, ProviderSpec
-else:
+if not _is_common_contract(_loaded_common):
+    raise ImportError("ast-grep adapter contract is incomplete")
+if not _is_codegraph_contract(_loaded_codegraph):
+    raise ImportError("CodeGraph adapter contract is incomplete")
+PROVIDERS = cast(_ProviderContract, _loaded_providers)
+COMMON = cast(_CommonContract, _loaded_common)
+CODEGRAPH = cast(_CodeGraphContract, _loaded_codegraph)
+if not TYPE_CHECKING:
     ProviderProbe = PROVIDERS.ProviderProbe
     ProviderResult = PROVIDERS.ProviderResult
     ProviderSpec = PROVIDERS.ProviderSpec
@@ -383,9 +461,11 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                 if prior is not None and prior != row:
                     raise ValueError("Joern node id changed across seed queries")
                 nodes[row["key"]] = row
-            for row in parsed_edges:
-                rewritten = dict(row)
-                rewritten["evidence"] = row["evidence"].replace("CodeGraph ", "Joern ", 1)
+            for edge_row in parsed_edges:
+                rewritten = dict(edge_row)
+                rewritten["evidence"] = edge_row["evidence"].replace(
+                    "CodeGraph ", "Joern ", 1
+                )
                 signature = (
                     rewritten["source"],
                     rewritten["target"],
