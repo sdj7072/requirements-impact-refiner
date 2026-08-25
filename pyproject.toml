@@ -1,0 +1,24 @@
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+preview = false
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.9"
+check_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[tool.coverage.run]
+branch = true
+source = ["scripts", "skills/requirements-impact-refiner/scripts", "evals/harness"]
+
+[tool.coverage.report]
+omit = ["tests/*"]
+fail_under = 80
+
+[tool.bandit]
+exclude_dirs = ["tests", "evals/results"]
