@@ -217,11 +217,25 @@ python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --p
 
 ## 10. 개발과 기여
 
-저장소 루트에서 표준 라이브러리 테스트를 실행합니다.
+런타임 테스트는 Python 3.9, 3.11, 3.13에서 실행되며 표준 라이브러리만 사용합니다. 저장소 루트에서 테스트를 실행합니다.
 
 ```sh
 python3 -m unittest discover -s tests -v
 python3 -m unittest tests.test_documentation -v
 ```
+
+품질 도구는 Python 3.13에서 별도로 실행합니다. 로컬 가상 환경을 만들고
+`requirements-quality.txt`의 정확한 pin만 설치합니다.
+
+```sh
+python3.13 -m venv .quality-venv
+.quality-venv/bin/pip install -r requirements-quality.txt
+.quality-venv/bin/python scripts/run-quality-gates.py
+```
+
+정확한 pin은 `bandit==1.9.4`, `coverage==7.15.4`, `mypy==1.18.2`,
+`ruff==0.16.3`입니다. Coverage는 루트 `scripts`와 `evals/harness` 소스 트리에
+적용되며 최소 80%여야 합니다. Bandit은 `-ll`로 모든 confidence level에서
+medium-or-higher severity를 보고합니다.
 
 RED/GREEN 평가 원칙, 다섯 번 반복하는 대조군, 검증 명령, 호환성 주장 규칙, 번역 정책은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요. 영어 문서가 기준이지만 의미가 달라지는 README 수정은 `README.ko.md`와 `README.ja.md`도 함께 고치거나 번역 대기 상태를 명시해야 합니다. 이 프로젝트는 [MIT License](LICENSE)로 제공됩니다.

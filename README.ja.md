@@ -217,11 +217,25 @@ python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --p
 
 ## 10. 開発とコントリビューション
 
-リポジトリルートから標準ライブラリのテストを実行します。
+ランタイムテストは Python 3.9、3.11、3.13 で実行し、標準ライブラリだけを使います。リポジトリルートから実行します。
 
 ```sh
 python3 -m unittest discover -s tests -v
 python3 -m unittest tests.test_documentation -v
 ```
+
+品質ツールは Python 3.13 で別に実行します。ローカル仮想環境を作成し、
+`requirements-quality.txt` の exact pin だけをインストールします。
+
+```sh
+python3.13 -m venv .quality-venv
+.quality-venv/bin/pip install -r requirements-quality.txt
+.quality-venv/bin/python scripts/run-quality-gates.py
+```
+
+exact pin は `bandit==1.9.4`、`coverage==7.15.4`、`mypy==1.18.2`、
+`ruff==0.16.3` です。Coverage はルートの `scripts` と `evals/harness` の
+source tree に適用され、少なくとも 80% 必要です。Bandit は `-ll` により
+すべての confidence level で medium-or-higher severity を報告します。
 
 RED/GREEN 評価規律、五回反復の対照、検証コマンド、互換性主張の規則、翻訳方針は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。英語文書が正本ですが、意味を変える README 更新では `README.ko.md` と `README.ja.md` も同時に更新するか、翻訳待ちを明記します。本プロジェクトは [MIT License](LICENSE) で提供されます。

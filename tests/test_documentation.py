@@ -87,6 +87,56 @@ def harness_commands(path):
 
 
 class DocumentationTest(unittest.TestCase):
+    def test_ci_has_separate_runtime_matrix_and_python_313_quality_job(self):
+        """Catch CI changes that drop the dedicated pinned-tool quality gate."""
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        test_job = re.search(r"(?ms)^  test:\n(?P<body>.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", workflow)
+        self.assertIsNotNone(test_job, "CI must retain a separate test job")
+        self.assertRegex(
+            test_job.group("body"),
+            r'python-version:\s*\[\s*["\']3\.9["\']\s*,\s*["\']3\.11["\']\s*,\s*["\']3\.13["\']\s*\]',
+        )
+        self.assertIn("python3 -m unittest discover -s tests -v", test_job.group("body"))
+        self.assertIn("python3 -m py_compile scripts/*.py", test_job.group("body"))
+        self.assertIn("Check unfinished markers", test_job.group("body"))
+
+        quality_job = re.search(
+            r"(?ms)^  quality:\n(?P<body>.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", workflow
+        )
+        self.assertIsNotNone(quality_job, "CI must keep quality independent from the test matrix")
+        self.assertNotIn("matrix:", quality_job.group("body"))
+        self.assertRegex(quality_job.group("body"), r'python-version:\s*["\']3\.13["\']')
+        self.assertIn("pip install -r requirements-quality.txt", quality_job.group("body"))
+        self.assertIn("python scripts/run-quality-gates.py", quality_job.group("body"))
+
+    def test_quality_workflow_is_documented_for_local_python_313(self):
+        """Keep the CI and local quality contract usable in every public language."""
+        required = (
+            "3.9",
+            "3.11",
+            "3.13",
+            "requirements-quality.txt",
+            "python3.13 -m venv .quality-venv",
+            ".quality-venv/bin/pip install -r requirements-quality.txt",
+            ".quality-venv/bin/python scripts/run-quality-gates.py",
+            "bandit==1.9.4",
+            "coverage==7.15.4",
+            "mypy==1.18.2",
+            "ruff==0.16.3",
+            "80%",
+            "-ll",
+        )
+        for name in (*READMES, "CONTRIBUTING.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for token in required:
+                self.assertIn(token, text, f"{token} missing from {name}")
+            self.assertRegex(text, r"(?:root|루트|ルート).{0,120}`scripts`.{0,120}`evals/harness`")
+            self.assertRegex(
+                text,
+                r"(?:medium|중간|中)[\s\S]{0,120}-ll|-ll[\s\S]{0,120}(?:medium|중간|中)",
+            )
+
     def test_core_skill_is_a_short_controller_first_positive_recipe(self):
         core = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         body = core.split("---", 2)[2]
