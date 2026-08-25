@@ -173,6 +173,7 @@ class PackagingTest(unittest.TestCase):
             "scripts/graph_builtin.py",
             "scripts/fast_scan.py",
             "scripts/graph_cache.py",
+            "scripts/rir_graph_delivery.py",
             "scripts/graph_providers.py",
             "scripts/graph_coordinator.py",
             "scripts/graph_adapter_ast_grep.py",
