@@ -52,6 +52,39 @@ class FastScanRendererTest(unittest.TestCase):
         self.assertIn("partial", text.lower())
         self.assertIn("unknown", text.lower())
 
+    def test_duplicate_seed_labels_render_with_file_locations(self):
+        value = receipt()
+        graph = value["graph_receipt"]
+        graph["nodes"][0]["label"] = "POLICY.md"
+        graph["nodes"][0]["location"] = "docs/POLICY.md"
+        graph["nodes"][1]["label"] = "POLICY.md"
+        graph["nodes"][1]["location"] = "module0.py"
+        graph["paths"] = [{
+            "nodes": [graph["nodes"][0]["id"], graph["nodes"][1]["id"]],
+            "edges": [], "risk_domains": ["authorization/privacy"],
+        }]
+
+        text = load_renderer().render_fast_scan(value, "balanced")
+
+        self.assertIn("docs/POLICY.md → module0.py", text)
+        self.assertNotIn("POLICY.md → POLICY.md", text)
+
+    def test_korean_and_japanese_locales_translate_guidance(self):
+        renderer = load_renderer()
+        partial = receipt()
+        partial["status"] = "partial"
+
+        korean = renderer.render_fast_scan(partial, "balanced", "ko")
+        japanese = renderer.render_fast_scan(partial, "balanced", "ja")
+
+        self.assertIn("빠른 영향도 검사", korean)
+        self.assertIn("부분 결과", korean)
+        self.assertIn("상세 영향도 정제를 진행할까요?", korean)
+        self.assertNotIn("Do you want detailed refinement?", korean)
+        self.assertIn("高速影響スキャン", japanese)
+        self.assertIn("部分的な結果", japanese)
+        self.assertIn("詳細な影響分析を続けますか?", japanese)
+
 if __name__ == "__main__":
     unittest.main()
 

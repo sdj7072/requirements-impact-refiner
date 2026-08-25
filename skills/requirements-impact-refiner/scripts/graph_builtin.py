@@ -802,6 +802,7 @@ def scan_repository(
     bytes_scanned = 0
     files_scanned = 0
     exhausted = False
+    resource_limit_reached = False
     for path, relative in _walk_files(root, expired, skipped, traversal_errors):
         if expired():
             exhausted = True
@@ -815,10 +816,12 @@ def scan_repository(
             skipped[relative] = reason or "unsafe-file"
             if reason in {"oversized", "byte-limit", "file-limit"}:
                 exhausted = True
+                resource_limit_reached = True
             continue
         if len(payload) > remaining:
             skipped[relative] = "byte-limit"
             exhausted = True
+            resource_limit_reached = True
             continue
         files_scanned += 1
         bytes_scanned += len(payload)
@@ -982,6 +985,7 @@ def scan_repository(
     candidates.extend((location, None, True) for location in error_locations)
     if len(candidates) > limits.max_nodes:
         exhausted = True
+        resource_limit_reached = True
     candidates = candidates[:limits.max_nodes]
 
     nodes = []
@@ -1043,6 +1047,7 @@ def scan_repository(
     ))
     if len(edge_candidates) > limits.max_edges:
         exhausted = True
+        resource_limit_reached = True
     edge_candidates = edge_candidates[:limits.max_edges]
     edges = []
     adjacency = {}
@@ -1063,32 +1068,89 @@ def scan_repository(
         edges.append(edge)
         adjacency.setdefault(edge.source, []).append((edge.target, edge.id))
 
+    # Emit one deterministic shortest path per destination, per reachable
+    # component. Enumerating every simple-path permutation makes dense lexical
+    # graphs explode and produces visually repetitive prefixes.
     raw_paths = []
     start_ids = sorted(location_ids[location] for location in seed_locations if location in location_ids)
-    path_limit_reached = limits.max_paths == 0 and bool(start_ids)
+    path_limit_reached = False
+    covered_nodes = set()
     for start_id in start_ids:
         if path_limit_reached:
             exhausted = True
             break
-        stack = [(start_id, (start_id,), ())]
-        while stack:
+        if start_id in covered_nodes:
+            continue
+        seen = set(covered_nodes)
+        seen.add(start_id)
+        covered_nodes.add(start_id)
+        pending_paths = [(start_id, (start_id,), ())]
+        pending_index = 0
+        while pending_index < len(pending_paths):
             if expired():
                 exhausted = True
-                stack.clear()
+                pending_paths.clear()
                 break
-            current, path_nodes, path_edges = stack.pop()
-            if path_edges:
-                raw_paths.append((path_nodes, path_edges))
+            current, path_nodes, path_edges = pending_paths[pending_index]
+            pending_index += 1
+            if len(path_edges) >= 6:
+                continue
+            for target, edge_id in adjacency.get(current, ()):
+                if target in seen:
+                    continue
+                seen.add(target)
+                covered_nodes.add(target)
+                next_nodes = path_nodes + (target,)
+                next_edges = path_edges + (edge_id,)
                 if len(raw_paths) >= limits.max_paths:
                     exhausted = True
                     path_limit_reached = True
-                    stack.clear()
+                    pending_paths.clear()
                     break
-            if len(path_edges) >= 6:
-                continue
-            for target, edge_id in reversed(adjacency.get(current, ())):
-                if target not in path_nodes:
-                    stack.append((target, path_nodes + (target,), path_edges + (edge_id,)))
+                raw_paths.append((next_nodes, next_edges))
+                pending_paths.append((target, next_nodes, next_edges))
+            if path_limit_reached:
+                break
+        # Preserve one meaningful transitive route in addition to the
+        # shortest-path tree. Prefer structural and specific evidence so a
+        # weak shared fragment cannot shortcut a stronger dependency chain.
+        if not path_limit_reached:
+            by_edge_id = {edge.id: edge for edge in edges}
+            current = start_id
+            representative_nodes = (start_id,)
+            representative_edges = ()
+            while len(representative_edges) < 6:
+                choices = [
+                    (target, edge_id)
+                    for target, edge_id in adjacency.get(current, ())
+                    if target not in representative_nodes
+                ]
+                if not choices:
+                    break
+                target, edge_id = min(choices, key=lambda item: (
+                    0 if by_edge_id[item[1]].confidence == "structural-inferred" else 1,
+                    -len(by_edge_id[item[1]].evidence),
+                    by_edge_id[item[1]].evidence,
+                    item[0],
+                ))
+                representative_nodes += (target,)
+                representative_edges += (edge_id,)
+                current = target
+            representative = (representative_nodes, representative_edges)
+            distinct_evidence = {
+                by_edge_id[edge_id].evidence
+                for edge_id in representative_edges
+            }
+            if (
+                len(representative_edges) >= 2
+                and len(distinct_evidence) >= 2
+                and representative not in raw_paths
+            ):
+                if len(raw_paths) < limits.max_paths:
+                    raw_paths.append(representative)
+                else:
+                    exhausted = True
+                    path_limit_reached = True
         if path_limit_reached:
             break
 
@@ -1098,6 +1160,7 @@ def scan_repository(
     unique_paths = sorted(set(raw_paths), key=lambda item: _path_sort_key(item, node_risks))
     if len(unique_paths) > limits.max_paths:
         exhausted = True
+        path_limit_reached = True
     unique_paths = unique_paths[:limits.max_paths]
     paths = []
     for index, (path_nodes, path_edges) in enumerate(unique_paths, start=1):
@@ -1134,9 +1197,14 @@ def scan_repository(
             f"unreadable source: {display}{suffix}", nodes[0].risk_domains,
         ))
     if exhausted and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
+        reason = (
+            "built-in scan resource capacity exhausted"
+            if resource_limit_reached
+            else "built-in scan path capacity exhausted"
+        )
         frontier_items.append(FrontierEntry(
             f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[-1].id,
-            "built-in scan budget exhausted", nodes[-1].risk_domains,
+            reason, nodes[-1].risk_domains,
         ))
     frontier = tuple(frontier_items)
     status = (

@@ -633,6 +633,17 @@ _PROVIDER_UNAVAILABLE_REASON = re.compile(
     r"provider unavailable; built-in fallback used: "
     r"[A-Za-z0-9_.+-]+(?:, [A-Za-z0-9_.+-]+)*"
 )
+_KOREAN_TEXT = re.compile(r"[\u3131-\u318e\uac00-\ud7a3]")
+_JAPANESE_TEXT = re.compile(r"[\u3040-\u30ff]")
+
+
+def _request_locale(request: FastScanRequest) -> str:
+    text = request.change_request + " " + " ".join(request.evidence)
+    if _KOREAN_TEXT.search(text):
+        return "ko"
+    if _JAPANESE_TEXT.search(text):
+        return "ja"
+    return "en"
 
 
 def _only_expected_provider_gap(graph: Mapping[str, object]) -> bool:
@@ -702,6 +713,7 @@ def execute_fast_scan(
     prepared = prepare_fast_scan_identity(
         request, graph_settings, payload_sha256
     )
+    locale = _request_locale(request)
     root = prepared.root
     settings = prepared.settings
     deadline = prepared.deadline
@@ -723,7 +735,7 @@ def execute_fast_scan(
             raise ValueError("existing fast scan receipt is invalid")
         rendered = dict(existing)
         rendered["cache_status"] = "hit"
-        display = fast_scan_renderer.render_fast_scan(rendered, request.audience)
+        display = fast_scan_renderer.render_fast_scan(rendered, request.audience, locale)
         graph = existing["graph_receipt"]
         return FastScanResult(
             existing["status"], scan_id, existing["receipt_id"],
@@ -779,7 +791,7 @@ def execute_fast_scan(
     payload = canonical_fast_scan_bytes(receipt)
     fast_scan_store.publish_scan_receipt(root, scan_id, payload)
     mapping = receipt.to_mapping()
-    display = fast_scan_renderer.render_fast_scan(mapping, request.audience)
+    display = fast_scan_renderer.render_fast_scan(mapping, request.audience, locale)
     digest = hashlib.sha256(payload).hexdigest()
     return FastScanResult(
         status, scan_id, receipt_id, digest, display, risk_level,

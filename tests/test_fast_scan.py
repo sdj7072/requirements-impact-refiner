@@ -609,6 +609,68 @@ class DeriveSeedReadEfficiencyTest(unittest.TestCase):
             )
 
 
+class PolicyPathDisplayRegressionTest(unittest.TestCase):
+    def test_filename_matches_do_not_render_as_repeated_self_paths(self):
+        fast_scan = load_fast_scan()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "docs").mkdir()
+            (root / "docs/POLICY.md").write_text(
+                'POLICY.md authorization privacy api cache state worker\n',
+                encoding="utf-8",
+            )
+            for index in range(7):
+                (root / f"module{index}.py").write_text(
+                    'POLICY = "POLICY.md"\n'
+                    'authorization privacy api cache state worker\n',
+                    encoding="utf-8",
+                )
+            settings = {
+                "enabled": True, "max_seconds": 30, "target_seconds": 10,
+                "providers": ["builtin"], "install_policy": "never",
+                "deep": False,
+            }
+
+            result = fast_scan.execute_fast_scan(
+                fast_scan.FastScanRequest(
+                    root, "Change docs/POLICY.md authorization rules", (),
+                    "balanced",
+                ),
+                settings,
+                payload_sha256="a" * 64,
+            )
+
+            self.assertNotIn("POLICY.md → POLICY.md", result.display_text)
+            self.assertIn("docs/POLICY.md → module0.py", result.display_text)
+            self.assertNotIn(
+                "built-in scan budget exhausted", result.display_text
+            )
+
+    def test_korean_request_automatically_uses_korean_guidance(self):
+        fast_scan = load_fast_scan()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "api.py").write_text(
+                'FIELD = "profile.displayName"\n', encoding="utf-8"
+            )
+            settings = {
+                "enabled": True, "max_seconds": 30, "target_seconds": 10,
+                "providers": ["builtin"], "install_policy": "never",
+                "deep": False,
+            }
+
+            result = fast_scan.execute_fast_scan(
+                fast_scan.FastScanRequest(
+                    root, "profile.displayName 필드를 변경해줘", (), "balanced"
+                ),
+                settings,
+                payload_sha256="a" * 64,
+            )
+
+            self.assertIn("빠른 영향도 검사", result.display_text)
+            self.assertIn("상세 영향도 정제를 진행할까요?", result.display_text)
+
+
 class InventoryCompletenessTest(unittest.TestCase):
     """An unreadable regular source file means the inventory did not account
     for content that exists; claiming complete would let promotion proceed

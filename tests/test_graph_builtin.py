@@ -44,17 +44,64 @@ class GraphBuiltinTest(unittest.TestCase):
     def test_shared_field_discovers_mobile_desktop_event_and_migration_test(self):
         result = scan(FIXTURE_ROOT)
         locations = {node.location for node in result.nodes}
-        self.assertTrue({
+        expected = {
             "api/profile.py", "mobile/user_dto.swift",
             "desktop/profile_cache.ts", "events/profile_changed.py",
             "tests/test_profile_migration.py",
-        } <= locations)
-        self.assertTrue(any(path.distance >= 3 for path in result.paths))
+        }
+        self.assertTrue(expected <= locations)
+        by_id = {node.id: node.location for node in result.nodes}
+        destinations = {by_id[path.nodes[-1]] for path in result.paths}
+        self.assertTrue(expected - {"api/profile.py"} <= destinations)
         self.assertTrue(all(edge.evidence for edge in result.edges))
         self.assertTrue(all(
             edge.confidence in {"lexical", "structural-inferred"}
             for edge in result.edges
         ))
+
+    def test_dense_filename_seed_graph_uses_distinct_file_labels_and_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            locations = ["docs/POLICY.md"] + [
+                f"module_{index}.py" for index in range(7)
+            ]
+            (root / "docs").mkdir()
+            for location in locations:
+                path = root / location
+                path.write_text(
+                    'POLICY = "POLICY.md"\nAUTH = "authorization"\n',
+                    encoding="utf-8",
+                )
+            seeds = tuple(
+                BUILTIN.ScanSeed("POLICY.md", location)
+                for location in locations
+            )
+
+            result = scan(root, seeds=seeds)
+
+            self.assertEqual(
+                {node.location for node in result.nodes}, set(locations)
+            )
+            self.assertEqual(len(result.paths), len(result.nodes) - 1)
+            self.assertNotEqual(result.budget_status, "budget_exhausted")
+
+    def test_real_transitive_chain_keeps_the_shortest_long_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "a.py").write_text('A = "alphabridgeone"\n', encoding="utf-8")
+            (root / "b.py").write_text(
+                'A = "alphabridgeone"\nB = "betabridgetwo"\n', encoding="utf-8"
+            )
+            (root / "c.py").write_text(
+                'B = "betabridgetwo"\nC = "gammabridgethree"\n', encoding="utf-8"
+            )
+            (root / "d.py").write_text('C = "gammabridgethree"\n', encoding="utf-8")
+
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("alphabridgeone", "a.py"),)
+            )
+
+            self.assertTrue(any(path.distance == 3 for path in result.paths))
 
     def test_scan_is_stable_and_deduplicates_terms_and_seeds(self):
         seeds = (
@@ -252,6 +299,57 @@ class GraphBuiltinTest(unittest.TestCase):
             )
             self.assertEqual(len(result.paths), 1)
             self.assertLess(clock.calls, 150)
+            self.assertTrue(any(
+                "path capacity exhausted" in row.reason
+                for row in result.frontier
+            ))
+
+    def test_exact_path_capacity_is_not_reported_as_exhausted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "a.py").write_text('KEY = "sharedboundary"\n', encoding="utf-8")
+            (root / "b.py").write_text('KEY = "sharedboundary"\n', encoding="utf-8")
+
+            result = scan(
+                root,
+                seeds=(BUILTIN.ScanSeed("sharedboundary", "a.py"),),
+                limits=BUILTIN.ScanLimits(max_paths=1),
+            )
+
+            self.assertEqual(len(result.paths), 1)
+            self.assertEqual(result.budget_status, "closed")
+            self.assertEqual(result.frontier, ())
+
+    def test_zero_path_capacity_is_closed_when_no_path_exists(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "isolated.py").write_text('KEY = "isolatedboundary"\n', encoding="utf-8")
+
+            result = scan(
+                root,
+                seeds=(BUILTIN.ScanSeed("isolatedboundary", "isolated.py"),),
+                limits=BUILTIN.ScanLimits(max_paths=0),
+            )
+
+            self.assertEqual(result.budget_status, "closed")
+            self.assertEqual(result.frontier, ())
+
+    def test_resource_truncation_is_not_masked_by_path_capacity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("a.py", "b.py", "c.py"):
+                (root / name).write_text('KEY = "sharedboundary"\n', encoding="utf-8")
+
+            result = scan(
+                root,
+                seeds=(BUILTIN.ScanSeed("sharedboundary", "a.py"),),
+                limits=BUILTIN.ScanLimits(max_nodes=2, max_paths=1),
+            )
+
+            self.assertEqual(result.budget_status, "budget_exhausted")
+            reasons = [row.reason for row in result.frontier]
+            self.assertTrue(any("resource capacity exhausted" in row for row in reasons))
+            self.assertFalse(any("path capacity exhausted" in row for row in reasons))
 
     def test_three_digit_contract_caps_edge_ids_at_999(self):
         with tempfile.TemporaryDirectory() as temporary:

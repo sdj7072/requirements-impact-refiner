@@ -1,10 +1,79 @@
 """Bounded user-facing rendering for Fast Scan receipts."""
+from collections import Counter
 from typing import Mapping
 WORD_LIMIT = 180
 AUDIENCES = {"simple", "balanced", "technical"}
+LOCALES = {"en", "ko", "ja"}
+
+RISK_LABELS = {
+    "ko": {"critical": "치명적", "high": "높음", "medium": "중간", "low": "낮음", "unknown": "미확인"},
+    "ja": {"critical": "重大", "high": "高", "medium": "中", "low": "低", "unknown": "未確認"},
+}
+STATUS_LABELS = {
+    "ko": {"complete": "완료", "partial": "부분", "needs_input": "추가 입력 필요"},
+    "ja": {"complete": "完了", "partial": "部分", "needs_input": "追加情報が必要"},
+}
+DOMAIN_LABELS = {
+    "ko": {
+        "authorization/privacy": "권한·개인정보", "interfaces": "인터페이스",
+        "data": "데이터", "state/concurrency": "상태·동시성",
+        "operations": "운영", "compatibility": "호환성",
+        "regression": "회귀", "functionality": "기능", "legal/policy": "법률·정책",
+    },
+    "ja": {
+        "authorization/privacy": "認可・プライバシー", "interfaces": "インターフェース",
+        "data": "データ", "state/concurrency": "状態・並行性",
+        "operations": "運用", "compatibility": "互換性",
+        "regression": "回帰", "functionality": "機能", "legal/policy": "法務・ポリシー",
+    },
+}
+
+FRONTIER_PREFIXES = {
+    "ko": (
+        ("provider unavailable; built-in fallback used: ", "선택 분석 도구를 사용할 수 없어 내장 분석을 사용함: "),
+        ("source inventory incomplete: ", "소스 목록이 불완전함: "),
+    ),
+    "ja": (
+        ("provider unavailable; built-in fallback used: ", "選択した分析ツールを利用できないため内蔵分析を使用: "),
+        ("source inventory incomplete: ", "ソース一覧が不完全: "),
+    ),
+}
+FRONTIER_EXACT = {
+    "ko": {
+        "built-in scan path capacity exhausted": "내장 분석의 경로 개수 한도에 도달함",
+        "built-in scan resource capacity exhausted": "내장 분석의 자원 한도에 도달함",
+        "built-in scan deadline exhausted": "내장 분석의 시간 한도에 도달함",
+        "graph coverage remains incomplete": "그래프 확인 범위가 아직 불완전함",
+    },
+    "ja": {
+        "built-in scan path capacity exhausted": "内蔵分析の経路数上限に到達",
+        "built-in scan resource capacity exhausted": "内蔵分析のリソース上限に到達",
+        "built-in scan deadline exhausted": "内蔵分析の時間上限に到達",
+        "graph coverage remains incomplete": "グラフの確認範囲がまだ不完全",
+    },
+}
 
 def _text(value):
     return (str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "&#124;").replace("\n", " "))
+
+def _localized(value, locale, table):
+    return table.get(locale, {}).get(value, value)
+
+def _domains(values, locale):
+    labels = [_localized(value, locale, DOMAIN_LABELS) for value in values]
+    if labels:
+        return ", ".join(labels)
+    return {"ko": "미확인 위험", "ja": "未確認のリスク"}.get(locale, "unknown risk")
+
+def _frontier_reason(reason, locale):
+    reason = str(reason or "unknown")
+    exact = FRONTIER_EXACT.get(locale, {}).get(reason)
+    if exact:
+        return exact
+    for prefix, translated in FRONTIER_PREFIXES.get(locale, ()):
+        if reason.startswith(prefix):
+            return translated + reason[len(prefix):]
+    return reason
 
 def _bounded_lines(lines, footer, protected=""):
     """Assemble whole body lines under the word cap. The footer always
@@ -35,40 +104,66 @@ def _bounded_lines(lines, footer, protected=""):
     kept = [word for line in kept_lines for word in line]
     return " ".join(kept + protected_words + footer_words)
 
-def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:
+def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str = "en") -> str:
     if audience not in AUDIENCES: raise ValueError("audience is invalid")
+    if locale not in LOCALES: locale = "en"
     status = receipt.get("status")
-    footer = f"Coverage: {status}; {receipt.get('elapsed_ms', 0)} ms; cache {receipt.get('cache_status', 'bypassed')}."
+    status_label = _localized(status, locale, STATUS_LABELS)
+    cache = receipt.get('cache_status', 'bypassed')
+    if locale == "ko":
+        cache_label = {"hit": "적중", "miss": "미적중", "bypassed": "사용 안 함"}.get(cache, cache)
+        footer = f"검사 범위: {status_label}; {receipt.get('elapsed_ms', 0)}ms; 캐시 {cache_label}."
+    elif locale == "ja":
+        cache_label = {"hit": "ヒット", "miss": "ミス", "bypassed": "未使用"}.get(cache, cache)
+        footer = f"確認範囲: {status_label}; {receipt.get('elapsed_ms', 0)}ms; キャッシュ {cache_label}."
+    else:
+        footer = f"Coverage: {status}; {receipt.get('elapsed_ms', 0)} ms; cache {cache}."
     if status != "needs_input":
-        footer += " Do you want detailed refinement?"
+        footer += {"ko": " 상세 영향도 정제를 진행할까요?", "ja": " 詳細な影響分析を続けますか?"}.get(locale, " Do you want detailed refinement?")
     else:
         footer += (
-            " Which file, symbol, or API is the concrete boundary of this"
-            " change?"
+            {"ko": " 변경 범위가 되는 구체적인 파일, 심볼 또는 API는 무엇인가요?",
+             "ja": " 変更境界となる具体的なファイル、シンボル、または API は何ですか?"}
+            .get(locale, " Which file, symbol, or API is the concrete boundary of this change?")
         )
     if status == "needs_input":
         candidates = receipt.get("candidates", [])
-        listed = "; ".join(_text(row.get("term")) + (" (" + _text(row.get("location")) + ")" if row.get("location") else "") for row in candidates[:3]) or "no repository-backed candidate"
-        return _bounded_lines(["Fast impact scan needs more input. Candidate boundaries: " + listed + "."], footer)
+        empty = {"ko": "저장소에서 확인된 후보 없음", "ja": "リポジトリで確認できた候補なし"}.get(locale, "no repository-backed candidate")
+        listed = "; ".join(_text(row.get("term")) + (" (" + _text(row.get("location")) + ")" if row.get("location") else "") for row in candidates[:3]) or empty
+        intro = {"ko": "빠른 영향도 검사에 추가 입력이 필요합니다. 후보 범위: ", "ja": "高速影響スキャンには追加情報が必要です。候補範囲: "}.get(locale, "Fast impact scan needs more input. Candidate boundaries: ")
+        return _bounded_lines([intro + listed + "."], footer)
     graph = receipt.get("graph_receipt", {})
-    nodes = {row.get("id"): row for row in graph.get("nodes", [])}
+    node_rows = graph.get("nodes", [])
+    nodes = {row.get("id"): row for row in node_rows}
+    label_counts = Counter(str(row.get("label")) for row in node_rows)
     edges = {row.get("id"): row for row in graph.get("edges", [])}
-    lines = ["Fast impact scan: " + str(receipt.get("risk_level", "unknown")) + " risk.", "Possible issue paths:"]
+    risk = _localized(receipt.get("risk_level", "unknown"), locale, RISK_LABELS)
+    if locale == "ko": lines = [f"빠른 영향도 검사: 위험도 {risk}.", "발생 가능한 영향 경로:"]
+    elif locale == "ja": lines = [f"高速影響スキャン: リスク {risk}。", "発生する可能性のある影響経路:"]
+    else: lines = ["Fast impact scan: " + str(risk) + " risk.", "Possible issue paths:"]
     for path in graph.get("paths", [])[:8]:
         path_nodes = [nodes.get(key, {}) for key in path.get("nodes", [])]
-        labels = " → ".join(_text(row.get("label", key)) for row, key in zip(path_nodes, path.get("nodes", [])))
-        line = "- " + labels + ": " + _text(", ".join(path.get("risk_domains", [])) or "unknown risk") + "."
+        display_labels = []
+        for row, key in zip(path_nodes, path.get("nodes", [])):
+            label = str(row.get("label", key))
+            location = row.get("location")
+            display_labels.append(location if location and label_counts[label] > 1 else label)
+        labels = " → ".join(_text(value) for value in display_labels)
+        line = "- " + labels + ": " + _text(_domains(path.get("risk_domains", []), locale)) + "."
         if audience == "technical":
             path_edges = [edges.get(key, {}) for key in path.get("edges", [])]
             providers = sorted({row.get("provider") for row in path_nodes if row.get("provider")})
             confidences = sorted({row.get("confidence") for row in path_edges + path_nodes if row.get("confidence")})
             locations = [row.get("location") for row in path_nodes if row.get("location")]
-            line += " provider " + _text("+".join(providers) or "unavailable")
-            line += "; confidence " + _text("+".join(confidences) or "unknown")
-            line += "; location " + _text(" + ".join(locations) or "unavailable") + "."
+            keys = {"ko": (" 제공자 ", "; 신뢰도 ", "; 위치 ", "사용 불가", "미확인"), "ja": (" provider ", "; 信頼度 ", "; 場所 ", "利用不可", "未確認")}.get(locale, (" provider ", "; confidence ", "; location ", "unavailable", "unknown"))
+            line += keys[0] + _text("+".join(providers) or keys[3])
+            line += keys[1] + _text("+".join(confidences) or keys[4])
+            line += keys[2] + _text(" + ".join(locations) or keys[3]) + "."
         lines.append(line)
     frontier = receipt.get("frontier", [])
     protected = []
-    if status == "partial": protected.append("Partial result: unknown impact may remain.")
-    if frontier: protected.append("Unknown frontier: " + "; ".join(_text(row.get("reason", "unknown")) for row in frontier[:3]) + ".")
+    if status == "partial": protected.append({"ko": "부분 결과: 아직 확인되지 않은 영향이 남아 있을 수 있습니다.", "ja": "部分的な結果: 未確認の影響が残っている可能性があります。"}.get(locale, "Partial result: unknown impact may remain."))
+    if frontier:
+        heading = {"ko": "미확인 범위: ", "ja": "未確認の範囲: "}.get(locale, "Unknown frontier: ")
+        protected.append(heading + "; ".join(_text(_frontier_reason(row.get("reason"), locale)) for row in frontier[:3]) + ".")
     return _bounded_lines(lines, footer, " ".join(protected))
