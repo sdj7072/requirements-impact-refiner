@@ -55,6 +55,20 @@ _SLASHED = re.compile(
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 _QUOTED = re.compile(r"(?P<quote>['\"])(?P<value>[^'\"\r\n]{2,256})(?P=quote)")
 _IMPORT = re.compile(r"(?m)^\s*(?:from|import)\s+(?P<value>[^\r\n#]+)")
+_PYTHON_FROM_IMPORT = re.compile(
+    r"(?m)^[ \t]*from[ \t]+(?P<module>[.A-Za-z_][A-Za-z0-9_.]*)"
+    r"[ \t]+import\b"
+)
+_PYTHON_IMPORT = re.compile(r"(?m)^[ \t]*import[ \t]+(?P<modules>[^\r\n#;]+)")
+_JS_FROM_IMPORT = re.compile(
+    r"(?ms)^[ \t]*import\b(?:(?!;).){0,4096}?\bfrom[ \t\r\n]+"
+    r"(?P<quote>['\"])(?P<module>[^'\"\r\n]+)(?P=quote)"
+)
+_JS_SIDE_EFFECT_IMPORT = re.compile(
+    r"(?m)^[ \t]*import[ \t]+(?P<quote>['\"])(?P<module>[^'\"\r\n]+)"
+    r"(?P=quote)"
+)
+_YAML_BLOCK_INDICATOR = re.compile(r"[ \t]*(?P<indicator>[|>][+-]?)[^\r\n]*(?:\r\n|\r|\n)")
 # Credential-shaped names are matched as whole identifier segments — snake,
 # kebab, and camel case, with prefixes and suffixes (GITHUB_TOKEN,
 # stripeSecretKey, tokenProd) — while embedded fragments (tokenizer,
@@ -69,9 +83,7 @@ _SENSITIVE_ASSIGNMENT = re.compile(
     r"credential)"
     r"(?:[_-][A-Za-z0-9]+|(?-i:[A-Z][A-Za-z0-9]*))*"
     r"(?P=keyquote)\s*(?::=|[:=])\s*)"
-    r"(?P<rest>[^\r\n]+)"
 )
-_QUOTED_LITERAL = re.compile(r"(?P<q>['\"])(?P<value>[^'\"\r\n]+)(?P=q)")
 _COMMON_TERMS = frozenset({
     "assert", "class", "const", "def", "export", "from", "function",
     "import", "interface", "profile", "return", "static", "string", "struct",
@@ -236,12 +248,19 @@ def _value_expression_end(rest: str) -> int:
     tracking nesting so wrapped calls and container literals stay inside."""
     depth = 0
     quote = None
+    escaped = False
     for index, char in enumerate(rest):
         if quote is not None:
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\" and quote != "`":
+                escaped = True
+                continue
             if char == quote:
                 quote = None
             continue
-        if char in "'\"":
+        if char in "'\"`":
             quote = char
         elif char in "([{":
             depth += 1
@@ -249,40 +268,116 @@ def _value_expression_end(rest: str) -> int:
             if depth == 0:
                 return index
             depth -= 1
-        elif depth == 0 and char in ",#":
+        elif depth == 0 and char in ",;#\r\n":
+            return index
+        elif depth == 0 and rest[index:index + 2] == "//":
             return index
     return len(rest)
 
 
+def _redact_quoted_literals(value_text: str, sensitive: set[str]) -> tuple[str, int]:
+    output = []
+    cursor = 0
+    count = 0
+    while cursor < len(value_text):
+        quote = value_text[cursor]
+        if quote not in "'\"`":
+            output.append(quote)
+            cursor += 1
+            continue
+        end = cursor + 1
+        escaped = False
+        while end < len(value_text):
+            char = value_text[end]
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "`":
+                escaped = True
+            elif char == quote:
+                break
+            end += 1
+        if end >= len(value_text):
+            output.append(value_text[cursor:])
+            break
+        value = value_text[cursor + 1:end]
+        sensitive.add(value)
+        output.extend((
+            quote,
+            _safe_graph_text(value, (value,)),
+            quote,
+        ))
+        count += 1
+        cursor = end + 1
+    return "".join(output), count
+
+
+def _yaml_block_span(
+    text: str, value_start: int, assignment_start: int
+) -> tuple[int, int] | None:
+    indicator = _YAML_BLOCK_INDICATOR.match(text, value_start)
+    if indicator is None:
+        return None
+    line_start = text.rfind("\n", 0, assignment_start) + 1
+    base_indent = len(text[line_start:assignment_start])
+    cursor = indicator.end()
+    end = cursor
+    while cursor < len(text):
+        line_end = text.find("\n", cursor)
+        line_end = len(text) if line_end < 0 else line_end + 1
+        line = text[cursor:line_end]
+        if line.strip():
+            indent = len(line) - len(line.lstrip(" \t"))
+            if indent <= base_indent:
+                break
+        end = line_end
+        cursor = line_end
+    return indicator.end(), end
+
+
 def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
     sensitive = set()
-
-    def replace(match):
-        rest = match.group("rest")
-        span = _value_expression_end(rest)
-        value_text, remainder = rest[:span], rest[span:]
-
-        def redact_literal(literal):
-            value = literal.group("value")
+    output = []
+    cursor = 0
+    for match in _SENSITIVE_ASSIGNMENT.finditer(text):
+        if match.start() < cursor:
+            continue
+        output.append(text[cursor:match.end()])
+        yaml_span = _yaml_block_span(text, match.end(), match.start())
+        if yaml_span is not None:
+            content_start, end = yaml_span
+            block = text[content_start:end]
+            value = block.strip()
             sensitive.add(value)
-            quote = literal.group("q")
-            return quote + _safe_graph_text(value, (value,)) + quote
+            indent = re.match(r"[ \t]*", block).group(0) if block else ""
+            newline = "\n" if block.endswith(("\n", "\r")) else ""
+            output.append(text[match.end():content_start])
+            output.append(indent + _safe_graph_text(value, (value,)) + newline)
+            cursor = end
+            continue
+        rest = text[match.end():]
+        span = _value_expression_end(rest)
+        value_text = rest[:span]
 
         # Every quoted literal inside the credential's value expression is
         # redacted, so wrapped forms — []byte("..."), map{...: "..."},
-        # getenv(_, "...") — cannot strand the secret; literals past the
-        # expression boundary (sibling JSON keys) are left intact.
-        redacted, quoted_count = _QUOTED_LITERAL.subn(redact_literal, value_text)
+        # getenv(_, "..."), multiline values, escaped quotes, and Go raw
+        # strings — cannot strand the secret. Literals past the expression
+        # boundary (sibling JSON keys) are left intact.
+        redacted, quoted_count = _redact_quoted_literals(value_text, sensitive)
         if quoted_count == 0:
             bare = re.match(r"[^\s,#})\]]+", value_text)
             if bare is None:
-                return match.group(0)
-            value = bare.group(0)
-            sensitive.add(value)
-            redacted = _safe_graph_text(value, (value,)) + value_text[bare.end():]
-        return match.group("prefix") + redacted + remainder
-
-    return _SENSITIVE_ASSIGNMENT.sub(replace, text), frozenset(sensitive)
+                redacted = value_text
+            else:
+                value = bare.group(0)
+                sensitive.add(value)
+                redacted = (
+                    _safe_graph_text(value, (value,)) + value_text[bare.end():]
+                )
+        output.append(redacted)
+        cursor = match.end() + span
+    output.append(text[cursor:])
+    return "".join(output), frozenset(sensitive)
 
 
 def _term_categories(text: str) -> Mapping[str, frozenset[str]]:
@@ -304,20 +399,119 @@ def _term_categories(text: str) -> Mapping[str, frozenset[str]]:
     })
 
 
+def _without_javascript_comments(text: str) -> str:
+    """Replace JS/TS comments with spaces while preserving strings/newlines."""
+    output = list(text)
+    quote = None
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in "'\"`":
+            quote = char
+            index += 1
+            continue
+        if text[index:index + 2] == "//":
+            end = text.find("\n", index + 2)
+            end = len(text) if end < 0 else end
+            for cursor in range(index, end):
+                output[cursor] = " "
+            index = end
+            continue
+        if text[index:index + 2] == "/*":
+            end = text.find("*/", index + 2)
+            end = len(text) if end < 0 else end + 2
+            for cursor in range(index, end):
+                if output[cursor] not in "\r\n":
+                    output[cursor] = " "
+            index = end
+            continue
+        index += 1
+    return "".join(output)
+
+
+def _javascript_code_mask(text: str) -> tuple[bool, ...]:
+    """True where a JS/TS token starts outside strings and comments."""
+    mask = [True] * len(text)
+    quote = None
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            mask[index] = False
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in "'\"`":
+            quote = char
+            mask[index] = False
+            index += 1
+            continue
+        if text[index:index + 2] == "//":
+            end = text.find("\n", index + 2)
+            end = len(text) if end < 0 else end
+            for cursor in range(index, end):
+                mask[cursor] = False
+            index = end
+            continue
+        if text[index:index + 2] == "/*":
+            end = text.find("*/", index + 2)
+            end = len(text) if end < 0 else end + 2
+            for cursor in range(index, end):
+                mask[cursor] = False
+            index = end
+            continue
+        index += 1
+    return tuple(mask)
+
+
 def _import_modules(text: str) -> frozenset[str]:
     """Collapsed module-path tokens from import statements. Only these can
     justify an imports edge: an imported member name (from helpers import
     auth) must not structurally link an unrelated file carrying that name."""
     modules = set()
-    for match in _IMPORT.finditer(text):
-        import_text = match.group("value")
-        if match.group(0).lstrip().startswith("from"):
-            import_text = import_text.split(" import ", 1)[0]
-        import_text = re.sub(r"\bas\s+\w+", " ", import_text)
-        for token in _DOTTED.findall(import_text) + _IDENTIFIER.findall(import_text):
-            collapsed = re.sub(r"[^a-z0-9]", "", token.lower())
+
+    def add_specifier(specifier: str) -> None:
+        cleaned = specifier.strip().strip("'\"").lstrip("./")
+        if not cleaned:
+            return
+        parts = [part for part in re.split(r"[./\\\\]+", cleaned) if part]
+        if parts and re.fullmatch(r"(?:py|js|jsx|ts|tsx|mjs|cjs)", parts[-1], re.I):
+            parts.pop()
+        values = [parts[-1], "".join(parts)] if parts else []
+        for value in values:
+            collapsed = re.sub(r"[^a-z0-9]", "", value.lower())
             if len(collapsed) >= 3:
                 modules.add(collapsed)
+
+    for match in _PYTHON_FROM_IMPORT.finditer(text):
+        add_specifier(match.group("module"))
+    javascript_text = _without_javascript_comments(text)
+    javascript_code = _javascript_code_mask(text)
+    for pattern in (_JS_FROM_IMPORT, _JS_SIDE_EFFECT_IMPORT):
+        for match in pattern.finditer(javascript_text):
+            if javascript_code[match.start()]:
+                add_specifier(match.group("module"))
+    for match in _PYTHON_IMPORT.finditer(text):
+        for clause in match.group("modules").split(","):
+            specifier = re.split(r"\s+as\s+", clause.strip(), maxsplit=1)[0]
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", specifier):
+                add_specifier(specifier)
     return frozenset(modules)
 
 
@@ -446,8 +640,7 @@ def _module_resolves_to_target(target: str, modules: frozenset[str]) -> bool:
         return False
     segments = {part for part in re.split(r"[^a-z0-9]+", stem) if part}
     return any(
-        module == collapsed_stem or module in segments or
-        module.endswith(collapsed_stem)
+        module == collapsed_stem or module in segments
         for module in modules
     )
 
@@ -542,6 +735,10 @@ def scan_repository(
 
     if expired():
         exhausted = True
+
+    unreadable_sources = sorted(
+        path for path, reason in skipped.items() if reason == "unsafe-file"
+    )
 
     def deadline_result(nodes=(), edges=()):
         frontier = ()
@@ -668,6 +865,15 @@ def scan_repository(
         nodes.append(node)
         node_risks[node_id] = risk
 
+    if unreadable_sources and not nodes and limits.max_nodes > 0:
+        node = GraphNode(
+            "NODE-001", "file", "unreadable source",
+            unreadable_sources[0], "builtin", "lexical", None,
+            ("functionality",),
+        )
+        nodes.append(node)
+        node_risks[node.id] = node.risk_domains
+
     edge_candidates = []
     for source, target, evidence, modules in relationships:
         if expired():
@@ -758,6 +964,16 @@ def scan_repository(
             f"{omitted_errors} unreadable directories omitted from node capacity",
             nodes[0].risk_domains,
         ))
+    if unreadable_sources and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
+        display = unreadable_sources[0]
+        suffix = (
+            f" and {len(unreadable_sources) - 1} more"
+            if len(unreadable_sources) > 1 else ""
+        )
+        frontier_items.append(FrontierEntry(
+            f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[0].id,
+            f"unreadable source: {display}{suffix}", nodes[0].risk_domains,
+        ))
     if exhausted and nodes and len(frontier_items) < GRAPH.MAX_FRONTIER:
         frontier_items.append(FrontierEntry(
             f"FRONTIER-{len(frontier_items) + 1:03d}", nodes[-1].id,
@@ -765,7 +981,7 @@ def scan_repository(
         ))
     frontier = tuple(frontier_items)
     status = (
-        "provider_limited" if traversal_errors else
+        "provider_limited" if traversal_errors or unreadable_sources else
         "budget_exhausted" if exhausted else "closed"
     )
     return BuiltInScanResult(

@@ -404,6 +404,54 @@ class SensitiveLiteralRedactionTest(unittest.TestCase):
                 self.assertNotIn(secret, safe_text, safe_text)
                 self.assertTrue(found)
 
+    def test_multiline_raw_and_escaped_assignment_values_are_redacted(self):
+        cases = (
+            ('token := []byte(\n  "multiline-secret"\n)', "multiline-secret"),
+            ('token := []byte(`raw-secret-value`)', "raw-secret-value"),
+            ('token := []byte("abc\\\"escaped-secret")', "escaped-secret"),
+        )
+        for source, secret in cases:
+            with self.subTest(source=source):
+                safe_text, found = BUILTIN._redact_sensitive_literals(source)
+                self.assertNotIn(secret, safe_text, safe_text)
+                self.assertTrue(found)
+
+    def test_raw_credential_value_never_reaches_edge_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            secret = "ULTRASECRET123456789"
+            (root / "a.go").write_text(
+                f"token := []byte(`{secret}`)\n", encoding="utf-8"
+            )
+            (root / "b.go").write_text(
+                f'const Linked = "{secret}"\n', encoding="utf-8"
+            )
+
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("token", "a.go"),)
+            )
+
+            self.assertTrue(all(secret not in edge.evidence for edge in result.edges))
+
+    def test_yaml_block_credential_value_never_reaches_edge_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            secret = "ULTRASECRET123456789"
+            (root / "config.yml").write_text(
+                f"token: |\n  {secret}\n  shared_boundary\n"
+                "name: visible\n",
+                encoding="utf-8",
+            )
+            (root / "consumer.py").write_text(
+                f'VALUE = "{secret}"\n', encoding="utf-8"
+            )
+
+            result = scan(
+                root, seeds=(BUILTIN.ScanSeed("token", "config.yml"),)
+            )
+
+            self.assertTrue(all(secret not in edge.evidence for edge in result.edges))
+
     PRESERVED_ASSIGNMENTS = (
         'tokenizer = "whitespace"',
         'keyboard_layout = "qwerty"',
@@ -511,6 +559,148 @@ class EdgeKindClassificationTest(unittest.TestCase):
             directions[("consumer.py", "auth.py")],
             ("references", "lexical"),
         )
+
+    def test_javascript_imported_binding_does_not_link_unrelated_file(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.ts": (
+                    'import { auth } from "./helpers";\n'
+                    'const value = "shared_boundary";\n'
+                ),
+                "helpers.ts": 'export const helper = "shared_boundary";\n',
+                "auth.ts": 'export const unrelated = "shared_boundary";\n',
+            },
+            "shared_boundary",
+            "consumer.ts",
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "helpers.ts")],
+            ("imports", "structural-inferred"),
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "auth.ts")],
+            ("references", "lexical"),
+        )
+
+    def test_module_suffix_does_not_earn_structural_import_confidence(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.py": (
+                    "import oauth\n"
+                    'VALUE = "shared_boundary"\n'
+                ),
+                "auth.py": 'UNRELATED = "shared_boundary"\n',
+            },
+            "shared_boundary",
+            "consumer.py",
+        )
+        self.assertEqual(
+            directions[("consumer.py", "auth.py")],
+            ("references", "lexical"),
+        )
+
+    def test_only_leaf_module_segment_earns_structural_confidence(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.ts": (
+                    'import { helper } from "./auth/helpers";\n'
+                    'const value = "shared_boundary";\n'
+                ),
+                "auth.ts": 'export const unrelated = "shared_boundary";\n',
+                "helpers.ts": 'export const helper = "shared_boundary";\n',
+            },
+            "shared_boundary",
+            "consumer.ts",
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "auth.ts")],
+            ("references", "lexical"),
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "helpers.ts")],
+            ("imports", "structural-inferred"),
+        )
+
+    def test_multiline_javascript_import_resolves_module_specifier(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.ts": (
+                    "import {\n  helper,\n  other\n} from \"./helpers\";\n"
+                    'const value = "shared_boundary";\n'
+                ),
+                "helpers.ts": 'export const helper = "shared_boundary";\n',
+            },
+            "shared_boundary",
+            "consumer.ts",
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "helpers.ts")],
+            ("imports", "structural-inferred"),
+        )
+
+    def test_javascript_comment_cannot_hijack_module_specifier(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.ts": (
+                    'import {\n  helper // from "./auth"\n'
+                    '} from "./helpers";\n'
+                    'const value = "shared_boundary";\n'
+                ),
+                "auth.ts": 'export const unrelated = "shared_boundary";\n',
+                "helpers.ts": 'export const helper = "shared_boundary";\n',
+            },
+            "shared_boundary",
+            "consumer.ts",
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "auth.ts")],
+            ("references", "lexical"),
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "helpers.ts")],
+            ("imports", "structural-inferred"),
+        )
+
+    def test_template_literal_cannot_invent_an_import_statement(self):
+        directions = self.edge_kinds(
+            {
+                "consumer.ts": (
+                    "const template = `\n"
+                    'import { fake } from "./auth";\n'
+                    "`;\n"
+                    'import { helper } from "./helpers";\n'
+                    'const value = "shared_boundary";\n'
+                ),
+                "auth.ts": 'export const unrelated = "shared_boundary";\n',
+                "helpers.ts": 'export const helper = "shared_boundary";\n',
+            },
+            "shared_boundary",
+            "consumer.ts",
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "auth.ts")],
+            ("references", "lexical"),
+        )
+        self.assertEqual(
+            directions[("consumer.ts", "helpers.ts")],
+            ("imports", "structural-inferred"),
+        )
+
+    def test_unreadable_only_repository_gets_synthetic_frontier(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            blocked = root / "blocked.py"
+            blocked.write_text("HIDDEN = 1\n", encoding="utf-8")
+            blocked.chmod(0o000)
+            try:
+                result = scan(root, seeds=())
+            finally:
+                blocked.chmod(0o644)
+
+            self.assertEqual(result.budget_status, "provider_limited")
+            self.assertTrue(result.nodes)
+            self.assertTrue(result.frontier)
+            self.assertIn("unreadable source", result.frontier[0].reason)
 
     def test_import_resolution_rejects_substring_collisions(self):
         module = BUILTIN

@@ -162,3 +162,12 @@ class WholeLineTrimmingTest(unittest.TestCase):
         self.assertIn("Unknown frontier", text)
         self.assertIn("Partial result", text)
         self.assertIn("Do you want detailed refinement?", text)
+
+    def test_ellipsis_is_included_in_the_word_budget(self):
+        renderer = load_renderer()
+        body = " ".join(["word"] * (renderer.WORD_LIMIT - 1))
+
+        text = renderer._bounded_lines([body, "overflow"], "footer")
+
+        self.assertLessEqual(len(text.split()), renderer.WORD_LIMIT)
+        self.assertIn("…", text)

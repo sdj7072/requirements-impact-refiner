@@ -17,16 +17,22 @@ def _bounded_lines(lines, footer, protected=""):
     if len(protected_words) > safety_budget:
         protected_words = protected_words[:max(0, safety_budget - 1)] + ["…"]
     available = max(0, WORD_LIMIT - len(footer_words) - len(protected_words))
-    kept = []
+    kept_lines = []
     used = 0
     for line in lines:
         line_words = line.split()
         if used + len(line_words) > available:
-            if kept:
-                kept.append("…")
+            if available > 0:
+                if used < available:
+                    kept_lines.append(["…"])
+                elif kept_lines:
+                    # Replacing the last complete line preserves the
+                    # no-mid-line provenance guarantee and budgets the marker.
+                    kept_lines[-1] = ["…"]
             break
-        kept.extend(line_words)
+        kept_lines.append(line_words)
         used += len(line_words)
+    kept = [word for line in kept_lines for word in line]
     return " ".join(kept + protected_words + footer_words)
 
 def render_fast_scan(receipt: Mapping[str, object], audience: str) -> str:

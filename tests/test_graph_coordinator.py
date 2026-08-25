@@ -117,6 +117,29 @@ class GraphCoordinatorTest(unittest.TestCase):
         self.assertLess(receipt.timings_ms["total"], 10_000)
         self.assertEqual(self.runner.calls, [])
 
+    def test_unreadable_regular_source_makes_direct_inventory_incomplete(self):
+        blocked = self.root / "blocked.py"
+        blocked.write_text("HIDDEN = 1\n", encoding="utf-8")
+        blocked.chmod(0o000)
+        self.addCleanup(lambda: blocked.chmod(0o644))
+        deadline = COORDINATOR.Deadline(self.clock, 30)
+
+        inventory = COORDINATOR._collect_source_digests(self.root, deadline)
+        builtin = COORDINATOR.BUILTIN.scan_repository(
+            self.root,
+            self.seeds,
+            COORDINATOR.ScanLimits(max_seconds=30),
+            self.clock,
+        )
+
+        self.assertFalse(inventory.complete)
+        self.assertEqual(inventory.reason, "unreadable-source")
+        self.assertEqual(builtin.budget_status, "provider_limited")
+        self.assertTrue(
+            any("unreadable source" in row.reason for row in builtin.frontier),
+            builtin.frontier,
+        )
+
     def test_coordinator_reuses_supplied_shared_deadline(self):
         deadline = COORDINATOR.Deadline(self.clock, 30)
         self.clock.advance(5)

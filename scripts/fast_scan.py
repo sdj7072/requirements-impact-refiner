@@ -629,6 +629,34 @@ def _graph_mapping(value: object) -> dict[str, object]:
 
 
 _BENIGN_SKIPS = {"binary", "encoding", "not-regular", "control"}
+_PROVIDER_UNAVAILABLE_REASON = re.compile(
+    r"provider unavailable; built-in fallback used: "
+    r"[A-Za-z0-9_.+-]+(?:, [A-Za-z0-9_.+-]+)*"
+)
+
+
+def _only_expected_provider_gap(graph: Mapping[str, object]) -> bool:
+    providers = graph.get("providers", [])
+    unavailable = sorted({
+        str(row.get("name"))
+        for row in providers
+        if isinstance(row, Mapping)
+        and row.get("name") != "builtin"
+        and row.get("status") != "ready"
+    })
+    if not unavailable:
+        return False
+    expected = (
+        "provider unavailable; built-in fallback used: "
+        + ", ".join(unavailable)
+    )
+    frontier = graph.get("frontier", [])
+    return (
+        isinstance(frontier, list)
+        and len(frontier) == 1
+        and str(frontier[0].get("reason", "")) == expected
+        and _PROVIDER_UNAVAILABLE_REASON.fullmatch(expected) is not None
+    )
 
 
 def _inventory(root: Path, deadline: object):
@@ -725,10 +753,7 @@ def execute_fast_scan(
         # reason (coverage gap, deadline, disagreement) keeps the scan
         # partial and unpromotable.
         frontier_rows = graph.get("frontier", [])
-        only_provider_gaps = all(
-            str(row.get("reason", "")).startswith("provider unavailable")
-            for row in frontier_rows
-        )
+        only_provider_gaps = _only_expected_provider_gap(graph)
         status = (
             "complete"
             if source_inventory.complete

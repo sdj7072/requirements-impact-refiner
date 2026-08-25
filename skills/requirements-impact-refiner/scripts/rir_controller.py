@@ -1819,6 +1819,7 @@ def _cas_replace_private_draft(
 COMPACT_MAX_NODES = 48
 COMPACT_MAX_PATHS = 16
 COMPACT_MAX_FRONTIER = 16
+COMPACT_MAX_BYTES = 24_000
 _COMPACT_RISK_ORDER = (
     "authorization/privacy", "interfaces", "data", "state/concurrency",
     "compatibility", "operations", "regression", "functionality",
@@ -1840,24 +1841,24 @@ def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list,
     # cap, so every delivered reference stays resolvable and the cap holds
     # even when deep paths alone would demand more nodes than the budget.
     required: set = set()
-    paths = []
-    for row in receipt["paths"]:
-        if len(paths) >= COMPACT_MAX_PATHS:
-            break
-        candidate = required | set(row["nodes"])
-        if len(candidate) > COMPACT_MAX_NODES:
-            break
-        required = candidate
-        paths.append(row)
     frontier = []
     for row in receipt["frontier"]:
         if len(frontier) >= COMPACT_MAX_FRONTIER:
             break
         candidate = required | {row["node"]}
         if len(candidate) > COMPACT_MAX_NODES:
-            break
+            continue
         required = candidate
         frontier.append(row)
+    paths = []
+    for row in receipt["paths"]:
+        if len(paths) >= COMPACT_MAX_PATHS:
+            break
+        candidate = required | set(row["nodes"])
+        if len(candidate) > COMPACT_MAX_NODES:
+            continue
+        required = candidate
+        paths.append(row)
     selected = [row for row in receipt["nodes"] if row["id"] in required]
     if len(selected) < COMPACT_MAX_NODES:
         remaining = sorted(
@@ -1874,13 +1875,58 @@ def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list,
     return selected, paths, frontier, truncated
 
 
+def _compact_size(value: Mapping[str, object]) -> int:
+    return len(json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8"))
+
+
+def _enforce_compact_byte_budget(compact: dict[str, object]) -> None:
+    """Shrink a compact delivery against its serialized byte budget.
+
+    Actionable frontier entries out-rank paths. Nodes not referenced by a
+    surviving path/frontier are removed first; then the lowest-priority path
+    or frontier is dropped. Every removal is reflected in the disclosure.
+    """
+    summary = compact["summary"]
+    truncated = summary["truncated"]
+    while _compact_size(compact) > COMPACT_MAX_BYTES:
+        referenced = {
+            node["key"]
+            for path in compact["paths"]
+            for node in path["nodes"]
+        }
+        referenced.update(row["node_key"] for row in compact["frontier"])
+        removable = next((
+            index for index in range(len(compact["nodes"]) - 1, -1, -1)
+            if compact["nodes"][index]["key"] not in referenced
+        ), None)
+        if removable is not None:
+            compact["nodes"].pop(removable)
+            truncated["nodes"] += 1
+            continue
+        if compact["paths"]:
+            compact["paths"].pop()
+            truncated["paths"] += 1
+            continue
+        if compact["frontier"]:
+            compact["frontier"].pop()
+            truncated["frontier"] += 1
+            continue
+        if compact["nodes"]:
+            compact["nodes"].pop()
+            truncated["nodes"] += 1
+            continue
+        raise ValueError("compact graph metadata exceeds byte budget")
+
+
 def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
     selected_nodes, selected_paths, selected_frontier, truncated = (
         _compact_selection(receipt)
     )
-    return {
+    compact = {
         "providers": [
             {
                 "name": row["name"], "status": row["status"],
@@ -1935,6 +1981,8 @@ def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
             "truncated": truncated,
         },
     }
+    _enforce_compact_byte_budget(compact)
+    return compact
 
 
 def _source_inventory_sha256(source_digests: Mapping[str, str]) -> str:

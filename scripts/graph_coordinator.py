@@ -366,6 +366,10 @@ def _collect_source_digests(root: Path, deadline: Deadline):
         if reason is not None or payload is None:
             if reason in {"file-limit", "byte-limit"}:
                 return SourceInventory(digests, False, "collection-limit")
+            if reason == "oversized":
+                return SourceInventory(digests, False, "collection-limit")
+            if reason == "unsafe-file":
+                return SourceInventory(digests, False, "unreadable-source")
             continue
         files += 1
         total_bytes += len(payload)

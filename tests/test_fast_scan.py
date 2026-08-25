@@ -498,6 +498,10 @@ class PromotionReachabilityTest(unittest.TestCase):
     def test_missing_providers_alone_do_not_block_promotion(self):
         graph = self.load_graph()
         self.assertEqual(graph["budget_status"], "provider_limited")
+        graph["providers"].append({
+            "name": "scip", "status": "missing", "confidence": "lexical",
+            "version": None, "executable_sha256": None,
+        })
         for row in graph["frontier"]:
             row["reason"] = "provider unavailable; built-in fallback used: scip"
 
@@ -510,6 +514,35 @@ class PromotionReachabilityTest(unittest.TestCase):
         graph = self.load_graph()
         self.assertEqual(graph["budget_status"], "provider_limited")
         graph["frontier"][0]["reason"] = "graph coverage remains incomplete"
+
+        result = self.run_scan(graph)
+
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
+
+    def test_provider_unavailable_prefix_cannot_hide_another_coverage_gap(self):
+        graph = self.load_graph()
+        self.assertEqual(graph["budget_status"], "provider_limited")
+        for row in graph["frontier"]:
+            row["reason"] = (
+                "provider unavailable; provider output disagreed and "
+                "coverage is incomplete"
+            )
+
+        result = self.run_scan(graph)
+
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
+
+    def test_invented_provider_disclosure_cannot_promote(self):
+        graph = self.load_graph()
+        graph["providers"] = [
+            row for row in graph["providers"] if row["name"] == "builtin"
+        ]
+        for row in graph["frontier"]:
+            row["reason"] = (
+                "provider unavailable; built-in fallback used: invented-provider"
+            )
 
         result = self.run_scan(graph)
 

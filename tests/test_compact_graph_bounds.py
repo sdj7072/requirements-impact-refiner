@@ -137,6 +137,88 @@ class CompactGraphBoundsTest(unittest.TestCase):
         for row in compact["frontier"]:
             self.assertIn(row["node_key"], kept)
 
+    def test_delivery_enforces_serialized_byte_budget_with_long_strings(self):
+        receipt = big_receipt(node_count=48, path_count=0, frontier_count=0)
+        for index, node in enumerate(receipt["nodes"]):
+            node["label"] = "L" * 256
+            node["location"] = ("src/" + "p" * 245 + str(index))[:255]
+        receipt["paths"] = [
+            {
+                "id": f"PATH-{i:03d}",
+                "nodes": [f"NODE-{i * 6 + j:03d}" for j in range(6)],
+                "edges": [f"EDGE-{i * 6 + j:03d}" for j in range(5)],
+                "distance": 5,
+                "risk_domains": ["operations"],
+            }
+            for i in range(8)
+        ]
+
+        compact = CONTROLLER._compact_graph(receipt)
+        payload = json.dumps(
+            compact, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+        self.assertLessEqual(len(payload), CONTROLLER.COMPACT_MAX_BYTES)
+
+    def test_later_frontier_survives_when_first_needs_an_unselected_node(self):
+        receipt = big_receipt(node_count=60, path_count=0, frontier_count=0)
+        receipt["paths"] = [
+            {
+                "id": f"PATH-{i:03d}",
+                "nodes": [f"NODE-{i * 6 + j:03d}" for j in range(6)],
+                "edges": [f"EDGE-{i * 6 + j:03d}" for j in range(5)],
+                "distance": 5,
+                "risk_domains": ["operations"],
+            }
+            for i in range(8)
+        ]
+        receipt["frontier"] = [
+            {
+                "id": "FRONTIER-000", "node": "NODE-048",
+                "reason": "needs another node", "risk_domains": ["operations"],
+            },
+            {
+                "id": "FRONTIER-001", "node": "NODE-000",
+                "reason": "selected node risk", "risk_domains": ["operations"],
+            },
+        ]
+
+        compact = CONTROLLER._compact_graph(receipt)
+
+        self.assertIn(
+            "selected node risk",
+            [row["reason"] for row in compact["frontier"]],
+        )
+
+    def test_high_risk_frontier_reserves_node_capacity_before_paths(self):
+        receipt = big_receipt(node_count=60, path_count=0, frontier_count=0)
+        receipt["paths"] = [
+            {
+                "id": f"PATH-{i:03d}",
+                "nodes": [f"NODE-{i * 6 + j:03d}" for j in range(6)],
+                "edges": [f"EDGE-{i * 6 + j:03d}" for j in range(5)],
+                "distance": 5,
+                "risk_domains": ["operations"],
+            }
+            for i in range(8)
+        ]
+        receipt["frontier"] = [{
+            "id": "FRONTIER-000", "node": "NODE-048",
+            "reason": "authorization boundary unknown",
+            "risk_domains": ["authorization/privacy"],
+        }]
+
+        compact = CONTROLLER._compact_graph(receipt)
+
+        self.assertEqual(
+            [row["reason"] for row in compact["frontier"]],
+            ["authorization boundary unknown"],
+        )
+        self.assertIn(
+            "NODE-048", {row["key"] for row in compact["nodes"]}
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
