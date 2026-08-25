@@ -196,7 +196,7 @@ def portable_artifact_paths(root):
             match = re.fullmatch(r"([0-9a-f]{64})(.*)", part)
             parts.append("<sha256>" + match.group(2) if match else part)
         result.append("/".join(parts))
-    return result
+    return sorted(result)
 
 
 def mode_contract(root, relatives):

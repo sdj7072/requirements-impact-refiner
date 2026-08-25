@@ -32,6 +32,7 @@ ROOT_FILES = (
     "scripts/report_store.py",
     "scripts/resolve-settings.py",
     "scripts/rir-controller.py",
+    "scripts/rir_contracts.py",
     "scripts/rir_controller.py",
     "scripts/rir_mcp_server.py",
     "scripts/validate-impact-report.py",
