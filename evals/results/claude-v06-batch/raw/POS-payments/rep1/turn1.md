@@ -1,0 +1,13 @@
+The Requirements Impact Refiner fast scan completed. Per the workflow, here is its display text verbatim, and I have stopped before any planning or implementation pending an answer to its refinement question:
+
+> Fast impact scan: medium risk. Possible issue paths: - payment.charge → payment.charge: functionality. - payment.charge → payment.charge: functionality. - payment.charge → payment.charge: functionality. - payment.charge → payment.charge: functionality. - payment.charge → payment.charge: functionality. - payment.charge → payment.charge: functionality. - payment.charge → payment.charge → payment.charge: functionality. - payment.charge → payment.charge → payment.charge: functionality. Unknown frontier: provider unavailable; built-in fallback used: ast-grep, codegraph, scip. Partial result: unknown impact may remain. Coverage: partial; 6 ms; cache miss. Do you want detailed refinement?
+
+Summary of what was done and why:
+
+- The request ("Automatically retry every failure of payment.charge") is a concrete behavior change, so the `requirements-impact-refiner` workflow was mandatory before planning or implementation. I invoked the routing skill, then the core skill.
+- The `rir_scan` MCP tool is not available in this session, so I used the skill's documented CLI fallback (`scripts/rir-controller.py scan`) against the repo under test at `/private/tmp/claude-501/-Users-p042890-workspace-polaris/074a0f85-287f-4435-929b-4948eb69c993/scratchpad/batch-v06/POS-payments/rep1`, passing the exact change request and the three supplied evidence items.
+- Result: medium risk, partial coverage (unknown impact may remain), with the refinement question above. Per the skill, high/medium risk does not auto-trigger detailed refinement — only an explicit "yes" from the user does.
+
+Substantive risk worth relaying with the question: the supplied evidence indicates `providers/gateway.py` may time out after capture, meaning a "failure" of `payment.charge` can be an ambiguous outcome where money was already captured — blindly retrying every failure risks double-charging unless each retry reuses the same `idempotency_key` (which `payments/charge.py` supports) and timeouts are treated as unknown-outcome rather than definite failure. Also, `ui/status.py` renders status before webhook settlement, so retry-in-progress states could surface misleading statuses to users.
+
+Next step: answer the refinement question ("Do you want detailed refinement?"). On "yes", the detailed refinement lineage runs (controller workflow plus one integration adapter); on "no", proceed directly to planning/implementing the retry behavior with the double-charge and UI-status caveats above.

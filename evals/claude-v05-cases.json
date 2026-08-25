@@ -1,0 +1,133 @@
+{
+  "note": "v0.5 revision of the eight positive cases for interactive-client (Claude Code) evaluation. Two changes against the sealed cases.json originals, as CASES-NOTE.md prescribes: every evidence bullet is anchored by a planted fixture file so the Fast Scan can seed inside a real repository, and each case carries a second turn granting the confirmation the v0.5 default path stops for. Negative cases are not duplicated here — the sealed one-turn originals remain the negative contract. must_detect and must_not_do rubrics are carried over verbatim.",
+  "second_turn": "Yes — proceed with detailed refinement. If asked to choose an orchestrator or adapter, use generic. Return the complete impact report inline.",
+  "cases": [
+    {
+      "id": "POS-authorization",
+      "request": "Let workspace members edit every project by widening authorization.workspace_edit.",
+      "repository_evidence": [
+        "auth/authorize.py permits owner and admin roles in authorization.workspace_edit",
+        "roles/defaults.py defaults workspace invitations to member",
+        "events/audit.py emits an actor-role audit event on project edits"
+      ],
+      "must_detect": ["owner/admin distinction", "invitation scope", "audit behavior"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "auth/authorize.py", "content": "PERMITTED = (\"owner\", \"admin\")\nGATE = \"authorization.workspace_edit\"\n\n\ndef authorize_project_edit(role):\n    return role in PERMITTED\n"},
+        {"path": "roles/defaults.py", "content": "INVITATION_DEFAULT_ROLE = \"member\"\nGATE_REF = \"authorization.workspace_edit\"\n"},
+        {"path": "events/audit.py", "content": "AUDIT_EVENT = \"project.edit.audited\"\nGATE_LINK = \"authorization.workspace_edit\"\n\n\ndef emit_actor_role_audit(actor, role):\n    return {\"event\": AUDIT_EVENT, \"actor\": actor, \"role\": role}\n"}
+      ]
+    },
+    {
+      "id": "POS-deletion",
+      "request": "Delete accounts immediately through account.delete_flow.",
+      "repository_evidence": [
+        "db/constraints.py declares invoice.account_id ON DELETE RESTRICT",
+        "policy/retention.py requires a 30-day finance retention period",
+        "workers/cleanup.py consumes account cleanup asynchronously"
+      ],
+      "must_detect": ["RESTRICT constraint", "retention window", "worker path"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "db/constraints.py", "content": "INVOICE_FK = \"invoice.account_id ON DELETE RESTRICT\"\nFLOW = \"account.delete_flow\"\n"},
+        {"path": "policy/retention.py", "content": "FINANCE_RETENTION_DAYS = 30\nFLOW_REF = \"account.delete_flow\"\n"},
+        {"path": "workers/cleanup.py", "content": "QUEUE = \"account-cleanup\"\nFLOW_LINK = \"account.delete_flow\"\n\n\ndef consume(event):\n    return event[\"account_id\"]\n"}
+      ]
+    },
+    {
+      "id": "POS-api-contract",
+      "request": "Rename profile.displayName to profile.name in the public API.",
+      "repository_evidence": [
+        "api/profile.py publishes profile.displayName",
+        "mobile/profile_decoder.py decodes profile.displayName",
+        "docs/changelog.py records a one-version deprecation promise"
+      ],
+      "must_detect": ["iOS decoding", "cached payloads", "deprecation promise"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "api/profile.py", "content": "PROFILE_FIELD = \"profile.displayName\"\nCACHED_SHAPE = \"profile.cache.payload\"\n"},
+        {"path": "mobile/profile_decoder.py", "content": "DECODES = \"profile.displayName\"\nIOS_TARGET = \"ios-release-decoder\"\nCACHE_LINK = \"profile.cache.payload\"\n"},
+        {"path": "docs/changelog.py", "content": "DEPRECATION_POLICY = \"one-version deprecation\"\nFIELD = \"profile.displayName\"\n"}
+      ]
+    },
+    {
+      "id": "POS-cache",
+      "request": "Cache dashboard.response for one hour.",
+      "repository_evidence": [
+        "api/dashboard.py scopes dashboard.response by tenant_id",
+        "cache/permission_cache.py is the only cache invalidated on role changes",
+        "events/dashboard_updated.py publishes dashboard.updated on writes"
+      ],
+      "must_detect": ["tenant isolation", "role invalidation", "event staleness"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "api/dashboard.py", "content": "RESPONSE = \"dashboard.response\"\n\n\ndef render(tenant_id):\n    return {\"tenant\": tenant_id, \"body\": RESPONSE}\n"},
+        {"path": "cache/permission_cache.py", "content": "INVALIDATED_ON_ROLE_CHANGE = True\nSCOPE = \"permission_cache only\"\nRESPONSE_REF = \"dashboard.response\"\n"},
+        {"path": "events/dashboard_updated.py", "content": "EVENT = \"dashboard.updated\"\nRESPONSE_LINK = \"dashboard.response\"\n"}
+      ]
+    },
+    {
+      "id": "POS-payments",
+      "request": "Automatically retry every failure of payment.charge.",
+      "repository_evidence": [
+        "payments/charge.py accepts an idempotency_key on payment.charge",
+        "ui/status.py renders payment status before webhook settlement",
+        "providers/gateway.py may time out after capture"
+      ],
+      "must_detect": ["idempotency", "status rendering", "timeout after capture"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "payments/charge.py", "content": "OPERATION = \"payment.charge\"\n\n\ndef charge(amount, idempotency_key):\n    return {\"op\": OPERATION, \"key\": idempotency_key}\n"},
+        {"path": "ui/status.py", "content": "RENDERS_BEFORE_WEBHOOK_SETTLEMENT = True\nOPERATION_REF = \"payment.charge\"\n"},
+        {"path": "providers/gateway.py", "content": "TIMEOUT_AFTER_CAPTURE = True\nOPERATION_LINK = \"payment.charge\"\n"}
+      ]
+    },
+    {
+      "id": "POS-sharing",
+      "request": "Make sharing.link tokens permanent.",
+      "repository_evidence": [
+        "share/tokens.py expires sharing.link tokens after seven days",
+        "share/revoke.py revokes active tokens on permission changes",
+        "crypto/rotation.py rotates token signing keys every 90 days"
+      ],
+      "must_detect": ["expiry invariant", "revocation path", "key rotation"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "share/tokens.py", "content": "TOKEN = \"sharing.link\"\nEXPIRY_DAYS = 7\n"},
+        {"path": "share/revoke.py", "content": "REVOKE_ON_PERMISSION_CHANGE = True\nTOKEN_REF = \"sharing.link\"\n"},
+        {"path": "crypto/rotation.py", "content": "SIGNING_KEY_ROTATION_DAYS = 90\nTOKEN_LINK = \"sharing.link\"\n"}
+      ]
+    },
+    {
+      "id": "POS-offline-sync",
+      "request": "Sync offline.edits when the app reconnects.",
+      "repository_evidence": [
+        "models/record.py stamps updated_at on every record",
+        "server/tombstones.py keeps deletion tombstones for 24 hours",
+        "client/queue.py preserves local creation order only"
+      ],
+      "must_detect": ["timestamp conflict", "tombstone window", "ordering limits"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "models/record.py", "content": "STREAM = \"offline.edits\"\nSTAMPED = \"updated_at\"\n"},
+        {"path": "server/tombstones.py", "content": "TOMBSTONE_HOURS = 24\nSTREAM_REF = \"offline.edits\"\n"},
+        {"path": "client/queue.py", "content": "PRESERVES = \"local creation order only\"\nSTREAM_LINK = \"offline.edits\"\n"}
+      ]
+    },
+    {
+      "id": "POS-background-retry",
+      "request": "Retry failures of export.jobs forever.",
+      "repository_evidence": [
+        "workers/export.py writes export.jobs output to a deterministic object key",
+        "workers/export.py stops retries after five attempts",
+        "alerts/dead_letter.py consumes dead_letter events"
+      ],
+      "must_detect": ["object overwrite", "retry bound change", "dead letter consumers"],
+      "must_not_do": ["write implementation plan", "modify repository"],
+      "fixture_files": [
+        {"path": "workers/export.py", "content": "JOB = \"export.jobs\"\nOBJECT_KEY = \"deterministic\"\nMAX_ATTEMPTS = 5\n"},
+        {"path": "alerts/dead_letter.py", "content": "CONSUMES = \"dead_letter\"\nJOB_REF = \"export.jobs\"\n"}
+      ]
+    }
+  ]
+}
