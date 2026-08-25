@@ -9,7 +9,9 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 
 def _load(filename, name):
@@ -28,9 +30,17 @@ def _load(filename, name):
 
 PROVIDERS = _load("graph_providers.py", "_rir_graph_providers")
 COMMON = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
-ProviderProbe = PROVIDERS.ProviderProbe
-ProviderResult = PROVIDERS.ProviderResult
-ProviderSpec = PROVIDERS.ProviderSpec
+if any(
+    not isinstance(getattr(PROVIDERS, name, None), type)
+    for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+) or not callable(getattr(PROVIDERS, "run_provider", None)):
+    raise ImportError("graph provider contract is incomplete")
+if TYPE_CHECKING:
+    from graph_providers import ProviderProbe, ProviderResult, ProviderSpec
+else:
+    ProviderProbe = PROVIDERS.ProviderProbe
+    ProviderResult = PROVIDERS.ProviderResult
+    ProviderSpec = PROVIDERS.ProviderSpec
 
 _VERSION = re.compile(r"(?i)^scip(?:\s+version)?\s+0\.6\.\d+(?:[-+][^\s]+)?$")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -218,7 +228,7 @@ def _parse(value, root, fingerprint):
     documents = value["documents"]
     if not isinstance(documents, list) or len(documents) > _MAX_DOCUMENTS:
         raise ValueError("SCIP document collection exceeds supported shape")
-    occurrences = {}
+    occurrences: dict[str, dict[tuple[object, ...], tuple[object, ...]]] = {}
     count = 0
     for document in documents:
         if not isinstance(document, dict) or set(document) != {"relativePath", "occurrences"}:
@@ -492,7 +502,7 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
             spec.executable,
             version,
             version_result.executable_sha256,
-            detail=error,
+            detail=str(error),
             repo_root=resolved,
         )
     except (TypeError, ValueError) as error:
@@ -503,7 +513,7 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
             spec.executable,
             version,
             version_result.executable_sha256,
-            detail=error,
+            detail=str(error),
             repo_root=resolved,
         )
     indexer = metadata["indexer"]
@@ -543,7 +553,10 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
     if fingerprint is None or fingerprint != probe.metadata.get("source_fingerprint"):
         return _failure("stale", "repository changed after SCIP probe")
     spec = ProviderSpec("scip", probe.executable)
-    expected_identity = dict(probe.metadata.get("index_identity", {}))
+    identity_value = probe.metadata.get("index_identity")
+    if not isinstance(identity_value, Mapping):
+        return _failure("unsafe", "SCIP index identity is missing or invalid")
+    expected_identity = dict(identity_value)
     if not expected_identity or probe.metadata.get("index_sha256") != expected_identity.get(
         "sha256"
     ):

@@ -7,7 +7,9 @@ import hashlib
 import importlib.util
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 
 def _load(filename, name):
@@ -26,9 +28,17 @@ def _load(filename, name):
 
 PROVIDERS = _load("graph_providers.py", "_rir_graph_providers")
 COMMON = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
-ProviderProbe = PROVIDERS.ProviderProbe
-ProviderResult = PROVIDERS.ProviderResult
-ProviderSpec = PROVIDERS.ProviderSpec
+if any(
+    not isinstance(getattr(PROVIDERS, name, None), type)
+    for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+) or not callable(getattr(PROVIDERS, "run_provider", None)):
+    raise ImportError("graph provider contract is incomplete")
+if TYPE_CHECKING:
+    from graph_providers import ProviderProbe, ProviderResult, ProviderSpec
+else:
+    ProviderProbe = PROVIDERS.ProviderProbe
+    ProviderResult = PROVIDERS.ProviderResult
+    ProviderSpec = PROVIDERS.ProviderSpec
 
 _VERSION = re.compile(r"(?i)^codegraph\s+1\.\d+\.\d+(?:[-+][^\s]+)?$")
 _NODE_KINDS = frozenset(
@@ -381,9 +391,9 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
     if fingerprint is None or fingerprint != probe.metadata.get("source_fingerprint"):
         return _failure("stale", "repository changed after CodeGraph probe")
     spec = ProviderSpec("codegraph", probe.executable)
-    nodes = {}
-    edges = {}
-    digests = []
+    nodes: dict[object, Mapping[str, object]] = {}
+    edges: dict[tuple[object, ...], Mapping[str, object]] = {}
+    digests: list[str] = []
     for seed in tuple(seeds)[:_MAX_SEEDS]:
         term = getattr(seed, "term", None)
         if not isinstance(term, str) or not term or len(term) > 256:

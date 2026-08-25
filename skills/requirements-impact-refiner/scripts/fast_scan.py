@@ -9,11 +9,14 @@ import re
 import stat
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
+from typing import Protocol, cast
+
+from typing_extensions import TypedDict, TypeGuard
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -125,7 +128,7 @@ _SEED_KEYS = {"term", "location", "derivation", "source_sha256"}
 _CANDIDATE_KEYS = {"term", "location", "derivation"}
 
 
-def _freeze(value):
+def _freeze(value: object) -> object:
     if isinstance(value, Mapping):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
@@ -133,7 +136,7 @@ def _freeze(value):
     return value
 
 
-def _thaw(value):
+def _thaw(value: object) -> object:
     if isinstance(value, Mapping):
         return {key: _thaw(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
@@ -240,10 +243,10 @@ class FastScanResult:
 @dataclass(frozen=True)
 class PreparedFastScan:
     root: Path
-    settings: object
-    deadline: object
+    settings: graph_coordinator.GraphSettings
+    deadline: graph_coordinator.Deadline
     seeds: tuple[DerivedSeed, ...]
-    source_inventory: object
+    source_inventory: graph_coordinator.SourceInventory
     inventory_mapping: Mapping[str, object]
     request_sha256: str
     scan_id: str
@@ -262,7 +265,50 @@ def _root(value: Path) -> Path:
     return resolved
 
 
-def _safe_relative(value: str) -> bool:
+class _StoredFastScan(TypedDict):
+    schema_version: int
+    status: str
+    scan_id: str
+    receipt_id: str
+    repo_root_sha256: str
+    request_sha256: str
+    payload_sha256: str
+    settings: Mapping[str, object]
+    source_inventory: Mapping[str, object]
+    seeds: list[Mapping[str, object]]
+    graph_receipt: Mapping[str, object]
+    risk_level: str
+    frontier: list[Mapping[str, object]]
+    candidates: list[Mapping[str, object]]
+    elapsed_ms: int
+    cache_status: str
+    can_promote: bool
+    created_at: str
+
+
+class _GraphSettingsArgs(TypedDict, total=False):
+    enabled: bool
+    max_seconds: int
+    target_seconds: int
+    providers: tuple[str, ...]
+    install_policy: str
+    deep: bool
+
+
+class _Coordinator(Protocol):
+    def __call__(
+        self,
+        repo_root: Path,
+        draft: object,
+        seeds: tuple[graph_coordinator.ScanSeed, ...],
+        settings: graph_coordinator.GraphSettings,
+        *,
+        deadline: graph_coordinator.Deadline,
+        source_inventory: graph_coordinator.SourceInventory,
+    ) -> object: ...
+
+
+def _safe_relative(value: object) -> TypeGuard[str]:
     if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
         return False
     path = PurePosixPath(value)
@@ -503,12 +549,28 @@ def derive_seeds(
     return tuple(ordered)
 
 
-def _mapping(value: object) -> bool:
-    return isinstance(value, Mapping)
+def _mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
 
 
-def _string(value: object) -> bool:
+def _string(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _rows(value: object) -> TypeGuard[Sequence[Mapping[str, object]]]:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes))
+        and all(_mapping(row) for row in value)
+    )
+
+
+def _values(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
+def _row_tuple(value: object) -> tuple[Mapping[str, object], ...]:
+    return tuple(value) if _rows(value) else ()
 
 
 def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
@@ -528,10 +590,12 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
     if value["status"] not in _STATUSES:
         errors.append("status is invalid")
     for key in ("scan_id", "receipt_id"):
-        if not isinstance(value[key], str) or _HEX32.fullmatch(value[key]) is None:
+        identifier = value[key]
+        if not isinstance(identifier, str) or _HEX32.fullmatch(identifier) is None:
             errors.append(f"{key} must be 32 lowercase hex characters")
     for key in ("repo_root_sha256", "request_sha256", "payload_sha256"):
-        if not isinstance(value[key], str) or _HEX64.fullmatch(value[key]) is None:
+        digest_value = value[key]
+        if not isinstance(digest_value, str) or _HEX64.fullmatch(digest_value) is None:
             errors.append(f"{key} must be 64 lowercase hex characters")
     if not _mapping(value["settings"]):
         errors.append("settings must be an object")
@@ -572,8 +636,8 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
                 continue
             if not _string(row["term"]):
                 errors.append(f"seed row {index} term must be nonblank")
-            location = row["location"]
-            if location is not None and not _safe_relative(location):
+            seed_location = row["location"]
+            if seed_location is not None and not _safe_relative(seed_location):
                 errors.append(f"seed row {index} location is unsafe")
             if not _string(row["derivation"]):
                 errors.append(f"seed row {index} derivation must be nonblank")
@@ -582,7 +646,7 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
                 not isinstance(digest, str) or _HEX64.fullmatch(digest) is None
             ):
                 errors.append(f"seed row {index} source_sha256 is invalid")
-            identity = (row.get("term"), location)
+            identity = (row.get("term"), seed_location)
             if identity in identities:
                 errors.append(f"duplicate seed row {index}")
             identities.add(identity)
@@ -659,8 +723,14 @@ def canonical_fast_scan_bytes(value: Mapping[str, object] | FastScanReceipt) -> 
 
 def _graph_mapping(value: object) -> dict[str, object]:
     if isinstance(value, Mapping):
-        return _thaw(value)
-    return json.loads(graph_coordinator.GRAPH.canonical_receipt_bytes(value))
+        thawed = _thaw(value)
+        if _mapping(thawed):
+            return dict(thawed)
+        raise ValueError("graph receipt must be an object")
+    loaded: object = json.loads(graph_coordinator.GRAPH.canonical_receipt_bytes(value))
+    if not _mapping(loaded):
+        raise ValueError("graph receipt must be an object")
+    return dict(loaded)
 
 
 _BENIGN_SKIPS = {"binary", "encoding", "not-regular", "control"}
@@ -682,7 +752,8 @@ def _request_locale(request: FastScanRequest) -> str:
 
 
 def _only_expected_provider_gap(graph: Mapping[str, object]) -> bool:
-    providers = graph.get("providers", [])
+    provider_value = graph.get("providers", [])
+    providers = provider_value if _rows(provider_value) else ()
     unavailable = sorted(
         {
             str(row.get("name"))
@@ -695,17 +766,19 @@ def _only_expected_provider_gap(graph: Mapping[str, object]) -> bool:
     if not unavailable:
         return False
     expected = "provider unavailable; built-in fallback used: " + ", ".join(unavailable)
-    frontier = graph.get("frontier", [])
+    frontier_value = graph.get("frontier", [])
+    frontier = frontier_value if _rows(frontier_value) else ()
     return (
-        isinstance(frontier, list)
-        and len(frontier) == 1
+        len(frontier) == 1
         and str(frontier[0].get("reason", "")) == expected
         and _PROVIDER_UNAVAILABLE_REASON.fullmatch(expected) is not None
     )
 
 
-def _inventory(root: Path, deadline: object):
-    digests = {}
+def _inventory(
+    root: Path, deadline: graph_coordinator.Deadline
+) -> graph_coordinator.SourceInventory:
+    digests: dict[str, str] = {}
     unreadable = False
     for relative in _source_files(root, deadline):
         source, reason = _read_source_detailed(root, relative)
@@ -721,12 +794,17 @@ def _inventory(root: Path, deadline: object):
 
 
 def _risk(graph: Mapping[str, object]) -> str:
+    collections = []
+    for key in ("nodes", "frontier"):
+        value = graph.get(key, [])
+        collections.append(value if _rows(value) else ())
     domains = {
-        domain
-        for collection in (graph.get("nodes", []), graph.get("frontier", []))
+        str(domain)
+        for collection in collections
         for row in collection
-        if isinstance(row, Mapping)
-        for domain in row.get("risk_domains", [])
+        for domain_value in (row.get("risk_domains", []),)
+        if _values(domain_value)
+        for domain in domain_value
     }
     if domains & {"authorization/privacy", "legal/policy"}:
         return "critical"
@@ -740,7 +818,7 @@ def execute_fast_scan(
     graph_settings: Mapping[str, object],
     payload_sha256: str,
     *,
-    coordinator=graph_coordinator.trace_impact,
+    coordinator: _Coordinator = graph_coordinator.trace_impact,
 ) -> FastScanResult:
     prepared = prepare_fast_scan_identity(request, graph_settings, payload_sha256)
     locale = _request_locale(request)
@@ -759,10 +837,11 @@ def execute_fast_scan(
     except FileNotFoundError:
         existing_payload = None
     if existing_payload is not None:
-        existing = json.loads(existing_payload)
-        errors = validate_fast_scan_receipt(existing)
-        if errors or existing.get("request_sha256") != request_sha:
+        existing_value: object = json.loads(existing_payload)
+        errors = validate_fast_scan_receipt(existing_value)
+        if not _mapping(existing_value) or errors or existing_value.get("request_sha256") != request_sha:
             raise ValueError("existing fast scan receipt is invalid")
+        existing = cast(_StoredFastScan, existing_value)
         rendered = dict(existing)
         rendered["cache_status"] = "hit"
         display = fast_scan_renderer.render_fast_scan(rendered, request.audience, locale)
@@ -774,14 +853,14 @@ def execute_fast_scan(
             hashlib.sha256(existing_payload).hexdigest(),
             display,
             existing["risk_level"],
-            tuple(graph.get("paths", [])),
+            _row_tuple(graph.get("paths", [])),
             tuple(existing["frontier"]),
             tuple(existing["candidates"]),
             min(30_000, deadline.elapsed_ms()),
             "hit",
             existing["can_promote"],
         )
-    candidates = []
+    candidates: list[Mapping[str, object]] = []
     if not seeds:
         graph = {}
         status = "needs_input"
@@ -799,7 +878,10 @@ def execute_fast_scan(
                 source_inventory=source_inventory,
             )
         )
-        receipt_id = graph["receipt_id"]
+        receipt_value = graph["receipt_id"]
+        if not isinstance(receipt_value, str):
+            raise ValueError("graph receipt_id is invalid")
+        receipt_id = receipt_value
         # A missing optional provider alone must not make the documented
         # promotion path unreachable on default installs — but only when
         # every frontier entry is that disclosure. Any other frontier
@@ -817,7 +899,9 @@ def execute_fast_scan(
             else "partial"
         )
         risk_level = _risk(graph)
-        cache_status = graph.get("cache", {}).get("status", "bypassed")
+        cache_value = graph.get("cache", {})
+        cache_mapping = cache_value if _mapping(cache_value) else {}
+        cache_status = str(cache_mapping.get("status", "bypassed"))
     elapsed = min(30_000, deadline.elapsed_ms())
     receipt = FastScanReceipt(
         1,
@@ -832,7 +916,7 @@ def execute_fast_scan(
         seeds,
         graph,
         risk_level,
-        tuple(graph.get("frontier", [])),
+        _row_tuple(graph.get("frontier", [])),
         tuple(candidates),
         elapsed,
         cache_status,
@@ -851,8 +935,8 @@ def execute_fast_scan(
         digest,
         display,
         risk_level,
-        tuple(graph.get("paths", [])),
-        tuple(graph.get("frontier", [])),
+        _row_tuple(graph.get("paths", [])),
+        _row_tuple(graph.get("frontier", [])),
         tuple(candidates),
         elapsed,
         cache_status,
@@ -868,7 +952,9 @@ def prepare_fast_scan_identity(
     root = _root(request.repo_root)
     if not isinstance(payload_sha256, str) or _HEX64.fullmatch(payload_sha256) is None:
         raise ValueError("payload_sha256 must be 64 lowercase hex characters")
-    settings = graph_coordinator.GraphSettings(**dict(graph_settings))
+    settings = graph_coordinator.GraphSettings(
+        **cast(_GraphSettingsArgs, dict(graph_settings))
+    )
     deadline = graph_coordinator.Deadline(time, settings.max_seconds)
     seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
     source_inventory = _inventory(root, deadline)

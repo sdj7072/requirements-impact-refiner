@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 
 def _load_graph_contract():
@@ -32,10 +33,16 @@ def _load_graph_contract():
 
 
 GRAPH = _load_graph_contract()
-GraphNode = GRAPH.GraphNode
-GraphEdge = GRAPH.GraphEdge
-GraphPath = GRAPH.GraphPath
-FrontierEntry = GRAPH.FrontierEntry
+for _contract_class in ("GraphNode", "GraphEdge", "GraphPath", "FrontierEntry"):
+    if not isinstance(getattr(GRAPH, _contract_class, None), type):
+        raise ImportError("impact graph contract is incomplete")
+if TYPE_CHECKING:
+    from impact_graph import FrontierEntry, GraphEdge, GraphNode, GraphPath
+else:
+    GraphNode = GRAPH.GraphNode
+    GraphEdge = GRAPH.GraphEdge
+    GraphPath = GRAPH.GraphPath
+    FrontierEntry = GRAPH.FrontierEntry
 
 DEFAULT_MAX_FILE_BYTES = 1_048_576
 MAX_GRAPH_ID = 999
@@ -383,7 +390,8 @@ def _redact_sensitive_literals(text: str) -> tuple[str, frozenset[str]]:
             block = text[content_start:end]
             value = block.strip()
             sensitive.add(value)
-            indent = re.match(r"[ \t]*", block).group(0) if block else ""
+            indent_match = re.match(r"[ \t]*", block)
+            indent = indent_match.group(0) if indent_match is not None else ""
             newline = "\n" if block.endswith(("\n", "\r")) else ""
             output.append(text[match.end() : content_start])
             output.append(indent + _safe_graph_text(value, (value,)) + newline)
@@ -593,7 +601,7 @@ def _python_structure(text: str):
         tree = ast.parse(text)
     except (SyntaxError, ValueError, MemoryError, RecursionError):
         return None
-    specifiers = []
+    specifiers: list[str] = []
     defs = set()
     loads = set()
     stores = set()
@@ -817,8 +825,18 @@ def scan_repository(
 
     skipped: dict[str, str] = {}
     traversal_errors: list[str] = []
-    documents: dict[str, tuple] = {}
-    sensitive_literals = set()
+    documents: dict[
+        str,
+        tuple[
+            str,
+            frozenset[str],
+            str,
+            Mapping[str, frozenset[str]],
+            frozenset[str],
+            LanguageStructure | None,
+        ],
+    ] = {}
+    sensitive_literals: set[str] = set()
     bytes_scanned = 0
     files_scanned = 0
     exhausted = False
@@ -880,8 +898,10 @@ def scan_repository(
 
     unreadable_sources = sorted(path for path, reason in skipped.items() if reason == "unsafe-file")
 
-    def deadline_result(nodes=(), edges=()):
-        frontier = ()
+    def deadline_result(
+        nodes: Sequence[GraphNode] = (), edges: Sequence[GraphEdge] = ()
+    ) -> BuiltInScanResult:
+        frontier: tuple[FrontierEntry, ...] = ()
         if nodes:
             last = nodes[-1]
             frontier = (
@@ -907,12 +927,16 @@ def scan_repository(
     if exhausted and expired():
         return deadline_result()
 
-    seed_locations = {seed.location for seed in normalized_seeds if seed.location in documents}
+    seed_locations = {
+        seed.location
+        for seed in normalized_seeds
+        if seed.location is not None and seed.location in documents
+    }
     seed_terms = {term for seed in normalized_seeds for term in _terms(seed.term)}
     if not seed_terms:
         seed_terms = {seed.term for seed in normalized_seeds}
 
-    relationships = []
+    relationships: list[tuple[str, str, str, frozenset[str], str]] = []
     locations = sorted(documents)
     for source in locations:
         source_terms = documents[source][1]
@@ -998,7 +1022,9 @@ def scan_repository(
     remaining_locations = [
         location for location in ordered_locations if location not in seed_locations
     ]
-    candidates = [(location, None, False) for location in matched_locations]
+    candidates: list[tuple[str | None, ScanSeed | None, bool]] = [
+        (location, None, False) for location in matched_locations
+    ]
     candidates.extend((None, seed, False) for seed in supplied_only)
     candidates.extend((location, None, False) for location in remaining_locations)
     candidates.extend((location, None, True) for location in error_locations)
@@ -1007,18 +1033,19 @@ def scan_repository(
         resource_limit_reached = True
     candidates = candidates[: limits.max_nodes]
 
-    nodes = []
-    location_ids = {}
-    error_node_ids = {}
-    node_risks = {}
+    nodes: list[GraphNode] = []
+    location_ids: dict[str, str] = {}
+    error_node_ids: dict[str, str] = {}
+    node_risks: dict[str, tuple[str, ...]] = {}
     for index, (location, seed, is_error) in enumerate(candidates, start=1):
         if expired():
             return deadline_result(nodes)
         node_id = f"NODE-{index:03d}"
         if is_error:
+            assert location is not None
             safe_location = None if location == "." else location
             label = "unreadable repository directory"
-            risk = ("functionality",)
+            risk: tuple[str, ...] = ("functionality",)
             node = GraphNode(
                 node_id,
                 "file",
@@ -1031,6 +1058,7 @@ def scan_repository(
             )
             error_node_ids[location] = node_id
         elif location is None:
+            assert seed is not None
             label = _safe_graph_text(seed.term, sensitive_literals)
             risk = _risk_domains(seed.location, seed.term)
             node = GraphNode(
@@ -1076,7 +1104,7 @@ def scan_repository(
         nodes.append(node)
         node_risks[node.id] = node.risk_domains
 
-    edge_candidates = []
+    edge_candidates: list[tuple[str, str, str, str, str]] = []
     for source, target, evidence, modules, basis in relationships:
         if expired():
             return deadline_result(nodes)
@@ -1099,8 +1127,8 @@ def scan_repository(
         exhausted = True
         resource_limit_reached = True
     edge_candidates = edge_candidates[: limits.max_edges]
-    edges = []
-    adjacency = {}
+    edges: list[GraphEdge] = []
+    adjacency: dict[str, list[tuple[str, str]]] = {}
     for index, (source, target, kind, confidence, evidence) in enumerate(edge_candidates, start=1):
         if expired():
             return deadline_result(nodes, edges)
@@ -1126,12 +1154,12 @@ def scan_repository(
     # Emit one deterministic shortest path per destination, per reachable
     # component. Enumerating every simple-path permutation makes dense lexical
     # graphs explode and produces visually repetitive prefixes.
-    raw_paths = []
+    raw_paths: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     start_ids = sorted(
         location_ids[location] for location in seed_locations if location in location_ids
     )
     path_limit_reached = False
-    covered_nodes = set()
+    covered_nodes: set[str] = set()
     for start_id in start_ids:
         if path_limit_reached:
             exhausted = True
@@ -1141,7 +1169,9 @@ def scan_repository(
         seen = set(covered_nodes)
         seen.add(start_id)
         covered_nodes.add(start_id)
-        pending_paths = [(start_id, (start_id,), ())]
+        pending_paths: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
+            (start_id, (start_id,), ())
+        ]
         pending_index = 0
         while pending_index < len(pending_paths):
             if expired():
@@ -1174,8 +1204,8 @@ def scan_repository(
         if not path_limit_reached:
             by_edge_id = {edge.id: edge for edge in edges}
             current = start_id
-            representative_nodes = (start_id,)
-            representative_edges = ()
+            representative_nodes: tuple[str, ...] = (start_id,)
+            representative_edges: tuple[str, ...] = ()
             while len(representative_edges) < 6:
                 choices = [
                     (target, edge_id)
@@ -1219,7 +1249,7 @@ def scan_repository(
         exhausted = True
         path_limit_reached = True
     unique_paths = unique_paths[: limits.max_paths]
-    paths = []
+    paths: list[GraphPath] = []
     for index, (path_nodes, path_edges) in enumerate(unique_paths, start=1):
         domains = {domain for node_id in path_nodes for domain in node_risks[node_id]}
         ordered_domains = tuple(sorted(domains, key=lambda item: (_RISK_RANK[item], item)))
@@ -1227,15 +1257,15 @@ def scan_repository(
             GraphPath(f"PATH-{index:03d}", path_nodes, path_edges, len(path_edges), ordered_domains)
         )
 
-    frontier_items = []
+    frontier_items: list[FrontierEntry] = []
     for location in error_locations:
-        node_id = error_node_ids.get(location)
-        if node_id is not None and len(frontier_items) < GRAPH.MAX_FRONTIER:
+        frontier_node_id = error_node_ids.get(location)
+        if frontier_node_id is not None and len(frontier_items) < GRAPH.MAX_FRONTIER:
             display = "repository root" if location == "." else location
             frontier_items.append(
                 FrontierEntry(
                     f"FRONTIER-{len(frontier_items) + 1:03d}",
-                    node_id,
+                    frontier_node_id,
                     f"unreadable directory: {display}",
                     ("functionality",),
                 )

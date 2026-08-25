@@ -39,7 +39,9 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 
 def _load_providers():
@@ -58,9 +60,17 @@ def _load_providers():
 
 
 PROVIDERS = _load_providers()
-ProviderProbe = PROVIDERS.ProviderProbe
-ProviderResult = PROVIDERS.ProviderResult
-ProviderSpec = PROVIDERS.ProviderSpec
+if any(
+    not isinstance(getattr(PROVIDERS, name, None), type)
+    for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+) or not callable(getattr(PROVIDERS, "run_provider", None)):
+    raise ImportError("graph provider contract is incomplete")
+if TYPE_CHECKING:
+    from graph_providers import ProviderProbe, ProviderResult, ProviderSpec
+else:
+    ProviderProbe = PROVIDERS.ProviderProbe
+    ProviderResult = PROVIDERS.ProviderResult
+    ProviderSpec = PROVIDERS.ProviderSpec
 
 _VERSION = re.compile(r"(?im)^ast-grep\s+0\.45\.\d+(?:[-+][^\s]+)?\s*$")
 _LANGUAGES = {
@@ -510,9 +520,9 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
             "ast-grep", "stale", "structural-inferred", "repository changed after ast-grep probe"
         )
     spec = ProviderSpec("ast-grep", probe.executable)
-    nodes = {}
-    edges = {}
-    digests = []
+    nodes: dict[str, Mapping[str, object]] = {}
+    edges: dict[tuple[object, ...], Mapping[str, object]] = {}
+    digests: list[str] = []
     for index, seed in enumerate(tuple(seeds)[:_MAX_SEEDS]):
         term = getattr(seed, "term", None)
         location = _safe_relative(getattr(seed, "location", None))

@@ -12,7 +12,7 @@ import shutil
 import signal
 import stat
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -48,7 +48,11 @@ import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import Any
+from typing import BinaryIO, Protocol, cast
+
+
+class Clock(Protocol):
+    def monotonic(self) -> float: ...
 
 STDOUT_LIMIT = 4 * 1024 * 1024
 STDERR_LIMIT = 256 * 1024
@@ -106,9 +110,9 @@ def _freeze(value):
 class Deadline:
     """One monotonic deadline shared by discovery and all provider queries."""
 
-    clock: Any
+    clock: Clock
     max_seconds: float
-    started: float = None
+    started: float | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -126,6 +130,7 @@ class Deadline:
 
     @property
     def expires(self) -> float:
+        assert self.started is not None
         return self.started + float(self.max_seconds)
 
     def remaining(self, cap=None) -> float:
@@ -140,13 +145,14 @@ class Deadline:
         return self.remaining() <= 0.0
 
     def elapsed_ms(self) -> int:
+        assert self.started is not None
         return max(0, round((float(self.clock.monotonic()) - self.started) * 1000))
 
 
 @dataclass(frozen=True)
 class ProviderSpec:
     name: str
-    executable: Path = None
+    executable: Path | None = None
 
     def __post_init__(self) -> None:
         canonical = _ALIASES.get(self.name)
@@ -165,13 +171,13 @@ class ProviderProbe:
     name: str
     status: str
     confidence: str = "lexical"
-    executable: Path = None
-    version: str = None
-    executable_sha256: str = None
-    capabilities: tuple = ()
-    detail: str = None
-    repo_root: Path = None
-    metadata: Mapping[str, Any] = None
+    executable: Path | None = None
+    version: str | None = None
+    executable_sha256: str | None = None
+    capabilities: tuple[str, ...] = ()
+    detail: str | None = None
+    repo_root: Path | None = None
+    metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         canonical = _ALIASES.get(self.name)
@@ -213,16 +219,16 @@ class ProviderQuery:
 
     provider: str
     status: str
-    argv: tuple
+    argv: tuple[str, ...]
     environment: Mapping[str, str]
     stdout: str = ""
     stderr: str = ""
-    returncode: int = None
-    executable_sha256: str = None
-    parsed_json: Any = None
+    returncode: int | None = None
+    executable_sha256: str | None = None
+    parsed_json: object = None
     stdout_truncated: bool = False
     stderr_truncated: bool = False
-    detail: str = None
+    detail: str | None = None
 
     def __post_init__(self) -> None:
         canonical = _ALIASES.get(self.provider)
@@ -250,12 +256,12 @@ class ProviderResult:
     provider: str
     status: str
     confidence: str
-    nodes: tuple = ()
-    edges: tuple = ()
-    frontier: tuple = ()
-    raw_receipt_sha256: tuple = ()
-    detail: str = None
-    metadata: Mapping[str, Any] = None
+    nodes: tuple[Mapping[str, object], ...] = ()
+    edges: tuple[Mapping[str, object], ...] = ()
+    frontier: tuple[Mapping[str, object], ...] = ()
+    raw_receipt_sha256: tuple[str, ...] = ()
+    detail: str | None = None
+    metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         canonical = _ALIASES.get(self.provider)
@@ -313,7 +319,7 @@ class _ExecutableSnapshot:
     inode: int
     size: int
     modified_ns: int
-    directory_fd: int = None
+    directory_fd: int | None = None
 
 
 def _bounded_detail(value: object) -> str:
@@ -745,17 +751,23 @@ def _bounded_subprocess(
                 timed_out = True
                 post_kill_expires = now + 0.25
                 _terminate_process_group(process, process_group_id)
-            if timed_out and now >= post_kill_expires:
-                for stream in tuple(buffers):
-                    try:
-                        selector.unregister(stream)
-                    except (KeyError, ValueError):
-                        pass
-                break
+            if timed_out:
+                assert post_kill_expires is not None
+                if now >= post_kill_expires:
+                    for stream in tuple(buffers):
+                        try:
+                            selector.unregister(stream)
+                        except (KeyError, ValueError):
+                            pass
+                    break
             wait_until = post_kill_expires if timed_out else expires
+            assert wait_until is not None
             events = selector.select(max(0.0, min(wait_until - now, 0.05)))
             for key, _ in events:
-                stream = key.fileobj
+                file_object = key.fileobj
+                if not hasattr(file_object, "fileno"):
+                    raise TypeError("provider selector stream must provide fileno()")
+                stream = cast(BinaryIO, file_object)
                 chunk = os.read(stream.fileno(), 64 * 1024)
                 if not chunk:
                     selector.unregister(stream)
@@ -795,12 +807,14 @@ def run_provider(
     try:
         safe_arguments = _validate_arguments(arguments)
     except PermissionError as error:
-        executable = str(spec.executable) if spec.executable else spec.name
-        return _empty_query(spec, "unsafe", (executable, *tuple(arguments)), {}, error)
+        executable_text = str(spec.executable) if spec.executable else spec.name
+        return _empty_query(spec, "unsafe", (executable_text, *tuple(arguments)), {}, error)
     root = Path(repo_root)
     if root.is_symlink() or not root.is_dir():
-        executable = str(spec.executable) if spec.executable else spec.name
-        return _empty_query(spec, "unsafe", (executable, *safe_arguments), {}, "unsafe repo_root")
+        executable_text = str(spec.executable) if spec.executable else spec.name
+        return _empty_query(
+            spec, "unsafe", (executable_text, *safe_arguments), {}, "unsafe repo_root"
+        )
     root = root.resolve()
     if spec.executable is None:
         return _empty_query(spec, "missing", (spec.name, *safe_arguments), {}, "missing executable")
@@ -980,7 +994,7 @@ def _configured_specs(requested, search_path, deep):
         )
         specs = []
         for name in names:
-            executable = None
+            executable: Path | None = None
             for candidate in _DISCOVERY_NAMES[name]:
                 found = shutil.which(candidate, path=search_path)
                 if found:
@@ -993,20 +1007,24 @@ def _configured_specs(requested, search_path, deep):
     for value in values:
         path = Path(value)
         if path.is_absolute():
-            name = _ALIASES.get(path.name)
-            if name is None:
+            canonical_name = _ALIASES.get(path.name)
+            if canonical_name is None:
                 unsafe.append(_unsafe_probe(value, "absolute path basename is not allowed"))
             else:
-                specs.append(ProviderSpec(name, path))
+                specs.append(ProviderSpec(canonical_name, path))
         elif value in _ALIASES:
-            name = _ALIASES[value]
-            found = None
-            for candidate in _DISCOVERY_NAMES[name]:
+            canonical_name = _ALIASES[value]
+            found_path: Path | None = None
+            for candidate in _DISCOVERY_NAMES[canonical_name]:
                 current = shutil.which(candidate, path=search_path)
                 if current:
-                    found = Path(current).absolute()
+                    found_path = Path(current).absolute()
                     break
-            specs.append(ProviderSpec(name, found) if found else ProviderSpec(name))
+            specs.append(
+                ProviderSpec(canonical_name, found_path)
+                if found_path
+                else ProviderSpec(canonical_name)
+            )
         else:
             unsafe.append(
                 _unsafe_probe(value, "configured provider must be a fixed name or absolute path")

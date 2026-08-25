@@ -11,10 +11,12 @@ import re
 import stat
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import cast
+
+from typing_extensions import TypeGuard
 
 
 def _load_graph_contract():
@@ -33,6 +35,11 @@ def _load_graph_contract():
 
 
 GRAPH = _load_graph_contract()
+if not isinstance(getattr(GRAPH, "MAX_RECEIPT_BYTES", None), int) or not all(
+    callable(getattr(GRAPH, name, None))
+    for name in ("canonical_receipt_bytes", "load_receipt_bytes")
+):
+    raise ImportError("impact graph cache contract is incomplete")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _CACHE_COMPONENTS = (
     ".requirements-impact-refiner",
@@ -66,11 +73,31 @@ _INVENTORY_REASONS = frozenset({"deadline", "collection-limit", "traversal", "un
 MAX_CACHE_BYTES = GRAPH.MAX_RECEIPT_BYTES * 2
 
 
+def _mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
+
+
+def _rows(value: object) -> TypeGuard[Sequence[Mapping[str, object]]]:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes))
+        and all(_mapping(row) for row in value)
+    )
+
+
+def _strings(value: object) -> TypeGuard[Sequence[str]]:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes))
+        and all(isinstance(item, str) for item in value)
+    )
+
+
 @dataclass(frozen=True)
 class CacheResult:
     status: str
     key: str
-    receipt: Mapping[str, Any] | None
+    receipt: Mapping[str, object] | None
     invalidated_nodes: tuple[str, ...]
     artifact: Path | None = None
 
@@ -131,17 +158,17 @@ def _cache_directory(root: Path, create: bool) -> Path | None:
     return current
 
 
-def _normalize_receipt(value) -> tuple[dict[str, Any], bytes]:
+def _normalize_receipt(value: object) -> tuple[dict[str, object], bytes]:
     canonical = GRAPH.canonical_receipt_bytes(value)
     normalized, errors = GRAPH.load_receipt_bytes(canonical)
     if errors or normalized is None:
         raise ValueError("invalid graph receipt")
-    return normalized, canonical
+    return cast(dict[str, object], normalized), canonical
 
 
 def _identity(
     root: Path,
-    receipt: Mapping[str, Any],
+    receipt: Mapping[str, object],
     source_digests,
     schema_version: int,
     inventory_complete: bool,
@@ -263,7 +290,7 @@ def publish(
 
 
 def invalidate(
-    receipt: Mapping[str, Any],
+    receipt: Mapping[str, object],
     cached_source_digests: Mapping[str, str],
     current_source_digests: Mapping[str, str],
 ) -> tuple[str, ...]:
@@ -273,12 +300,22 @@ def invalidate(
     changed_paths = {
         path for path in set(cached) | set(current) if cached.get(path) != current.get(path)
     }
-    nodes = receipt.get("nodes", ())
-    direct = {node["id"] for node in nodes if node.get("location") in changed_paths}
+    node_value = receipt.get("nodes", ())
+    nodes = node_value if _rows(node_value) else ()
+    direct = {
+        node_id
+        for node in nodes
+        if node.get("location") in changed_paths
+        and isinstance((node_id := node.get("id")), str)
+    }
     invalidated = set(direct)
-    adjacency = {}
-    for edge in receipt.get("edges", ()):
-        adjacency.setdefault(edge.get("source"), set()).add(edge.get("target"))
+    adjacency: dict[str, set[str]] = {}
+    edge_value = receipt.get("edges", ())
+    edges = edge_value if _rows(edge_value) else ()
+    for edge in edges:
+        source, target = edge.get("source"), edge.get("target")
+        if isinstance(source, str) and isinstance(target, str):
+            adjacency.setdefault(source, set()).add(target)
     pending = sorted(direct)
     while pending:
         source = pending.pop(0)
@@ -286,8 +323,11 @@ def invalidate(
             if target not in invalidated:
                 invalidated.add(target)
                 pending.append(target)
-    for path in receipt.get("paths", ()):
-        path_nodes = path.get("nodes", ())
+    path_value = receipt.get("paths", ())
+    paths = path_value if _rows(path_value) else ()
+    for path in paths:
+        path_node_value = path.get("nodes", ())
+        path_nodes = path_node_value if _strings(path_node_value) else ()
         for index, node_id in enumerate(path_nodes):
             if node_id in direct:
                 invalidated.update(path_nodes[index:])
@@ -295,7 +335,7 @@ def invalidate(
     return tuple(sorted(invalidated, key=lambda node_id: (node_order.get(node_id, 10**9), node_id)))
 
 
-def _read_artifact(path: Path) -> dict[str, Any] | None:
+def _read_artifact(path: Path) -> dict[str, object] | None:
     try:
         metadata = path.lstat()
     except OSError:
@@ -313,7 +353,7 @@ def _read_artifact(path: Path) -> dict[str, Any] | None:
         return None
     if value.get("cache_schema_version") != 1:
         return None
-    return value
+    return cast(dict[str, object], value)
 
 
 def load(
@@ -388,8 +428,10 @@ def load(
     changed_paths = {
         path for path in set(cached) | set(current) if cached.get(path) != current.get(path)
     }
+    normalized_node_value = normalized["nodes"]
+    normalized_nodes = normalized_node_value if _rows(normalized_node_value) else ()
     mapped_paths = {
-        node.get("location") for node in normalized["nodes"] if node.get("location") is not None
+        node.get("location") for node in normalized_nodes if node.get("location") is not None
     }
     if not changed_paths <= mapped_paths:
         return _miss(key)

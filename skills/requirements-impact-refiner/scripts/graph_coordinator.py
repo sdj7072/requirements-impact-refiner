@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Protocol, cast
 
 
 def _load_sibling(filename, module_name):
@@ -37,18 +38,54 @@ BUILTIN = _load_sibling("graph_builtin.py", "_rir_graph_builtin")
 CACHE = _load_sibling("graph_cache.py", "_rir_graph_cache")
 PROVIDERS = _load_sibling("graph_providers.py", "_rir_graph_providers")
 
-Deadline = PROVIDERS.Deadline
-ProviderProbe = PROVIDERS.ProviderProbe
-ProviderQuery = PROVIDERS.ProviderQuery
-ProviderResult = PROVIDERS.ProviderResult
-ProviderSpec = PROVIDERS.ProviderSpec
+for _module, _classes, _functions in (
+    (GRAPH, ("GraphSettings",), ("canonical_receipt_bytes", "load_receipt_bytes")),
+    (BUILTIN, ("ScanSeed", "ScanLimits", "BuiltInScanResult"), ("scan_repository",)),
+    (CACHE, ("CacheResult",), ("load", "publish", "_source_digests")),
+    (
+        PROVIDERS,
+        ("Deadline", "ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec"),
+        ("discover_providers", "run_provider"),
+    ),
+):
+    if any(not isinstance(getattr(_module, name, None), type) for name in _classes) or any(
+        not callable(getattr(_module, name, None)) for name in _functions
+    ):
+        raise ImportError("graph sibling contract is incomplete")
+
+if TYPE_CHECKING:
+    from graph_builtin import ScanLimits, ScanSeed
+    from graph_providers import Deadline, ProviderProbe, ProviderQuery, ProviderResult, ProviderSpec
+    from impact_graph import GraphSettings
+else:
+    Deadline = PROVIDERS.Deadline
+    ProviderProbe = PROVIDERS.ProviderProbe
+    ProviderQuery = PROVIDERS.ProviderQuery
+    ProviderResult = PROVIDERS.ProviderResult
+    ProviderSpec = PROVIDERS.ProviderSpec
+    ScanSeed = BUILTIN.ScanSeed
+    ScanLimits = BUILTIN.ScanLimits
+    GraphSettings = GRAPH.GraphSettings
+
 discover_providers = PROVIDERS.discover_providers
 run_provider = PROVIDERS.run_provider
-ScanSeed = BUILTIN.ScanSeed
-ScanLimits = BUILTIN.ScanLimits
-GraphSettings = GRAPH.GraphSettings
 
-ADAPTERS = {}
+
+class _Adapter(Protocol):
+    def probe(
+        self, spec: ProviderSpec, root: Path, deadline: Deadline, runner: object
+    ) -> ProviderProbe: ...
+
+    def query(
+        self,
+        probe: ProviderProbe,
+        seeds: tuple[ScanSeed, ...],
+        deadline: Deadline,
+        runner: object,
+    ) -> ProviderResult: ...
+
+
+ADAPTERS: dict[str, _Adapter] = {}
 _HEX32 = re.compile(r"[0-9a-f]{32}")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 # Canonical FrontierEntry has no severity field. Boundary-crossing domains at
@@ -96,7 +133,7 @@ def _settings(value) -> GraphSettings:
         settings = GraphSettings(**dict(value))
     else:
         raise TypeError("settings must be GraphSettings or a mapping")
-    errors = []
+    errors: list[str] = []
     GRAPH._validate_settings(settings.to_mapping(), errors)
     if errors:
         raise ValueError("invalid graph settings: " + "; ".join(errors))
@@ -260,7 +297,7 @@ def _path_sort(item):
     )
 
 
-def _adapter(name):
+def _adapter(name: str) -> _Adapter | None:
     configured = ADAPTERS.get(name)
     if configured is not None:
         return configured
@@ -268,7 +305,12 @@ def _adapter(name):
     path = Path(__file__).with_name(filename)
     if not path.is_file():
         return None
-    return _load_sibling(filename, "_rir_" + filename[:-3])
+    loaded = _load_sibling(filename, "_rir_" + filename[:-3])
+    if not callable(getattr(loaded, "probe", None)) or not callable(
+        getattr(loaded, "query", None)
+    ):
+        raise ImportError("provider adapter contract is incomplete")
+    return cast(_Adapter, loaded)
 
 
 def _current_cache_key(root: Path):
@@ -400,9 +442,9 @@ def _load_cache(
 
 def _collect_source_digests(root: Path, deadline: Deadline):
     """Collect the exact built-in document identity without expanding relationships."""
-    skipped = {}
-    traversal_errors = []
-    digests = {}
+    skipped: dict[str, str] = {}
+    traversal_errors: list[str] = []
+    digests: dict[str, str] = {}
     files = 0
     total_bytes = 0
     if deadline.expired():
@@ -571,7 +613,7 @@ def _merge_provider_results(base, results):
     paths = list(base.paths)
     frontier = list(base.frontier)
     identity = {(node.kind, node.label, node.location): node.id for node in nodes}
-    edge_pairs = {}
+    edge_pairs: dict[tuple[str, str], set[str]] = {}
     for edge in edges:
         edge_pairs.setdefault((edge.source, edge.target), set()).add(edge.kind)
     compacted = False
@@ -706,7 +748,7 @@ def _merge_provider_results(base, results):
                 ordered,
             )
         )
-    adjacency = {}
+    adjacency: dict[str, list[tuple[str, str]]] = {}
     provider_sources = set()
     provider_targets = set()
     for edge in provider_edges:
@@ -723,7 +765,9 @@ def _merge_provider_results(base, results):
         ),
     )
     known_paths = {path.edges for path in paths}
-    pending = [(root, (root,), ()) for root in reversed(roots)]
+    pending: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
+        (root, (root,), ()) for root in reversed(roots)
+    ]
     expansions = 0
     while pending and len(paths) < min(GRAPH.MAX_PATHS, 999):
         current, path_nodes, path_edges = pending.pop()
@@ -915,11 +959,11 @@ def receipt_sha256(path) -> str:
             payload.extend(chunk)
     finally:
         os.close(descriptor)
-    payload = bytes(payload)
-    loaded, errors = GRAPH.load_receipt_bytes(payload)
+    payload_bytes = bytes(payload)
+    loaded, errors = GRAPH.load_receipt_bytes(payload_bytes)
     if loaded is None or errors:
         raise ValueError("graph receipt is invalid")
-    return hashlib.sha256(payload).hexdigest()
+    return hashlib.sha256(payload_bytes).hexdigest()
 
 
 def _unavailable_frontier(nodes, probes, provider_results):
@@ -1029,7 +1073,7 @@ def trace_impact(
         )
 
     requested = tuple(item for item in settings.providers if item != "builtin")
-    probes = ()
+    probes: tuple[ProviderProbe, ...] = ()
     if settings.enabled and requested and not deadline.expired():
         probes = discover_providers(
             root,
@@ -1085,8 +1129,8 @@ def trace_impact(
         if cached.budget_status == "closed" or not cached.frontier:
             return cached
 
-    prepared_probes = []
-    prepared_adapters = {}
+    prepared_probes: list[ProviderProbe] = []
+    prepared_adapters: dict[str, _Adapter] = {}
     for probe in probes:
         if deadline.expired():
             prepared_probes.append(
@@ -1139,8 +1183,8 @@ def trace_impact(
         prepared_adapters[probe.name] = adapter
     probes = tuple(prepared_probes)
 
-    provider_results = []
-    final_probes = list(probes)
+    provider_results: list[ProviderResult] = []
+    final_probes: list[ProviderProbe] = list(probes)
     for index, probe in enumerate(probes):
         if deadline.expired():
             for remaining in range(index, len(final_probes)):

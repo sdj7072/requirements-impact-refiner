@@ -40,7 +40,9 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 
 def _load(filename, name):
@@ -60,9 +62,17 @@ def _load(filename, name):
 PROVIDERS = _load("graph_providers.py", "_rir_graph_providers")
 COMMON = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
 CODEGRAPH = _load("graph_adapter_codegraph.py", "_rir_graph_adapter_codegraph")
-ProviderProbe = PROVIDERS.ProviderProbe
-ProviderResult = PROVIDERS.ProviderResult
-ProviderSpec = PROVIDERS.ProviderSpec
+if any(
+    not isinstance(getattr(PROVIDERS, name, None), type)
+    for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+) or not callable(getattr(PROVIDERS, "run_provider", None)):
+    raise ImportError("graph provider contract is incomplete")
+if TYPE_CHECKING:
+    from graph_providers import ProviderProbe, ProviderResult, ProviderSpec
+else:
+    ProviderProbe = PROVIDERS.ProviderProbe
+    ProviderResult = PROVIDERS.ProviderResult
+    ProviderSpec = PROVIDERS.ProviderSpec
 
 _VERSION = re.compile(r"(?i)^joern\s+(?P<version>4\.\d+\.\d+(?:[-+][^\s]+)?)$")
 _CREATOR_VERSION = re.compile(r"4\.\d+\.\d+(?:[-+][^\s]+)?")
@@ -202,7 +212,7 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
             "failed",
             "verified-provider",
             spec.executable,
-            detail=error,
+            detail=str(error),
             repo_root=resolved,
         )
     if metadata["projectRoot"] != str(resolved):
@@ -338,9 +348,9 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
     ) or graph_digest != probe.metadata.get("graph_sha256"):
         return _failure("stale", "repository or Joern graph changed after probe")
     spec = ProviderSpec("joern", probe.executable)
-    nodes = {}
-    edges = {}
-    digests = []
+    nodes: dict[object, Mapping[str, object]] = {}
+    edges: dict[tuple[object, ...], Mapping[str, object]] = {}
+    digests: list[str] = []
     for seed in tuple(seeds)[:16]:
         term = getattr(seed, "term", None)
         if not isinstance(term, str) or not term or len(term) > 256:

@@ -1,7 +1,9 @@
 """Bounded user-facing rendering for Fast Scan receipts."""
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+
+from typing_extensions import TypeGuard
 
 WORD_LIMIT = 180
 AUDIENCES = {"simple", "balanced", "technical"}
@@ -89,6 +91,26 @@ def _text(value):
     )
 
 
+def _mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
+
+
+def _rows(value: object) -> TypeGuard[Sequence[Mapping[str, object]]]:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes))
+        and all(_mapping(row) for row in value)
+    )
+
+
+def _values(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
+def _strings(value: object) -> TypeGuard[Sequence[str]]:
+    return _values(value) and all(isinstance(item, str) for item in value)
+
+
 def _localized(value, locale, table):
     return table.get(locale, {}).get(value, value)
 
@@ -146,9 +168,9 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
         raise ValueError("audience is invalid")
     if locale not in LOCALES:
         locale = "en"
-    status = receipt.get("status")
+    status = str(receipt.get("status", "needs_input"))
     status_label = _localized(status, locale, STATUS_LABELS)
-    cache = receipt.get("cache_status", "bypassed")
+    cache = str(receipt.get("cache_status", "bypassed"))
     if locale == "ko":
         cache_label = {"hit": "적중", "miss": "미적중", "bypassed": "사용 안 함"}.get(cache, cache)
         footer = f"검사 범위: {status_label}; {receipt.get('elapsed_ms', 0)}ms; 캐시 {cache_label}."
@@ -170,7 +192,8 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
             "ja": " 変更境界となる具体的なファイル、シンボル、または API は何ですか?",
         }.get(locale, " Which file, symbol, or API is the concrete boundary of this change?")
     if status == "needs_input":
-        candidates = receipt.get("candidates", [])
+        candidate_value = receipt.get("candidates", [])
+        candidates = candidate_value if _rows(candidate_value) else ()
         empty = {"ko": "저장소에서 확인된 후보 없음", "ja": "リポジトリで確認できた候補なし"}.get(
             locale, "no repository-backed candidate"
         )
@@ -187,11 +210,15 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
             "ja": "高速影響スキャンには追加情報が必要です。候補範囲: ",
         }.get(locale, "Fast impact scan needs more input. Candidate boundaries: ")
         return _bounded_lines([intro + listed + "."], footer)
-    graph = receipt.get("graph_receipt", {})
-    node_rows = graph.get("nodes", [])
+    graph_value = receipt.get("graph_receipt", {})
+    graph = graph_value if _mapping(graph_value) else {}
+    node_value = graph.get("nodes", [])
+    node_rows = node_value if _rows(node_value) else ()
     nodes = {row.get("id"): row for row in node_rows}
     label_counts = Counter(str(row.get("label")) for row in node_rows)
-    edges = {row.get("id"): row for row in graph.get("edges", [])}
+    edge_value = graph.get("edges", [])
+    edge_rows = edge_value if _rows(edge_value) else ()
+    edges = {row.get("id"): row for row in edge_rows}
     risk = _localized(receipt.get("risk_level", "unknown"), locale, RISK_LABELS)
     if locale == "ko":
         lines = [f"빠른 영향도 검사: 위험도 {risk}.", "발생 가능한 영향 경로:"]
@@ -199,22 +226,36 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
         lines = [f"高速影響スキャン: リスク {risk}。", "発生する可能性のある影響経路:"]
     else:
         lines = ["Fast impact scan: " + str(risk) + " risk.", "Possible issue paths:"]
-    for path in graph.get("paths", [])[:8]:
-        path_nodes = [nodes.get(key, {}) for key in path.get("nodes", [])]
+    path_value = graph.get("paths", [])
+    path_rows = path_value if _rows(path_value) else ()
+    for path in path_rows[:8]:
+        path_node_value = path.get("nodes", [])
+        path_node_ids = path_node_value if _strings(path_node_value) else ()
+        path_nodes = [nodes.get(key, {}) for key in path_node_ids]
         display_labels = []
-        for row, key in zip(path_nodes, path.get("nodes", [])):
+        for row, key in zip(path_nodes, path_node_ids):
             label = str(row.get("label", key))
             location = row.get("location")
             display_labels.append(location if location and label_counts[label] > 1 else label)
         labels = " → ".join(_text(value) for value in display_labels)
-        line = "- " + labels + ": " + _text(_domains(path.get("risk_domains", []), locale)) + "."
+        domain_value = path.get("risk_domains", [])
+        domains = domain_value if _values(domain_value) else ()
+        line = "- " + labels + ": " + _text(_domains(domains, locale)) + "."
         if audience == "technical":
-            path_edges = [edges.get(key, {}) for key in path.get("edges", [])]
-            providers = sorted({row.get("provider") for row in path_nodes if row.get("provider")})
-            confidences = sorted(
-                {row.get("confidence") for row in path_edges + path_nodes if row.get("confidence")}
+            path_edge_value = path.get("edges", [])
+            path_edge_ids = path_edge_value if _strings(path_edge_value) else ()
+            path_edges = [edges.get(key, {}) for key in path_edge_ids]
+            providers = sorted(
+                {str(row.get("provider")) for row in path_nodes if row.get("provider")}
             )
-            locations = [row.get("location") for row in path_nodes if row.get("location")]
+            confidences = sorted(
+                {
+                    str(row.get("confidence"))
+                    for row in path_edges + path_nodes
+                    if row.get("confidence")
+                }
+            )
+            locations = [str(row.get("location")) for row in path_nodes if row.get("location")]
             keys = {
                 "ko": (" 제공자 ", "; 신뢰도 ", "; 위치 ", "사용 불가", "미확인"),
                 "ja": (" provider ", "; 信頼度 ", "; 場所 ", "利用不可", "未確認"),
@@ -223,7 +264,8 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
             line += keys[1] + _text("+".join(confidences) or keys[4])
             line += keys[2] + _text(" + ".join(locations) or keys[3]) + "."
         lines.append(line)
-    frontier = receipt.get("frontier", [])
+    frontier_value = receipt.get("frontier", [])
+    frontier = frontier_value if _rows(frontier_value) else ()
     protected = []
     if status == "partial":
         protected.append(
