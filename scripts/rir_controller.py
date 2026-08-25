@@ -18,7 +18,8 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict, cast
 
 if TYPE_CHECKING:
     from graph_builtin import ScanSeed as ScanSeedType
@@ -27,6 +28,15 @@ if TYPE_CHECKING:
     from impact_graph import GraphReceipt as GraphReceiptType
     from impact_graph import GraphSettings as GraphSettingsType
     from impact_graph import ProviderStatus as ProviderStatusType
+    from rir_contracts import (
+        BeginRequest,
+        DraftResult,
+        FinalizeRequest,
+        FinalizeResult,
+        ScanRequest,
+        TraceRequest,
+        TraceResult,
+    )
     from typing_extensions import TypeGuard
 
 
@@ -36,6 +46,28 @@ class _FcntlContract(Protocol):
     LOCK_UN: int
 
     def flock(self, fd: int, operation: int) -> None: ...
+
+
+class _ControllerContractsContract(Protocol):
+    MAX_BEGIN_BYTES: int
+    MAX_FINALIZE_BYTES: int
+    MAX_STRING_BYTES: int
+    MAX_TRACE_BYTES: int
+    BeginRequest: type
+    DraftResult: type
+    FinalizeRequest: type
+    FinalizeResult: type
+    ScanRequest: type
+    TraceRequest: type
+    TraceResult: type
+
+    def _local_key(self, value: object, label: str) -> str: ...
+
+    def bounded_bytes(self, value: object, maximum: int, label: str) -> bytes: ...
+
+    def canonical_bytes(self, value: object) -> bytes: ...
+
+    def validate_analysis(self, analysis: Mapping[str, object]) -> None: ...
 
 
 def _is_fcntl_contract(value: object) -> TypeGuard[_FcntlContract]:
@@ -58,29 +90,113 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+
+def _regular_module_path(path: Path) -> Path | None:
+    try:
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        return None
+    return resolved
+
+
+def _is_controller_contracts_contract(value: object) -> TypeGuard[_ControllerContractsContract]:
+    integer_names = (
+        "MAX_BEGIN_BYTES",
+        "MAX_FINALIZE_BYTES",
+        "MAX_STRING_BYTES",
+        "MAX_TRACE_BYTES",
+    )
+    class_names = (
+        "BeginRequest",
+        "DraftResult",
+        "FinalizeRequest",
+        "FinalizeResult",
+        "ScanRequest",
+        "TraceRequest",
+        "TraceResult",
+    )
+    callable_names = ("_local_key", "bounded_bytes", "canonical_bytes", "validate_analysis")
+    return (
+        all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in integer_names
+        )
+        and all(isinstance(getattr(value, name, None), type) for name in class_names)
+        and all(callable(getattr(value, name, None)) for name in callable_names)
+    )
+
+
+def _module_uses_sibling(value: object, expected: Path) -> bool:
+    module_file = getattr(value, "__file__", None)
+    return isinstance(module_file, str) and _regular_module_path(Path(module_file)) == expected
+
+
+def _load_controller_contracts() -> _ControllerContractsContract:
+    sibling = SCRIPT_DIR / "rir_contracts.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("controller contracts sibling is unsafe")
+    module_name = (
+        "_rir_controller_contracts_"
+        + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    )
+    candidates = (sys.modules.get("rir_contracts"), sys.modules.get(module_name))
+    for candidate in candidates:
+        if _module_uses_sibling(candidate, expected) and _is_controller_contracts_contract(
+            candidate
+        ):
+            sys.modules[module_name] = cast(ModuleType, candidate)
+            return candidate
+    previous = sys.modules.get(module_name)
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed controller contracts sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+        raise ImportError("cannot load fixed controller contracts sibling") from error
+    if not _is_controller_contracts_contract(module):
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+        raise ImportError("controller contracts sibling contract is incomplete")
+    return module
+
+
+CONTRACTS = _load_controller_contracts()
+MAX_BEGIN_BYTES = CONTRACTS.MAX_BEGIN_BYTES
+MAX_FINALIZE_BYTES = CONTRACTS.MAX_FINALIZE_BYTES
+MAX_STRING_BYTES = CONTRACTS.MAX_STRING_BYTES
+MAX_TRACE_BYTES = CONTRACTS.MAX_TRACE_BYTES
+if not TYPE_CHECKING:
+    BeginRequest = CONTRACTS.BeginRequest
+    DraftResult = CONTRACTS.DraftResult
+    FinalizeRequest = CONTRACTS.FinalizeRequest
+    FinalizeResult = CONTRACTS.FinalizeResult
+    ScanRequest = CONTRACTS.ScanRequest
+    TraceRequest = CONTRACTS.TraceRequest
+    TraceResult = CONTRACTS.TraceResult
+_local_key = CONTRACTS._local_key
+bounded_bytes = CONTRACTS.bounded_bytes
+canonical_bytes = CONTRACTS.canonical_bytes
+validate_analysis = CONTRACTS.validate_analysis
+
 import compact_state
 import fast_scan
 import fast_scan_store
 import impact_renderer
 import payload_identity
 import report_store
-from rir_contracts import (
-    MAX_BEGIN_BYTES,
-    MAX_FINALIZE_BYTES,
-    MAX_STRING_BYTES,
-    MAX_TRACE_BYTES,
-    BeginRequest,
-    DraftResult,
-    FinalizeRequest,
-    FinalizeResult,
-    ScanRequest,
-    TraceRequest,
-    TraceResult,
-    _local_key,
-    bounded_bytes,
-    canonical_bytes,
-    validate_analysis,
-)
 
 MAX_DRAFT_BYTES = 4 * 1024 * 1024
 MAX_TRACE_SEEDS = 128
