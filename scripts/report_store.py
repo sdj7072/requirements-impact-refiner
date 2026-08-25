@@ -10,6 +10,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -235,7 +236,10 @@ def publish_revision(
     state, state_errors = compact_state.load_state_bytes(state_bytes)
     if state_errors or state is None:
         raise ValueError("; ".join(state_errors))
-    report = state["report"]
+    typed_state = cast(
+        compact_state.State, state
+    )  # compact_state.load_state_bytes validates the complete State shape.
+    report = typed_state["report"]
     report_id = report["id"]
     revision = report["revision"]
     report_dir = report_directory(repo_root, report_id, create=True)

@@ -7,6 +7,7 @@ import re
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -17,6 +18,7 @@ import impact_report
 
 VALIDATOR_PATH = SCRIPT_DIR / "validate-impact-report.py"
 VALIDATOR_SPEC = importlib.util.spec_from_file_location("compact_render_validator", VALIDATOR_PATH)
+assert VALIDATOR_SPEC is not None and VALIDATOR_SPEC.loader is not None
 VALIDATOR = importlib.util.module_from_spec(VALIDATOR_SPEC)
 VALIDATOR_SPEC.loader.exec_module(VALIDATOR)
 GENERIC_ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
@@ -69,7 +71,7 @@ def _table(title: str, headers: Sequence[str], rows: Sequence[Sequence[str]]) ->
     return "\n".join(lines)
 
 
-def _render_report_state(state):
+def _render_report_state(state: compact_state.State) -> str:
     report = state["report"]
     return _table(
         "Report State",
@@ -85,7 +87,7 @@ def _render_report_state(state):
     )
 
 
-def _render_summary(state):
+def _render_summary(state: compact_state.State) -> str:
     return _table(
         "Change Impact Summary",
         (
@@ -114,7 +116,7 @@ def _render_summary(state):
     )
 
 
-def _render_original_requirement(state):
+def _render_original_requirement(state: compact_state.State) -> str:
     row = state["original_requirement"]
     return _table(
         "Original Requirement",
@@ -123,7 +125,7 @@ def _render_original_requirement(state):
     )
 
 
-def _render_refined_requirement(state):
+def _render_refined_requirement(state: compact_state.State) -> str:
     row = state["refined_requirement"]
     decision = _identifier(row["decision"]) if row["decision"] else "—"
     return _table(
@@ -140,7 +142,7 @@ def _render_refined_requirement(state):
     )
 
 
-def _render_current_behavior(state):
+def _render_current_behavior(state: compact_state.State) -> str:
     return _table(
         "Current Behavior",
         ("Invariant ID", "Current behavior", "Evidence level", "Evidence"),
@@ -156,7 +158,7 @@ def _render_current_behavior(state):
     )
 
 
-def _render_preserved_invariants(state):
+def _render_preserved_invariants(state: compact_state.State) -> str:
     return _table(
         "Preserved Invariants",
         ("Invariant ID", "Must preserve for requirement", "Affected impacts", "Evidence"),
@@ -172,7 +174,7 @@ def _render_preserved_invariants(state):
     )
 
 
-def _render_impacts(state):
+def _render_impacts(state: compact_state.State) -> str:
     pre = state["report"]["phase"] == "pre-decision"
     rows = []
     for row in state["impacts"]:
@@ -211,9 +213,10 @@ def _render_impacts(state):
     )
 
 
-def _render_decision(state):
+def _render_decision(state: compact_state.State) -> str:
     if state["report"]["phase"] == "pre-decision":
         needed = state["decision_needed"]
+        assert needed is not None
         return _table(
             "Decision Needed",
             ("Question", "Option", "Impact IDs", "Trade-off"),
@@ -243,7 +246,7 @@ def _render_decision(state):
     )
 
 
-def _render_delta(state):
+def _render_delta(state: compact_state.State) -> str:
     return _table(
         "Impact Delta",
         ("Category", "Impact IDs"),
@@ -254,7 +257,7 @@ def _render_delta(state):
     )
 
 
-def _render_history(state):
+def _render_history(state: compact_state.State) -> str:
     pre = state["report"]["phase"] == "pre-decision"
     rows = []
     for row in state["history"]:
@@ -279,7 +282,7 @@ def _render_history(state):
     )
 
 
-def _render_criteria(state):
+def _render_criteria(state: compact_state.State) -> str:
     return _table(
         "Acceptance and Regression Criteria",
         (
@@ -304,7 +307,7 @@ def _render_criteria(state):
     )
 
 
-def _render_unresolved(state):
+def _render_unresolved(state: compact_state.State) -> str:
     return _table(
         "Unresolved, Deferred, and Blocked Items",
         ("Impact ID", "State", "Information gap or rationale", "Linked decision", "Next owner"),
@@ -321,7 +324,7 @@ def _render_unresolved(state):
     )
 
 
-def _render_scope(state):
+def _render_scope(state: compact_state.State) -> str:
     return _table(
         "Analysis Scope and Limitations",
         ("Scope or limitation", "Inspected evidence", "Consequence for confidence"),
@@ -332,7 +335,7 @@ def _render_scope(state):
     )
 
 
-def _render_handoff(state):
+def _render_handoff(state: compact_state.State) -> str:
     row = state["handoff"]
     refined = (
         _identifier(row["refined_requirement"])
@@ -364,6 +367,9 @@ def render_markdown(state: Mapping[str, object]) -> str:
     errors = compact_state.validate_state(state)
     if errors:
         raise ValueError("; ".join(errors))
+    typed_state = cast(
+        compact_state.State, state
+    )  # compact_state.validate_state proves the complete State shape.
     sections = (
         _render_report_state,
         _render_summary,
@@ -382,7 +388,7 @@ def render_markdown(state: Mapping[str, object]) -> str:
     )
     return (
         "# Requirements Impact Report\n\n"
-        + "\n\n".join(section(state) for section in sections)
+        + "\n\n".join(section(typed_state) for section in sections)
         + "\n"
     )
 
@@ -402,14 +408,16 @@ def validate_rendered_markdown(text: str, previous_bytes: bytes | None = None) -
     )
 
 
-def _artifact_path(state, suffix):
+def _artifact_path(state: compact_state.State, suffix: str) -> str:
     report = state["report"]
     return f".requirements-impact-refiner/reports/{report['id']}/revision-{report['revision']:04d}.{suffix}"
 
 
-def _graph_scope(state):
-    paths = {}
-    coverage = None
+def _graph_scope(
+    state: compact_state.State,
+) -> tuple[dict[str, tuple[str, str]], str | None]:
+    paths: dict[str, tuple[str, str]] = {}
+    coverage: str | None = None
     for row in state["scope"]:
         boundary = row["boundary"]
         match = re.fullmatch(r"Graph paths for (IMP-\d{3})", boundary)
@@ -420,20 +428,22 @@ def _graph_scope(state):
     return paths, coverage
 
 
-def _structured_graph_paths(state):
+def _structured_graph_paths(
+    state: compact_state.State,
+) -> dict[str, list[compact_state.GraphPath]]:
     return {row["impact"]: row["paths"] for row in state.get("graph_paths", [])}
 
 
-def _short(value, limit):
+def _short(value: object, limit: int) -> str:
     words = str(value).split()
     return " ".join(words[:limit]) + (" …" if len(words) > limit else "")
 
 
-def _word_count(lines):
+def _word_count(lines: Sequence[str]) -> int:
     return len("\n".join(lines).split())
 
 
-def _compact_path(evidence, confidence, audience):
+def _compact_path(evidence: str, confidence: str, audience: str) -> str:
     evidence = evidence.split(" || ", 1)[0]
     confidence = confidence.split(" || ", 1)[0]
     if audience == "simple":
@@ -443,7 +453,7 @@ def _compact_path(evidence, confidence, audience):
     return f"{evidence} ({confidence})"
 
 
-def _structured_compact_path(path, audience):
+def _structured_compact_path(path: compact_state.GraphPath, audience: str) -> str:
     label = _short(" → ".join(path["labels"]), 24)
     if audience == "simple":
         return label
@@ -457,11 +467,11 @@ def _structured_compact_path(path, audience):
     )
 
 
-def _severity_rank(row):
+def _severity_rank(row: compact_state.Summary) -> int:
     return {"critical": 0, "high": 1, "medium": 2, "low": 3}[row["severity"]]
 
 
-def _coverage_text(value):
+def _coverage_text(value: str) -> str:
     match = re.search(r"(Impact scan: [^·]+).*?(\d+ unknown frontiers)", value)
     if match:
         return f"{match.group(1).strip()} · {match.group(2)}"
@@ -472,8 +482,11 @@ def render_compact(state: Mapping[str, object]) -> str:
     errors = compact_state.validate_state(state)
     if errors:
         raise ValueError("; ".join(errors))
+    typed_state = cast(
+        compact_state.State, state
+    )  # compact_state.validate_state proves the complete State shape.
     ranked = sorted(
-        enumerate(state["summary"]), key=lambda item: (_severity_rank(item[1]), item[0])
+        enumerate(typed_state["summary"]), key=lambda item: (_severity_rank(item[1]), item[0])
     )
     displayed = [row for _, row in ranked[:COMPACT_SUMMARY_ROWS]]
     lines = [
@@ -486,15 +499,17 @@ def render_compact(state: Mapping[str, object]) -> str:
         lines.append(
             f"| {_identifier(row['impact_id'])} | {_text(_short(row['possible_issue'], COMPACT_FIELD_WORDS))} | {_text(_short(row['affected'], COMPACT_FIELD_WORDS))} | {_text(_short(row['prevention'], COMPACT_FIELD_WORDS))} |"
         )
-    omitted = len(state["summary"]) - len(displayed)
+    omitted = len(typed_state["summary"]) - len(displayed)
     if omitted:
         lines.append(f"| — | {omitted} lower-priority impacts remain in the full report. | — | — |")
-    graph_paths, graph_coverage = _graph_scope(state)
-    structured_paths = _structured_graph_paths(state)
+    graph_paths, graph_coverage = _graph_scope(typed_state)
+    structured_paths = _structured_graph_paths(typed_state)
     remaining = [
-        row for row in state["summary"] if row["status"] in {"accepted", "deferred", "blocked"}
+        row
+        for row in typed_state["summary"]
+        if row["status"] in {"accepted", "deferred", "blocked"}
     ]
-    tail = []
+    tail: list[str] = []
     if remaining:
         shown_risks = remaining[:3]
         risk_text = "; ".join(
@@ -503,46 +518,52 @@ def render_compact(state: Mapping[str, object]) -> str:
         if len(remaining) > len(shown_risks):
             risk_text += f"; {len(remaining) - len(shown_risks)} more in the full report"
         tail.extend(("", "**Remaining risks:** " + risk_text))
-    if state["report"]["phase"] == "pre-decision":
-        needed = state["decision_needed"]
+    if typed_state["report"]["phase"] == "pre-decision":
+        needed = typed_state["decision_needed"]
+        assert needed is not None
         tail.extend(("", f"**Decision needed:** {_text(_short(needed['question'], 18))}"))
         tail.extend(
             f"- {_text(_short(option['option'], 10))}: {_text(_short(option['tradeoff'], 12))}"
             for option in needed["options"]
         )
     else:
-        shown_decisions = state["decisions"][:3]
+        shown_decisions = typed_state["decisions"][:3]
         choices = "; ".join(_text(_short(row["choice"], 18)) for row in shown_decisions)
-        if len(state["decisions"]) > len(shown_decisions):
-            choices += f"; {len(state['decisions']) - len(shown_decisions)} more in the full report"
+        if len(typed_state["decisions"]) > len(shown_decisions):
+            choices += (
+                f"; {len(typed_state['decisions']) - len(shown_decisions)} more in the full report"
+            )
         tail.extend(("", f"**Recorded decision:** {choices}"))
     tail.extend(
         (
             "",
-            f"Validation: passed · Report {_identifier(state['report']['id'])} revision {state['report']['revision']}",
-            f"State: `{_artifact_path(state, 'json')}`",
-            f"Full report: `{_artifact_path(state, 'md')}`",
+            f"Validation: passed · Report {_identifier(typed_state['report']['id'])} revision {typed_state['report']['revision']}",
+            f"State: `{_artifact_path(typed_state, 'json')}`",
+            f"Full report: `{_artifact_path(typed_state, 'md')}`",
         )
     )
-    graph_lines = []
+    graph_lines: list[str] = []
     if graph_coverage is not None:
         graph_lines.extend(("", f"**Coverage:** {_text(_coverage_text(graph_coverage))}"))
     if graph_paths or structured_paths:
-        candidates = []
+        candidates: list[str] = []
         for _, row in ranked:
             structured = structured_paths.get(row["impact_id"])
             if structured:
-                rendered = _structured_compact_path(structured[0], state["settings"]["audience"])
+                rendered = _structured_compact_path(
+                    structured[0], typed_state["settings"]["audience"]
+                )
             else:
                 path = graph_paths.get(row["impact_id"])
                 if path is None:
                     continue
                 evidence, confidence = path
                 rendered = _short(
-                    _compact_path(evidence, confidence, state["settings"]["audience"]), 36
+                    _compact_path(evidence, confidence, typed_state["settings"]["audience"]),
+                    36,
                 )
             candidates.append(f"- {_identifier(row['impact_id'])}: {_text(rendered)}")
-        selected = []
+        selected: list[str] = []
         for candidate in candidates:
             proposal = [*lines, "", "**Impact paths:**", *selected, candidate, *graph_lines, *tail]
             if _word_count(proposal) <= COMPACT_WORD_LIMIT:

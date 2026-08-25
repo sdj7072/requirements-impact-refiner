@@ -521,10 +521,10 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
             if category in {"new", "reopened"}:
                 continue
             for impact_id in impact_ids:
-                state = impact_states.get(impact_id)
-                if state is not None and STATE_TO_DELTA.get(state) != category:
+                delta_state = impact_states.get(impact_id)
+                if delta_state is not None and STATE_TO_DELTA.get(delta_state) != category:
                     errors.append(
-                        f"impact {impact_id} state {state} disagrees with delta category {category}"
+                        f"impact {impact_id} state {delta_state} disagrees with delta category {category}"
                     )
 
     unresolved_counts: dict[str, int] = {}
@@ -631,8 +631,8 @@ def main(argv: list[str] | None = None) -> int:
         if not current_errors and not previous_errors:
             print(render_delta(calculate_delta(previous_report, current_report)))
     if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
+        for message in errors:
+            print(message, file=sys.stderr)
         return 1
     print("valid impact report")
     return 0

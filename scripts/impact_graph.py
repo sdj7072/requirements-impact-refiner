@@ -9,7 +9,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Any
+
+from typing_extensions import TypeGuard
 
 MAX_RECEIPT_BYTES = 1_048_576
 MAX_STRING_LENGTH = 4_096
@@ -108,11 +109,11 @@ def _tuples(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _immutable_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
+def _immutable_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
     return MappingProxyType({key: _freeze(item) for key, item in value.items()})
 
 
-def _freeze(value: Any) -> Any:
+def _freeze(value: object) -> object:
     if isinstance(value, Mapping):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
@@ -122,7 +123,7 @@ def _freeze(value: Any) -> Any:
     return value
 
 
-def _json_value(value: Any) -> Any:
+def _json_value(value: object) -> object:
     if isinstance(value, Mapping):
         return {key: _json_value(item) for key, item in value.items()}
     if isinstance(value, (tuple, list, frozenset, set)):
@@ -229,7 +230,7 @@ class GraphReceipt:
     frontier: tuple[FrontierEntry, ...]
     timings_ms: Mapping[str, int]
     budget_status: str
-    cache: Mapping[str, Any]
+    cache: Mapping[str, object]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "providers", tuple(self.providers))
@@ -241,7 +242,7 @@ class GraphReceipt:
         object.__setattr__(self, "cache", _immutable_mapping(self.cache))
 
 
-def _mapping(value: object) -> bool:
+def _mapping(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
@@ -258,16 +259,24 @@ def _keys(
     return not missing and not unknown
 
 
-def _identifier(value: object, kind: str) -> bool:
+def _identifier(value: object, kind: str) -> TypeGuard[str]:
     return isinstance(value, str) and _ID_PATTERNS[kind].fullmatch(value) is not None
 
 
-def _string(value: object, *, allow_empty: bool = False) -> bool:
+def _string(value: object, *, allow_empty: bool = False) -> TypeGuard[str]:
     return (
         isinstance(value, str)
         and len(value) <= MAX_STRING_LENGTH
         and (allow_empty or bool(value.strip()))
     )
+
+
+def _confidence(value: object) -> TypeGuard[str]:
+    return value in CONFIDENCES
+
+
+def _known_provider(value: object, providers: Mapping[str, object]) -> TypeGuard[str]:
+    return value in providers
 
 
 def _safe_path(value: object) -> bool:
@@ -327,13 +336,15 @@ def _validate_settings(value: object, errors: list[str]) -> None:
         errors.append(f"settings has invalid install_policy {value.get('install_policy')}")
 
 
-def _check_limit(rows: object, label: str, maximum: int, errors: list[str]) -> list[dict[str, Any]]:
+def _check_limit(
+    rows: object, label: str, maximum: int, errors: list[str]
+) -> list[dict[str, object]]:
     if not isinstance(rows, list):
         errors.append(f"{label} must be an array")
         return []
     if len(rows) > maximum:
         errors.append(f"{label} exceeds maximum collection size")
-    result: list[dict[str, Any]] = []
+    result: list[dict[str, object]] = []
     for index, row in enumerate(rows, start=1):
         if not _mapping(row):
             errors.append(f"{label} row {index} must be an object")
@@ -347,7 +358,7 @@ def _valid_hash(value: object, length: int) -> bool:
     return isinstance(value, str) and pattern.fullmatch(value) is not None
 
 
-def _receipt_mapping(value: object) -> dict[str, Any] | None:
+def _receipt_mapping(value: object) -> dict[str, object] | None:
     if isinstance(value, GraphReceipt):
         return {
             "schema_version": 1,
@@ -462,33 +473,35 @@ def validate_receipt(value: object) -> tuple[str, ...]:
     _validate_settings(receipt["settings"], errors)
 
     provider_rows = _check_limit(receipt["providers"], "providers", MAX_PROVIDERS, errors)
-    providers: dict[str, dict[str, Any]] = {}
+    providers: dict[str, dict[str, object]] = {}
     provider_fields = {"name", "status", "confidence", "version", "executable_sha256"}
     for row in provider_rows:
         _keys(errors, "provider", row, provider_fields)
-        name = row.get("name")
-        if not _string(name):
+        provider_name = row.get("name")
+        if not _string(provider_name):
             errors.append("provider requires a name")
             continue
-        if name in providers:
-            errors.append(f"duplicate provider {name}")
-        providers[name] = row
+        if provider_name in providers:
+            errors.append(f"duplicate provider {provider_name}")
+        providers[provider_name] = row
         if row.get("status") not in PROVIDER_STATUSES:
-            errors.append(f"provider {name} has invalid status {row.get('status')}")
+            errors.append(f"provider {provider_name} has invalid status {row.get('status')}")
         if row.get("confidence") not in CONFIDENCES:
-            errors.append(f"provider {name} has invalid confidence {row.get('confidence')}")
+            errors.append(
+                f"provider {provider_name} has invalid confidence {row.get('confidence')}"
+            )
         for field in ("version", "executable_sha256"):
             current = row.get(field)
             if current is not None and not _string(current):
-                errors.append(f"provider {name} has invalid {field}")
+                errors.append(f"provider {provider_name} has invalid {field}")
         executable = row.get("executable_sha256")
         if executable is not None and not _valid_hash(executable, 64):
             errors.append(
-                f"provider {name} executable_sha256 must be a lowercase SHA-256 hex string"
+                f"provider {provider_name} executable_sha256 must be a lowercase SHA-256 hex string"
             )
 
     node_rows = _check_limit(receipt["nodes"], "nodes", MAX_NODES, errors)
-    nodes: dict[str, dict[str, Any]] = {}
+    nodes: dict[str, dict[str, object]] = {}
     node_fields = {
         "id",
         "kind",
@@ -519,17 +532,19 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         if location is not None and not _safe_path(location):
             errors.append(f"node {identifier} has unsafe location {location}")
         provider = row.get("provider")
-        if provider not in providers:
+        known_provider = provider if _known_provider(provider, providers) else None
+        if known_provider is None:
             errors.append(f"node {identifier} references unknown provider {provider}")
         confidence = row.get("confidence")
-        if confidence not in CONFIDENCES:
+        if not _confidence(confidence):
             errors.append(f"node {identifier} has invalid confidence {confidence}")
-        elif (
-            provider in providers
-            and providers[provider].get("confidence") in _CONFIDENCE_RANK
-            and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[providers[provider]["confidence"]]
-        ):
-            errors.append(f"node {identifier} upgrades provider {provider} confidence")
+        elif known_provider is not None:
+            provider_confidence = providers[known_provider].get("confidence")
+            if (
+                _confidence(provider_confidence)
+                and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[provider_confidence]
+            ):
+                errors.append(f"node {identifier} upgrades provider {provider} confidence")
         source = row.get("source_sha256")
         if source is not None and not _valid_hash(source, 64):
             errors.append(f"node {identifier} source_sha256 must be a lowercase SHA-256 hex string")
@@ -538,7 +553,7 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         )
 
     edge_rows = _check_limit(receipt["edges"], "edges", MAX_EDGES, errors)
-    edges: dict[str, dict[str, Any]] = {}
+    edges: dict[str, dict[str, object]] = {}
     edge_fields = {
         "id",
         "source",
@@ -570,17 +585,19 @@ def validate_receipt(value: object) -> tuple[str, ...]:
         if not _string(row.get("evidence")):
             errors.append(f"edge {identifier} requires evidence")
         provider = row.get("provider")
-        if provider not in providers:
+        known_provider = provider if _known_provider(provider, providers) else None
+        if known_provider is None:
             errors.append(f"edge {identifier} references unknown provider {provider}")
         confidence = row.get("confidence")
-        if confidence not in CONFIDENCES:
+        if not _confidence(confidence):
             errors.append(f"edge {identifier} has invalid confidence {confidence}")
-        elif (
-            provider in providers
-            and providers[provider].get("confidence") in _CONFIDENCE_RANK
-            and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[providers[provider]["confidence"]]
-        ):
-            errors.append(f"edge {identifier} upgrades provider {provider} confidence")
+        elif known_provider is not None:
+            provider_confidence = providers[known_provider].get("confidence")
+            if (
+                _confidence(provider_confidence)
+                and _CONFIDENCE_RANK[confidence] < _CONFIDENCE_RANK[provider_confidence]
+            ):
+                errors.append(f"edge {identifier} upgrades provider {provider} confidence")
         source = row.get("source_sha256")
         if source is not None and not _valid_hash(source, 64):
             errors.append(f"edge {identifier} source_sha256 must be a lowercase SHA-256 hex string")
@@ -683,7 +700,7 @@ def validate_receipt(value: object) -> tuple[str, ...]:
     return tuple(errors)
 
 
-def load_receipt_bytes(payload: bytes) -> tuple[dict[str, Any] | None, tuple[str, ...]]:
+def load_receipt_bytes(payload: bytes) -> tuple[dict[str, object] | None, tuple[str, ...]]:
     """Decode a bounded, UTF-8 JSON receipt without accepting malformed input."""
     if not isinstance(payload, bytes):
         return None, ("receipt must be bytes",)
@@ -699,7 +716,7 @@ def load_receipt_bytes(payload: bytes) -> tuple[dict[str, Any] | None, tuple[str
     return (value, errors) if not errors else (None, errors)
 
 
-def canonical_receipt_bytes(value: Mapping[str, Any] | GraphReceipt) -> bytes:
+def canonical_receipt_bytes(value: Mapping[str, object] | GraphReceipt) -> bytes:
     """Return the single stable JSON representation used for receipt digests."""
     receipt = _receipt_mapping(value)
     errors = validate_receipt(receipt)

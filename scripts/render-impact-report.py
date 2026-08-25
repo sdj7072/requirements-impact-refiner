@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -15,7 +16,7 @@ import compact_state
 import impact_renderer
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Render or convert an impact report")
     parser.add_argument("state", nargs="?", type=Path)
     parser.add_argument("--from-markdown", type=Path)
@@ -40,7 +41,7 @@ def _publish(text: str, output: Path | None, force: bool) -> int:
     return 0
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if (args.state is None) == (args.from_markdown is None):
         print("provide exactly one state path or --from-markdown", file=sys.stderr)
@@ -49,14 +50,15 @@ def main(argv=None):
         if args.from_markdown is not None:
             markdown = args.from_markdown.read_text(encoding="utf-8")
             state, errors = impact_renderer.state_from_markdown(markdown)
-            if errors:
+            if errors or state is None:
                 for error in errors:
                     print(error, file=sys.stderr)
                 return 1
             rendered = json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         else:
+            assert args.state is not None
             state, errors = compact_state.load_state_bytes(args.state.read_bytes())
-            if errors:
+            if errors or state is None:
                 for error in errors:
                     print(error, file=sys.stderr)
                 return 1

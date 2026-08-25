@@ -399,7 +399,7 @@ def impact_states(report: ParsedReport) -> dict[str, str]:
 
 
 def authored_delta(report: ParsedReport) -> dict[str, set[str]]:
-    delta = {category: set() for category in DELTA_CATEGORIES}
+    delta: dict[str, set[str]] = {category: set() for category in DELTA_CATEGORIES}
     for row in report.tables.get("Impact Delta", ()):
         category = unquote(row.get("Category", "")).lower()
         if category in delta:
@@ -411,7 +411,7 @@ def calculate_delta(
     previous: ParsedReport | None,
     current: ParsedReport,
 ) -> dict[str, list[str]]:
-    result = {category: [] for category in DELTA_CATEGORIES}
+    result: dict[str, list[str]] = {category: [] for category in DELTA_CATEGORIES}
     previous_states = impact_states(previous) if previous is not None else {}
     for impact_id, current_state in impact_states(current).items():
         previous_state = previous_states.get(impact_id)
