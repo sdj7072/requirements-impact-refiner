@@ -4,6 +4,7 @@ import re
 import shlex
 import shutil
 import struct
+import subprocess
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -166,6 +167,7 @@ class PackagingTest(unittest.TestCase):
             "scripts/rir_mcp_server.py",
             "scripts/rir_controller.py",
             "scripts/rir_contracts.py",
+            "scripts/rir_storage.py",
             "scripts/compact_state.py",
             "scripts/impact_graph.py",
             "scripts/graph_builtin.py",
@@ -199,6 +201,30 @@ class PackagingTest(unittest.TestCase):
                 target.write_bytes(original + b"\nmutation")
                 self.assertNotEqual(PAYLOAD_IDENTITY.payload_sha256(copy_root), baseline, name)
                 target.write_bytes(original)
+
+    def test_runtime_lock_artifacts_are_neither_tracked_nor_shipped(self):
+        tracked_result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        )
+        tracked = tuple(path.decode("utf-8") for path in tracked_result.stdout.split(b"\0") if path)
+
+        def is_runtime_lock(path):
+            return path == ".requirements-impact-refiner/drafts/.draft-transaction.lock" or (
+                re.fullmatch(
+                    r"\.requirements-impact-refiner/reports/[^/]+/\.controller\.lock",
+                    path,
+                )
+                is not None
+            )
+
+        self.assertEqual(tuple(path for path in tracked if is_runtime_lock(path)), ())
+        shipped = tuple(
+            path.relative_to(ROOT).as_posix() for path in PAYLOAD_IDENTITY.functional_paths(ROOT)
+        )
+        self.assertEqual(tuple(path for path in shipped if is_runtime_lock(path)), ())
 
     def load(self, relative_path):
         return json.loads((ROOT / relative_path).read_text(encoding="utf-8"))

@@ -5,3 +5,5 @@
 .coverage.*
 __pycache__/
 *.pyc
+/.requirements-impact-refiner/drafts/.draft-transaction.lock
+/.requirements-impact-refiner/reports/*/.controller.lock

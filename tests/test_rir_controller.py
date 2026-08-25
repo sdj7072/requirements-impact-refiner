@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
@@ -689,7 +690,7 @@ else:
                         side_effect=AssertionError("binding recovery must not republish"),
                     ),
                     mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
+                        CONTROLLER.STORAGE, "_rename_noreplace", side_effect=interrupting_rename
                     ),
                     mock.patch.object(CONTROLLER.os, "link", side_effect=interrupting_link),
                     mock.patch.object(CONTROLLER.os, "unlink", side_effect=interrupting_unlink),
@@ -858,12 +859,12 @@ else:
                         side_effect=AssertionError("cleanup recovery must not republish"),
                     ),
                     mock.patch.object(
-                        CONTROLLER,
+                        CONTROLLER.STORAGE,
                         "_write_private_transaction_component",
                         side_effect=interrupting_write,
                     ),
                     mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=interrupting_rename
+                        CONTROLLER.STORAGE, "_rename_noreplace", side_effect=interrupting_rename
                     ),
                     mock.patch.object(CONTROLLER.os, "unlink", side_effect=interrupting_unlink),
                 ):
@@ -1045,12 +1046,12 @@ else:
                     with (
                         mock.patch.object(CONTROLLER.secrets, "token_hex", return_value=token),
                         mock.patch.object(
-                            CONTROLLER,
+                            CONTROLLER.STORAGE,
                             "_write_private_transaction_component",
                             side_effect=fail_manifest,
                         ),
                         mock.patch.object(
-                            CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                            CONTROLLER.STORAGE, "_rename_noreplace", side_effect=replacing_rename
                         ),
                         mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                     ):
@@ -1103,7 +1104,7 @@ else:
 
         with (
             mock.patch.object(CONTROLLER.secrets, "token_hex", return_value=token),
-            mock.patch.object(CONTROLLER, "_rename_noreplace", side_effect=race_claim),
+            mock.patch.object(CONTROLLER.STORAGE, "_rename_noreplace", side_effect=race_claim),
         ):
             with self.assertRaisesRegex(ValueError, "compare-and-swap|quarantine|uncertain"):
                 CONTROLLER._cas_replace_private_draft(
@@ -1542,7 +1543,7 @@ else:
 
                 with (
                     mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                        CONTROLLER.STORAGE, "_rename_noreplace", side_effect=replacing_rename
                     ),
                     mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                 ):
@@ -1607,7 +1608,7 @@ else:
                         side_effect=interrupt_stale_quarantine,
                     ),
                     mock.patch.object(
-                        CONTROLLER,
+                        CONTROLLER.STORAGE,
                         "_rename_noreplace",
                         side_effect=interrupt_stale_quarantine_rename,
                     ),
@@ -1672,7 +1673,7 @@ else:
 
                 with (
                     mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                        CONTROLLER.STORAGE, "_rename_noreplace", side_effect=replacing_rename
                     ),
                     mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                 ):
@@ -1758,7 +1759,7 @@ else:
                 try:
                     with (
                         mock.patch.object(
-                            CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                            CONTROLLER.STORAGE, "_rename_noreplace", side_effect=replacing_rename
                         ),
                         mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                     ):
@@ -1894,7 +1895,7 @@ else:
 
         try:
             with mock.patch.object(
-                CONTROLLER,
+                CONTROLLER.STORAGE,
                 "_rename_noreplace",
                 side_effect=insert_at_destination_window,
             ):
@@ -1994,7 +1995,7 @@ else:
                             side_effect=OSError("injected component fsync failure"),
                         ),
                         mock.patch.object(
-                            CONTROLLER, "_rename_noreplace", side_effect=replacing_rename
+                            CONTROLLER.STORAGE, "_rename_noreplace", side_effect=replacing_rename
                         ),
                         mock.patch.object(CONTROLLER.os, "unlink", side_effect=replacing_unlink),
                     ):
@@ -2106,7 +2107,7 @@ else:
                 with (
                     mock.patch.object(CONTROLLER.os, "unlink", side_effect=insert_at_late_window),
                     mock.patch.object(
-                        CONTROLLER, "_rename_noreplace", side_effect=insert_at_late_rename
+                        CONTROLLER.STORAGE, "_rename_noreplace", side_effect=insert_at_late_rename
                     ),
                 ):
                     with self.assertRaisesRegex(
@@ -2187,7 +2188,7 @@ else:
                 side_effect=interrupt_before_quarantine_cleanup,
             ),
             mock.patch.object(
-                CONTROLLER,
+                CONTROLLER.STORAGE,
                 "_rename_noreplace",
                 side_effect=interrupt_before_quarantine_rename,
             ),
@@ -2237,7 +2238,7 @@ else:
         clock = FakeClock()
         real_lock = CONTROLLER._report_lock
 
-        @CONTROLLER.contextmanager
+        @contextmanager
         def expire_after_lock(root, report_id, deadline=None):
             with real_lock(root, report_id, deadline=deadline):
                 clock.current = 30.0
@@ -2341,7 +2342,7 @@ else:
         clock = FakeClock()
         real_lock = CONTROLLER._report_lock
 
-        @CONTROLLER.contextmanager
+        @contextmanager
         def expire_after_lock(root, report_id, deadline=None):
             with real_lock(root, report_id, deadline=deadline):
                 clock.current = 30.0
