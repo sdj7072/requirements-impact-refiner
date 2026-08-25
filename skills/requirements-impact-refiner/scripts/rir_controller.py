@@ -18,7 +18,8 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict, cast
 
 if TYPE_CHECKING:
     from graph_builtin import ScanSeed as ScanSeedType
@@ -159,11 +160,18 @@ def _load_controller_contracts() -> _ControllerContractsContract:
         "_rir_controller_contracts_"
         + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
     )
-    if "rir_contracts" not in sys.modules:
-        return _load_registered_contracts("rir_contracts", expected)
-    canonical = sys.modules.get("rir_contracts")
     hashed_present = module_name in sys.modules
     hashed = sys.modules.get(module_name)
+    if "rir_contracts" not in sys.modules:
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError("controller contracts sibling is unsafe")
+            if not _is_controller_contracts_contract(hashed):
+                raise ImportError("controller contracts sibling contract is incomplete")
+            sys.modules["rir_contracts"] = cast(ModuleType, hashed)
+            return hashed
+        return _load_registered_contracts("rir_contracts", expected)
+    canonical = sys.modules.get("rir_contracts")
     if _module_uses_sibling(canonical, expected):
         if not _is_controller_contracts_contract(canonical):
             raise ImportError("controller contracts sibling contract is incomplete")

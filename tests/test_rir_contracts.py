@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -7,6 +8,7 @@ import pickle
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -144,6 +146,123 @@ class RirContractsTest(unittest.TestCase):
             sys.modules.update(preserved)
             for name in controller_names:
                 sys.modules.pop(name, None)
+
+    def test_vacated_canonical_alias_reuses_existing_same_root_hash(self):
+        prefix = "_rir_controller_contracts_"
+        preserved = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "rir_contracts" or name.startswith(prefix)
+        }
+        controller_names = ("vacated_alias_controller_one", "vacated_alias_controller_two")
+        try:
+            for name in preserved:
+                sys.modules.pop(name, None)
+            with tempfile.TemporaryDirectory() as temporary:
+                conflict_path = Path(temporary) / "rir_contracts.py"
+                conflict_path.write_text(
+                    "MAX_BEGIN_BYTES = MAX_FINALIZE_BYTES = MAX_STRING_BYTES = MAX_TRACE_BYTES = 1\n"
+                    + "\n".join(f"class {name}: pass" for name in CONTRACT_NAMES)
+                    + "\ndef _local_key(value, label): return 'conflict'\n"
+                    + "def bounded_bytes(value, maximum, label): return b'conflict'\n"
+                    + "def canonical_bytes(value): return b'conflict'\n"
+                    + "def validate_analysis(analysis): return None\n",
+                    encoding="utf-8",
+                )
+                load_module("rir_contracts", conflict_path)
+                first = load_module(controller_names[0], SCRIPTS / "rir_controller.py")
+                hashed_name = next(
+                    name
+                    for name, module in sys.modules.items()
+                    if name.startswith(prefix) and module is first.CONTRACTS
+                )
+                sys.modules.pop("rir_contracts")
+
+                second = load_module(controller_names[1], SCRIPTS / "rir_controller.py")
+
+                self.assertIs(second.CONTRACTS, first.CONTRACTS)
+                self.assertIs(sys.modules[hashed_name], first.CONTRACTS)
+                self.assertIs(sys.modules["rir_contracts"], first.CONTRACTS)
+                for name in CONTRACT_NAMES:
+                    self.assertIs(getattr(second, name), getattr(first, name))
+                for facade_name in (
+                    "canonical_bytes",
+                    "bounded_bytes",
+                    "validate_analysis",
+                    "_canonical_bytes",
+                    "_bounded",
+                    "_validate_analysis",
+                ):
+                    self.assertIs(getattr(second, facade_name), getattr(first, facade_name))
+                local_modules = {
+                    id(module)
+                    for name, module in sys.modules.items()
+                    if (name == "rir_contracts" or name.startswith(prefix))
+                    and Path(getattr(module, "__file__", "/missing")).resolve()
+                    == (SCRIPTS / "rir_contracts.py").resolve()
+                }
+                self.assertEqual(local_modules, {id(first.CONTRACTS)})
+        finally:
+            for name in tuple(sys.modules):
+                if name == "rir_contracts" or name.startswith(prefix):
+                    sys.modules.pop(name, None)
+            sys.modules.update(preserved)
+            for name in controller_names:
+                sys.modules.pop(name, None)
+
+    def test_vacant_canonical_alias_fails_closed_for_invalid_expected_hash(self):
+        prefix = "_rir_controller_contracts_"
+        expected_hash = (
+            prefix
+            + hashlib.sha256(
+                str((SCRIPTS / "rir_contracts.py").resolve()).encode("utf-8")
+            ).hexdigest()[:16]
+        )
+        preserved = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "rir_contracts" or name.startswith(prefix)
+        }
+        try:
+            for name in preserved:
+                sys.modules.pop(name, None)
+            with tempfile.TemporaryDirectory() as temporary:
+                temporary_root = Path(temporary)
+                wrong_path = temporary_root / "wrong_contracts.py"
+                wrong_path.write_text("value = 1\n", encoding="utf-8")
+                symlink_path = temporary_root / "linked_contracts.py"
+                symlink_path.symlink_to(SCRIPTS / "rir_contracts.py")
+
+                incomplete = load_module(expected_hash, SCRIPTS / "rir_contracts.py")
+                del incomplete.BeginRequest
+                with self.assertRaisesRegex(
+                    ImportError, "controller contracts sibling contract is incomplete"
+                ):
+                    load_module("invalid_hash_incomplete_controller", SCRIPTS / "rir_controller.py")
+                self.assertNotIn("rir_contracts", sys.modules)
+
+                for label, hashed in (
+                    ("unsafe", types.ModuleType(expected_hash)),
+                    ("wrong_file", load_module(expected_hash, wrong_path)),
+                    ("symlink", load_module(expected_hash, symlink_path)),
+                ):
+                    with self.subTest(label=label):
+                        sys.modules[expected_hash] = hashed
+                        with self.assertRaisesRegex(
+                            ImportError, "controller contracts sibling is unsafe"
+                        ):
+                            load_module(
+                                f"invalid_hash_{label}_controller",
+                                SCRIPTS / "rir_controller.py",
+                            )
+                        self.assertNotIn("rir_contracts", sys.modules)
+        finally:
+            for name in tuple(sys.modules):
+                if name == "rir_contracts" or name.startswith(prefix):
+                    sys.modules.pop(name, None)
+                if name.startswith("invalid_hash_"):
+                    sys.modules.pop(name, None)
+            sys.modules.update(preserved)
 
     def test_preloaded_correct_sibling_is_reused_without_duplicate_contract_identity(self):
         prefix = "_rir_controller_contracts_"
