@@ -1,0 +1,80 @@
+[
+ {
+  "case": "NEG-brainstorming",
+  "kind": "negative",
+  "mechanical": "pass",
+  "detail": "clean"
+ },
+ {
+  "case": "NEG-code-review",
+  "kind": "negative",
+  "mechanical": "pass",
+  "detail": "clean"
+ },
+ {
+  "case": "NEG-debugging",
+  "kind": "negative",
+  "mechanical": "pass",
+  "detail": "clean"
+ },
+ {
+  "case": "NEG-generic-prd",
+  "kind": "negative",
+  "mechanical": "pass",
+  "detail": "clean"
+ },
+ {
+  "case": "NEG-planning",
+  "kind": "negative",
+  "mechanical": "fail",
+  "detail": "ids=['RPT-002']"
+ },
+ {
+  "case": "POS-api-contract",
+  "kind": "positive",
+  "mechanical": "fail",
+  "detail": "skill not engaged; acted directly (must_not_do violated)"
+ },
+ {
+  "case": "POS-authorization",
+  "kind": "positive",
+  "mechanical": "fail",
+  "detail": "skill not engaged; acted directly (must_not_do violated)"
+ },
+ {
+  "case": "POS-background-retry",
+  "kind": "positive",
+  "mechanical": "fail",
+  "detail": "inline report invalid: impact delta missing category accepted; impact delta missing category blocked"
+ },
+ {
+  "case": "POS-cache",
+  "kind": "positive",
+  "mechanical": "fail",
+  "detail": "inline report invalid: Planning Handoff requires Report IDs; analysis scope requires a substantive row"
+ },
+ {
+  "case": "POS-deletion",
+  "kind": "positive",
+  "mechanical": "fail",
+  "detail": "skill not engaged; acted directly (must_not_do violated)"
+ },
+ {
+  "case": "POS-offline-sync",
+  "kind": "positive",
+  "mechanical": "fail",
+  "detail": "skill not engaged; acted directly (must_not_do violated)"
+ },
+ {
+  "case": "POS-payments",
+  "kind": "positive",
+  "mechanical": "pass",
+  "detail": "inline report valid"
+ },
+ {
+  "case": "POS-sharing",
+  "kind": "positive",
+  "mechanical": "fail",
+  "detail": "skill not engaged; acted directly (must_not_do violated)"
+ }
+]
