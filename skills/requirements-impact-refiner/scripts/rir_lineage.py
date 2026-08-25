@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 class _ContractsContract(Protocol):
     MAX_STRING_BYTES: int
+    BeginRequest: type
 
     def _local_key(self, value: object, label: str) -> str: ...
 
@@ -124,6 +125,7 @@ def _is_contracts_contract(value: object) -> TypeGuard[_ContractsContract]:
     return (
         type(maximum) is int
         and maximum > 0
+        and isinstance(getattr(value, "BeginRequest", None), type)
         and _callables(value, ("_local_key", "validate_analysis"))
     )
 
@@ -334,6 +336,7 @@ STORAGE = cast(
     ),
 )
 
+BeginRequest = CONTRACTS.BeginRequest
 MAX_STRING_BYTES = CONTRACTS.MAX_STRING_BYTES
 SUPERPOWERS_HANDOFF_MARKER = (
     "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans"

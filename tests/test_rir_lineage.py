@@ -122,6 +122,7 @@ class RirLineageTest(unittest.TestCase):
         lineage = self.lineage()
         rows = ({"key": "kept"}, {"key": "new"})
 
+        self.assertIs(lineage.BeginRequest, lineage.CONTRACTS.BeginRequest)
         self.assertEqual(
             lineage.allocate_ids(rows, "IMP", {"kept": "IMP-002"}),
             {"kept": "IMP-002", "new": "IMP-001"},

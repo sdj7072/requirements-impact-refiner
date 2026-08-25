@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import subprocess
 import sys
 import tempfile
 import types
@@ -73,6 +74,27 @@ class RirFinalizeTest(unittest.TestCase):
             )
         )
 
+    def enable_graph(self):
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(
+                {
+                    "impact_graph": {
+                        "enabled": True,
+                        "max_seconds": 30,
+                        "target_seconds": 10,
+                        "providers": ["builtin"],
+                        "install_policy": "never",
+                        "deep": False,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (self.root / "api").mkdir()
+        (self.root / "api" / "profile.py").write_text(
+            'FIELD = "profile.displayName"\n', encoding="utf-8"
+        )
+
     def request(self, draft):
         return CONTROLLER.FinalizeRequest(
             self.root,
@@ -101,6 +123,11 @@ class RirFinalizeTest(unittest.TestCase):
         self.assertIs(CONTROLLER.FinalizeResult, CONTROLLER.CONTRACTS.FinalizeResult)
         self.assertEqual(Path(CONTROLLER.FINALIZE.__file__).resolve(), FINALIZE_PATH.resolve())
         self.assertIs(CONTROLLER._build_state, CONTROLLER.LINEAGE.build_state)
+        defaults = finalize.default_runtime()
+        self.assertIs(defaults["publish_revision"], finalize.REPORT_STORE.publish_revision)
+        self.assertIs(defaults["consume_draft"], finalize.STORAGE.consume_draft)
+        with self.assertRaises(TypeError):
+            defaults["consume_draft"] = lambda *args, **kwargs: None
 
         draft = self.begin("Fault injection remains facade-owned.")
         request = self.request(draft)
@@ -114,6 +141,362 @@ class RirFinalizeTest(unittest.TestCase):
         self.assertIs(type(result), CONTROLLER.FinalizeResult)
         self.assertEqual((result.report_id, result.revision), ("RPT-001", 1))
         self.assertIsNotNone(finalize)
+
+    def test_direct_promoted_scan_finalize_executes_complete_local_fast_scan_graph(self):
+        finalize = self.finalize()
+        self.enable_graph()
+        scan = CONTROLLER.scan_impact(
+            CONTROLLER.ScanRequest(self.root, "Rename profile.displayName", (), "balanced")
+        )
+        draft = CONTROLLER.begin_refinement(
+            CONTROLLER.BeginRequest(
+                self.root,
+                "Rename profile.displayName",
+                (),
+                "generic",
+                scan_id=scan.scan_id,
+            )
+        )
+        analysis = fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in scan.paths]
+        if not analysis["impacts"][0]["graph_path_keys"]:
+            analysis["impacts"][0]["coverage_rationale"] = (
+                "Fast Scan found no closed repository path."
+            )
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+
+        result = finalize.finalize_refinement(
+            finalize.FinalizeRequest(self.root, draft.draft_id, analysis, scan.receipt_id)
+        )
+
+        self.assertEqual(result.status, "published")
+        self.assertTrue(finalize.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_facade_promoted_finalize_ignores_conflicting_process_aliases(self):
+        script = r"""
+import importlib.util
+import json
+import sys
+import tempfile
+import types
+from pathlib import Path
+
+scripts = Path(sys.argv[1]).resolve()
+fixtures = Path(sys.argv[2]).resolve()
+
+def load(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary).resolve()
+    (root / ".requirements-impact-refiner.json").write_text(
+        json.dumps(
+            {
+                "impact_graph": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["builtin"],
+                    "install_policy": "never",
+                    "deep": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "api").mkdir()
+    (root / "api" / "profile.py").write_text(
+        'FIELD = "profile.displayName"\n', encoding="utf-8"
+    )
+    producer = load("_task5_fix_producer", scripts / "rir_controller.py")
+    scan = producer.scan_impact(
+        producer.ScanRequest(root, "Rename profile.displayName", (), "balanced")
+    )
+    draft = producer.begin_refinement(
+        producer.BeginRequest(
+            root,
+            "Rename profile.displayName",
+            (),
+            "generic",
+            scan_id=scan.scan_id,
+        )
+    )
+    analysis = json.loads(
+        (fixtures / "controller-analysis-pre-decision.json").read_text(encoding="utf-8")
+    )
+    analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in scan.paths]
+    if not analysis["impacts"][0]["graph_path_keys"]:
+        analysis["impacts"][0]["coverage_rationale"] = (
+            "Fast Scan found no closed repository path."
+        )
+    analysis["impacts"][0]["evidence_level"] = "unknown"
+
+    calls = []
+    foreign_dir = root / "foreign"
+    foreign_dir.mkdir()
+
+    def forbidden(label):
+        def operation(*args, **kwargs):
+            calls.append(label)
+            raise AssertionError(f"foreign dependency used: {label}")
+        return operation
+
+    names = (
+        "compact_state",
+        "fast_scan",
+        "fast_scan_renderer",
+        "fast_scan_store",
+        "graph_builtin",
+        "graph_coordinator",
+        "impact_report",
+        "impact_renderer",
+        "payload_identity",
+        "report_store",
+        "rir_contracts",
+        "rir_finalize",
+        "rir_graph_delivery",
+        "rir_lineage",
+        "rir_storage",
+    )
+    foreign = {}
+    for name in names:
+        module = types.ModuleType(name)
+        module.__file__ = str(foreign_dir / f"{name}.py")
+        foreign[name] = module
+        sys.modules[name] = module
+    foreign["compact_state"].load_state_bytes = forbidden("compact_state.load_state_bytes")
+    foreign["fast_scan"].FastScanResult = type("ForeignFastScanResult", (), {})
+    foreign["fast_scan"].FastScanRequest = forbidden("fast_scan.FastScanRequest")
+    foreign["fast_scan"].prepare_fast_scan_identity = forbidden(
+        "fast_scan.prepare_fast_scan_identity"
+    )
+    foreign["fast_scan"].validate_fast_scan_receipt = forbidden(
+        "fast_scan.validate_fast_scan_receipt"
+    )
+    foreign["fast_scan"].canonical_fast_scan_bytes = forbidden(
+        "fast_scan.canonical_fast_scan_bytes"
+    )
+    foreign["fast_scan_renderer"].render_fast_scan = forbidden(
+        "fast_scan_renderer.render_fast_scan"
+    )
+    foreign["fast_scan_store"].load_scan_receipt_bytes = forbidden(
+        "fast_scan_store.load_scan_receipt_bytes"
+    )
+    foreign["impact_renderer"].render_compact = forbidden(
+        "impact_renderer.render_compact"
+    )
+    foreign["impact_renderer"].render_markdown = forbidden(
+        "impact_renderer.render_markdown"
+    )
+    foreign["payload_identity"].payload_sha256 = forbidden(
+        "payload_identity.payload_sha256"
+    )
+    foreign["report_store"].ReportStoreError = RuntimeError
+    foreign["report_store"].publish_revision = forbidden("report_store.publish_revision")
+
+    controller = load("_task5_fix_conflict_controller", scripts / "rir_controller.py")
+    for name, module in foreign.items():
+        assert sys.modules[name] is module, name
+
+    result = controller.finalize_refinement(
+        controller.FinalizeRequest(root, draft.draft_id, analysis, scan.receipt_id)
+    )
+    assert result.status == "published"
+    assert controller.FINALIZE.STORAGE.load_private_draft(root, draft.draft_id)["consumed"] is True
+    assert calls == [], calls
+    for name, module in foreign.items():
+        assert sys.modules[name] is module, name
+
+    runtime = controller._finalize_runtime()
+    defaults = controller.FINALIZE.default_runtime()
+    for key in (
+        "root_path",
+        "bounded_bytes",
+        "load_draft",
+        "report_lock",
+        "load_promoted_scan_context",
+        "canonical_bytes",
+        "write_controller_metadata",
+        "publish_revision",
+        "load_state_bytes",
+        "render_compact",
+        "render_markdown",
+        "draft_path",
+        "consume_draft",
+    ):
+        assert runtime[key] is defaults[key], key
+    assert runtime["result_type"] is controller.FinalizeResult
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SCRIPTS), str(FIXTURES)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_malformed_same_path_coordinator_hash_fails_closed_before_finalize(self):
+        finalize = self.finalize()
+        delivery_path = SCRIPTS / "rir_graph_delivery.py"
+        expected_hash = (
+            "_rir_finalize_graph_delivery_"
+            + __import__("hashlib")
+            .sha256(str(delivery_path.resolve()).encode("utf-8"))
+            .hexdigest()[:16]
+        )
+        preserved_canonical = sys.modules.get("rir_graph_delivery")
+        canonical_present = "rir_graph_delivery" in sys.modules
+        preserved_hash = sys.modules.get(expected_hash)
+        hash_present = expected_hash in sys.modules
+        module_name = "finalize_malformed_coordinator_guard"
+        conflict = types.ModuleType("rir_graph_delivery")
+        conflict.__file__ = str(self.root / "foreign-graph-delivery.py")
+        graph = types.ModuleType("malformed_graph")
+        graph.__file__ = str(SCRIPTS / "impact_graph.py")
+        graph.validate_receipt = lambda value: ()
+        graph.canonical_receipt_bytes = lambda value: b"{}\n"
+        coordinator = types.ModuleType("malformed_coordinator")
+        coordinator.__file__ = str(SCRIPTS / "graph_coordinator.py")
+        coordinator.GRAPH = graph
+        malformed = types.ModuleType(expected_hash)
+        malformed.__file__ = str(delivery_path)
+        malformed.CONTRACTS = finalize.CONTRACTS
+        malformed.STORAGE = finalize.STORAGE
+        malformed.GRAPH = graph
+        malformed.GRAPH_COORDINATOR = coordinator
+        malformed.load_graph_context = lambda *args, **kwargs: {}
+        malformed.validate_graph_coverage = lambda *args, **kwargs: None
+        malformed.verify_receipt_sources = lambda *args, **kwargs: None
+        try:
+            sys.modules["rir_graph_delivery"] = conflict
+            sys.modules[expected_hash] = malformed
+            with self.assertRaisesRegex(
+                ImportError,
+                "^finalize graph delivery sibling contract is incomplete$",
+            ):
+                load_module(module_name, FINALIZE_PATH)
+            self.assertIs(sys.modules["rir_graph_delivery"], conflict)
+        finally:
+            sys.modules.pop(module_name, None)
+            if canonical_present:
+                sys.modules["rir_graph_delivery"] = preserved_canonical
+            else:
+                sys.modules.pop("rir_graph_delivery", None)
+            if hash_present:
+                sys.modules[expected_hash] = preserved_hash
+            else:
+                sys.modules.pop(expected_hash, None)
+
+    def test_default_runtime_rejects_incomplete_same_path_fast_scan_store(self):
+        finalize = self.finalize()
+        store_path = SCRIPTS / "fast_scan_store.py"
+        expected_hash = (
+            "_rir_finalize_fast_scan_store_"
+            + __import__("hashlib")
+            .sha256(str(store_path.resolve()).encode("utf-8"))
+            .hexdigest()[:16]
+        )
+        preserved_canonical = sys.modules.get("fast_scan_store")
+        canonical_present = "fast_scan_store" in sys.modules
+        preserved_hash = sys.modules.get(expected_hash)
+        hash_present = expected_hash in sys.modules
+        incomplete = types.ModuleType("fast_scan_store")
+        incomplete.__file__ = str(store_path)
+        incomplete.load_scan_receipt_bytes = lambda *args, **kwargs: b""
+        try:
+            sys.modules["fast_scan_store"] = incomplete
+            sys.modules.pop(expected_hash, None)
+            with self.assertRaisesRegex(
+                ImportError,
+                "^finalize Fast Scan store sibling contract is incomplete$",
+            ):
+                finalize.default_runtime()
+        finally:
+            if canonical_present:
+                sys.modules["fast_scan_store"] = preserved_canonical
+            else:
+                sys.modules.pop("fast_scan_store", None)
+            if hash_present:
+                sys.modules[expected_hash] = preserved_hash
+            else:
+                sys.modules.pop(expected_hash, None)
+
+    def test_default_runtime_rejects_missing_promoted_graph_members(self):
+        finalize = self.finalize()
+        coordinator = finalize.GRAPH_DELIVERY.GRAPH_COORDINATOR
+        graph = coordinator.GRAPH
+        builtin = coordinator.BUILTIN
+        cache = coordinator.CACHE
+        cases = (
+            (coordinator, "SourceInventory"),
+            (coordinator, "_settings"),
+            (coordinator, "_seed_key"),
+            (graph, "_safe_path"),
+            (graph, "_validate_settings"),
+            (builtin, "_read_regular_file"),
+            (builtin, "_safe_graph_text"),
+            (builtin, "_walk_files"),
+            (cache, "_cache_directory"),
+            (cache, "_read_artifact"),
+            (cache, "_source_digests"),
+            (cache, "_canonical_json"),
+            (cache, "_normalize_receipt"),
+        )
+
+        for module, name in cases:
+            with self.subTest(module=module.__name__, member=name):
+                with mock.patch.object(module, name, None):
+                    with self.assertRaisesRegex(
+                        ImportError,
+                        "^finalize graph delivery sibling contract is incomplete$",
+                    ):
+                        finalize.default_runtime()
+
+    def test_default_runtime_rejects_cross_wired_promoted_graph_identities(self):
+        finalize = self.finalize()
+        coordinator = finalize.GRAPH_DELIVERY.GRAPH_COORDINATOR
+        builtin = coordinator.BUILTIN
+        cache = coordinator.CACHE
+        foreign_type = type("ForeignPromotedGraphType", (), {})
+
+        def foreign_operation(*args, **kwargs):
+            return None
+
+        cases = (
+            (coordinator, "GRAPH", object()),
+            (coordinator, "BUILTIN", object()),
+            (coordinator, "CACHE", object()),
+            (coordinator, "PROVIDERS", object()),
+            (coordinator, "GraphSettings", foreign_type),
+            (coordinator, "Deadline", foreign_type),
+            (coordinator, "ProviderProbe", foreign_type),
+            (coordinator, "ProviderQuery", foreign_type),
+            (coordinator, "ProviderResult", foreign_type),
+            (coordinator, "ProviderSpec", foreign_type),
+            (coordinator, "ScanSeed", foreign_type),
+            (coordinator, "ScanLimits", foreign_type),
+            (coordinator, "discover_providers", foreign_operation),
+            (coordinator, "run_provider", foreign_operation),
+            (builtin, "GRAPH", object()),
+            (builtin, "GraphNode", foreign_type),
+            (builtin, "GraphEdge", foreign_type),
+            (builtin, "GraphPath", foreign_type),
+            (builtin, "FrontierEntry", foreign_type),
+            (cache, "GRAPH", object()),
+        )
+
+        for module, name, replacement in cases:
+            with self.subTest(module=module.__name__, member=name):
+                with mock.patch.object(module, name, replacement):
+                    with self.assertRaisesRegex(
+                        ImportError,
+                        "^finalize graph delivery sibling contract is incomplete$",
+                    ):
+                        finalize.default_runtime()
 
     def test_root_and_skill_finalize_resolve_local_dependencies_on_conflict_repeat_and_vacation(
         self,

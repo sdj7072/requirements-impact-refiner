@@ -384,12 +384,9 @@ def _cas_replace_private_draft(
     )
 
 
-import compact_state
 import fast_scan
 import fast_scan_store
-import impact_renderer
 import payload_identity
-import report_store
 
 MAX_TRACE_SEEDS = 128
 ADAPTERS = {"generic", "superpowers", "claude-feature-dev", "spec-kit"}
@@ -913,6 +910,8 @@ def _is_lineage_contract(value: object) -> bool:
         and getattr(lineage_storage, "report_store", None) is lineage_report_store
         and getattr(lineage_report_store, "compact_state", None) is lineage_compact_state
         and getattr(lineage_report_store, "impact_renderer", None) is lineage_renderer
+        and getattr(value, "BeginRequest", None)
+        is getattr(getattr(value, "CONTRACTS", None), "BeginRequest", None)
         and _callables(
             value,
             ("current_lineage", "legacy_key_map", "allocate_ids", "map_keys", "build_state"),
@@ -1370,6 +1369,7 @@ def _is_finalize_contract(value: object) -> bool:
         and _module_uses_sibling(finalize_graph_delivery, SCRIPT_DIR / "rir_graph_delivery.py")
         and _is_graph_delivery_contract(finalize_graph_delivery)
         and callable(getattr(value, "finalize_refinement", None))
+        and callable(getattr(value, "default_runtime", None))
     )
 
 
@@ -1387,6 +1387,14 @@ def _load_registered_finalize(module_name: str, expected: Path) -> object:
     if not _is_finalize_contract(module):
         sys.modules.pop(module_name, None)
         raise ImportError("finalize sibling contract is incomplete")
+    try:
+        runtime = module.default_runtime()
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    if not isinstance(runtime, Mapping):
+        sys.modules.pop(module_name, None)
+        raise ImportError("finalize default runtime contract is incomplete")
     return module
 
 
@@ -1423,30 +1431,69 @@ def _load_finalize() -> object:
 
 FINALIZE = cast(Any, _load_finalize())
 
+compact_state = FINALIZE.COMPACT_STATE
+impact_renderer = FINALIZE.IMPACT_RENDERER
+report_store = FINALIZE.REPORT_STORE
+
+_FACADE_BUILD_STATE = _build_state
+_FACADE_LOAD_GRAPH_CONTEXT = _load_graph_context
+_FACADE_VALIDATE_ANALYSIS = _validate_analysis
+_FACADE_VALIDATE_GRAPH_COVERAGE = _validate_graph_coverage
+_FACADE_CONSUME = _consume
+
+
+def _overlay_finalize_hook(
+    runtime: dict[str, object], name: str, current: object, original: object
+) -> None:
+    if current is original:
+        return
+    if not callable(current):
+        raise TypeError(f"finalize facade hook is invalid: {name}")
+    runtime[name] = current
+
+
+def _validate_finalize_hooks() -> None:
+    if (
+        _FACADE_BUILD_STATE is not LINEAGE.build_state
+        or _FACADE_VALIDATE_ANALYSIS is not CONTRACTS.validate_analysis
+        or _FACADE_CONSUME is not STORAGE.consume_draft
+        or not _module_uses_sibling(STORAGE, SCRIPT_DIR / "rir_storage.py")
+        or getattr(_FACADE_LOAD_GRAPH_CONTEXT, "__module__", None) != __name__
+        or getattr(_FACADE_VALIDATE_GRAPH_COVERAGE, "__module__", None) != __name__
+    ):
+        raise ImportError("finalize facade hook contract is invalid")
+
 
 def _finalize_runtime() -> dict[str, object]:
-    return {
-        "root_path": _root,
-        "bounded_bytes": _bounded,
-        "max_finalize_bytes": MAX_FINALIZE_BYTES,
-        "load_draft": load_draft,
-        "report_lock": _report_lock,
-        "load_graph_context": _load_graph_context,
-        "load_promoted_scan_context": _load_promoted_scan_context,
-        "validate_analysis": _validate_analysis,
-        "validate_graph_coverage": _validate_graph_coverage,
-        "build_state": _build_state,
-        "canonical_bytes": _canonical_bytes,
-        "write_controller_metadata": _write_controller_metadata,
-        "publish_revision": report_store.publish_revision,
-        "report_store_error": report_store.ReportStoreError,
-        "load_state_bytes": compact_state.load_state_bytes,
-        "render_compact": impact_renderer.render_compact,
-        "render_markdown": impact_renderer.render_markdown,
-        "draft_path": _draft_path,
-        "consume_draft": _consume,
-        "result_type": FinalizeResult,
-    }
+    _validate_finalize_hooks()
+    runtime = dict(FINALIZE.default_runtime())
+    _overlay_finalize_hook(runtime, "build_state", _build_state, _FACADE_BUILD_STATE)
+    _overlay_finalize_hook(
+        runtime,
+        "load_graph_context",
+        _load_graph_context,
+        _FACADE_LOAD_GRAPH_CONTEXT,
+    )
+    _overlay_finalize_hook(
+        runtime,
+        "validate_analysis",
+        _validate_analysis,
+        _FACADE_VALIDATE_ANALYSIS,
+    )
+    _overlay_finalize_hook(
+        runtime,
+        "validate_graph_coverage",
+        _validate_graph_coverage,
+        _FACADE_VALIDATE_GRAPH_COVERAGE,
+    )
+    _overlay_finalize_hook(runtime, "consume_draft", _consume, _FACADE_CONSUME)
+    if (
+        not _module_uses_sibling(CONTRACTS, SCRIPT_DIR / "rir_contracts.py")
+        or FinalizeResult is not CONTRACTS.FinalizeResult
+    ):
+        raise ImportError("finalize facade result contract is invalid")
+    runtime["result_type"] = FinalizeResult
+    return runtime
 
 
 def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:

@@ -112,3 +112,54 @@ The brief prohibited subagents, so review was performed directly against base
 public facade contracts remain sealed by the Task 1 fixture, path-local module
 graphs are validated through clean/conflicting/vacated/repeated states, and no
 Task 3 cleanup or unrelated runtime state is included.
+
+## Fix round 1 — complete path-local finalization runtime
+
+### Review findings addressed
+
+- The facade no longer constructs finalization from its process-global
+  `compact_state`, `impact_renderer`, `report_store`, Fast Scan, or storage
+  imports. `rir_finalize.default_runtime()` now returns an immutable, complete
+  operation map from the finalizer's validated path-local lineage, storage,
+  report, renderer, graph-delivery, payload, and Fast Scan graph. The facade
+  copies that map and overlays only changed, callable fault-injection hooks plus
+  its validated public `FinalizeResult` factory.
+- The lineage contract now exports and seals `BeginRequest` to its exact local
+  contracts class. Graph delivery is accepted only when all finalization
+  callables are present and its coordinator's `GRAPH`, `BUILTIN`, `CACHE`, and
+  `PROVIDERS` modules are exact regular siblings with coherent class, function,
+  and graph identities.
+- Promoted Fast Scan preflight now validates every graph, built-in scan, cache,
+  provider, coordinator, renderer, store, and Fast Scan member used by direct
+  finalization. Selectively stale but structurally safe modules are re-executed
+  with the current local aliases; malformed or foreign modules fail before the
+  finalizer enters its mutation sequence.
+
+### Regression coverage and TDD evidence
+
+- The inherited focused suite first passed 14 tests, establishing the partial
+  handoff state. A new malformed-dependency mutation test then failed in all 13
+  cases because `default_runtime()` accepted missing coordinator
+  `SourceInventory`, `_settings`, `_seed_key`, graph setting/path validators,
+  built-in source operations, and cache inventory-verification operations.
+- After strengthening the contracts, that test passed. A companion regression
+  now exercises 20 cross-wired coordinator/child class, module, graph, and
+  provider-function identities.
+- A direct extracted-finalizer regression promotes and publishes a real Fast
+  Scan. A separate controller subprocess installs conflicting process aliases
+  for contracts, storage, report/renderer, payload, graph, and Fast Scan
+  modules, proves none are called or replaced, and still completes publication
+  through the coherent local finalizer graph.
+- Same-path malformed coordinator and Fast Scan store regressions fail closed,
+  while the existing selective storage replacement regression rebuilds a
+  coherent graph-delivery module.
+
+### Fix-round verification
+
+- Python 3.9.6 compilation passed for root and installed-skill lineage,
+  finalize, and controller modules. The focused lineage/finalize suite passed
+  16 tests, and the expanded facade/controller/CLI/MCP suite passed 137 tests.
+- Full Python 3.9 discovery passed 798 tests with 24 skips. The pinned quality
+  runner passed Ruff lint/format, mypy over 48 source files, 798 tests with 21
+  skips, 80.26% total branch coverage, and Bandit. `rir_finalize.py` reached
+  77.65% branch coverage.
