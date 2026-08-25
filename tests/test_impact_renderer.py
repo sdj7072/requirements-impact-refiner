@@ -138,6 +138,15 @@ class ImpactRendererTest(unittest.TestCase):
         )
         self.assertEqual(RENDERER.validate_rendered_markdown(first), [])
 
+    def test_markdown_render_rejects_malformed_nested_state_before_rendering(self):
+        state = self.fixture()
+        state["refined_requirement"]["supersedes"] = 7
+
+        with self.assertRaisesRegex(
+            ValueError, "refined_requirement supersedes must be an array of strings"
+        ):
+            RENDERER.render_markdown(state)
+
     def test_compact_render_names_every_impact_once_and_stays_bounded(self):
         state = self.fixture()
 

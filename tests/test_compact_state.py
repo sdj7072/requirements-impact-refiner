@@ -59,6 +59,40 @@ class CompactStateTest(unittest.TestCase):
         self.assertIn("unknown top-level key surprise", errors)
         self.assertIn("missing top-level key scope", errors)
 
+    def test_structure_rejects_malformed_nested_state_fields(self):
+        cases = (
+            (
+                lambda value: value["refined_requirement"].__setitem__("supersedes", 7),
+                "refined_requirement supersedes must be an array of strings",
+            ),
+            (
+                lambda value: value["history"][0].__setitem__("superseded_impacts", 7),
+                "history row 1 superseded_impacts must be an array of strings",
+            ),
+            (
+                lambda value: value["handoff"].__setitem__("report_ids", 7),
+                "handoff report_ids must be an array of strings",
+            ),
+            (
+                lambda value: value["unresolved"].append(
+                    {
+                        "impact": "IMP-001",
+                        "state": "accepted",
+                        "rationale": "Accepted by decision.",
+                        "decision": 7,
+                        "owner": "planning",
+                    }
+                ),
+                "unresolved row 1 decision must be a string or null",
+            ),
+        )
+        for mutate, expected in cases:
+            with self.subTest(expected=expected):
+                value = self.fixture()
+                mutate(value)
+
+                self.assertIn(expected, COMPACT.validate_state(value))
+
     def test_optional_graph_settings_preserve_legacy_states_and_validate_contract(self):
         legacy = self.fixture()
         self.assertEqual(COMPACT.validate_state(legacy), [])

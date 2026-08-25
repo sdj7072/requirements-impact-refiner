@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import TypedDict, cast
 
 from typing_extensions import TypeGuard
@@ -241,6 +241,55 @@ ROW_FIELDS = {
         "status",
     },
 }
+OBJECT_STRING_FIELDS = {
+    "report": {"id", "previous_sha256", "phase"},
+    "original_requirement": {"id", "request", "source"},
+    "refined_requirement": {"id", "revision"},
+    "handoff": {"refined_requirement", "workflow"},
+}
+OBJECT_STRING_ARRAY_FIELDS = {
+    "refined_requirement": {"supersedes"},
+    "handoff": {"report_ids", "remaining_risks", "criteria"},
+}
+OBJECT_NULLABLE_STRING_FIELDS = {"refined_requirement": {"decision"}}
+ROW_STRING_FIELDS = {
+    "current_behavior": {"id", "behavior", "evidence_level", "evidence"},
+    "preserved_invariants": {"id", "requirement", "evidence"},
+    "impacts": {
+        "id",
+        "requirement",
+        "category",
+        "severity",
+        "state",
+        "evidence_level",
+        "evidence",
+    },
+    "decisions": {"id", "choice", "requirement", "rationale"},
+    "history": {"requirement", "revision", "summary"},
+    "criteria": {"id", "requirement", "impact", "invariant", "criterion", "evidence"},
+    "unresolved": {"impact", "state", "rationale", "owner"},
+    "scope": {"boundary", "evidence", "confidence"},
+    "summary": {
+        "impact_id",
+        "changed_feature",
+        "possible_issue",
+        "affected",
+        "trigger",
+        "severity",
+        "prevention",
+        "status",
+    },
+}
+ROW_STRING_ARRAY_FIELDS = {
+    "preserved_invariants": {"impacts"},
+    "impacts": {"invariants", "decisions", "criteria"},
+    "decisions": {"accepted_impacts"},
+    "history": {"superseded_impacts"},
+}
+ROW_NULLABLE_STRING_FIELDS = {
+    "history": {"decision"},
+    "unresolved": {"decision"},
+}
 DECISION_NEEDED_FIELDS = {"question", "options"}
 OPTION_FIELDS = {"option", "impacts", "tradeoff"}
 DELTA_CATEGORIES = (
@@ -315,6 +364,37 @@ def _string_list(value: object) -> TypeGuard[list[str]]:
     return isinstance(value, list) and all(_nonempty(item) for item in value)
 
 
+def _string_array(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _check_field_types(
+    label: str,
+    value: object,
+    *,
+    strings: Collection[str] = (),
+    string_arrays: Collection[str] = (),
+    nullable_strings: Collection[str] = (),
+    integers: Collection[str] = (),
+) -> list[str]:
+    if not _mapping(value):
+        return []
+    errors: list[str] = []
+    for field in sorted(strings):
+        if field in value and not isinstance(value[field], str):
+            errors.append(f"{label} {field} must be a string")
+    for field in sorted(string_arrays):
+        if field in value and not _string_array(value[field]):
+            errors.append(f"{label} {field} must be an array of strings")
+    for field in sorted(nullable_strings):
+        if field in value and value[field] is not None and not isinstance(value[field], str):
+            errors.append(f"{label} {field} must be a string or null")
+    for field in sorted(integers):
+        if field in value and (not isinstance(value[field], int) or isinstance(value[field], bool)):
+            errors.append(f"{label} {field} must be an integer")
+    return errors
+
+
 def _check_keys(label: str, value: object, expected: set[str]) -> list[str]:
     if not _mapping(value):
         return [f"{label} must be an object"]
@@ -367,7 +447,18 @@ def validate_structure(value: object) -> list[str]:
     if value["schema_version"] != 1:
         errors.append("schema_version must be 1")
     for name, fields in OBJECT_FIELDS.items():
-        errors.extend(_check_keys(name, value[name], fields))
+        current = value[name]
+        errors.extend(_check_keys(name, current, fields))
+        errors.extend(
+            _check_field_types(
+                name,
+                current,
+                strings=OBJECT_STRING_FIELDS.get(name, set()),
+                string_arrays=OBJECT_STRING_ARRAY_FIELDS.get(name, set()),
+                nullable_strings=OBJECT_NULLABLE_STRING_FIELDS.get(name, set()),
+                integers={"revision"} if name == "report" else set(),
+            )
+        )
     settings = value["settings"]
     if not _mapping(settings):
         errors.append("settings must be an object")
@@ -375,6 +466,7 @@ def validate_structure(value: object) -> list[str]:
         errors.extend(
             f"settings missing key {key}" for key in sorted(SETTING_FIELDS - set(settings))
         )
+        errors.extend(_check_field_types("settings", settings, strings=SETTING_FIELDS))
         errors.extend(
             f"settings has unknown key {key}"
             for key in sorted(set(settings) - SETTING_FIELDS - OPTIONAL_SETTING_FIELDS)
@@ -389,17 +481,37 @@ def validate_structure(value: object) -> list[str]:
             errors.append(f"{name} must be an array")
             continue
         for index, row in enumerate(rows, start=1):
-            errors.extend(_check_keys(f"{name} row {index}", row, fields))
+            label = f"{name} row {index}"
+            errors.extend(_check_keys(label, row, fields))
+            errors.extend(
+                _check_field_types(
+                    label,
+                    row,
+                    strings=ROW_STRING_FIELDS.get(name, set()),
+                    string_arrays=ROW_STRING_ARRAY_FIELDS.get(name, set()),
+                    nullable_strings=ROW_NULLABLE_STRING_FIELDS.get(name, set()),
+                )
+            )
     needed = value["decision_needed"]
     if needed is not None:
         errors.extend(_check_keys("decision_needed", needed, DECISION_NEEDED_FIELDS))
         if _mapping(needed) and "options" in needed:
+            errors.extend(_check_field_types("decision_needed", needed, strings={"question"}))
             options = needed["options"]
             if not isinstance(options, list):
                 errors.append("decision_needed options must be an array")
             else:
                 for index, option in enumerate(options, start=1):
-                    errors.extend(_check_keys(f"decision option {index}", option, OPTION_FIELDS))
+                    label = f"decision option {index}"
+                    errors.extend(_check_keys(label, option, OPTION_FIELDS))
+                    errors.extend(
+                        _check_field_types(
+                            label,
+                            option,
+                            strings={"option", "tradeoff"},
+                            string_arrays={"impacts"},
+                        )
+                    )
     delta = value["delta"]
     errors.extend(_check_keys("delta", delta, set(DELTA_CATEGORIES)))
     if _mapping(delta):
@@ -415,6 +527,9 @@ def validate_structure(value: object) -> list[str]:
                 errors.extend(_check_keys(f"graph path row {index}", row, {"impact", "paths"}))
                 if not _mapping(row):
                     continue
+                errors.extend(
+                    _check_field_types(f"graph path row {index}", row, strings={"impact"})
+                )
                 paths = row.get("paths")
                 if not isinstance(paths, list) or len(paths) > 128:
                     errors.append(f"graph path row {index} paths must be a bounded array")

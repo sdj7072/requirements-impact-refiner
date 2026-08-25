@@ -76,6 +76,14 @@ class ImpactGraphTest(unittest.TestCase):
         errors = GRAPH.validate_receipt(value)
         self.assertIn("node NODE-001 upgrades provider builtin confidence", errors)
 
+    def test_receipt_reports_malformed_provider_confidence_without_crashing(self):
+        value = fixture()
+        value["providers"][0]["confidence"] = ["lexical"]
+
+        errors = GRAPH.validate_receipt(value)
+
+        self.assertIn("provider builtin has invalid confidence ['lexical']", errors)
+
     def test_receipt_requires_sha_inputs(self):
         value = fixture()
         del value["request_sha256"]
