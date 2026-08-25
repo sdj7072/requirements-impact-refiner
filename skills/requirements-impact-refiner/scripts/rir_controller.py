@@ -19,11 +19,41 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, SupportsInt, TypedDict
+
+from typing_extensions import TypeGuard
+
+if TYPE_CHECKING:
+    from graph_builtin import ScanSeed as ScanSeedType
+    from graph_coordinator import SourceInventory as SourceInventoryType
+    from graph_providers import Deadline as DeadlineType
+    from impact_graph import GraphReceipt as GraphReceiptType
+    from impact_graph import GraphSettings as GraphSettingsType
+    from impact_graph import ProviderStatus as ProviderStatusType
+
+
+class _FcntlContract(Protocol):
+    LOCK_EX: int
+    LOCK_NB: int
+    LOCK_UN: int
+
+    def flock(self, fd: int, operation: int) -> None: ...
+
+
+def _is_fcntl_contract(value: object) -> TypeGuard[_FcntlContract]:
+    return all(
+        isinstance(getattr(value, name, None), int) for name in ("LOCK_EX", "LOCK_NB", "LOCK_UN")
+    ) and callable(getattr(value, "flock", None))
+
 
 try:
-    import fcntl
+    import fcntl as _loaded_fcntl
 except ImportError:  # pragma: no cover - non-POSIX fallback is serialized per process
-    fcntl = None
+    fcntl: _FcntlContract | None = None
+else:
+    if not _is_fcntl_contract(_loaded_fcntl):  # pragma: no cover - standard-library contract
+        raise ImportError("fcntl contract is incomplete")
+    fcntl = _loaded_fcntl
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -99,18 +129,313 @@ GRAPH_CONFIDENCE_RANK = {
 }
 
 
-def _load_settings_module():
+class GraphSettingsPayload(TypedDict):
+    enabled: bool
+    max_seconds: int
+    target_seconds: int
+    providers: list[str]
+    install_policy: str
+    deep: bool
+
+
+class SettingsPayload(TypedDict):
+    audience: str
+    delivery: str
+    impact_graph: GraphSettingsPayload
+
+
+class ProviderPayload(TypedDict):
+    name: str
+    status: str
+    confidence: str
+    version: str | None
+    executable_sha256: str | None
+
+
+class NodePayload(TypedDict):
+    id: str
+    kind: str
+    label: str
+    location: str | None
+    provider: str
+    confidence: str
+    source_sha256: str | None
+    risk_domains: list[str]
+
+
+class EdgePayload(TypedDict):
+    id: str
+    source: str
+    target: str
+    kind: str
+    location: str | None
+    evidence: str
+    confidence: str
+    provider: str
+    source_sha256: str | None
+
+
+class PathPayload(TypedDict):
+    id: str
+    nodes: list[str]
+    edges: list[str]
+    distance: int
+    risk_domains: list[str]
+
+
+class FrontierPayload(TypedDict):
+    id: str
+    node: str
+    reason: str
+    risk_domains: list[str]
+
+
+class CachePayload(TypedDict):
+    status: str
+    key: str
+    invalidated_nodes: list[str]
+
+
+class ReceiptPayload(TypedDict):
+    schema_version: int
+    receipt_id: str
+    draft_id: str
+    repo_root_sha256: str
+    request_sha256: str
+    settings: GraphSettingsPayload
+    providers: list[ProviderPayload]
+    nodes: list[NodePayload]
+    edges: list[EdgePayload]
+    paths: list[PathPayload]
+    frontier: list[FrontierPayload]
+    timings_ms: dict[str, int]
+    budget_status: str
+    cache: CachePayload
+
+
+class CompactNodePayload(TypedDict):
+    key: str
+    kind: str
+    label: str
+    location: str | None
+    confidence: str
+    risk_domains: list[str]
+
+
+class CompactPathNodePayload(TypedDict):
+    key: str
+    label: str
+    location: str | None
+
+
+class CompactPathEdgePayload(TypedDict):
+    key: str
+    kind: str
+    confidence: str
+
+
+class CompactPathPayload(TypedDict):
+    key: str
+    nodes: list[CompactPathNodePayload]
+    edges: list[CompactPathEdgePayload]
+    distance: int
+    risk_domains: list[str]
+
+
+class CompactFrontierPayload(TypedDict):
+    key: str
+    node_key: str
+    reason: str
+    risk_domains: list[str]
+
+
+class CompactTruncatedPayload(TypedDict):
+    nodes: int
+    paths: int
+    frontier: int
+
+
+class CompactSummaryPayload(TypedDict):
+    nodes: int
+    edges: int
+    paths: int
+    unknown_frontiers: int
+    timings_ms: dict[str, int]
+    budget_status: str
+    truncated: CompactTruncatedPayload
+
+
+class CompactGraphPayload(TypedDict):
+    providers: list[dict[str, str | None]]
+    nodes: list[CompactNodePayload]
+    paths: list[CompactPathPayload]
+    frontier: list[CompactFrontierPayload]
+    summary: CompactSummaryPayload
+
+
+class GraphContext(TypedDict, total=False):
+    receipt: ReceiptPayload
+    sha256: str
+    binding: dict[str, object]
+    impact_paths: dict[str, list[str]]
+    rationales: dict[str, str | None]
+    impact_confidences: dict[str, str]
+
+
+class _SettingsContract(Protocol):
+    def resolve(
+        self,
+        repo_root: Path,
+        audience_override: str | None,
+        delivery_override: str | None,
+    ) -> SettingsPayload: ...
+
+
+class _GraphContract(Protocol):
+    ProviderStatus: type[ProviderStatusType]
+    MAX_RECEIPT_BYTES: int
+
+    def _safe_path(self, value: object) -> bool: ...
+
+    def validate_receipt(self, value: object) -> tuple[str, ...]: ...
+
+    def canonical_receipt_bytes(self, value: Mapping[str, object] | GraphReceiptType) -> bytes: ...
+
+    def load_receipt_bytes(
+        self, payload: bytes
+    ) -> tuple[dict[str, object] | None, tuple[str, ...]]: ...
+
+
+class _CacheContract(Protocol):
+    _IDENTITY_FIELDS: frozenset[str]
+
+    def _cache_directory(self, root: Path, create: bool) -> Path | None: ...
+
+    def _read_artifact(self, path: Path) -> Mapping[str, object] | None: ...
+
+    def _source_digests(self, value: Mapping[str, str]) -> dict[str, str]: ...
+
+    def _canonical_json(self, value: object) -> bytes: ...
+
+    def _normalize_receipt(self, value: object) -> tuple[dict[str, object], bytes]: ...
+
+
+class _GraphCoordinatorContract(Protocol):
+    GRAPH: _GraphContract
+    CACHE: _CacheContract
+    ScanSeed: type[ScanSeedType]
+    Deadline: type[DeadlineType]
+
+    def _settings(self, value: Mapping[str, object]) -> GraphSettingsType: ...
+
+    def _request_sha256(
+        self,
+        draft: Mapping[str, object],
+        seeds: tuple[ScanSeedType, ...],
+        settings: GraphSettingsType,
+    ) -> str: ...
+
+    def _seed_key(self, seed: ScanSeedType) -> tuple[int, str, str]: ...
+
+    def _trace_identity(
+        self,
+        root: Path,
+        draft_id: str,
+        request_sha256: str,
+        seeds: tuple[ScanSeedType, ...],
+        settings: GraphSettingsType,
+        probes: tuple[ProviderStatusType, ...],
+    ) -> str: ...
+
+    def _collect_source_digests(
+        self, root: Path, deadline: DeadlineType
+    ) -> SourceInventoryType: ...
+
+    def trace_impact(
+        self,
+        repo_root: Path,
+        draft: Mapping[str, object],
+        seeds: tuple[ScanSeedType, ...],
+        settings: Mapping[str, object],
+        clock: object,
+        runner: object = None,
+        deadline: DeadlineType | None = None,
+        source_inventory: SourceInventoryType | None = None,
+    ) -> GraphReceiptType: ...
+
+
+def _classes(value: object, names: tuple[str, ...]) -> bool:
+    return all(isinstance(getattr(value, name, None), type) for name in names)
+
+
+def _callables(value: object, names: tuple[str, ...]) -> bool:
+    return all(callable(getattr(value, name, None)) for name in names)
+
+
+def _is_settings_contract(value: object) -> TypeGuard[_SettingsContract]:
+    return _callables(value, ("resolve",))
+
+
+def _is_graph_contract(value: object) -> TypeGuard[_GraphContract]:
+    return (
+        _classes(value, ("ProviderStatus",))
+        and isinstance(getattr(value, "MAX_RECEIPT_BYTES", None), int)
+        and _callables(
+            value,
+            ("_safe_path", "validate_receipt", "canonical_receipt_bytes", "load_receipt_bytes"),
+        )
+    )
+
+
+def _is_cache_contract(value: object) -> TypeGuard[_CacheContract]:
+    return isinstance(getattr(value, "_IDENTITY_FIELDS", None), frozenset) and _callables(
+        value,
+        (
+            "_cache_directory",
+            "_read_artifact",
+            "_source_digests",
+            "_canonical_json",
+            "_normalize_receipt",
+        ),
+    )
+
+
+def _is_graph_coordinator_contract(value: object) -> TypeGuard[_GraphCoordinatorContract]:
+    return (
+        _is_graph_contract(getattr(value, "GRAPH", None))
+        and _is_cache_contract(getattr(value, "CACHE", None))
+        and _classes(value, ("ScanSeed", "Deadline"))
+        and _callables(
+            value,
+            (
+                "_settings",
+                "_request_sha256",
+                "_seed_key",
+                "_trace_identity",
+                "_collect_source_digests",
+                "trace_impact",
+            ),
+        )
+    )
+
+
+def _load_settings_module() -> object:
     path = SCRIPT_DIR / "resolve-settings.py"
     spec = importlib.util.spec_from_file_location("rir_resolve_settings", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load fixed settings resolver")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-SETTINGS = _load_settings_module()
+_loaded_settings = _load_settings_module()
+if not _is_settings_contract(_loaded_settings):
+    raise ImportError("settings sibling contract is incomplete")
+SETTINGS = _loaded_settings
 
 
-def _load_graph_coordinator():
+def _load_graph_coordinator() -> object:
     path = SCRIPT_DIR / "graph_coordinator.py"
     module_name = (
         "_rir_controller_graph_coordinator_"
@@ -128,9 +453,35 @@ def _load_graph_coordinator():
     return module
 
 
-GRAPH_COORDINATOR = _load_graph_coordinator()
+_loaded_graph_coordinator = _load_graph_coordinator()
+if not _is_graph_coordinator_contract(_loaded_graph_coordinator):
+    raise ImportError("graph coordinator sibling contract is incomplete")
+GRAPH_COORDINATOR = _loaded_graph_coordinator
 GRAPH = GRAPH_COORDINATOR.GRAPH
 TraceSeed = GRAPH_COORDINATOR.ScanSeed
+
+
+def _is_receipt_payload(value: object) -> TypeGuard[ReceiptPayload]:
+    return not GRAPH.validate_receipt(value)
+
+
+def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, str]]:
+    return isinstance(value, Mapping) and all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
+
+
+def _is_int_input(value: object) -> TypeGuard[str | bytes | bytearray | SupportsInt]:
+    return isinstance(value, (str, bytes, bytearray)) or callable(getattr(value, "__int__", None))
+
+
+def _int_value(value: object) -> int:
+    if not _is_int_input(value):
+        raise TypeError(
+            "int() argument must be a string, a bytes-like object or a real number, "
+            f"not '{type(value).__name__}'"
+        )
+    return int(value)
 
 
 @dataclass(frozen=True)
@@ -151,7 +502,7 @@ class DraftResult:
     report_id: str
     revision: int
     previous_sha256: str
-    settings: Mapping[str, str]
+    settings: Mapping[str, object]
     prior_state: Mapping[str, object] | None
     prior_key_map: Mapping[str, object] | None
     scan_id: str | None = None
@@ -173,7 +524,7 @@ ScanResult = fast_scan.FastScanResult
 class TraceRequest:
     repo_root: Path
     draft_id: str
-    seeds: tuple[TraceSeed, ...]
+    seeds: tuple[ScanSeedType, ...]
 
 
 @dataclass(frozen=True)
@@ -181,10 +532,10 @@ class TraceResult:
     receipt_id: str
     receipt_path: Path
     receipt_sha256: str
-    compact_graph: Mapping[str, object]
+    compact_graph: CompactGraphPayload
     budget_status: str
     request_sha256: str
-    seeds: tuple[TraceSeed, ...]
+    seeds: tuple[ScanSeedType, ...]
 
 
 @dataclass(frozen=True)
@@ -337,22 +688,24 @@ def _current_lineage(root: Path):
     prior_state, errors = compact_state.load_state_bytes(current.state_path.read_bytes())
     if errors or prior_state is None:
         raise ValueError("current report state is invalid")
-    key_map = _load_controller_metadata(current)
+    key_map: Mapping[str, object] | None = _load_controller_metadata(current)
     if key_map is None:
         key_map = _legacy_key_map(prior_state)
     return current, prior_state, key_map
 
 
 def _legacy_key_map(state: Mapping[str, object]) -> dict[str, dict[str, str]]:
-    sections = {
+    sections: dict[str, tuple[object, str]] = {
         "invariants": (state.get("current_behavior", []), "inv"),
         "impacts": (state.get("impacts", []), "imp"),
         "decisions": (state.get("decisions", []), "dec"),
         "criteria": (state.get("criteria", []), "ac"),
     }
-    result = {}
+    result: dict[str, dict[str, str]] = {}
     for name, (rows, prefix) in sections.items():
-        mapping = {}
+        if not isinstance(rows, list):
+            raise ValueError("current report cannot derive controller key lineage")
+        mapping: dict[str, str] = {}
         for row in rows:
             identifier = row.get("id") if isinstance(row, dict) else None
             if not isinstance(identifier, str):
@@ -679,17 +1032,18 @@ def _draft_transaction_lock(directory_fd: int):
             or metadata.st_nlink != 1
         ):
             raise ValueError("draft transaction lock is unsafe")
-        if fcntl is not None:
+        current_fcntl = fcntl
+        if current_fcntl is not None:
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                current_fcntl.flock(descriptor, current_fcntl.LOCK_EX | current_fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise ValueError("draft transaction recovery is busy; retry") from error
             locked = True
         yield
     finally:
         if descriptor is not None:
-            if locked:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            if locked and current_fcntl is not None:
+                current_fcntl.flock(descriptor, current_fcntl.LOCK_UN)
             os.close(descriptor)
 
 
@@ -1838,44 +2192,51 @@ _COMPACT_RISK_ORDER = (
 _COMPACT_RISK_RANK = {name: index for index, name in enumerate(_COMPACT_RISK_ORDER)}
 
 
-def _compact_node_rank(row: Mapping[str, object]) -> tuple[int, str]:
+def _compact_node_rank(row: NodePayload) -> tuple[int, str]:
     domains = row.get("risk_domains", ())
     best = min((_COMPACT_RISK_RANK.get(domain, 99) for domain in domains), default=99)
     return (best, str(row["id"]))
 
 
-def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list, dict]:
+def _compact_selection(
+    receipt: ReceiptPayload,
+) -> tuple[
+    list[NodePayload],
+    list[PathPayload],
+    list[FrontierPayload],
+    CompactTruncatedPayload,
+]:
     # Admit paths and frontier entries only while their nodes fit the node
     # cap, so every delivered reference stays resolvable and the cap holds
     # even when deep paths alone would demand more nodes than the budget.
-    required: set = set()
-    frontier = []
-    for row in receipt["frontier"]:
+    required: set[str] = set()
+    frontier: list[FrontierPayload] = []
+    for frontier_row in receipt["frontier"]:
         if len(frontier) >= COMPACT_MAX_FRONTIER:
             break
-        candidate = required | {row["node"]}
+        candidate = required | {frontier_row["node"]}
         if len(candidate) > COMPACT_MAX_NODES:
             continue
         required = candidate
-        frontier.append(row)
-    paths = []
-    for row in receipt["paths"]:
+        frontier.append(frontier_row)
+    paths: list[PathPayload] = []
+    for path_row in receipt["paths"]:
         if len(paths) >= COMPACT_MAX_PATHS:
             break
-        candidate = required | set(row["nodes"])
+        candidate = required | set(path_row["nodes"])
         if len(candidate) > COMPACT_MAX_NODES:
             continue
         required = candidate
-        paths.append(row)
-    selected = [row for row in receipt["nodes"] if row["id"] in required]
+        paths.append(path_row)
+    selected = [node_row for node_row in receipt["nodes"] if node_row["id"] in required]
     if len(selected) < COMPACT_MAX_NODES:
         remaining = sorted(
-            (row for row in receipt["nodes"] if row["id"] not in required),
+            (node_row for node_row in receipt["nodes"] if node_row["id"] not in required),
             key=_compact_node_rank,
         )
         selected.extend(remaining[: COMPACT_MAX_NODES - len(selected)])
     selected.sort(key=lambda row: str(row["id"]))
-    truncated = {
+    truncated: CompactTruncatedPayload = {
         "nodes": max(0, len(receipt["nodes"]) - len(selected)),
         "paths": max(0, len(receipt["paths"]) - len(paths)),
         "frontier": max(0, len(receipt["frontier"]) - len(frontier)),
@@ -1883,7 +2244,7 @@ def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list,
     return selected, paths, frontier, truncated
 
 
-def _compact_size(value: Mapping[str, object]) -> int:
+def _compact_size(value: object) -> int:
     return len(
         json.dumps(
             value,
@@ -1894,7 +2255,7 @@ def _compact_size(value: Mapping[str, object]) -> int:
     )
 
 
-def _enforce_compact_byte_budget(compact: dict[str, object]) -> None:
+def _enforce_compact_byte_budget(compact: CompactGraphPayload) -> None:
     """Shrink a compact delivery against its serialized byte budget.
 
     Actionable frontier entries out-rank paths. Nodes not referenced by a
@@ -1933,11 +2294,11 @@ def _enforce_compact_byte_budget(compact: dict[str, object]) -> None:
         raise ValueError("compact graph metadata exceeds byte budget")
 
 
-def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
+def _compact_graph(receipt: ReceiptPayload) -> CompactGraphPayload:
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
     selected_nodes, selected_paths, selected_frontier, truncated = _compact_selection(receipt)
-    compact = {
+    compact: CompactGraphPayload = {
         "providers": [
             {
                 "name": row["name"],
@@ -2013,9 +2374,9 @@ def _source_inventory_sha256(source_digests: Mapping[str, str]) -> str:
 
 
 def _receipt_source_inventory(
-    root: Path, receipt: Mapping[str, object]
+    root: Path, receipt: ReceiptPayload
 ) -> tuple[str, dict[str, str], str, bool, str | None]:
-    key = receipt.get("cache", {}).get("key")
+    key = receipt["cache"]["key"]
     if not isinstance(key, str) or re.fullmatch(r"[0-9a-f]{64}", key) is None or key == "0" * 64:
         raise ValueError("graph receipt has no verifiable source inventory cache")
     cache_dir = GRAPH_COORDINATOR.CACHE._cache_directory(root, False)
@@ -2025,7 +2386,10 @@ def _receipt_source_inventory(
     if artifact is None:
         raise ValueError("graph source inventory cache is invalid")
     try:
-        source_digests = GRAPH_COORDINATOR.CACHE._source_digests(artifact["source_digests"])
+        source_digest_value = artifact["source_digests"]
+        if not _is_string_mapping(source_digest_value):
+            raise ValueError("source digests must be a mapping")
+        source_digests = GRAPH_COORDINATOR.CACHE._source_digests(source_digest_value)
         identity = artifact["identity"]
         cached_receipt, _ = GRAPH_COORDINATOR.CACHE._normalize_receipt(artifact["receipt"])
     except (KeyError, TypeError, ValueError) as error:
@@ -2037,6 +2401,8 @@ def _receipt_source_inventory(
         or hashlib.sha256(GRAPH_COORDINATOR.CACHE._canonical_json(identity)).hexdigest() != key
     ):
         raise ValueError("graph source inventory cache identity is invalid")
+    if not _is_receipt_payload(cached_receipt):
+        raise ValueError("graph source inventory cache is invalid")
     complete = identity.get("source_inventory_complete")
     reason = identity.get("source_inventory_reason")
     if (
@@ -2085,14 +2451,14 @@ def _verify_source_inventory(
     expected_digests: Mapping[str, str],
     expected_complete: bool,
     expected_reason: str | None,
-    receipt: Mapping[str, object],
+    receipt: ReceiptPayload,
     *,
     deadline=None,
     stale_message="graph receipt source inventory is stale",
 ) -> None:
     expected = GRAPH_COORDINATOR.CACHE._source_digests(expected_digests)
     if deadline is None:
-        deadline = GRAPH_COORDINATOR.Deadline(time, int(graph_settings["max_seconds"]))
+        deadline = GRAPH_COORDINATOR.Deadline(time, _int_value(graph_settings["max_seconds"]))
     current = GRAPH_COORDINATOR._collect_source_digests(root, deadline)
     if expected_complete:
         stale = not current.complete or dict(current.digests) != expected
@@ -2138,7 +2504,7 @@ def _trace_intent_sha256(intent: Mapping[str, object]) -> str:
 def _new_trace_intent(
     root: Path,
     draft: Mapping[str, object],
-    seeds: tuple[TraceSeed, ...],
+    seeds: tuple[ScanSeedType, ...],
     graph_settings: Mapping[str, object],
     source_inventory,
 ) -> dict[str, object]:
@@ -2164,7 +2530,7 @@ def _new_trace_intent(
 def _validate_trace_intent(
     root: Path,
     draft: Mapping[str, object],
-    seeds: tuple[TraceSeed, ...],
+    seeds: tuple[ScanSeedType, ...],
     graph_settings: Mapping[str, object],
     intent: object,
 ) -> dict[str, object]:
@@ -2310,6 +2676,8 @@ def _remove_exact_trace_receipt(
         nonlocal quarantined
         if not quarantined:
             return True
+        if graph_fd is None:
+            return False
         opened_here = None
         component = None
         try:
@@ -2355,6 +2723,8 @@ def _remove_exact_trace_receipt(
         nonlocal guard_claimed
         if not guard_claimed:
             return True
+        if graph_fd is None:
+            return False
         try:
             current = os.stat(filename, dir_fd=graph_fd, follow_symlinks=False)
         except FileNotFoundError:
@@ -2618,9 +2988,9 @@ def _repository_file_sha256(root: Path, relative: str) -> str:
             os.close(current)
 
 
-def _verify_receipt_sources(root: Path, receipt: Mapping[str, object]) -> None:
-    observed = {}
-    for row in list(receipt["nodes"]) + list(receipt["edges"]):
+def _verify_receipt_sources(root: Path, receipt: ReceiptPayload) -> None:
+    observed: dict[str, str] = {}
+    for row in [*receipt["nodes"], *receipt["edges"]]:
         location, expected = row.get("location"), row.get("source_sha256")
         if location is None or expected is None:
             continue
@@ -2637,8 +3007,8 @@ def _load_graph_context(
     draft: Mapping[str, object],
     selected_receipt_id: str | None,
     *,
-    deadline=None,
-) -> dict[str, object]:
+    deadline: DeadlineType | None = None,
+) -> GraphContext:
     binding = draft.get("graph_receipt")
     if not isinstance(binding, dict) or set(binding) != {
         "receipt_id",
@@ -2661,7 +3031,12 @@ def _load_graph_context(
         raise ValueError("valid graph_receipt_id is required")
     if selected_receipt_id != binding.get("receipt_id"):
         raise ValueError("graph receipt does not match selected draft receipt")
-    graph_settings = draft["settings"].get("impact_graph")
+    draft_settings = draft.get("settings")
+    graph_settings = (
+        draft_settings.get("impact_graph") if isinstance(draft_settings, dict) else None
+    )
+    if not isinstance(graph_settings, dict):
+        raise ValueError("graph receipt settings do not match draft")
     if binding.get("settings") != graph_settings:
         raise ValueError("graph receipt settings do not match draft")
     seed_rows = binding.get("seeds")
@@ -2681,7 +3056,7 @@ def _load_graph_context(
         raise ValueError("graph receipt trace intent digest is invalid")
     payload = _read_bound_receipt_bytes(root, str(draft["draft_id"]))
     receipt, errors = GRAPH.load_receipt_bytes(payload)
-    if receipt is None or errors:
+    if receipt is None or errors or not _is_receipt_payload(receipt):
         raise ValueError("graph receipt is invalid or tampered")
     if GRAPH.canonical_receipt_bytes(receipt) != payload:
         raise ValueError("graph receipt is not canonical")
@@ -2753,7 +3128,7 @@ def _load_graph_context(
 
 def _load_promoted_scan_context(
     root: Path, draft: Mapping[str, object], selected_receipt_id: str | None
-) -> dict[str, object]:
+) -> GraphContext:
     binding = draft.get("promoted_scan")
     if not isinstance(binding, dict) or set(binding) != {
         "scan_id",
@@ -2764,13 +3139,29 @@ def _load_promoted_scan_context(
         raise ValueError("promoted Fast Scan binding is invalid")
     if selected_receipt_id != binding["receipt_id"]:
         raise ValueError("Fast Scan graph receipt does not match draft")
+    request_value = draft.get("request")
+    evidence_value = draft.get("repository_evidence")
+    adapter_value = draft.get("adapter")
+    settings_value = draft.get("settings")
+    if (
+        not isinstance(request_value, str)
+        or not isinstance(evidence_value, list)
+        or not all(isinstance(item, str) for item in evidence_value)
+        or not isinstance(adapter_value, str)
+        or not isinstance(settings_value, dict)
+        or not isinstance(settings_value.get("audience"), str)
+        or not isinstance(settings_value.get("delivery"), str)
+    ):
+        raise ValueError("promoted Fast Scan binding is invalid")
+    audience = settings_value["audience"]
+    delivery = settings_value["delivery"]
     request = BeginRequest(
         root,
-        draft["request"],
-        tuple(draft["repository_evidence"]),
-        draft["adapter"],
-        draft["settings"]["audience"],
-        draft["settings"]["delivery"],
+        request_value,
+        tuple(evidence_value),
+        adapter_value,
+        audience,
+        delivery,
         binding["scan_id"],
     )
     promotion = _promoted_scan(root, request, draft["settings"])
@@ -2780,7 +3171,11 @@ def _load_promoted_scan_context(
     if hashlib.sha256(payload).hexdigest() != binding["sha256"]:
         raise ValueError("promoted Fast Scan digest is stale")
     wrapper = json.loads(payload)
+    if not isinstance(wrapper, dict):
+        raise ValueError("promoted Fast Scan binding is invalid")
     receipt = wrapper["graph_receipt"]
+    if not _is_receipt_payload(receipt):
+        raise ValueError("promoted Fast Scan binding is invalid")
     graph_payload = GRAPH.canonical_receipt_bytes(receipt)
     if hashlib.sha256(graph_payload).hexdigest() != binding["receipt_sha256"]:
         raise ValueError("promoted graph receipt digest is stale")
@@ -2820,15 +3215,24 @@ def _structured_path(path, nodes, edges) -> dict[str, object]:
     }
 
 
-def _validate_graph_coverage(analysis: Mapping[str, object], context: dict[str, object]) -> None:
+def _validate_graph_coverage(analysis: Mapping[str, object], context: GraphContext) -> None:
     receipt = context["receipt"]
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
     paths = {row["id"]: row for row in receipt["paths"]}
     frontier_nodes = {row["node"] for row in receipt["frontier"]}
     covered_nodes = set()
-    impact_confidences = {}
-    for impact in analysis["impacts"]:
+    impact_confidences: dict[str, str] = {}
+    impacts = analysis["impacts"]
+    invariants = analysis["invariants"]
+    if not isinstance(impacts, list) or not isinstance(invariants, list):
+        raise ValueError("graph coverage analysis arrays are invalid")
+    impact_paths: dict[str, list[str]] = {}
+    rationales: dict[str, str | None] = {}
+    for impact in impacts:
+        if not isinstance(impact, dict):
+            raise ValueError("impact must be an object")
+        impact_key = _local_key(impact.get("key"), "impact")
         if "graph_path_keys" not in impact:
             raise ValueError("graph_path_keys is required for every graph-enabled impact")
         selected = impact["graph_path_keys"]
@@ -2860,7 +3264,9 @@ def _validate_graph_coverage(analysis: Mapping[str, object], context: dict[str, 
                 )
             if impact.get("state") == "resolved":
                 raise ValueError("resolved impact cannot rely on unknown graph evidence")
-            impact_confidences[impact["key"]] = "unknown"
+            impact_confidences[impact_key] = "unknown"
+            impact_paths[impact_key] = list(selected)
+            rationales[impact_key] = rationale
             continue
         confidences = [_path_confidence(path, nodes, edges) for path in selected_paths]
         strongest = min(confidences, key=lambda value: GRAPH_CONFIDENCE_RANK[value])
@@ -2871,18 +3277,26 @@ def _validate_graph_coverage(analysis: Mapping[str, object], context: dict[str, 
             if strongest == "structural-inferred"
             else "unknown"
         )
-        if EVIDENCE_RANK.get(impact.get("evidence_level"), -1) < EVIDENCE_RANK[allowed_evidence]:
+        evidence_level = impact.get("evidence_level")
+        evidence_rank = (
+            EVIDENCE_RANK.get(evidence_level, -1) if isinstance(evidence_level, str) else -1
+        )
+        if evidence_rank < EVIDENCE_RANK[allowed_evidence]:
             raise ValueError("impact evidence confidence upgrades graph path evidence")
         if impact.get("state") == "resolved" and all(
             confidence == "lexical" for confidence in confidences
         ):
             raise ValueError("resolved impact cannot rely solely on lexical graph evidence")
-        impact_confidences[impact["key"]] = strongest
-    invariant_text = "\n".join(
-        f"{row.get('behavior', '')}\n{row.get('evidence', '')}"
-        for row in analysis["invariants"]
-        if row.get("evidence_level") == "verified"
-    )
+        impact_confidences[impact_key] = strongest
+        impact_paths[impact_key] = list(selected)
+        rationales[impact_key] = rationale
+    invariant_lines = []
+    for row in invariants:
+        if not isinstance(row, dict):
+            raise ValueError("invariant must be an object")
+        if row.get("evidence_level") == "verified":
+            invariant_lines.append(f"{row.get('behavior', '')}\n{row.get('evidence', '')}")
+    invariant_text = "\n".join(invariant_lines)
     invariant_tokens = set(re.findall(r"[A-Za-z0-9_./-]+", invariant_text))
     invariant_nodes = {
         identifier
@@ -2901,19 +3315,15 @@ def _validate_graph_coverage(analysis: Mapping[str, object], context: dict[str, 
             and identifier not in frontier_nodes
         ):
             raise ValueError(f"uncovered high-risk graph node {identifier}")
-    context["impact_paths"] = {
-        row["key"]: list(row["graph_path_keys"]) for row in analysis["impacts"]
-    }
-    context["rationales"] = {
-        row["key"]: row.get("coverage_rationale") for row in analysis["impacts"]
-    }
+    context["impact_paths"] = impact_paths
+    context["rationales"] = rationales
     context["impact_confidences"] = impact_confidences
 
 
 def _validate_persisted_trace_receipt(
     root: Path,
     draft: Mapping[str, object],
-    normalized_seeds: tuple[TraceSeed, ...],
+    normalized_seeds: tuple[ScanSeedType, ...],
     graph_settings: Mapping[str, object],
     intent: Mapping[str, object],
     expected_payload: bytes | None = None,
@@ -2922,7 +3332,7 @@ def _validate_persisted_trace_receipt(
     if expected_payload is not None and stored != expected_payload:
         raise ValueError("persisted graph receipt does not match coordinator result")
     receipt_value, errors = GRAPH.load_receipt_bytes(stored)
-    if receipt_value is None or errors:
+    if receipt_value is None or errors or not _is_receipt_payload(receipt_value):
         raise ValueError("persisted graph receipt is invalid")
     if GRAPH.canonical_receipt_bytes(receipt_value) != stored:
         raise ValueError("persisted graph receipt is not canonical")
@@ -2977,10 +3387,10 @@ def _validate_persisted_trace_receipt(
 def _bind_trace_receipt(
     root: Path,
     draft: Mapping[str, object],
-    normalized_seeds: tuple[TraceSeed, ...],
+    normalized_seeds: tuple[ScanSeedType, ...],
     graph_settings: Mapping[str, object],
     intent: Mapping[str, object],
-    receipt_value: Mapping[str, object],
+    receipt_value: ReceiptPayload,
     stored: bytes,
     expected_request_sha256: str,
     cache_key: str,
@@ -3050,7 +3460,7 @@ def trace_impact(request: TraceRequest) -> TraceResult:
         raise ValueError("draft graph settings are invalid")
     if graph_settings.get("enabled") is not True:
         raise ValueError("impact graph is disabled for this draft")
-    deadline = GRAPH_COORDINATOR.Deadline(time, int(graph_settings["max_seconds"]))
+    deadline = GRAPH_COORDINATOR.Deadline(time, _int_value(graph_settings["max_seconds"]))
     receipt_path = root / ".requirements-impact-refiner" / "graph" / f"{request.draft_id}.json"
     with _report_lock(root, str(draft["report_id"]), deadline=deadline):
         _recover_private_draft_transaction(root, request.draft_id)
@@ -3214,8 +3624,11 @@ def _validate_analysis(analysis: Mapping[str, object]) -> None:
         if len(keys) != len(set(keys)):
             raise ValueError(f"duplicate {section} local key")
     if analysis["phase"] == "pre-decision":
-        _check_keys("decision_needed", analysis["decision_needed"], {"question", "options"})
-        options = analysis["decision_needed"]["options"]
+        decision_needed = analysis["decision_needed"]
+        if not isinstance(decision_needed, dict):
+            raise ValueError("decision_needed must be an object")
+        _check_keys("decision_needed", decision_needed, {"question", "options"})
+        options = decision_needed["options"]
         if not isinstance(options, list) or not 2 <= len(options) <= 3:
             raise ValueError("decision_needed requires two or three options")
         for option in options:
@@ -3395,7 +3808,7 @@ def _build_state(draft, analysis, graph_context=None):
         for row in analysis["impacts"]
     ]
     first_decision = decisions[0]["id"] if decisions else None
-    delta = {category: [] for category in compact_state.DELTA_CATEGORIES}
+    delta: dict[str, list[str]] = {category: [] for category in compact_state.DELTA_CATEGORIES}
     if prior_state is None:
         delta["new"] = list(impact_ids.values())
     else:
@@ -3647,7 +4060,8 @@ def _write_controller_metadata(
     key_map: Mapping[str, object],
     graph_receipt: Mapping[str, object] | None = None,
 ) -> None:
-    path = _controller_metadata_path(str(draft["report_id"]), int(draft["revision"]), root)
+    revision_value = _int_value(draft["revision"])
+    path = _controller_metadata_path(str(draft["report_id"]), revision_value, root)
     metadata = {
         "schema_version": 1,
         "draft_id": draft["draft_id"],
@@ -3681,7 +4095,7 @@ def _write_controller_metadata(
                     and existing.get("revision") == draft["revision"]
                 )
                 report_dir = path.parent
-                revision = int(draft["revision"])
+                revision = revision_value
                 artifacts_exist = any(
                     (report_dir / f"revision-{revision:04d}.{suffix}").exists()
                     for suffix in ("json", "md")
@@ -3693,6 +4107,8 @@ def _write_controller_metadata(
                     or (current is not None and current.revision >= revision)
                 ):
                     raise ValueError("controller revision belongs to another draft")
+                if temporary is None:
+                    raise ValueError("controller revision temporary is unavailable")
                 os.replace(temporary, path)
                 temporary = None
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -3717,8 +4133,13 @@ def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
         draft = load_draft(root, request.draft_id)
         if draft.get("consumed") is True:
             raise ValueError("draft is already consumed")
-        graph_settings = draft.get("settings", {}).get("impact_graph", {})
-        graph_context = None
+        settings_value = draft.get("settings")
+        graph_settings = (
+            settings_value.get("impact_graph") if isinstance(settings_value, dict) else None
+        )
+        if not isinstance(graph_settings, dict):
+            raise ValueError("draft graph settings are invalid")
+        graph_context: GraphContext | None = None
         if graph_settings.get("enabled") is True:
             graph_context = (
                 _load_promoted_scan_context(root, draft, request.graph_receipt_id)
@@ -3750,7 +4171,10 @@ def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
         stored_state, errors = compact_state.load_state_bytes(published.state_path.read_bytes())
         if errors or stored_state is None:
             raise ValueError("published state could not be verified")
-        delivery = stored_state["settings"]["delivery"]
+        stored_settings = stored_state.get("settings")
+        delivery = stored_settings.get("delivery") if isinstance(stored_settings, dict) else None
+        if not isinstance(delivery, str):
+            raise ValueError("published state could not be verified")
         display = (
             impact_renderer.render_compact(stored_state)
             if delivery == "compact"

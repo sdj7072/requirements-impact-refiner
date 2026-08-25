@@ -97,6 +97,36 @@ class RirMcpServerTest(unittest.TestCase):
         self.assertIn("graph_path_keys", impact_properties)
         self.assertIn("coverage_rationale", impact_properties)
 
+    def test_incomplete_controller_sibling_fails_closed(self):
+        script = r"""
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(path.parent))
+fake = types.ModuleType("rir_controller")
+fake.BeginRequest = type("BeginRequest", (), {})
+sys.modules["rir_controller"] = fake
+spec = importlib.util.spec_from_file_location("_mcp_guard", path)
+module = importlib.util.module_from_spec(spec)
+try:
+    spec.loader.exec_module(module)
+except ImportError as error:
+    if str(error) != "controller sibling contract is incomplete":
+        raise AssertionError(str(error))
+else:
+    raise AssertionError("incomplete controller sibling was accepted")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SERVER)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_scan_returns_renderer_text_and_structured_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

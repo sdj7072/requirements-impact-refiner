@@ -66,7 +66,11 @@ class DynamicSiblingContractTest(unittest.TestCase):
                 (
                     ("_rir_graph_providers", "graph_providers.py", None),
                     ("_rir_graph_adapter_ast_grep", "graph_adapter_ast_grep.py", None),
-                    ("_rir_graph_adapter_codegraph", "graph_adapter_codegraph.py", "_parse_explore"),
+                    (
+                        "_rir_graph_adapter_codegraph",
+                        "graph_adapter_codegraph.py",
+                        "_parse_explore",
+                    ),
                 ),
                 "CodeGraph adapter contract is incomplete",
             ),
@@ -76,7 +80,7 @@ class DynamicSiblingContractTest(unittest.TestCase):
                 "graph provider contract is incomplete",
             ),
         )
-        script = r'''
+        script = r"""
 import importlib.util
 import sys
 from pathlib import Path
@@ -107,7 +111,7 @@ except Exception as error:
         raise AssertionError(repr(str(error)))
 else:
     raise AssertionError("malformed injected sibling was accepted")
-'''
+"""
         for target, dependencies, expected in cases:
             encoded = ";".join(
                 "|".join((name, filename, missing or ""))

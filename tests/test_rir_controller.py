@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -348,6 +349,58 @@ class RirControllerTest(unittest.TestCase):
                     (CONTROLLER.TraceSeed("profile.displayName", "../outside.py"),),
                 )
             )
+
+    def test_trace_rejects_malformed_persisted_graph_settings(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(self.request(request="Malformed graph settings"))
+        stored = CONTROLLER.load_draft(self.root, draft.draft_id)
+        stored["settings"]["impact_graph"]["max_seconds"] = "30"
+        draft.draft_path.write_bytes(CONTROLLER._canonical_bytes(stored))
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "invalid graph settings: settings max_seconds must be a positive integer",
+        ):
+            CONTROLLER.trace_impact(
+                CONTROLLER.TraceRequest(
+                    self.root,
+                    draft.draft_id,
+                    (CONTROLLER.TraceSeed("profile.displayName", "api/profile.py"),),
+                )
+            )
+
+    def test_incomplete_graph_coordinator_sibling_fails_closed(self):
+        script = r"""
+import hashlib
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(path.parent))
+module_name = (
+    "_rir_controller_graph_coordinator_"
+    + hashlib.sha256(str(path.with_name("graph_coordinator.py")).encode("utf-8")).hexdigest()[:16]
+)
+sys.modules[module_name] = types.ModuleType(module_name)
+spec = importlib.util.spec_from_file_location("_controller_guard", path)
+module = importlib.util.module_from_spec(spec)
+try:
+    spec.loader.exec_module(module)
+except ImportError as error:
+    if str(error) != "graph coordinator sibling contract is incomplete":
+        raise AssertionError(str(error))
+else:
+    raise AssertionError("incomplete graph coordinator sibling was accepted")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SCRIPTS / "rir_controller.py")],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_trace_rejects_oversized_or_excessive_seeds_before_scanning(self):
         self.enable_builtin_graph()
