@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Optional
 
 from .adapters.claude import ClaudeAdapter
@@ -44,7 +46,9 @@ from .models import (
 )
 from .performance import (
     GraphPerformanceObservation,
+    GraphSmokeGateResult,
     PerformanceObservation,
+    SmokeGateResult,
     evaluate_graph_smoke,
     evaluate_smoke_gate,
 )
@@ -55,8 +59,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SKILL_SCRIPT_DIR = _REPO_ROOT / "skills" / "requirements-impact-refiner" / "scripts"
 if str(_SKILL_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SKILL_SCRIPT_DIR))
-import impact_renderer as _impact_renderer
-import payload_identity as _payload_identity
+_impact_renderer: ModuleType = importlib.import_module("impact_renderer")
+_payload_identity: ModuleType = importlib.import_module("payload_identity")
 
 _RAW_DIRECTORY = "raw"
 _DERIVED_ARTIFACTS = frozenset(
@@ -91,7 +95,7 @@ class ScheduledRun:
 class EvalArgumentParser(argparse.ArgumentParser):
     """Validate controller-only invocation rules after ordinary parsing."""
 
-    def parse_args(self, args: Optional[Iterable[str]] = None, namespace: Any = None):
+    def parse_args(self, args: Optional[Sequence[str]] = None, namespace: Any = None):
         parsed = super().parse_args(args, namespace)
         if parsed.repetitions < 1:
             self.error("--repetitions must be a positive integer")
@@ -453,14 +457,24 @@ def _load_existing(
     runs = ledger.get("runs")
     if not isinstance(attempts, list) or not isinstance(runs, list):
         return None
-    slots = {(slot.case.id, slot.repetition): slot for slot in schedule}
-    results = []
-    seen = set()
+    slots: dict[tuple[str, int], ScheduledRun] = {
+        (slot.case.id, slot.repetition): slot for slot in schedule
+    }
+    results: list[RunResult] = []
+    seen: set[tuple[str, int]] = set()
     for row in runs:
         if not isinstance(row, dict):
             return None
         result = _result_from_payload(row.get("result"))
-        key = (row.get("case_id"), row.get("repetition"))
+        case_id = row.get("case_id")
+        repetition = row.get("repetition")
+        if (
+            not isinstance(case_id, str)
+            or isinstance(repetition, bool)
+            or not isinstance(repetition, int)
+        ):
+            return None
+        key = (case_id, repetition)
         if (
             result is None
             or key not in slots
@@ -484,19 +498,30 @@ def _load_existing(
             return None
         seen.add(key)
         results.append(result)
-    attempt_keys = set()
-    attempts_by_final = {}
+    attempt_keys: set[tuple[str, int, int]] = set()
+    attempts_by_final: dict[tuple[str, int], dict[int, RunResult]] = {}
     for row in attempts:
         if not isinstance(row, dict):
             return None
         result = _result_from_payload(row.get("result"))
-        key = (row.get("case_id"), row.get("repetition"), row.get("attempt"))
-        final_key = key[:2]
+        case_id = row.get("case_id")
+        repetition = row.get("repetition")
+        attempt = row.get("attempt")
+        if (
+            not isinstance(case_id, str)
+            or isinstance(repetition, bool)
+            or not isinstance(repetition, int)
+            or isinstance(attempt, bool)
+            or not isinstance(attempt, int)
+        ):
+            return None
+        attempt_key = (case_id, repetition, attempt)
+        final_key = (case_id, repetition)
         if (
             result is None
             or final_key not in slots
-            or key in attempt_keys
-            or key != (result.case_id, result.repetition, result.attempt)
+            or attempt_key in attempt_keys
+            or attempt_key != (result.case_id, result.repetition, result.attempt)
             or result.attempt not in (1, 2)
         ):
             return None
@@ -504,7 +529,7 @@ def _load_existing(
             return None
         if result.attempt == 2 and result.retry_of != "%s/%02d" % final_key:
             return None
-        attempt_keys.add(key)
+        attempt_keys.add(attempt_key)
         attempts_by_final.setdefault(final_key, {})[result.attempt] = result
     for result in results:
         history = attempts_by_final.get((result.case_id, result.repetition))
@@ -636,7 +661,7 @@ def _smoke_observation(
     ):
         duration_ms = round(sum(row["elapsed_seconds"] for row in durations) * 1000)
     input_tokens, output_tokens = _turn_usage(jsonl_payloads)
-    impact_ids = ()
+    impact_ids: tuple[str, ...] = ()
     state_match = slot.case.kind == "negative"
     if slot.case.kind != "negative":
         if _captured_canonical_report(raw_root, attempt_path, slot.case.kind == "lineage") is None:
@@ -657,7 +682,18 @@ def _smoke_observation(
                 0
             ].decode("utf-8", errors="strict")
         )
-        impact_ids = tuple(sorted(row["id"] for row in state["impacts"]))
+        impacts = state.get("impacts") if isinstance(state, dict) else None
+        if not isinstance(impacts, list) or any(
+            not isinstance(row, dict) or not isinstance(row.get("id"), str) for row in impacts
+        ):
+            raise ValueError("smoke compact state impacts are invalid")
+        impact_ids = tuple(
+            sorted(
+                row["id"]
+                for row in impacts
+                if isinstance(row, dict) and isinstance(row.get("id"), str)
+            )
+        )
         state_match = bool(impact_ids) and all(identifier in output for identifier in impact_ids)
     routed_bytes, routed_words = _resource_measurement(slot.case)
     return PerformanceObservation(
@@ -745,10 +781,12 @@ def _graph_state_parity(raw_root, attempt_path, receipt, receipt_digest, score):
         not in coverage[0].get("confidence", "")
     ):
         return False
-    expected_paths = {
-        path["id"]: _receipt_structured_path(receipt, path) for path in receipt["paths"]
+    expected_paths: dict[str, object] = {
+        identifier: _receipt_structured_path(receipt, path)
+        for path in receipt["paths"]
+        if isinstance(identifier := path.get("id"), str)
     }
-    observed = {}
+    observed: dict[str, object] = {}
     for row in state.get("graph_paths", ()):
         if not isinstance(row, dict) or not isinstance(row.get("paths"), list):
             return False
@@ -756,6 +794,8 @@ def _graph_state_parity(raw_root, attempt_path, receipt, receipt_digest, score):
             if not isinstance(path, dict):
                 return False
             identifier = path.get("id")
+            if not isinstance(identifier, str):
+                return False
             if identifier in observed and observed[identifier] != path:
                 return False
             observed[identifier] = path
@@ -791,7 +831,7 @@ def _graph_observation(raw_root, client, slot, result, mechanical_score):
     )
     input_tokens, output_tokens = _turn_usage((jsonl_bytes,))
     receipt = None
-    receipt_digests = ((controller_relative, controller_digest),)
+    receipt_digests: tuple[tuple[str, str], ...] = ((controller_relative, controller_digest),)
     parity = controller.get("valid") is True
     if case.kind == "positive":
         for field in (
@@ -816,7 +856,7 @@ def _graph_observation(raw_root, client, slot, result, mechanical_score):
             attempt_path / "workspace-graph" / f"{draft_id}.json",
             "graph receipt",
         )
-        receipt_digests += ((relative, digest),)
+        receipt_digests = (*receipt_digests, (relative, digest))
         if digest != controller["receipt_sha256"][0]:
             raise ValueError("graph receipt digest disagrees with trace result")
         receipt = json.loads(payload.decode("utf-8", errors="strict"))
@@ -1173,8 +1213,8 @@ def _validate_attempt_evidence(
     attempts: Sequence[dict[str, object]],
 ) -> tuple[bool, tuple[tuple[str, str], ...]]:
     """Validate every retry-history result and its raw canonical metadata."""
-    history = {}
-    digests = []
+    history: dict[tuple[str, int], dict[int, RunResult]] = {}
+    digests: list[tuple[str, str]] = []
     for row in attempts:
         if not isinstance(row, dict):
             return False, ()
@@ -1225,6 +1265,38 @@ def _validate_attempt_evidence(
         ):
             return False, ()
     return True, tuple(digests)
+
+
+def _smoke_performance_payload(
+    observations: Sequence[PerformanceObservation], gate: SmokeGateResult
+) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    for observation in observations:
+        row = dict(asdict(observation))
+        row["status"] = observation.status.value
+        row["impact_ids"] = list(observation.impact_ids)
+        rows.append(row)
+    gate_row = dict(asdict(gate))
+    errors = gate_row.get("errors")
+    if isinstance(errors, tuple):
+        gate_row["errors"] = list(errors)
+    return {"observations": rows, "gate": gate_row}
+
+
+def _graph_performance_payload(
+    observations: Sequence[GraphPerformanceObservation], gate: GraphSmokeGateResult
+) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    for observation in observations:
+        row = dict(asdict(observation))
+        row["status"] = observation.status.value
+        row["uncovered_high_risk_nodes"] = list(observation.uncovered_high_risk_nodes)
+        rows.append(row)
+    gate_row = dict(asdict(gate))
+    errors = gate_row.get("errors")
+    if isinstance(errors, tuple):
+        gate_row["errors"] = list(errors)
+    return {"observations": rows, "gate": gate_row}
 
 
 def run_batch(
@@ -1349,17 +1421,17 @@ def run_batch(
         return 1
     smoke_gate = None
     graph_gate = None
-    graph_scores = []
-    observations = []
-    extraction_errors = []
+    graph_scores: list[GraphScore] = []
+    extraction_errors: list[str] = []
     if args.suite == "smoke" and probe.plugin_version == "0.4.0":
+        smoke_observations: list[PerformanceObservation] = []
         for result, score in zip(results, scores):
             slot = slots[(result.case_id, result.repetition)]
             try:
                 observation = _smoke_observation(raw_root, args.client, slot, result, score)
                 if not isinstance(observation, PerformanceObservation):
                     raise ValueError("smoke observation is missing or invalid")
-                observations.append(observation)
+                smoke_observations.append(observation)
             except (
                 OSError,
                 ValueError,
@@ -1370,21 +1442,14 @@ def run_batch(
                 RecursionError,
             ) as error:
                 extraction_errors.append(f"{result.case_id} performance evidence invalid: {error}")
-        smoke_gate = evaluate_smoke_gate(observations)
+        smoke_gate = evaluate_smoke_gate(smoke_observations)
         if extraction_errors:
             smoke_gate = replace(
                 smoke_gate,
                 passed=False,
                 errors=tuple(sorted(set(smoke_gate.errors + tuple(extraction_errors)))),
             )
-        performance_payload = {
-            "observations": [asdict(row) for row in observations],
-            "gate": asdict(smoke_gate),
-        }
-        for row in performance_payload["observations"]:
-            row["status"] = row["status"].value
-            row["impact_ids"] = list(row["impact_ids"])
-        performance_payload["gate"]["errors"] = list(smoke_gate.errors)
+        performance_payload = _smoke_performance_payload(smoke_observations, smoke_gate)
         try:
             _write_derived(
                 output_root / "performance.json",
@@ -1393,16 +1458,16 @@ def run_batch(
         except OSError:
             return 1
     if args.suite == "graph-smoke":
-        observations = []
-        graph_extraction_errors = []
-        graph_digest_rows = []
+        graph_observations: list[GraphPerformanceObservation] = []
+        graph_extraction_errors: list[str] = []
+        graph_digest_rows: list[tuple[str, str]] = []
         for result, score in zip(results, scores):
             slot = slots[(result.case_id, result.repetition)]
             try:
                 observation, graph_score, digests = _graph_observation(
                     raw_root, args.client, slot, result, score
                 )
-                observations.append(observation)
+                graph_observations.append(observation)
                 graph_scores.append(graph_score)
                 graph_digest_rows.extend(digests)
             except (
@@ -1415,7 +1480,7 @@ def run_batch(
                 RecursionError,
             ) as error:
                 graph_extraction_errors.append(f"{result.case_id} graph evidence invalid: {error}")
-        graph_gate = evaluate_graph_smoke(observations)
+        graph_gate = evaluate_graph_smoke(graph_observations)
         if graph_extraction_errors:
             graph_gate = replace(
                 graph_gate,
@@ -1423,14 +1488,7 @@ def run_batch(
                 errors=tuple(sorted(set(graph_gate.errors + tuple(graph_extraction_errors)))),
             )
         scored_digests.update(graph_digest_rows)
-        performance_payload = {
-            "observations": [asdict(row) for row in observations],
-            "gate": asdict(graph_gate),
-        }
-        for row in performance_payload["observations"]:
-            row["status"] = row["status"].value
-            row["uncovered_high_risk_nodes"] = list(row["uncovered_high_risk_nodes"])
-        performance_payload["gate"]["errors"] = list(graph_gate.errors)
+        performance_payload = _graph_performance_payload(graph_observations, graph_gate)
         graph_payload = [
             _graph_score_row(score, result.repetition)
             for score, result in zip(graph_scores, results)
@@ -1573,7 +1631,7 @@ def run_probe(args: argparse.Namespace, adapter: Any) -> int:
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     """Run a probe or batch without equating a completed batch with a verified skill."""
-    args = build_parser().parse_args(argv)
+    args = build_parser().parse_args(None if argv is None else tuple(argv))
     adapter = create_adapter(args)
     if args.probe_only:
         return run_probe(args, adapter)

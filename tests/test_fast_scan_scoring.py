@@ -52,6 +52,28 @@ class FastScanScoringTest(unittest.TestCase):
             ).passed
         )
 
+    def test_malformed_path_distance_is_scored_as_missing_evidence(self):
+        module = load()
+        case = module.load_fast_scan_cases()[0]
+
+        score = module.score_fast_scan(
+            case,
+            {
+                "status": "complete",
+                "elapsed_ms": 17,
+                "display_text": "Fast impact scan",
+                "seeds": [
+                    {"term": case.required_seeds[0][0], "location": case.required_seeds[0][1]}
+                ],
+                "maximum_path_distance": "three",
+                "controller_calls": ["rir_scan"],
+                "uncovered_high_risk_nodes": [],
+            },
+        )
+
+        self.assertFalse(score.passed)
+        self.assertIn("required distant path is missing", score.findings)
+
 
 if __name__ == "__main__":
     unittest.main()

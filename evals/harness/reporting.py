@@ -66,7 +66,7 @@ def _metadata_value(metadata: Mapping[str, object], key: str) -> object:
 
 
 def _require_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
-    values = {}
+    values: dict[str, object] = {}
     for key in _REQUIRED_METADATA:
         value = _metadata_value(metadata, key)
         if value is None or (isinstance(value, str) and not value.strip()):
@@ -83,8 +83,16 @@ def _require_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
         or len(set(plugins)) != len(plugins)
     ):
         raise ValueError("report metadata enabled_plugins must be unique plugin IDs")
-    values["enabled_plugins"] = tuple(plugins)
+    values["enabled_plugins"] = tuple(plugin for plugin in plugins if isinstance(plugin, str))
     return values
+
+
+def _required_plugins(required: Mapping[str, object]) -> tuple[str, ...]:
+    """Return plugins after _require_metadata has checked their exact shape."""
+    value = required["enabled_plugins"]
+    if not isinstance(value, tuple) or any(not isinstance(plugin, str) for plugin in value):
+        raise ValueError("report metadata enabled_plugins must be unique plugin IDs")
+    return value
 
 
 def _environment_values(run: RunResult) -> tuple[str, ...]:
@@ -144,7 +152,7 @@ def _verification_errors(
         "client_version": str(required["version"]),
         "plugin_version": str(required["plugin_version"]),
         "enabled_composition": str(required["enabled_composition"]),
-        "enabled_plugins": ",".join(required["enabled_plugins"]),
+        "enabled_plugins": ",".join(_required_plugins(required)),
         "model": str(required["model"]),
         "reasoning": str(required["reasoning"]),
     }
@@ -201,7 +209,7 @@ def render_report(
         "- version: {}".format(required["version"]),
         "- plugin version: {}".format(required["plugin_version"]),
         f"- enabled composition: {rendered_composition}",
-        "- enabled plugins: {}".format(",".join(required["enabled_plugins"])),
+        "- enabled plugins: {}".format(",".join(_required_plugins(required))),
         "- model: {}".format(required["model"]),
         "- reasoning: {}".format(required["reasoning"]),
         f"- repetitions: {derived_repetitions}",

@@ -59,7 +59,7 @@ class ControllerEvidence:
         return json.dumps(payload, sort_keys=True) + "\n"
 
 
-def _structured(result):
+def _structured(result: object) -> Optional[dict[str, object]]:
     if not isinstance(result, dict):
         return None
     snake = result.get("structured_content")
@@ -77,10 +77,10 @@ def _presentation_bytes(value: str) -> str:
     return "\n".join(line.rstrip(" \t") for line in normalized.split("\n"))
 
 
-def _normalized_seeds(value):
+def _normalized_seeds(value: object) -> Optional[tuple[tuple[str, Optional[str]], ...]]:
     if not isinstance(value, list):
         return None
-    seeds = []
+    seeds: list[tuple[str, Optional[str]]] = []
     for row in value:
         if not isinstance(row, dict) or set(row) != {"term", "location"}:
             return None
@@ -95,9 +95,11 @@ def _normalized_seeds(value):
     return tuple(sorted(set(seeds), key=lambda row: (row[1] or "", row[0])))
 
 
-def _attempted_calls(streams: Sequence[str]):
-    calls = {}
-    order = []
+def _attempted_calls(
+    streams: Sequence[str],
+) -> tuple[tuple[dict[str, object], ...], bool]:
+    calls: dict[tuple[int, str], dict[str, object]] = {}
+    order: list[tuple[int, str]] = []
     malformed = False
     for stream_index, stream in enumerate(streams):
         for line in stream.splitlines():
@@ -109,11 +111,13 @@ def _attempted_calls(streams: Sequence[str]):
                 malformed = True
                 continue
             item = event.get("item") if isinstance(event, dict) else None
+            tool = item.get("tool") if isinstance(item, dict) else None
             if (
                 not isinstance(item, dict)
                 or item.get("type") != "mcp_tool_call"
                 or item.get("server") != _SERVER
-                or item.get("tool") not in _TOOLS
+                or not isinstance(tool, str)
+                or tool not in _TOOLS
             ):
                 continue
             identifier = item.get("id")
@@ -153,11 +157,11 @@ def analyze_controller_trace(
     if expected_turns > 0 and len(final_outputs) != expected_turns:
         raise ValueError("final outputs must match expected turns")
     calls, malformed = _attempted_calls(jsonl_streams)
-    order = tuple(call["tool"] for call in calls)
+    order = tuple(tool for call in calls if isinstance((tool := call.get("tool")), str))
     begins = tuple(call for call in calls if call["tool"] == "rir_begin")
     traces = tuple(call for call in calls if call["tool"] == "rir_trace_impact")
     finalizes = tuple(call for call in calls if call["tool"] == "rir_finalize")
-    errors = []
+    errors: list[str] = []
     expected_order = _TOOLS * expected_turns
     if malformed:
         errors.append("controller JSONL is malformed")
@@ -166,8 +170,8 @@ def analyze_controller_trace(
     if any(call.get("status") != "completed" or call.get("error") is not None for call in calls):
         errors.append("controller tool attempt failed or did not complete")
 
-    begin_ids = []
-    payload_digests = []
+    begin_ids: list[Optional[str]] = []
+    payload_digests: list[Optional[str]] = []
     for call in begins:
         result = _structured(call.get("result"))
         value = result.get("draft_id") if result is not None else None
@@ -178,14 +182,14 @@ def analyze_controller_trace(
             if isinstance(payload_digest, str) and re.fullmatch(r"[0-9a-f]{64}", payload_digest)
             else None
         )
-    trace_ids = []
-    receipt_ids = []
-    receipt_paths = []
-    receipt_digests = []
-    compact_digests = []
-    request_digests = []
-    trace_seed_values = []
-    trace_success = []
+    trace_ids: list[Optional[str]] = []
+    receipt_ids: list[Optional[str]] = []
+    receipt_paths: list[Optional[str]] = []
+    receipt_digests: list[Optional[str]] = []
+    compact_digests: list[Optional[str]] = []
+    request_digests: list[Optional[str]] = []
+    trace_seed_values: list[Optional[tuple[tuple[str, Optional[str]], ...]]] = []
+    trace_success: list[bool] = []
     for call in traces:
         arguments = call.get("arguments")
         trace_id = arguments.get("draft_id") if isinstance(arguments, dict) else None
@@ -258,10 +262,10 @@ def analyze_controller_trace(
             and argument_seeds is not None
             and result_seeds == argument_seeds
         )
-    finalize_ids = []
-    finalize_receipt_ids = []
-    finalize_success = []
-    displays = []
+    finalize_ids: list[Optional[str]] = []
+    finalize_receipt_ids: list[Optional[str]] = []
+    finalize_success: list[bool] = []
+    displays: list[Optional[str]] = []
     for call in finalizes:
         arguments = call.get("arguments")
         draft_id = arguments.get("draft_id") if isinstance(arguments, dict) else None
@@ -305,7 +309,7 @@ def analyze_controller_trace(
         traced = not calls
         receipt_match = not calls
         succeeded = not calls
-        compared_displays = ()
+        compared_displays: tuple[Optional[str], ...] = ()
     else:
         compared_displays = tuple(displays)
         exact_match = (
@@ -316,7 +320,9 @@ def analyze_controller_trace(
         presentation_equivalent = (
             len(compared_displays) == expected_turns
             and all(isinstance(value, str) for value in compared_displays)
-            and tuple(_presentation_bytes(value) for value in compared_displays)
+            and tuple(
+                _presentation_bytes(value) for value in compared_displays if isinstance(value, str)
+            )
             == tuple(_presentation_bytes(value) for value in final_outputs)
         )
     if not draft_match:

@@ -10,6 +10,7 @@ import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from types import ModuleType
 from typing import Optional
 
 from .models import Adjudication, CaseSpec, MechanicalScore, RunResult, RunStatus
@@ -23,7 +24,7 @@ _REPORT_WORKFLOW = re.compile(
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
 
 
-def _load_validator():
+def _load_validator() -> ModuleType:
     """Load the checked-in canonical validator without copying its behavior."""
     validator_path = (
         Path(__file__).resolve().parents[2]
@@ -45,10 +46,18 @@ def _load_validator():
     return module
 
 
-_VALIDATOR = _load_validator()
+_VALIDATOR: ModuleType = _load_validator()
 _REPORT_MODEL = sys.modules.get("impact_report")
-if _REPORT_MODEL is None:
+if not isinstance(_REPORT_MODEL, ModuleType):
     raise RuntimeError("canonical impact report model is unavailable")
+
+
+def _report_model() -> ModuleType:
+    """Return the dynamically loaded model after its import-time validation."""
+    model = _REPORT_MODEL
+    if not isinstance(model, ModuleType):
+        raise RuntimeError("canonical impact report model is unavailable")
+    return model
 
 
 def _complete_report_errors(
@@ -81,7 +90,7 @@ def _planning_handoff_workflow(output: str) -> Optional[str]:
     rows = parsed.tables.get("Planning Handoff", ())
     if len(rows) != 1:
         return None
-    return _REPORT_MODEL.unquote(rows[0].get("Selected planning workflow", ""))
+    return _report_model().unquote(rows[0].get("Selected planning workflow", ""))
 
 
 def _lineage_findings(case: CaseSpec, output: str) -> list[str]:
@@ -98,7 +107,7 @@ def _lineage_findings(case: CaseSpec, output: str) -> list[str]:
         findings = []
         if not states or not states <= _REJECTION_ACTIVE_STATES:
             findings.append(f"{case.id} requires an active evidence-supported ledger state")
-        authored = _REPORT_MODEL.authored_delta(parsed)
+        authored = _report_model().authored_delta(parsed)
         if authored.get("resolved") or authored.get("accepted"):
             findings.append(f"{case.id} forbids resolved or accepted Impact Delta")
         return findings
@@ -106,7 +115,7 @@ def _lineage_findings(case: CaseSpec, output: str) -> list[str]:
         parsed, parse_errors = _VALIDATOR.parse_report(output)
         if parse_errors:
             return []
-        authored = _REPORT_MODEL.authored_delta(parsed)
+        authored = _report_model().authored_delta(parsed)
         if not authored.get(transition):
             return [f"{case.id} requires {transition} Impact Delta transition"]
     return []
@@ -149,7 +158,7 @@ def score_mechanical(
         findings.extend(_complete_report_errors(output, previous_bytes))
 
     if case.id == "INT-superpowers":
-        if _planning_handoff_workflow(output) != _REPORT_MODEL.SUPERPOWERS_HANDOFF_MARKER:
+        if _planning_handoff_workflow(output) != _report_model().SUPERPOWERS_HANDOFF_MARKER:
             findings.append("INT-superpowers requires the exact structured Planning Handoff marker")
     if case.kind == "lineage":
         findings.extend(_lineage_findings(case, output))
@@ -189,35 +198,37 @@ def validate_adjudications(
     if cases is None or runs is None:
         return [*errors, "adjudication validation requires both cases and runs"]
 
-    expected = {
+    expected: set[tuple[str, int, str]] = {
         (case.id, repetition, rubric)
         for case in cases
         for repetition in range(1, 6)
         for rubric in case.must_detect + case.must_not_do
     }
-    run_index = {}
+    run_index: dict[tuple[str, int], RunResult] = {}
     for run in runs:
-        key = (run.case_id, run.repetition)
-        if key in run_index:
-            errors.append("duplicate sealed run %s/%02d" % key)
+        run_key = (run.case_id, run.repetition)
+        if run_key in run_index:
+            errors.append("duplicate sealed run %s/%02d" % run_key)
         else:
-            run_index[key] = run
+            run_index[run_key] = run
 
-    seen = set()
+    seen: set[tuple[str, int, str]] = set()
     for row in rows:
-        key = (row.case_id, row.repetition, row.rubric)
-        label = "%s/%02d %s" % key
-        if key not in expected:
+        adjudication_key = (row.case_id, row.repetition, row.rubric)
+        label = f"{row.case_id}/{row.repetition:02d} {row.rubric}"
+        if adjudication_key not in expected:
             errors.append(f"unknown adjudication {label}")
             continue
-        if key in seen:
+        if adjudication_key in seen:
             errors.append(f"duplicate adjudication {label}")
             continue
-        seen.add(key)
-        run = run_index.get((row.case_id, row.repetition))
-        if run is None:
+        seen.add(adjudication_key)
+        sealed_run = run_index.get((row.case_id, row.repetition))
+        if sealed_run is None:
             errors.append(f"{label} has no sealed run")
-        elif isinstance(row.quote, str) and row.quote.strip() not in (run.final_output or ""):
+        elif isinstance(row.quote, str) and row.quote.strip() not in (
+            sealed_run.final_output or ""
+        ):
             errors.append(f"{label} quote is not in sealed final output")
     errors.extend("missing adjudication %s/%02d %s" % key for key in sorted(expected - seen))
     return errors

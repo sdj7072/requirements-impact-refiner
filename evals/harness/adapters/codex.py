@@ -7,7 +7,7 @@ import stat
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from ..controller_evidence import analyze_controller_trace
 from ..evidence import Artifact, PotentialSecretError, record_run
@@ -190,7 +190,7 @@ class CodexAdapter(ClientAdapter):
                     first_command,
                 )
             problem, first_output = self._command_problem(first_command, first_final)
-            commands = (first_command,)
+            commands: tuple[CommandResult, ...] = (first_command,)
             artifacts["metadata.json"] = self._metadata_json(
                 probe, probe_commands, commands, request
             )
@@ -379,7 +379,7 @@ class CodexAdapter(ClientAdapter):
         )
 
     @staticmethod
-    def _plugin_entries(payload: str) -> Optional[tuple[dict[str, Any], ...]]:
+    def _plugin_entries(payload: str) -> Optional[tuple[dict[str, object], ...]]:
         try:
             decoded = json.loads(payload)
         except (json.JSONDecodeError, RecursionError):
@@ -388,30 +388,36 @@ class CodexAdapter(ClientAdapter):
             decoded = decoded.get("installed", decoded.get("plugins"))
         if not isinstance(decoded, list):
             return None
-        entries = []
+        entries: list[dict[str, object]] = []
         for item in decoded:
             if not isinstance(item, dict):
                 return None
-            entry = item.get("plugin") if isinstance(item.get("plugin"), dict) else item
-            entries.append(entry)
+            entry = item
+            plugin = item.get("plugin")
+            if isinstance(plugin, dict):
+                entry = plugin
+            if any(not isinstance(key, str) for key in entry):
+                return None
+            entries.append({key: value for key, value in entry.items() if isinstance(key, str)})
         return tuple(entries)
 
     @staticmethod
-    def _plugin_id(entry: dict[str, Any]) -> str:
+    def _plugin_id(entry: dict[str, object]) -> str:
         value = entry.get("pluginId") or entry.get("id")
         return value if isinstance(value, str) else ""
 
     @staticmethod
-    def _plugin_version(entry: dict[str, Any]) -> Optional[str]:
+    def _plugin_version(entry: dict[str, object]) -> Optional[str]:
         value = entry.get("version")
-        if value is None and isinstance(entry.get("manifest"), dict):
-            value = entry["manifest"].get("version")
+        manifest = entry.get("manifest")
+        if value is None and isinstance(manifest, dict):
+            value = manifest.get("version")
         return str(value) if value is not None else None
 
-    def _is_rir(self, entry: dict[str, Any]) -> bool:
+    def _is_rir(self, entry: dict[str, object]) -> bool:
         return self._plugin_id(entry) == self.expected_rir_plugin_id
 
-    def _is_superpowers(self, entry: dict[str, Any]) -> bool:
+    def _is_superpowers(self, entry: dict[str, object]) -> bool:
         return self._plugin_id(entry) == _SUPERPOWERS_PLUGIN_ID
 
     @staticmethod
@@ -436,10 +442,10 @@ class CodexAdapter(ClientAdapter):
             command.extend(("-c", f'model_reasoning_effort="{request.reasoning}"'))
 
     @staticmethod
-    def _parse_jsonl(text: str) -> Optional[tuple[dict[str, Any], ...]]:
+    def _parse_jsonl(text: str) -> Optional[tuple[dict[str, object], ...]]:
         if not text.strip():
             return None
-        events = []
+        events: list[dict[str, object]] = []
         for line in text.splitlines():
             if not line.strip():
                 continue
@@ -449,7 +455,9 @@ class CodexAdapter(ClientAdapter):
                 return None
             if not isinstance(event, dict):
                 return None
-            events.append(event)
+            if any(not isinstance(key, str) for key in event):
+                return None
+            events.append({key: value for key, value in event.items() if isinstance(key, str)})
         return tuple(events) if events else None
 
     def _command_problem(
@@ -573,7 +581,9 @@ class CodexAdapter(ClientAdapter):
     def _workspace_graph_artifacts(workspace_root: Path) -> dict[str, bytes]:
         directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
         file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        workspace_fd = base_fd = graph_fd = None
+        workspace_fd: Optional[int] = None
+        base_fd: Optional[int] = None
+        graph_fd: Optional[int] = None
         try:
             workspace_fd = os.open(workspace_root, directory_flags)
             try:
@@ -588,7 +598,7 @@ class CodexAdapter(ClientAdapter):
                 graph_fd = os.open("graph", directory_flags, dir_fd=base_fd)
             except FileNotFoundError:
                 return {}
-            artifacts = {}
+            artifacts: dict[str, bytes] = {}
             for name in sorted(os.listdir(graph_fd)):
                 if re.fullmatch(r"[0-9a-f]{32}\.json", name) is None:
                     raise ValueError("workspace graph receipt name is invalid")
@@ -602,7 +612,7 @@ class CodexAdapter(ClientAdapter):
                         raise ValueError("workspace graph artifacts must be regular files")
                     if before.st_size > 1_048_576:
                         raise ValueError("workspace graph receipt exceeds maximum byte size")
-                    chunks = []
+                    chunks: list[bytes] = []
                     remaining = 1_048_576 + 1
                     while remaining:
                         chunk = os.read(descriptor, min(64 * 1024, remaining))
@@ -631,9 +641,9 @@ class CodexAdapter(ClientAdapter):
                 artifacts[f"workspace-graph/{name}"] = payload
             return artifacts
         finally:
-            for descriptor in (graph_fd, base_fd, workspace_fd):
-                if descriptor is not None:
-                    os.close(descriptor)
+            for open_descriptor in (graph_fd, base_fd, workspace_fd):
+                if open_descriptor is not None:
+                    os.close(open_descriptor)
 
     @classmethod
     def _capture_workspace_graph(
@@ -779,7 +789,7 @@ class CodexAdapter(ClientAdapter):
         commands: Sequence[CommandResult],
         request: RunRequest,
     ) -> str:
-        def command_payload(command: CommandResult) -> dict[str, Any]:
+        def command_payload(command: CommandResult) -> dict[str, object]:
             return {
                 "argv": list(command.argv),
                 "returncode": command.returncode,
@@ -787,7 +797,7 @@ class CodexAdapter(ClientAdapter):
                 "timed_out": command.timed_out,
             }
 
-        payload = {
+        payload: dict[str, object] = {
             "client": "codex",
             "environment": _COMPOSITION_LABEL,
             "version": probe.version,
