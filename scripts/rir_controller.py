@@ -3219,6 +3219,7 @@ def _validate_graph_coverage(analysis: Mapping[str, object], context: GraphConte
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
     paths = {row["id"]: row for row in receipt["paths"]}
+    path_nodes = {identifier for path in paths.values() for identifier in path["nodes"]}
     frontier_nodes = {row["node"] for row in receipt["frontier"]}
     covered_nodes = set()
     impact_confidences: dict[str, str] = {}
@@ -3309,6 +3310,7 @@ def _validate_graph_coverage(analysis: Mapping[str, object], context: GraphConte
     for identifier, node in sorted(nodes.items()):
         if (
             set(node["risk_domains"]) & HIGH_RISK_DOMAINS
+            and identifier in path_nodes
             and identifier not in covered_nodes
             and identifier not in invariant_nodes
             and identifier not in frontier_nodes

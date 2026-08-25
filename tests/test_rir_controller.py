@@ -104,6 +104,63 @@ class RirControllerTest(unittest.TestCase):
             'const key = "profile.displayName";\n', encoding="utf-8"
         )
 
+    def graph_context_with_high_risk_license(self, paths):
+        receipt = self.fixture("impact-graph-receipt.json")
+        receipt["nodes"] = [
+            {
+                "id": "NODE-001",
+                "kind": "symbol",
+                "label": "remote.contract",
+                "location": None,
+                "provider": "builtin",
+                "confidence": "lexical",
+                "source_sha256": None,
+                "risk_domains": ["interfaces"],
+            },
+            {
+                "id": "NODE-018",
+                "kind": "file",
+                "label": "LICENSE",
+                "location": "LICENSE",
+                "provider": "builtin",
+                "confidence": "lexical",
+                "source_sha256": "d" * 64,
+                "risk_domains": ["legal/policy"],
+            },
+        ]
+        receipt["edges"] = (
+            []
+            if not paths
+            else [
+                {
+                    "id": "EDGE-001",
+                    "source": "NODE-001",
+                    "target": "NODE-018",
+                    "kind": "references",
+                    "location": "LICENSE",
+                    "evidence": "LICENSE",
+                    "confidence": "lexical",
+                    "provider": "builtin",
+                    "source_sha256": "d" * 64,
+                }
+            ]
+        )
+        receipt["paths"] = paths
+        receipt["frontier"] = [
+            {
+                "id": "FRONTIER-001",
+                "node": "NODE-001",
+                "reason": "provider unavailable for supplied remote contract",
+                "risk_domains": ["interfaces"],
+            }
+        ]
+        receipt["budget_status"] = "provider_limited"
+        payload = CONTROLLER.GRAPH.canonical_receipt_bytes(receipt)
+        validated, errors = CONTROLLER.GRAPH.load_receipt_bytes(payload)
+        self.assertEqual(errors, ())
+        self.assertIsNotNone(validated)
+        return {"receipt": validated, "sha256": "e" * 64}
+
     def test_trace_persists_private_receipt_bound_to_draft(self):
         self.enable_builtin_graph()
         draft = CONTROLLER.begin_refinement(self.request())
@@ -2419,6 +2476,53 @@ else:
                     graph_receipt_id=receipt.receipt_id,
                 )
             )
+
+    def test_finalize_accepts_supplied_only_zero_path_coverage_with_unrelated_license(self):
+        self.enable_builtin_graph()
+        draft = CONTROLLER.begin_refinement(
+            self.request(request="Honor remote.contract supplied by the user.")
+        )
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = []
+        analysis["impacts"][0]["coverage_rationale"] = (
+            "Supplied remote contract evidence remains unknown without a repository path."
+        )
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        context = self.graph_context_with_high_risk_license([])
+
+        with mock.patch.object(CONTROLLER, "_load_graph_context", return_value=context):
+            result = CONTROLLER.finalize_refinement(
+                CONTROLLER.FinalizeRequest(
+                    repo_root=self.root,
+                    draft_id=draft.draft_id,
+                    analysis=analysis,
+                    graph_receipt_id=context["receipt"]["receipt_id"],
+                )
+            )
+
+        self.assertEqual(result.status, "published")
+
+    def test_graph_coverage_rejects_unselected_high_risk_node_on_available_path(self):
+        analysis = self.fixture("controller-analysis-pre-decision.json")
+        analysis["impacts"][0]["graph_path_keys"] = []
+        analysis["impacts"][0]["coverage_rationale"] = (
+            "Supplied remote contract evidence remains unknown without a selected path."
+        )
+        analysis["impacts"][0]["evidence_level"] = "unknown"
+        context = self.graph_context_with_high_risk_license(
+            [
+                {
+                    "id": "PATH-001",
+                    "nodes": ["NODE-001", "NODE-018"],
+                    "edges": ["EDGE-001"],
+                    "distance": 1,
+                    "risk_domains": ["interfaces", "legal/policy"],
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "uncovered high-risk graph node NODE-018"):
+            CONTROLLER._validate_graph_coverage(analysis, context)
 
     def test_finalize_accepts_valid_paths_and_injects_receipt_bound_scope(self):
         self.enable_builtin_graph()
