@@ -198,3 +198,73 @@ changed.
   mutation coverage and `git diff --check` pass.
 - The two pre-existing runtime pointer modifications remain unstaged and unchanged. No new runtime
   dependency or import cycle was introduced.
+
+---
+
+## Final fix wave — seal the controller Fast Scan graph
+
+Base: `ce53283cc7213390500a6118415adbb19c0cf288`. This wave closes the final review
+Important and the deferred Minor. Task 8 is green after the verification below.
+
+### Important correction
+
+The controller no longer performs runtime plain imports of `fast_scan`, `fast_scan_store`, or
+`payload_identity`, and it no longer dereferences `fast_scan.FastScanResult` before dependency
+validation. After the controller has established its exact local graph-delivery coordinator, it
+now resolves the complete Fast Scan graph through the accepted canonical/conflict/path-hash/
+vacation/repeat state machine:
+
+- exact regular non-symlink `fast_scan_renderer.py` and `fast_scan_store.py`, including every
+  class, constant, and callable used by public scan/promotion;
+- exact local `graph_coordinator.py` with exact `impact_graph.py`, `graph_builtin.py`,
+  `graph_cache.py`, and `graph_providers.py` paths and their GRAPH/BUILTIN/CACHE/PROVIDERS class,
+  callable, and object identities;
+- exact local `fast_scan.py`, wired to the validated renderer, store, builtin, and coordinator;
+- exact local `payload_identity.py`, with the Fast Scan/controller payload paths and digest
+  callables required by `_payload_sha256`.
+
+`ScanResult`, request construction, execution, receipt loading/validation, promotion identity,
+and promoted-context loading now all use the validated local modules. Temporary import aliases are
+restored on success and failure, foreign canonical aliases are never replaced, and root/installed-
+skill graphs remain distinct. Payload identity is still calculated from the repository plugin root
+for both controller copies. Task 1 signatures, result fields, canonical bytes, scan IDs, errors,
+and facade fixture outputs are unchanged.
+
+### Deferred Minor closed
+
+The unused duplicate `_graph_draft_identity` was removed from root and installed-skill
+`rir_storage.py`. Runtime ownership remains exclusively in `rir_graph_delivery.py`; repository
+search confirms no storage reference remains. No storage transaction function or behavior changed.
+
+### TDD evidence
+
+- RED on `ce53283`: a fresh Python 3.9 process with plausible foreign Fast Scan, renderer, store,
+  coordinator, builtin, and payload modules imported the controller but exposed no validated
+  `FAST_SCAN` graph; the public type was still captured from the foreign plain import.
+- RED on `ce53283`: copied controllers with a symlinked/incomplete local Fast Scan reached the later
+  finalize loader instead of failing at the controller boundary; invalid expected controller hash
+  state was not inspected.
+- GREEN: fresh root and installed-skill controllers execute real `scan_impact` and promoted
+  `begin_refinement` through their own exact local graphs. `ScanResult` is each local
+  `FastScanResult`, promoted bindings are persisted, payload digests use the correct plugin root,
+  every foreign sentinel remains registered, and no sentinel callable executes.
+- GREEN: symlinked/incomplete local Fast Scan and invalid expected store hashes fail closed during
+  controller import before scan state mutation. In-process conflict, vacation, repeat, rewire,
+  invalid-contract, invalid-hash, unsafe-hash, and alias-restoration controls cover the complete
+  accepted loader state machine.
+
+### Final verification
+
+- Python 3.9.6 focused Fast Scan/store/renderer, scan/promotion, controller/facade/CLI/MCP,
+  storage/finalize, and packaging matrix: 226 tests passed.
+- Full pinned quality runner: Ruff check/format and Mypy passed; 859 tests passed with 21 controlled
+  skips; branch coverage was 80.01%; Bandit passed; final exit status was 0.
+- Real pinned ast-grep 0.45.0 canary passed with executable SHA-256
+  `a3ac7f26733e6cf56eb8f340105aa09067e87dbb1c62d63ce99d41fb5a626d6d`.
+- Real corpus score retained the narrow scoped-static-internal-import claim: 20 deterministic
+  candidates, 2 fully labelled sources, 2 relationships, both providers TP/FP/FN `2/0/0`,
+  precision/recall 1.0, zero disagreement, built-in frontier 276, median 1,264.5 ms, hard maximum
+  4,522 ms, compact output 5,701 bytes.
+- Root/installed-skill controller and storage pairs are byte-identical. Payload mutation coverage,
+  facade parity, current and commit diff checks pass. Only the two pre-existing runtime pointer
+  modifications remain unstaged.

@@ -251,6 +251,546 @@ class RirControllerTest(unittest.TestCase):
                 )
             )
 
+    def test_pristine_root_and_skill_scan_and_promote_ignore_foreign_fast_scan_graph(self):
+        script = r"""
+import importlib.util
+import json
+import re
+import sys
+import tempfile
+import types
+from pathlib import Path
+
+repo = Path(sys.argv[1]).resolve()
+directories = (repo / "scripts", repo / "skills/requirements-impact-refiner/scripts")
+
+def load(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+calls = []
+foreign = {}
+for name in (
+    "fast_scan",
+    "fast_scan_renderer",
+    "fast_scan_store",
+    "graph_builtin",
+    "graph_coordinator",
+    "payload_identity",
+):
+    module = types.ModuleType(name)
+    module.__file__ = f"/tmp/foreign-{name}.py"
+    foreign[name] = module
+
+foreign["fast_scan_renderer"].WORD_LIMIT = 180
+foreign["fast_scan_renderer"].AUDIENCES = {"simple", "balanced", "technical"}
+foreign["fast_scan_renderer"].LOCALES = {"en", "ko", "ja"}
+foreign["fast_scan_renderer"].render_fast_scan = lambda *a, **k: calls.append("renderer")
+foreign["fast_scan_store"]._ID = re.compile(r"[0-9a-f]{32}")
+foreign["fast_scan_store"]._MAX = 1
+foreign["fast_scan_store"]._MAX_JSON_DEPTH = 1
+foreign["fast_scan_store"].publish_scan_receipt = lambda *a, **k: calls.append("publish")
+foreign["fast_scan_store"].load_scan_receipt_bytes = lambda *a, **k: calls.append("load")
+for name in ("DerivedSeed", "FastScanRequest", "FastScanReceipt", "FastScanResult", "PreparedFastScan"):
+    setattr(foreign["fast_scan"], name, type(f"Foreign{name}", (), {}))
+for name in (
+    "derive_seeds",
+    "execute_fast_scan",
+    "prepare_fast_scan_identity",
+    "validate_fast_scan_receipt",
+    "canonical_fast_scan_bytes",
+):
+    setattr(foreign["fast_scan"], name, lambda *a, _name=name, **k: calls.append(_name))
+foreign["payload_identity"].ROOT_FILES = ("scripts/rir_controller.py",)
+foreign["payload_identity"].functional_paths = lambda *a, **k: calls.append("paths")
+foreign["payload_identity"].payload_sha256 = lambda *a, **k: calls.append("payload")
+foreign["graph_builtin"].GRAPH = object()
+foreign["graph_coordinator"].GRAPH = object()
+foreign["graph_coordinator"].BUILTIN = foreign["graph_builtin"]
+foreign["graph_coordinator"].CACHE = object()
+foreign["graph_coordinator"].PROVIDERS = object()
+sys.modules.update(foreign)
+
+controllers = []
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary).resolve()
+    (root / ".requirements-impact-refiner.json").write_text(
+        json.dumps(
+            {
+                "impact_graph": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["builtin"],
+                    "install_policy": "never",
+                    "deep": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "api").mkdir()
+    (root / "api/profile.py").write_text(
+        'FIELD = "profile.displayName"\n', encoding="utf-8"
+    )
+    for index, directory in enumerate(directories, start=1):
+        controller = load(f"pristine_fast_scan_controller_{index}", directory / "rir_controller.py")
+        controllers.append(controller)
+        assert Path(controller.FAST_SCAN.__file__).resolve() == (directory / "fast_scan.py").resolve()
+        assert Path(controller.FAST_SCAN_STORE.__file__).resolve() == (directory / "fast_scan_store.py").resolve()
+        assert Path(controller.FAST_SCAN_RENDERER.__file__).resolve() == (directory / "fast_scan_renderer.py").resolve()
+        assert Path(controller.PAYLOAD_IDENTITY.__file__).resolve() == (directory / "payload_identity.py").resolve()
+        assert controller.FAST_SCAN.fast_scan_renderer is controller.FAST_SCAN_RENDERER
+        assert controller.FAST_SCAN.fast_scan_store is controller.FAST_SCAN_STORE
+        assert controller.FAST_SCAN.graph_builtin is controller.GRAPH_COORDINATOR.BUILTIN
+        assert controller.FAST_SCAN.graph_coordinator is controller.GRAPH_COORDINATOR
+        assert controller.ScanResult is controller.FAST_SCAN.FastScanResult
+        assert controller._payload_sha256() == controller.PAYLOAD_IDENTITY.payload_sha256(repo)
+        scan = controller.scan_impact(
+            controller.ScanRequest(root, "Rename profile.displayName", (), "balanced")
+        )
+        assert type(scan) is controller.ScanResult
+        draft = controller.begin_refinement(
+            controller.BeginRequest(
+                root,
+                "Rename profile.displayName",
+                (),
+                "generic",
+                scan_id=scan.scan_id,
+            )
+        )
+        stored = controller.load_draft(root, draft.draft_id)
+        assert stored["promoted_scan"]["scan_id"] == scan.scan_id
+        for name, sentinel in foreign.items():
+            assert sys.modules[name] is sentinel, name
+
+assert controllers[0].FAST_SCAN is not controllers[1].FAST_SCAN
+assert controllers[0].FAST_SCAN_STORE is not controllers[1].FAST_SCAN_STORE
+assert controllers[0].GRAPH_COORDINATOR is not controllers[1].GRAPH_COORDINATOR
+assert calls == [], calls
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(ROOT)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_controller_fast_scan_conflict_vacation_and_repeat_reuse_local_graph(self):
+        exact_names = {
+            "fast_scan",
+            "fast_scan_renderer",
+            "fast_scan_store",
+            "graph_builtin",
+            "graph_coordinator",
+            "payload_identity",
+        }
+        prefixes = (
+            "_rir_controller_fast_scan_",
+            "_rir_controller_payload_identity_",
+        )
+        controller_names = (
+            "rir_controller_fast_scan_conflict",
+            "rir_controller_fast_scan_vacated",
+        )
+        preserved = {
+            name: module
+            for name, module in sys.modules.items()
+            if name in exact_names or name.startswith(prefixes)
+        }
+        foreign = {}
+        try:
+            for name in tuple(sys.modules):
+                if name in exact_names or name.startswith(prefixes):
+                    sys.modules.pop(name, None)
+            for name in exact_names:
+                sentinel = type(sys)(name)
+                sentinel.__file__ = str(self.root / f"foreign-{name}.py")
+                foreign[name] = sentinel
+                sys.modules[name] = sentinel
+
+            first = load_module(controller_names[0], SCRIPTS / "rir_controller.py")
+
+            self.assertEqual(
+                Path(first.FAST_SCAN.__file__).resolve(),
+                (SCRIPTS / "fast_scan.py").resolve(),
+            )
+            self.assertEqual(
+                Path(first.FAST_SCAN_STORE.__file__).resolve(),
+                (SCRIPTS / "fast_scan_store.py").resolve(),
+            )
+            self.assertEqual(
+                Path(first.FAST_SCAN_RENDERER.__file__).resolve(),
+                (SCRIPTS / "fast_scan_renderer.py").resolve(),
+            )
+            self.assertEqual(
+                Path(first.PAYLOAD_IDENTITY.__file__).resolve(),
+                (SCRIPTS / "payload_identity.py").resolve(),
+            )
+            self.assertIs(first.FAST_SCAN.graph_coordinator, first.GRAPH_COORDINATOR)
+            self.assertIs(first.FAST_SCAN.graph_builtin, first.GRAPH_COORDINATOR.BUILTIN)
+            for name, sentinel in foreign.items():
+                self.assertIs(sys.modules[name], sentinel)
+
+            for name in exact_names:
+                sys.modules.pop(name)
+            repeated = load_module(controller_names[1], SCRIPTS / "rir_controller.py")
+            self.assertIs(repeated.FAST_SCAN, first.FAST_SCAN)
+            self.assertIs(repeated.FAST_SCAN_STORE, first.FAST_SCAN_STORE)
+            self.assertIs(repeated.FAST_SCAN_RENDERER, first.FAST_SCAN_RENDERER)
+            self.assertIs(repeated.PAYLOAD_IDENTITY, first.PAYLOAD_IDENTITY)
+            self.assertIs(sys.modules["fast_scan"], first.FAST_SCAN)
+            self.assertIs(sys.modules["fast_scan_store"], first.FAST_SCAN_STORE)
+            self.assertIs(sys.modules["fast_scan_renderer"], first.FAST_SCAN_RENDERER)
+            self.assertIs(sys.modules["payload_identity"], first.PAYLOAD_IDENTITY)
+        finally:
+            for name in tuple(sys.modules):
+                if name in exact_names or name.startswith(prefixes) or name in controller_names:
+                    sys.modules.pop(name, None)
+            sys.modules.update(preserved)
+
+    def test_controller_sibling_loader_rewires_repeats_and_fails_closed(self):
+        module_names = {
+            "controller_loader_dependency",
+            "controller_loader_rewire_fixture",
+            "controller_loader_direct_fixture",
+            "controller_loader_broken_fixture",
+            "controller_loader_invalid_fixture",
+            "controller_loader_hashed_fixture",
+            "controller_loader_unsafe_hash_fixture",
+            "controller_loader_same_path_invalid",
+            "controller_loader_valid_foreign_hash",
+            "controller_loader_invalid_foreign_hash",
+        }
+        prefixes = (
+            "_controller_loader_rewire_",
+            "_controller_loader_direct_",
+            "_controller_loader_broken_",
+            "_controller_loader_invalid_",
+            "_controller_loader_hashed_",
+            "_controller_loader_unsafe_hash_",
+            "_controller_loader_same_path_invalid_",
+            "_controller_loader_valid_foreign_hash_",
+            "_controller_loader_invalid_foreign_hash_",
+        )
+        preserved = {
+            name: module
+            for name, module in sys.modules.items()
+            if name in module_names or name.startswith(prefixes)
+        }
+
+        def dependency(name, marker):
+            module = type(sys)(name)
+            module.__file__ = str(self.root / f"{name}.py")
+            module.marker = marker
+            return module
+
+        try:
+            for name in tuple(sys.modules):
+                if name in module_names or name.startswith(prefixes):
+                    sys.modules.pop(name, None)
+            fixture_root = self.root.resolve()
+            target = fixture_root / "target.py"
+            target.write_text(
+                "import controller_loader_dependency as dependency\nmarker = dependency.marker\n",
+                encoding="utf-8",
+            )
+            broken = fixture_root / "broken.py"
+            broken.write_text("raise RuntimeError('broken fixture')\n", encoding="utf-8")
+            invalid = fixture_root / "invalid.py"
+            invalid.write_text("marker = 'wrong'\n", encoding="utf-8")
+            linked = fixture_root / "linked.py"
+            linked.symlink_to(target)
+            expected = target.resolve()
+
+            foreign_dependency = dependency("controller_loader_dependency", "foreign")
+            sys.modules["controller_loader_dependency"] = foreign_dependency
+            foreign_target = dependency("controller_loader_rewire_fixture", "foreign")
+            sys.modules["controller_loader_rewire_fixture"] = foreign_target
+            first_dependency = dependency("first_dependency", "first")
+            second_dependency = dependency("second_dependency", "second")
+
+            with mock.patch.object(CONTROLLER, "SCRIPT_DIR", fixture_root):
+                first = CONTROLLER._load_controller_sibling(
+                    "target.py",
+                    "controller_loader_rewire_fixture",
+                    "_controller_loader_rewire_",
+                    lambda value: getattr(value, "marker", None) == "first",
+                    "loader fixture",
+                    aliases={"controller_loader_dependency": first_dependency},
+                    rewire_validator=lambda value: hasattr(value, "marker"),
+                )
+                self.assertEqual(first.marker, "first")
+                self.assertIs(sys.modules["controller_loader_rewire_fixture"], foreign_target)
+                self.assertIs(sys.modules["controller_loader_dependency"], foreign_dependency)
+
+                rewired = CONTROLLER._load_controller_sibling(
+                    "target.py",
+                    "controller_loader_rewire_fixture",
+                    "_controller_loader_rewire_",
+                    lambda value: getattr(value, "marker", None) == "second",
+                    "loader fixture",
+                    aliases={"controller_loader_dependency": second_dependency},
+                    rewire_validator=lambda value: hasattr(value, "marker"),
+                )
+                repeated = CONTROLLER._load_controller_sibling(
+                    "target.py",
+                    "controller_loader_rewire_fixture",
+                    "_controller_loader_rewire_",
+                    lambda value: getattr(value, "marker", None) == "second",
+                    "loader fixture",
+                    aliases={"controller_loader_dependency": second_dependency},
+                    rewire_validator=lambda value: hasattr(value, "marker"),
+                )
+                self.assertEqual(rewired.marker, "second")
+                self.assertIs(repeated, rewired)
+                self.assertIs(sys.modules["controller_loader_dependency"], foreign_dependency)
+
+                direct = CONTROLLER._execute_controller_sibling(
+                    "controller_loader_direct_fixture",
+                    target,
+                    lambda value: getattr(value, "marker", None) == "first",
+                    "loader fixture",
+                    aliases={"controller_loader_dependency": first_dependency},
+                )
+                self.assertEqual(direct.marker, "first")
+                reloaded = CONTROLLER._load_controller_sibling(
+                    "target.py",
+                    "controller_loader_direct_fixture",
+                    "_controller_loader_direct_",
+                    lambda value: getattr(value, "marker", None) == "second",
+                    "loader fixture",
+                    aliases={"controller_loader_dependency": second_dependency},
+                    rewire_validator=lambda value: hasattr(value, "marker"),
+                )
+                self.assertEqual(reloaded.marker, "second")
+                self.assertIs(
+                    CONTROLLER._load_controller_sibling(
+                        "target.py",
+                        "controller_loader_direct_fixture",
+                        "_controller_loader_direct_",
+                        lambda value: getattr(value, "marker", None) == "second",
+                        "loader fixture",
+                        aliases={"controller_loader_dependency": second_dependency},
+                        rewire_validator=lambda value: hasattr(value, "marker"),
+                    ),
+                    reloaded,
+                )
+
+                CONTROLLER._execute_controller_sibling(
+                    "controller_loader_same_path_invalid",
+                    target,
+                    lambda value: getattr(value, "marker", None) == "first",
+                    "loader fixture",
+                    aliases={"controller_loader_dependency": first_dependency},
+                )
+                with self.assertRaisesRegex(
+                    ImportError, "controller loader fixture sibling contract is incomplete"
+                ):
+                    CONTROLLER._load_controller_sibling(
+                        "target.py",
+                        "controller_loader_same_path_invalid",
+                        "_controller_loader_same_path_invalid_",
+                        lambda value: getattr(value, "marker", None) == "second",
+                        "loader fixture",
+                    )
+
+                with self.assertRaisesRegex(
+                    ImportError, "cannot load fixed controller loader fixture sibling"
+                ):
+                    CONTROLLER._load_controller_sibling(
+                        "broken.py",
+                        "controller_loader_broken_fixture",
+                        "_controller_loader_broken_",
+                        lambda value: True,
+                        "loader fixture",
+                    )
+                with self.assertRaisesRegex(
+                    ImportError, "controller loader fixture sibling contract is incomplete"
+                ):
+                    CONTROLLER._load_controller_sibling(
+                        "invalid.py",
+                        "controller_loader_invalid_fixture",
+                        "_controller_loader_invalid_",
+                        lambda value: getattr(value, "marker", None) == "valid",
+                        "loader fixture",
+                    )
+
+                valid_foreign_hash = (
+                    "_controller_loader_valid_foreign_hash_"
+                    + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+                )
+                sys.modules[valid_foreign_hash] = first
+                sys.modules["controller_loader_valid_foreign_hash"] = dependency(
+                    "controller_loader_valid_foreign_hash", "foreign"
+                )
+                self.assertIs(
+                    CONTROLLER._load_controller_sibling(
+                        "target.py",
+                        "controller_loader_valid_foreign_hash",
+                        "_controller_loader_valid_foreign_hash_",
+                        lambda value: getattr(value, "marker", None) == "first",
+                        "loader fixture",
+                    ),
+                    first,
+                )
+
+                invalid_foreign_hash = (
+                    "_controller_loader_invalid_foreign_hash_"
+                    + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+                )
+                invalid_foreign = dependency(invalid_foreign_hash, "wrong")
+                invalid_foreign.__file__ = str(expected)
+                sys.modules[invalid_foreign_hash] = invalid_foreign
+                sys.modules["controller_loader_invalid_foreign_hash"] = dependency(
+                    "controller_loader_invalid_foreign_hash", "foreign"
+                )
+                with self.assertRaisesRegex(
+                    ImportError, "controller loader fixture sibling contract is incomplete"
+                ):
+                    CONTROLLER._load_controller_sibling(
+                        "target.py",
+                        "controller_loader_invalid_foreign_hash",
+                        "_controller_loader_invalid_foreign_hash_",
+                        lambda value: getattr(value, "marker", None) == "valid",
+                        "loader fixture",
+                    )
+                with self.assertRaisesRegex(
+                    ImportError, "controller loader fixture sibling is unsafe"
+                ):
+                    CONTROLLER._load_controller_sibling(
+                        "linked.py",
+                        "controller_loader_invalid_fixture",
+                        "_controller_loader_invalid_",
+                        lambda value: True,
+                        "loader fixture",
+                    )
+
+                valid_hash = (
+                    "_controller_loader_hashed_"
+                    + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+                )
+                invalid_hash = dependency(valid_hash, "wrong")
+                invalid_hash.__file__ = str(expected)
+                sys.modules[valid_hash] = invalid_hash
+                with self.assertRaisesRegex(
+                    ImportError, "controller loader fixture sibling contract is incomplete"
+                ):
+                    CONTROLLER._load_controller_sibling(
+                        "target.py",
+                        "controller_loader_hashed_fixture",
+                        "_controller_loader_hashed_",
+                        lambda value: getattr(value, "marker", None) == "valid",
+                        "loader fixture",
+                    )
+
+                unsafe_hash_name = (
+                    "_controller_loader_unsafe_hash_"
+                    + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+                )
+                sys.modules[unsafe_hash_name] = dependency(unsafe_hash_name, "valid")
+                sys.modules["controller_loader_unsafe_hash_fixture"] = dependency(
+                    "controller_loader_unsafe_hash_fixture", "foreign"
+                )
+                with self.assertRaisesRegex(
+                    ImportError, "controller loader fixture sibling is unsafe"
+                ):
+                    CONTROLLER._load_controller_sibling(
+                        "target.py",
+                        "controller_loader_unsafe_hash_fixture",
+                        "_controller_loader_unsafe_hash_",
+                        lambda value: getattr(value, "marker", None) == "valid",
+                        "loader fixture",
+                    )
+        finally:
+            for name in tuple(sys.modules):
+                if name in module_names or name.startswith(prefixes):
+                    sys.modules.pop(name, None)
+            sys.modules.update(preserved)
+
+    def test_controller_fast_scan_graph_rejects_unsafe_local_and_expected_hash_modules(self):
+        script = r"""
+import hashlib
+import importlib.util
+import shutil
+import sys
+import tempfile
+import types
+from pathlib import Path
+
+source = Path(sys.argv[1]).resolve()
+
+def load(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+def clear():
+    for name in tuple(sys.modules):
+        if name in {
+            "fast_scan", "fast_scan_renderer", "fast_scan_store", "graph_builtin",
+            "graph_coordinator", "payload_identity", "rir_controller", "rir_contracts",
+            "rir_storage", "rir_graph_delivery", "rir_lineage", "rir_finalize",
+        } or name.startswith("_rir_") or name.startswith("unsafe_fast_scan_"):
+            sys.modules.pop(name, None)
+
+with tempfile.TemporaryDirectory() as temporary:
+    copied = Path(temporary) / "scripts"
+    shutil.copytree(source, copied)
+    (copied / "fast_scan.py").unlink()
+    (copied / "fast_scan.py").symlink_to(source / "fast_scan.py")
+    try:
+        load("unsafe_fast_scan_symlink", copied / "rir_controller.py")
+    except ImportError as error:
+        assert str(error) == "controller Fast Scan sibling is unsafe", error
+    else:
+        raise AssertionError("symlinked local Fast Scan was accepted")
+
+clear()
+with tempfile.TemporaryDirectory() as temporary:
+    copied = Path(temporary) / "scripts"
+    shutil.copytree(source, copied)
+    (copied / "fast_scan.py").write_text("class FastScanResult: pass\n", encoding="utf-8")
+    try:
+        load("unsafe_fast_scan_incomplete", copied / "rir_controller.py")
+    except ImportError as error:
+        assert str(error) == "controller Fast Scan sibling contract is incomplete", error
+    else:
+        raise AssertionError("incomplete local Fast Scan was accepted")
+
+clear()
+foreign = types.ModuleType("fast_scan_store")
+foreign.__file__ = "/tmp/foreign-fast-scan-store.py"
+sys.modules["fast_scan_store"] = foreign
+expected = (source / "fast_scan_store.py").resolve()
+hashed_name = "_rir_controller_fast_scan_store_" + hashlib.sha256(
+    str(expected).encode("utf-8")
+).hexdigest()[:16]
+invalid = types.ModuleType(hashed_name)
+invalid.__file__ = str(expected)
+sys.modules[hashed_name] = invalid
+try:
+    load("unsafe_fast_scan_hash", source / "rir_controller.py")
+except ImportError as error:
+    assert str(error) == "controller Fast Scan store sibling contract is incomplete", error
+else:
+    raise AssertionError("invalid expected Fast Scan store hash was accepted")
+assert sys.modules["fast_scan_store"] is foreign
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SCRIPTS)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_legacy_begin_has_no_promoted_scan_identity(self):
         draft = CONTROLLER.begin_refinement(self.request())
         self.assertIsNone(draft.scan_id)

@@ -441,36 +441,6 @@ def load_draft(repo_root: Path, draft_id: str) -> dict[str, object]:
     return value
 
 
-def _graph_draft_identity(draft: Mapping[str, object]) -> dict[str, object]:
-    keys = (
-        "schema_version",
-        "draft_id",
-        "repo_root",
-        "request",
-        "request_sha256",
-        "repository_evidence",
-        "adapter",
-        "settings",
-        "report_id",
-        "revision",
-        "previous_sha256",
-        "prior_state",
-        "prior_key_map",
-        "created_at",
-    )
-    try:
-        identity = {key: draft[key] for key in keys}
-    except KeyError as error:
-        raise ValueError(f"draft graph identity is missing {error.args[0]}") from error
-    request = identity["request"]
-    if (
-        not isinstance(request, str)
-        or identity["request_sha256"] != hashlib.sha256(request.encode("utf-8")).hexdigest()
-    ):
-        raise ValueError("draft request identity is invalid")
-    return identity
-
-
 def _replace_private_draft(root: Path, draft_id: str, value: Mapping[str, object]) -> None:
     directory_fd = _private_draft_directory_fd(root)
     temporary_name = f".{draft_id}.{secrets.token_hex(8)}.tmp"

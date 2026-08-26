@@ -15,9 +15,10 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Protocol, SupportsInt, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Callable, Protocol, SupportsInt, TypedDict, cast
 
 if TYPE_CHECKING:
+    from fast_scan import FastScanResult as ScanResult
     from graph_builtin import ScanSeed as ScanSeedType
     from graph_coordinator import SourceInventory as SourceInventoryType
     from graph_providers import Deadline as DeadlineType
@@ -415,10 +416,6 @@ def _cas_replace_private_draft(
     )
 
 
-import fast_scan
-import fast_scan_store
-import payload_identity
-
 MAX_TRACE_SEEDS = 128
 ADAPTERS = {"generic", "superpowers", "claude-feature-dev", "spec-kit"}
 SUPERPOWERS_HANDOFF_MARKER = (
@@ -684,6 +681,274 @@ def _callables(value: object, names: tuple[str, ...]) -> bool:
     return all(callable(getattr(value, name, None)) for name in names)
 
 
+def _execute_controller_sibling(
+    module_name: str,
+    expected: Path,
+    validator: Callable[[object], bool],
+    label: str,
+    aliases: Mapping[str, ModuleType] | None = None,
+) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError(f"cannot load fixed controller {label} sibling")
+    module = importlib.util.module_from_spec(specification)
+    previous = {name: (name in sys.modules, sys.modules.get(name)) for name in (aliases or {})}
+    sys.modules[module_name] = module
+    try:
+        if aliases:
+            sys.modules.update(aliases)
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"cannot load fixed controller {label} sibling") from error
+    finally:
+        for name, (present, value) in previous.items():
+            if name == module_name:
+                continue
+            if present:
+                sys.modules[name] = cast(ModuleType, value)
+            else:
+                sys.modules.pop(name, None)
+    if not validator(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"controller {label} sibling contract is incomplete")
+    return module
+
+
+def _load_controller_sibling(
+    filename: str,
+    canonical_name: str,
+    prefix: str,
+    validator: Callable[[object], bool],
+    label: str,
+    aliases: Mapping[str, ModuleType] | None = None,
+    rewire_validator: Callable[[object], bool] | None = None,
+) -> object:
+    sibling = SCRIPT_DIR / filename
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError(f"controller {label} sibling is unsafe")
+    hashed_name = prefix + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    hashed_present = hashed_name in sys.modules
+    hashed = sys.modules.get(hashed_name)
+
+    def rewired() -> object:
+        if aliases is None:
+            raise ImportError(f"controller {label} sibling contract is incomplete")
+        identity = []
+        for alias, module in sorted(aliases.items()):
+            registrations = sorted(name for name, value in sys.modules.items() if value is module)
+            identity.append(
+                (
+                    alias,
+                    getattr(module, "__name__", ""),
+                    getattr(module, "__file__", ""),
+                    registrations,
+                )
+            )
+        suffix = hashlib.sha256(repr(identity).encode("utf-8")).hexdigest()[:16]
+        rewired_name = f"{hashed_name}_{suffix}"
+        existing = sys.modules.get(rewired_name)
+        if existing is not None:
+            if not _module_uses_sibling(existing, expected):
+                raise ImportError(f"controller {label} sibling is unsafe")
+            if not validator(existing):
+                raise ImportError(f"controller {label} sibling contract is incomplete")
+            return existing
+        return _execute_controller_sibling(
+            rewired_name,
+            expected,
+            validator,
+            label,
+            aliases=aliases,
+        )
+
+    if canonical_name not in sys.modules:
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError(f"controller {label} sibling is unsafe")
+            if not validator(hashed):
+                raise ImportError(f"controller {label} sibling contract is incomplete")
+            sys.modules[canonical_name] = cast(ModuleType, hashed)
+            return hashed
+        return _execute_controller_sibling(
+            canonical_name, expected, validator, label, aliases=aliases
+        )
+    canonical = sys.modules.get(canonical_name)
+    if _module_uses_sibling(canonical, expected):
+        if validator(canonical) and not hashed_present:
+            return canonical
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError(f"controller {label} sibling is unsafe")
+            if validator(hashed):
+                return hashed
+            if rewire_validator is not None and rewire_validator(hashed):
+                return rewired()
+            raise ImportError(f"controller {label} sibling contract is incomplete")
+        if rewire_validator is not None and rewire_validator(canonical):
+            return _execute_controller_sibling(
+                hashed_name, expected, validator, label, aliases=aliases
+            )
+        raise ImportError(f"controller {label} sibling contract is incomplete")
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError(f"controller {label} sibling is unsafe")
+        if validator(hashed):
+            return hashed
+        if rewire_validator is not None and rewire_validator(hashed):
+            return rewired()
+        raise ImportError(f"controller {label} sibling contract is incomplete")
+    return _execute_controller_sibling(hashed_name, expected, validator, label, aliases=aliases)
+
+
+def _is_fast_scan_renderer_contract(value: object) -> bool:
+    word_limit = getattr(value, "WORD_LIMIT", None)
+    return (
+        type(word_limit) is int
+        and word_limit > 0
+        and isinstance(getattr(value, "AUDIENCES", None), set)
+        and isinstance(getattr(value, "LOCALES", None), set)
+        and callable(getattr(value, "render_fast_scan", None))
+    )
+
+
+def _is_fast_scan_store_contract(value: object) -> bool:
+    return (
+        isinstance(getattr(value, "_ID", None), re.Pattern)
+        and all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in ("_MAX", "_MAX_JSON_DEPTH")
+        )
+        and _callables(value, ("publish_scan_receipt", "load_scan_receipt_bytes"))
+    )
+
+
+def _is_fast_scan_coordinator_graph(value: object) -> bool:
+    graph = getattr(value, "GRAPH", None)
+    builtin = getattr(value, "BUILTIN", None)
+    cache = getattr(value, "CACHE", None)
+    providers = getattr(value, "PROVIDERS", None)
+    priority = getattr(providers, "PROVIDER_PRIORITY", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "graph_coordinator.py")
+        and _module_uses_sibling(graph, SCRIPT_DIR / "impact_graph.py")
+        and _module_uses_sibling(builtin, SCRIPT_DIR / "graph_builtin.py")
+        and _module_uses_sibling(cache, SCRIPT_DIR / "graph_cache.py")
+        and _module_uses_sibling(providers, SCRIPT_DIR / "graph_providers.py")
+        and getattr(builtin, "GRAPH", None) is graph
+        and getattr(cache, "GRAPH", None) is graph
+        and isinstance(priority, tuple)
+        and all(isinstance(item, str) for item in priority)
+        and _classes(
+            graph,
+            (
+                "GraphSettings",
+                "ProviderStatus",
+                "GraphNode",
+                "GraphEdge",
+                "GraphPath",
+                "FrontierEntry",
+                "GraphReceipt",
+            ),
+        )
+        and _classes(builtin, ("ScanSeed", "ScanLimits", "BuiltInScanResult"))
+        and _classes(cache, ("CacheResult",))
+        and _classes(
+            providers,
+            ("Deadline", "ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec"),
+        )
+        and getattr(value, "GraphSettings", None) is getattr(graph, "GraphSettings", None)
+        and getattr(value, "Deadline", None) is getattr(providers, "Deadline", None)
+        and getattr(value, "ScanSeed", None) is getattr(builtin, "ScanSeed", None)
+        and getattr(value, "ScanLimits", None) is getattr(builtin, "ScanLimits", None)
+        and all(
+            getattr(value, name, None) is getattr(providers, name, None)
+            for name in ("ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec")
+        )
+        and getattr(value, "discover_providers", None)
+        is getattr(providers, "discover_providers", None)
+        and getattr(value, "run_provider", None) is getattr(providers, "run_provider", None)
+        and _classes(value, ("SourceInventory",))
+        and _callables(
+            value,
+            (
+                "_settings",
+                "_request_sha256",
+                "_seed_key",
+                "_trace_identity",
+                "_collect_source_digests",
+                "trace_impact",
+            ),
+        )
+    )
+
+
+def _is_fast_scan_shape(value: object) -> bool:
+    renderer = getattr(value, "fast_scan_renderer", None)
+    store = getattr(value, "fast_scan_store", None)
+    builtin = getattr(value, "graph_builtin", None)
+    coordinator = getattr(value, "graph_coordinator", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "fast_scan.py")
+        and _module_uses_sibling(renderer, SCRIPT_DIR / "fast_scan_renderer.py")
+        and _is_fast_scan_renderer_contract(renderer)
+        and _module_uses_sibling(store, SCRIPT_DIR / "fast_scan_store.py")
+        and _is_fast_scan_store_contract(store)
+        and _module_uses_sibling(builtin, SCRIPT_DIR / "graph_builtin.py")
+        and _is_fast_scan_coordinator_graph(coordinator)
+        and getattr(builtin, "GRAPH", None) is getattr(coordinator, "GRAPH", None)
+        and _classes(
+            value,
+            (
+                "DerivedSeed",
+                "FastScanRequest",
+                "FastScanReceipt",
+                "FastScanResult",
+                "PreparedFastScan",
+            ),
+        )
+        and all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in (
+                "MAX_CHANGE_BYTES",
+                "MAX_EVIDENCE_ROWS",
+                "MAX_EVIDENCE_BYTES",
+                "MAX_SEEDS",
+                "MAX_SOURCE_BYTES",
+                "MAX_FRONTIER",
+                "MAX_CANDIDATES",
+            )
+        )
+        and _callables(
+            value,
+            (
+                "derive_seeds",
+                "execute_fast_scan",
+                "prepare_fast_scan_identity",
+                "validate_fast_scan_receipt",
+                "canonical_fast_scan_bytes",
+            ),
+        )
+    )
+
+
+def _is_payload_identity_contract(value: object) -> bool:
+    root_files = getattr(value, "ROOT_FILES", None)
+    return (
+        isinstance(root_files, tuple)
+        and all(isinstance(item, str) for item in root_files)
+        and {
+            "scripts/fast_scan.py",
+            "scripts/fast_scan_renderer.py",
+            "scripts/fast_scan_store.py",
+            "scripts/rir_controller.py",
+        }
+        <= set(root_files)
+        and _callables(value, ("functional_paths", "payload_sha256"))
+    )
+
+
 def _is_settings_contract(value: object) -> TypeGuard[_SettingsContract]:
     return _callables(value, ("resolve",))
 
@@ -877,6 +1142,69 @@ GRAPH = GRAPH_DELIVERY.GRAPH
 TraceSeed = GRAPH_DELIVERY.TraceSeed
 
 
+def _load_controller_fast_scan_graph():
+    if not _is_fast_scan_coordinator_graph(GRAPH_COORDINATOR):
+        raise ImportError("controller Fast Scan coordinator graph is incomplete")
+    renderer = _load_controller_sibling(
+        "fast_scan_renderer.py",
+        "fast_scan_renderer",
+        "_rir_controller_fast_scan_renderer_",
+        _is_fast_scan_renderer_contract,
+        "Fast Scan renderer",
+    )
+    store = _load_controller_sibling(
+        "fast_scan_store.py",
+        "fast_scan_store",
+        "_rir_controller_fast_scan_store_",
+        _is_fast_scan_store_contract,
+        "Fast Scan store",
+    )
+
+    def valid(value: object) -> bool:
+        return (
+            _is_fast_scan_shape(value)
+            and getattr(value, "fast_scan_renderer", None) is renderer
+            and getattr(value, "fast_scan_store", None) is store
+            and getattr(value, "graph_builtin", None) is GRAPH_COORDINATOR.BUILTIN
+            and getattr(value, "graph_coordinator", None) is GRAPH_COORDINATOR
+        )
+
+    fast_scan_module = _load_controller_sibling(
+        "fast_scan.py",
+        "fast_scan",
+        "_rir_controller_fast_scan_",
+        valid,
+        "Fast Scan",
+        aliases={
+            "fast_scan_renderer": cast(ModuleType, renderer),
+            "fast_scan_store": cast(ModuleType, store),
+            "graph_builtin": cast(ModuleType, GRAPH_COORDINATOR.BUILTIN),
+            "graph_coordinator": cast(ModuleType, GRAPH_COORDINATOR),
+        },
+        rewire_validator=_is_fast_scan_shape,
+    )
+    payload_identity_module = _load_controller_sibling(
+        "payload_identity.py",
+        "payload_identity",
+        "_rir_controller_payload_identity_",
+        _is_payload_identity_contract,
+        "payload identity",
+    )
+    return renderer, store, fast_scan_module, payload_identity_module
+
+
+(
+    FAST_SCAN_RENDERER,
+    FAST_SCAN_STORE,
+    FAST_SCAN,
+    PAYLOAD_IDENTITY,
+) = _load_controller_fast_scan_graph()
+fast_scan_renderer = FAST_SCAN_RENDERER
+fast_scan_store = FAST_SCAN_STORE
+fast_scan = FAST_SCAN
+payload_identity = PAYLOAD_IDENTITY
+
+
 def _is_receipt_payload(value: object) -> TypeGuard[ReceiptPayload]:
     return isinstance(value, dict) and not GRAPH.validate_receipt(value)
 
@@ -900,7 +1228,8 @@ def _int_value(value: object) -> int:
     return int(value)
 
 
-ScanResult = fast_scan.FastScanResult
+if not TYPE_CHECKING:
+    ScanResult = FAST_SCAN.FastScanResult
 
 
 _canonical_bytes = canonical_bytes
@@ -1007,7 +1336,7 @@ def _payload_sha256() -> str:
     candidate = SCRIPT_DIR.parent
     if not (candidate / ".codex-plugin" / "plugin.json").is_file():
         candidate = SCRIPT_DIR.parents[2]
-    return payload_identity.payload_sha256(candidate)
+    return PAYLOAD_IDENTITY.payload_sha256(candidate)
 
 
 def scan_impact(request: ScanRequest) -> ScanResult:
@@ -1015,8 +1344,8 @@ def scan_impact(request: ScanRequest) -> ScanResult:
     if not isinstance(request.evidence, tuple):
         raise ValueError("scan evidence must be a tuple")
     settings = SETTINGS.resolve(root, request.audience_override, None)
-    return fast_scan.execute_fast_scan(
-        fast_scan.FastScanRequest(
+    return FAST_SCAN.execute_fast_scan(
+        FAST_SCAN.FastScanRequest(
             root, request.change_request, request.evidence, settings["audience"]
         ),
         settings["impact_graph"],
@@ -1029,8 +1358,8 @@ def _promoted_scan(root, request, settings):
         return None
     if DRAFT_ID_PATTERN.fullmatch(request.scan_id) is None:
         raise ValueError("invalid Fast Scan ID")
-    prepared = fast_scan.prepare_fast_scan_identity(
-        fast_scan.FastScanRequest(
+    prepared = FAST_SCAN.prepare_fast_scan_identity(
+        FAST_SCAN.FastScanRequest(
             root,
             request.request,
             request.repository_evidence,
@@ -1045,10 +1374,10 @@ def _promoted_scan(root, request, settings):
             "text, repository evidence rows, audience, graph settings, and "
             "repository contents must all equal the original rir_scan call"
         )
-    payload = fast_scan_store.load_scan_receipt_bytes(root, request.scan_id)
+    payload = FAST_SCAN_STORE.load_scan_receipt_bytes(root, request.scan_id)
     value = json.loads(payload)
-    errors = fast_scan.validate_fast_scan_receipt(value)
-    if errors or fast_scan.canonical_fast_scan_bytes(value) != payload:
+    errors = FAST_SCAN.validate_fast_scan_receipt(value)
+    if errors or FAST_SCAN.canonical_fast_scan_bytes(value) != payload:
         raise ValueError("Fast Scan receipt is invalid")
     if value["status"] != "complete" or value["can_promote"] is not True:
         raise ValueError("Fast Scan receipt is not promotable")
@@ -1301,7 +1630,7 @@ def _load_promoted_scan_context(
     promotion = _promoted_scan(root, request, draft["settings"])
     if promotion != binding:
         raise ValueError("promoted Fast Scan binding is stale")
-    payload = fast_scan_store.load_scan_receipt_bytes(root, binding["scan_id"])
+    payload = FAST_SCAN_STORE.load_scan_receipt_bytes(root, binding["scan_id"])
     if hashlib.sha256(payload).hexdigest() != binding["sha256"]:
         raise ValueError("promoted Fast Scan digest is stale")
     wrapper = json.loads(payload)
