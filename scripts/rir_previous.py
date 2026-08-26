@@ -769,7 +769,7 @@ def _run_git_command(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            start_new_session=os.environ.get("RIR_DELTA_WORKER") != "1",
         )
     except OSError:
         return None

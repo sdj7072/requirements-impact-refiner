@@ -997,7 +997,7 @@ def _run_git(
             stdin=subprocess.DEVNULL if input_stream is None else input_stream,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            start_new_session=os.environ.get("RIR_DELTA_WORKER") != "1",
         )
     except OSError:
         if input_stream is not None:

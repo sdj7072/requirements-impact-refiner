@@ -110,11 +110,15 @@
         "previous_revision",
         "previous_markdown_sha256",
         "previous_state_sha256",
+        "previous_graph_receipt_id",
+        "previous_graph_sha256",
         "previous_display_text",
         "changed_paths",
         "changed_count",
         "max_seconds",
         "seed_provenance",
+        "omitted_seed_count",
+        "omitted_seed_provenance",
         "previous_frontier"
       ],
       "properties": {
@@ -125,6 +129,14 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "previous_state_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "previous_graph_receipt_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "previous_graph_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
@@ -159,6 +171,11 @@
               "provenance": {"type": "object"}
             }
           }
+        },
+        "omitted_seed_count": {"type": "integer", "minimum": 0},
+        "omitted_seed_provenance": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 1}
         },
         "previous_frontier": {"type": "array", "maxItems": 512, "items": {"type": "object"}}
       }

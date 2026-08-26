@@ -130,7 +130,13 @@ def publish_scan_receipt(root, scan_id, payload):
     if not isinstance(payload, bytes) or not payload or len(payload) > _MAX:
         raise ValueError("scan receipt payload is invalid")
     directory_fd = _scan_dir(root)
-    temporary = "." + scan_id + "." + secrets.token_hex(8) + ".tmp"
+    worker_token = os.environ.get("RIR_DELTA_WORKER_TOKEN")
+    token = (
+        worker_token
+        if isinstance(worker_token, str) and re.fullmatch(r"[0-9a-f]{32}", worker_token)
+        else secrets.token_hex(8)
+    )
+    temporary = "." + scan_id + "." + token + ".tmp"
     fd = None
     try:
         fd = os.open(

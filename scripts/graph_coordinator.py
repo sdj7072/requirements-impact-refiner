@@ -1122,8 +1122,14 @@ def _persist_receipt(root: Path, receipt) -> Path:
     if destination.exists() and not destination.is_file():
         raise ValueError("graph receipt path must be a regular file")
     payload = GRAPH.canonical_receipt_bytes(receipt)
+    worker_token = os.environ.get("RIR_DELTA_WORKER_TOKEN")
+    token_prefix = (
+        f"{worker_token}."
+        if isinstance(worker_token, str) and re.fullmatch(r"[0-9a-f]{32}", worker_token)
+        else ""
+    )
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{receipt.draft_id}.",
+        prefix=f".{receipt.draft_id}.{token_prefix}",
         suffix=".tmp",
         dir=str(directory),
     )

@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 FIXTURE = ROOT / "tests" / "fixtures" / "delta-cdz-project"
+SLOW_WORKER = ROOT / "tests" / "fixtures" / "delta-workers" / "slow_worker.py"
 
 
 def load_module(name: str, path: Path):
@@ -35,11 +37,22 @@ BUILTIN = load_module("_test_rir_delta_graph_builtin", SCRIPTS / "graph_builtin.
 CONTROLLER = load_module("_test_rir_delta_controller", SCRIPTS / "rir_controller.py")
 MCP = load_module("_test_rir_delta_mcp", SCRIPTS / "rir_mcp_server.py")
 CLI = load_module("_test_rir_delta_cli", SCRIPTS / "rir-controller.py")
+WORKER = load_module("_test_rir_delta_worker", SCRIPTS / "rir_delta_worker.py")
 
 
 class FakeClock:
     def monotonic(self):
         return 0.0
+
+
+def process_exists(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def graph_receipt(root: Path, *, frontier=(), budget_status="closed"):
@@ -56,6 +69,20 @@ def graph_receipt(root: Path, *, frontier=(), budget_status="closed"):
             "risk_domains": ["regression"],
         }
         for index, location in enumerate(locations, start=1)
+    ]
+    edges = [
+        {
+            "id": f"EDGE-{index:03d}",
+            "source": nodes[index - 1]["id"],
+            "target": nodes[index]["id"],
+            "kind": "references",
+            "location": nodes[index]["location"],
+            "evidence": f"dependency-{index}",
+            "confidence": "structural-inferred",
+            "provider": "builtin",
+            "source_sha256": nodes[index]["source_sha256"],
+        }
+        for index in range(1, len(nodes))
     ]
     return {
         "schema_version": 1,
@@ -81,12 +108,12 @@ def graph_receipt(root: Path, *, frontier=(), budget_status="closed"):
             }
         ],
         "nodes": nodes,
-        "edges": [],
+        "edges": edges,
         "paths": [
             {
                 "id": "PATH-001",
                 "nodes": [row["id"] for row in nodes],
-                "edges": [],
+                "edges": [row["id"] for row in edges],
                 "distance": 3,
                 "risk_domains": ["regression"],
             }
@@ -112,8 +139,19 @@ def previous_state(report_id="RPT-001", revision=2):
     }
 
 
+def graph_identity(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return value["receipt_id"], hashlib.sha256(payload).hexdigest()
+
+
 def trusted_previous(
-    *, status="stale", revision=2, changed_paths=("a.py",), markdown_sha256="5" * 64
+    *,
+    status="stale",
+    revision=2,
+    changed_paths=("a.py",),
+    markdown_sha256="5" * 64,
+    requirement_sha256="c" * 64,
+    source_inventory_sha256="d" * 64,
 ):
     return SimpleNamespace(
         status=status,
@@ -122,6 +160,8 @@ def trusted_previous(
         markdown_sha256=markdown_sha256,
         changed_paths=tuple(changed_paths),
         changed_count=len(changed_paths),
+        requirement_sha256=requirement_sha256,
+        source_inventory_sha256=source_inventory_sha256,
         display_text="## Previous impact\n\nTrusted previous revision.",
     )
 
@@ -136,15 +176,38 @@ class DeltaScanTest(unittest.TestCase):
         self.temporary.cleanup()
 
     def context(self, *, configured_max_seconds=9, frontier=()):
+        prior_graph = graph_receipt(self.root, frontier=frontier)
+        receipt_id, receipt_sha256 = graph_identity(prior_graph)
         return DELTA.bind_delta_context(
             self.root,
             trusted_previous(),
             previous_state(),
-            graph_receipt(self.root, frontier=frontier),
+            prior_graph,
             previous_report_id="RPT-001",
             previous_revision=2,
             changed_paths=("a.py",),
             configured_max_seconds=configured_max_seconds,
+            previous_graph_receipt_id=receipt_id,
+            previous_graph_sha256=receipt_sha256,
+        )
+
+    def chain_context(self):
+        state = previous_state()
+        state["preserved_invariants"] = []
+        state["criteria"] = []
+        prior_graph = graph_receipt(self.root)
+        receipt_id, receipt_sha256 = graph_identity(prior_graph)
+        return DELTA.bind_delta_context(
+            self.root,
+            trusted_previous(),
+            state,
+            prior_graph,
+            previous_report_id="RPT-001",
+            previous_revision=2,
+            changed_paths=("a.py",),
+            configured_max_seconds=3,
+            previous_graph_receipt_id=receipt_id,
+            previous_graph_sha256=receipt_sha256,
         )
 
     def test_changed_path_then_all_prior_path_nodes_then_state_evidence_are_stable(self):
@@ -189,6 +252,11 @@ class DeltaScanTest(unittest.TestCase):
             self.assertNotIn("OriginSignal", consumer)
             self.assertNotIn("negotiation", consumer)
         seeds = DELTA.derive_delta_seeds(self.context())
+        prior_graph = graph_receipt(self.root)
+        self.assertEqual(CONTROLLER.GRAPH.validate_receipt(prior_graph), ())
+        self.assertEqual(len(prior_graph["nodes"]), 4)
+        self.assertEqual(len(prior_graph["edges"]), 3)
+        self.assertEqual(prior_graph["paths"][0]["distance"], 3)
 
         result = BUILTIN.scan_repository(
             self.root,
@@ -199,6 +267,96 @@ class DeltaScanTest(unittest.TestCase):
 
         locations = {node.location for node in result.nodes}
         self.assertTrue({"a.py", "c.py", "d.py", "z.py"} <= locations)
+
+    def test_prior_path_requires_current_receipt_local_edge_chain(self):
+        context = self.chain_context()
+        current = graph_receipt(self.root)
+        current["edges"] = []
+        current["paths"] = []
+
+        frontier = DELTA.surviving_frontier(context, current)
+        reasons = {row["reason"] for row in frontier}
+
+        self.assertIn("previous selected path remains unverified: PATH-001", reasons)
+        for location in ("a.py", "c.py", "d.py", "z.py"):
+            self.assertIn(
+                f"previous selected path node remains unverified: PATH-001:{location}",
+                reasons,
+            )
+
+        request = FAST_SCAN.FastScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            previous_report_id="RPT-001",
+            previous_revision=2,
+            changed_paths=("a.py",),
+        )
+        result = FAST_SCAN.execute_fast_scan(
+            request,
+            graph_receipt(self.root)["settings"],
+            "7" * 64,
+            coordinator=lambda *_args, **_kwargs: current,
+            delta_context=context,
+        )
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
+
+    def test_prior_path_rejects_missing_null_digest_and_unexpected_hash_change(self):
+        context = self.chain_context()
+        cases = []
+        missing = graph_receipt(self.root)
+        missing["nodes"] = missing["nodes"][:-1]
+        missing["edges"] = missing["edges"][:-1]
+        missing["paths"] = []
+        cases.append(("missing", missing, "z.py"))
+        null_digest = graph_receipt(self.root)
+        null_digest["nodes"][1]["source_sha256"] = None
+        null_digest["edges"][0]["source_sha256"] = None
+        cases.append(("null-digest", null_digest, "c.py"))
+        (self.root / "c.py").write_text("changed_consumer = True\n", encoding="utf-8")
+        hash_changed = graph_receipt(self.root)
+        cases.append(("hash-change", hash_changed, "c.py"))
+
+        for label, current, location in cases:
+            with self.subTest(label=label):
+                frontier = DELTA.surviving_frontier(context, current)
+                reasons = {row["reason"] for row in frontier}
+                self.assertIn("previous selected path remains unverified: PATH-001", reasons)
+                self.assertIn(
+                    f"previous selected path node remains unverified: PATH-001:{location}",
+                    reasons,
+                )
+
+    def test_prior_path_survives_valid_chain_with_changed_requested_source(self):
+        context = self.chain_context()
+        (self.root / "a.py").write_text("def origin_signal(value):\n    return value + 1\n")
+        current = graph_receipt(self.root)
+
+        frontier = DELTA.surviving_frontier(context, current)
+
+        self.assertFalse(
+            any("previous selected path" in str(row.get("reason")) for row in frontier)
+        )
+
+    def test_prior_path_accepts_explicit_verified_replacement_node(self):
+        context = self.chain_context()
+        replacement_path = self.root / "c_v2.py"
+        replacement_path.write_text("replacement_consumer = True\n", encoding="utf-8")
+        current = graph_receipt(self.root)
+        replacement_sha256 = hashlib.sha256(replacement_path.read_bytes()).hexdigest()
+        current["nodes"][1]["location"] = "c_v2.py"
+        current["nodes"][1]["source_sha256"] = replacement_sha256
+        current["nodes"][1]["confidence"] = "verified-provider"
+        current["edges"][0]["location"] = "c_v2.py"
+        current["edges"][0]["source_sha256"] = replacement_sha256
+
+        frontier = DELTA.surviving_frontier(context, current)
+
+        self.assertFalse(
+            any("previous selected path" in str(row.get("reason")) for row in frontier)
+        )
 
     def test_generated_directories_do_not_consume_inventory_unless_explicit(self):
         generated = {
@@ -288,7 +446,11 @@ class DeltaScanTest(unittest.TestCase):
             scan_calls.append((request, graph_settings, payload_sha256, kwargs))
             return SimpleNamespace(status="partial")
 
+        prior_graph = graph_receipt(self.root)
+        prior_graph_id, prior_graph_sha256 = graph_identity(prior_graph)
+
         with ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {CONTROLLER._DELTA_WORKER_FLAG: "1"}))
             stack.enter_context(
                 mock.patch.object(CONTROLLER, "lookup_previous", side_effect=lookup)
             )
@@ -299,7 +461,12 @@ class DeltaScanTest(unittest.TestCase):
                 mock.patch.object(
                     CONTROLLER.DELTA,
                     "load_trusted_previous_artifacts",
-                    return_value=(previous_state(), graph_receipt(self.root)),
+                    return_value=(
+                        previous_state(),
+                        prior_graph,
+                        prior_graph_id,
+                        prior_graph_sha256,
+                    ),
                 )
             )
             stack.enter_context(
@@ -352,6 +519,9 @@ class DeltaScanTest(unittest.TestCase):
             with self.subTest(status=result.status, changed_paths=result.changed_paths):
                 with ExitStack() as stack:
                     stack.enter_context(
+                        mock.patch.dict(os.environ, {CONTROLLER._DELTA_WORKER_FLAG: "1"})
+                    )
+                    stack.enter_context(
                         mock.patch.object(CONTROLLER, "lookup_previous", return_value=result)
                     )
                     stack.enter_context(
@@ -376,6 +546,40 @@ class DeltaScanTest(unittest.TestCase):
                                 changed_paths=("a.py",),
                             )
                         )
+
+    def test_controller_uses_worker_only_for_delta_requests(self):
+        sentinel = SimpleNamespace(status="partial")
+        delta_request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change a.py",
+            (),
+            "balanced",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        with mock.patch.object(
+            CONTROLLER, "_execute_delta_worker", return_value=sentinel
+        ) as worker:
+            self.assertIs(CONTROLLER.scan_impact(delta_request), sentinel)
+        self.assertEqual(worker.call_count, 1)
+
+        ordinary = SimpleNamespace(status="complete")
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch.object(
+                    CONTROLLER,
+                    "_execute_delta_worker",
+                    side_effect=AssertionError("ordinary scans must stay in process"),
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(CONTROLLER.FAST_SCAN, "execute_fast_scan", return_value=ordinary)
+            )
+            result = CONTROLLER.scan_impact(
+                CONTROLLER.ScanRequest(self.root, "Change a.py", (), "balanced")
+            )
+        self.assertIs(result, ordinary)
 
     def test_mcp_scan_accepts_delta_hints_and_returns_previous_summary(self):
         arguments = {
@@ -486,6 +690,120 @@ class DeltaScanTest(unittest.TestCase):
                 configured_max_seconds=3,
             )
 
+    def test_delta_context_binds_exact_prior_graph_receipt_identity(self):
+        prior_graph = graph_receipt(self.root)
+        receipt_id, receipt_sha256 = graph_identity(prior_graph)
+        context = DELTA.bind_delta_context(
+            self.root,
+            trusted_previous(),
+            previous_state(),
+            prior_graph,
+            previous_report_id="RPT-001",
+            previous_revision=2,
+            changed_paths=("a.py",),
+            configured_max_seconds=3,
+            previous_graph_receipt_id=receipt_id,
+            previous_graph_sha256=receipt_sha256,
+        )
+        mapping = DELTA.context_mapping(context, DELTA.derive_delta_seed_selection(context))
+
+        self.assertEqual(context.previous_graph_receipt_id, receipt_id)
+        self.assertEqual(context.previous_graph_sha256, receipt_sha256)
+        self.assertEqual(mapping["previous_graph_receipt_id"], receipt_id)
+        self.assertEqual(mapping["previous_graph_sha256"], receipt_sha256)
+
+        rebound = json.loads(json.dumps(prior_graph))
+        rebound["receipt_id"] = "f" * 32
+        with self.assertRaisesRegex(ValueError, "exact prior graph binding"):
+            DELTA.bind_delta_context(
+                self.root,
+                trusted_previous(),
+                previous_state(),
+                rebound,
+                previous_report_id="RPT-001",
+                previous_revision=2,
+                changed_paths=("a.py",),
+                configured_max_seconds=3,
+                previous_graph_receipt_id=receipt_id,
+                previous_graph_sha256=receipt_sha256,
+            )
+
+    def test_seed_selection_caps_max_changed_paths_with_omission_frontier(self):
+        changed_paths = tuple(f"changed/{index:04d}.py" for index in range(4096))
+        prior_graph = graph_receipt(self.root)
+        receipt_id, receipt_sha256 = graph_identity(prior_graph)
+        state = previous_state()
+        state["preserved_invariants"] = []
+        state["criteria"] = []
+        context = DELTA.bind_delta_context(
+            self.root,
+            trusted_previous(changed_paths=changed_paths),
+            state,
+            prior_graph,
+            previous_report_id="RPT-001",
+            previous_revision=2,
+            changed_paths=changed_paths,
+            configured_max_seconds=3,
+            previous_graph_receipt_id=receipt_id,
+            previous_graph_sha256=receipt_sha256,
+        )
+
+        selection = DELTA.derive_delta_seed_selection(context)
+        frontier = DELTA.surviving_frontier(context, {}, selection)
+
+        self.assertEqual(len(selection.seeds), 512)
+        self.assertEqual(selection.omitted_count, 3588)
+        self.assertEqual(selection.omitted_by_source["previous-lookup"], 3584)
+        self.assertEqual(selection.omitted_by_source["previous-graph-path"], 4)
+        self.assertTrue(any(row.get("omitted_seed_count") == 3588 for row in frontier))
+
+    def test_seed_selection_caps_after_changed_path_then_511_prior_nodes(self):
+        nodes = [
+            {
+                "id": f"NODE-{index:03d}",
+                "label": f"prior-{index}",
+                "location": f"prior/{index:03d}.py",
+                "source_sha256": "a" * 64,
+            }
+            for index in range(1, 513)
+        ]
+        prior_graph = {
+            "receipt_id": "b" * 32,
+            "repo_root_sha256": hashlib.sha256(str(self.root.resolve()).encode()).hexdigest(),
+            "nodes": nodes,
+            "paths": [
+                {
+                    "id": f"PATH-{index:03d}",
+                    "nodes": [nodes[index * 2]["id"], nodes[index * 2 + 1]["id"]],
+                }
+                for index in range(256)
+            ],
+            "frontier": [],
+        }
+        receipt_id, receipt_sha256 = graph_identity(prior_graph)
+        state = previous_state()
+        state["preserved_invariants"] = []
+        state["criteria"] = []
+        context = DELTA.bind_delta_context(
+            self.root,
+            trusted_previous(changed_paths=("changed.py",)),
+            state,
+            prior_graph,
+            previous_report_id="RPT-001",
+            previous_revision=2,
+            changed_paths=("changed.py",),
+            configured_max_seconds=3,
+            previous_graph_receipt_id=receipt_id,
+            previous_graph_sha256=receipt_sha256,
+        )
+
+        selection = DELTA.derive_delta_seed_selection(context)
+
+        self.assertEqual(selection.seeds[0].location, "changed.py")
+        self.assertEqual(len(selection.seeds), 512)
+        self.assertEqual(selection.omitted_count, 1)
+        self.assertEqual(selection.omitted_by_source, {"previous-graph-path": 1})
+
     def test_trusted_artifact_loader_binds_current_state_and_private_graph(self):
         report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
         graph_dir = self.root / ".requirements-impact-refiner" / "graph"
@@ -512,8 +830,21 @@ class DeltaScanTest(unittest.TestCase):
             json.dumps(pointer, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode()
         (report_dir / "current.json").write_bytes(pointer_payload)
+        payload_sha256 = "e" * 64
+        repository_evidence_sha256 = "f" * 64
+        context_identity = {
+            "payload_sha256": payload_sha256,
+            "repo_root_sha256": hashlib.sha256(str(self.root.resolve()).encode()).hexdigest(),
+            "requirement_sha256": "c" * 64,
+            "state_sha256": hashlib.sha256(state_payload).hexdigest(),
+            "repository_evidence_sha256": repository_evidence_sha256,
+            "source_inventory_available": True,
+            "source_inventory_complete": True,
+            "source_inventory_git_tracked_only": True,
+            "source_inventory_sha256": "d" * 64,
+        }
         controller = {
-            "schema_version": 1,
+            "schema_version": 2,
             "draft_id": receipt["draft_id"],
             "report_id": "RPT-001",
             "revision": 2,
@@ -523,6 +854,8 @@ class DeltaScanTest(unittest.TestCase):
                 "receipt_id": receipt["receipt_id"],
                 "sha256": hashlib.sha256(receipt_payload).hexdigest(),
             },
+            "analysis_sha256": "9" * 64,
+            "context_identity": context_identity,
         }
         controller_path = report_dir / "revision-0002.controller.json"
         controller_path.write_bytes(
@@ -534,19 +867,49 @@ class DeltaScanTest(unittest.TestCase):
         graph_path.chmod(0o600)
         trusted = trusted_previous(markdown_sha256=pointer["markdown_sha256"])
 
-        loaded_state, loaded_graph = DELTA.load_trusted_previous_artifacts(
-            self.root,
-            trusted,
-            state_loader=lambda payload: (json.loads(payload), []),
-            receipt_loader=lambda payload: (json.loads(payload), []),
-            canonical_receipt_bytes=lambda value: json.dumps(
-                value, sort_keys=True, separators=(",", ":")
-            ).encode(),
-            max_receipt_bytes=4 * 1024 * 1024,
+        schema1 = dict(controller)
+        schema1["schema_version"] = 1
+        schema1.pop("analysis_sha256")
+        schema1.pop("context_identity")
+        controller_path.write_bytes(
+            json.dumps(schema1, sort_keys=True, separators=(",", ":")).encode()
+        )
+        with self.assertRaisesRegex(ValueError, "schema version 2"):
+            DELTA.load_trusted_previous_artifacts(
+                self.root,
+                trusted,
+                state_loader=lambda payload: (json.loads(payload), []),
+                receipt_loader=lambda payload: (json.loads(payload), []),
+                canonical_receipt_bytes=lambda value: json.dumps(
+                    value, sort_keys=True, separators=(",", ":")
+                ).encode(),
+                max_receipt_bytes=4 * 1024 * 1024,
+                expected_payload_sha256=payload_sha256,
+                expected_repository_evidence_sha256=repository_evidence_sha256,
+            )
+        controller_path.write_bytes(
+            json.dumps(controller, sort_keys=True, separators=(",", ":")).encode()
+        )
+
+        loaded_state, loaded_graph, loaded_receipt_id, loaded_receipt_sha256 = (
+            DELTA.load_trusted_previous_artifacts(
+                self.root,
+                trusted,
+                state_loader=lambda payload: (json.loads(payload), []),
+                receipt_loader=lambda payload: (json.loads(payload), []),
+                canonical_receipt_bytes=lambda value: json.dumps(
+                    value, sort_keys=True, separators=(",", ":")
+                ).encode(),
+                max_receipt_bytes=4 * 1024 * 1024,
+                expected_payload_sha256=payload_sha256,
+                expected_repository_evidence_sha256=repository_evidence_sha256,
+            )
         )
 
         self.assertEqual(loaded_state, state)
         self.assertEqual(loaded_graph, receipt)
+        self.assertEqual(loaded_receipt_id, receipt["receipt_id"])
+        self.assertEqual(loaded_receipt_sha256, hashlib.sha256(receipt_payload).hexdigest())
 
         graph_path.unlink()
         scan_id = "9" * 32
@@ -597,18 +960,26 @@ class DeltaScanTest(unittest.TestCase):
         scan_path.write_bytes(wrapper_payload)
         scan_path.chmod(0o600)
 
-        promoted_state, promoted_graph = DELTA.load_trusted_previous_artifacts(
-            self.root,
-            trusted,
-            state_loader=lambda payload: (json.loads(payload), []),
-            receipt_loader=lambda payload: (json.loads(payload), []),
-            canonical_receipt_bytes=lambda value: json.dumps(
-                value, sort_keys=True, separators=(",", ":")
-            ).encode(),
-            max_receipt_bytes=4 * 1024 * 1024,
+        promoted_state, promoted_graph, promoted_receipt_id, promoted_receipt_sha256 = (
+            DELTA.load_trusted_previous_artifacts(
+                self.root,
+                trusted,
+                state_loader=lambda payload: (json.loads(payload), []),
+                receipt_loader=lambda payload: (json.loads(payload), []),
+                canonical_receipt_bytes=lambda value: json.dumps(
+                    value, sort_keys=True, separators=(",", ":")
+                ).encode(),
+                max_receipt_bytes=4 * 1024 * 1024,
+                expected_payload_sha256=payload_sha256,
+                expected_repository_evidence_sha256=repository_evidence_sha256,
+            )
         )
         self.assertEqual(promoted_state, state)
         self.assertEqual(promoted_graph, promoted_receipt)
+        self.assertEqual(promoted_receipt_id, promoted_receipt["receipt_id"])
+        self.assertEqual(
+            promoted_receipt_sha256, hashlib.sha256(promoted_receipt_payload).hexdigest()
+        )
 
         outside = Path(self.temporary.name) / "foreign-graph.json"
         outside.write_bytes(receipt_payload)
@@ -623,6 +994,8 @@ class DeltaScanTest(unittest.TestCase):
                     value, sort_keys=True, separators=(",", ":")
                 ).encode(),
                 max_receipt_bytes=4 * 1024 * 1024,
+                expected_payload_sha256=payload_sha256,
+                expected_repository_evidence_sha256=repository_evidence_sha256,
             )
         foreign_graph = graph_receipt(self.root)
         foreign_graph["repo_root_sha256"] = "f" * 64
@@ -645,6 +1018,149 @@ class DeltaScanTest(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 with self.assertRaisesRegex(ValueError, "delta_max_seconds"):
                     self.context(configured_max_seconds=invalid)
+
+    def test_whole_call_worker_bounds_slow_lookup_hash_provider_persist_and_render(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        for scenario in ("lookup", "hash", "provider", "persist", "render"):
+            with self.subTest(scenario=scenario):
+                started = time.monotonic()
+                result = CONTROLLER._execute_delta_worker(
+                    request,
+                    0.25,
+                    started,
+                    worker_path=SLOW_WORKER,
+                    worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
+                )
+                actual_ms = round((time.monotonic() - started) * 1000)
+                self.assertLess(actual_ms, 750)
+                self.assertGreaterEqual(result.elapsed_ms, 150)
+                self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 100)
+                self.assertEqual(result.status, "partial")
+                self.assertFalse(result.can_promote)
+                if scenario == "lookup":
+                    self.assertIsNone(result.previous_report_id)
+                else:
+                    self.assertEqual(result.previous_report_id, "RPT-001")
+                self.assertFalse(list((self.root / ".requirements-impact-refiner").rglob("*.tmp")))
+
+    def test_whole_call_timeout_kills_descendants_and_leaves_no_zombie(self):
+        marker = Path(self.temporary.name) / "descendant-marker"
+        child_pid_path = Path(self.temporary.name) / "descendant.pid"
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        started = time.monotonic()
+        result = CONTROLLER._execute_delta_worker(
+            request,
+            0.35,
+            started,
+            worker_path=SLOW_WORKER,
+            worker_environment={
+                "RIR_DELTA_TEST_SCENARIO": "descendant",
+                "RIR_DELTA_TEST_MARKER": str(marker),
+                "RIR_DELTA_TEST_CHILD_PID": str(child_pid_path),
+            },
+        )
+
+        self.assertEqual(result.status, "partial")
+        self.assertTrue(child_pid_path.is_file())
+        child_pid = int(child_pid_path.read_text(encoding="ascii"))
+        deadline = time.monotonic() + 1.0
+        while process_exists(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(process_exists(child_pid), "delta worker descendant survived cleanup")
+        self.assertFalse(marker.exists(), "delta worker descendant executed after timeout")
+
+    def test_worker_validates_immutable_input_and_emits_canonical_fallback_then_result(self):
+        input_path = Path(self.temporary.name) / "worker-input.json"
+        value = {
+            "schema_version": 1,
+            "repo_root": str(self.root.resolve()),
+            "change_request": "Change OriginSignal negotiation",
+            "evidence": [],
+            "audience_override": "technical",
+            "previous_report_id": "RPT-001",
+            "previous_revision": 2,
+            "changed_paths": ["a.py"],
+            "operation_started": time.monotonic(),
+            "max_seconds": 3,
+        }
+        payload = (
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+        input_path.write_bytes(payload)
+        input_path.chmod(0o600)
+        fallback = DELTA.delta_timeout_fallback(self.chain_context(), 1)
+        final = SimpleNamespace(
+            status="partial",
+            scan_id="1" * 32,
+            receipt_id="2" * 32,
+            receipt_sha256="3" * 64,
+            display_text="trusted previous then result",
+            risk_level="unknown",
+            paths=(),
+            frontier=(),
+            candidates=(),
+            elapsed_ms=2,
+            cache_status="miss",
+            can_promote=False,
+            previous_report_id="RPT-001",
+            previous_revision=2,
+            changed_paths=("a.py",),
+            changed_count=1,
+            previous_display_text="trusted previous",
+        )
+
+        def execute(request, *, operation_started, fallback_callback):
+            self.assertEqual(request.previous_report_id, "RPT-001")
+            self.assertIsInstance(operation_started, float)
+            fallback_callback(fallback)
+            return final
+
+        output = io.StringIO()
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"RIR_DELTA_WORKER": "1", "RIR_DELTA_WORKER_TOKEN": "a" * 32},
+            ),
+            mock.patch.object(
+                WORKER.rir_controller, "_scan_impact_in_process", side_effect=execute
+            ),
+            redirect_stdout(output),
+        ):
+            exit_code = WORKER.main(
+                [
+                    "--input",
+                    str(input_path),
+                    "--sha256",
+                    hashlib.sha256(payload).hexdigest(),
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        messages = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([message["kind"] for message in messages], ["fallback", "result"])
+        for line, message in zip(output.getvalue().splitlines(), messages):
+            self.assertEqual(
+                line,
+                json.dumps(message, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            )
+        with self.assertRaisesRegex(ValueError, "digest"):
+            WORKER._read_input(input_path, "0" * 64)
 
     def test_settings_publish_default_and_repository_delta_budget(self):
         default = CONTROLLER.SETTINGS.resolve(self.root, None, None)
@@ -755,15 +1271,19 @@ class DeltaScanTest(unittest.TestCase):
 
     def test_delta_identity_and_cache_include_previous_revision_and_changed_paths(self):
         first = self.context()
+        second_graph = graph_receipt(self.root)
+        second_graph_id, second_graph_sha256 = graph_identity(second_graph)
         second = DELTA.bind_delta_context(
             self.root,
             trusted_previous(revision=3, changed_paths=("c.py",)),
             previous_state(revision=3),
-            graph_receipt(self.root),
+            second_graph,
             previous_report_id="RPT-001",
             previous_revision=3,
             changed_paths=("c.py",),
             configured_max_seconds=3,
+            previous_graph_receipt_id=second_graph_id,
+            previous_graph_sha256=second_graph_sha256,
         )
         first_request = FAST_SCAN.FastScanRequest(
             self.root,
@@ -838,24 +1358,29 @@ class DeltaScanTest(unittest.TestCase):
         complete_state = previous_state()
         complete_state["preserved_invariants"] = [complete_state["preserved_invariants"][0]]
         complete_state["criteria"] = [complete_state["criteria"][0]]
+        prior_graph = graph_receipt(self.root)
+        prior_graph_id, prior_graph_sha256 = graph_identity(prior_graph)
         context = DELTA.bind_delta_context(
             self.root,
             trusted_previous(),
             complete_state,
-            graph_receipt(self.root),
+            prior_graph,
             previous_report_id="RPT-001",
             previous_revision=2,
             changed_paths=("a.py",),
             configured_max_seconds=3,
+            previous_graph_receipt_id=prior_graph_id,
+            previous_graph_sha256=prior_graph_sha256,
         )
         output_graph = json.loads(
             (ROOT / "tests" / "fixtures" / "impact-graph-receipt.json").read_text(encoding="utf-8")
         )
         output_graph["budget_status"] = "closed"
         output_graph["frontier"] = []
-        output_graph["nodes"] = graph_receipt(self.root)["nodes"]
-        output_graph["edges"] = []
-        output_graph["paths"] = []
+        current_graph = graph_receipt(self.root)
+        output_graph["nodes"] = current_graph["nodes"]
+        output_graph["edges"] = current_graph["edges"]
+        output_graph["paths"] = current_graph["paths"]
         settings = {
             "audience": "technical",
             "audience_source": "request",
@@ -900,23 +1425,6 @@ class DeltaScanTest(unittest.TestCase):
         self.assertEqual(promoted["scan_id"], scan.scan_id)
         self.assertEqual(promoted["receipt_id"], output_graph["receipt_id"])
 
-    def test_c_d_z_delta_scan_p95_is_below_three_seconds(self):
-        context = self.context()
-        observations = []
-        for _ in range(25):
-            started = time.perf_counter()
-            seeds = DELTA.derive_delta_seeds(context)
-            BUILTIN.scan_repository(
-                self.root,
-                tuple(BUILTIN.ScanSeed(seed.term, seed.location) for seed in seeds),
-                BUILTIN.ScanLimits(max_seconds=3),
-                FakeClock(),
-            )
-            observations.append(time.perf_counter() - started)
-        observations.sort()
-        p95 = observations[int(len(observations) * 0.95) - 1]
-        self.assertLessEqual(p95, 3.0)
-
     def test_fast_scan_schema_declares_optional_delta_context(self):
         schema = json.loads(
             (ROOT / "schemas" / "fast-impact-scan.schema.json").read_text(encoding="utf-8")
@@ -926,11 +1434,16 @@ class DeltaScanTest(unittest.TestCase):
         self.assertNotIn("delta_context", schema["required"])
         delta = schema["properties"]["delta_context"]
         self.assertEqual(delta["properties"]["max_seconds"]["maximum"], 3)
+        self.assertIn("previous_graph_receipt_id", delta["required"])
+        self.assertIn("previous_graph_sha256", delta["required"])
+        self.assertIn("omitted_seed_count", delta["required"])
+        self.assertIn("omitted_seed_provenance", delta["required"])
 
     def test_delta_runtime_is_payload_bound_and_installed_mirrors_are_exact(self):
         self.assertIn("scripts/rir_delta.py", CONTROLLER.PAYLOAD_IDENTITY.ROOT_FILES)
         pairs = (
             ("rir_delta.py", "rir_delta.py"),
+            ("rir_delta_worker.py", "rir_delta_worker.py"),
             ("fast_scan.py", "fast_scan.py"),
             ("graph_builtin.py", "graph_builtin.py"),
             ("resolve-settings.py", "resolve-settings.py"),

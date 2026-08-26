@@ -796,6 +796,7 @@ def _bounded_subprocess(
 ):
     if shell or not start_new_session:
         raise ValueError("provider subprocess security options are mandatory")
+    shared_delta_worker_group = os.environ.get("RIR_DELTA_WORKER") == "1"
     snapshot = _ExecutableSnapshot(
         Path(executable_snapshot).parent,
         Path(executable_snapshot),
@@ -811,12 +812,12 @@ def _bounded_subprocess(
         cwd=cwd,
         env=env,
         shell=False,
-        start_new_session=True,
+        start_new_session=not shared_delta_worker_group,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         close_fds=True,
     )
-    process_group_id = process.pid
+    process_group_id = None if shared_delta_worker_group else process.pid
     selector = selectors.DefaultSelector()
     assert process.stdout is not None and process.stderr is not None
     selector.register(process.stdout, selectors.EVENT_READ, (bytearray(), stdout_limit))
@@ -832,7 +833,13 @@ def _bounded_subprocess(
             if now >= expires and not timed_out:
                 timed_out = True
                 post_kill_expires = now + 0.25
-                _terminate_process_group(process, process_group_id)
+                if shared_delta_worker_group:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                else:
+                    _terminate_process_group(process, process_group_id)
             if timed_out:
                 assert post_kill_expires is not None
                 if now >= post_kill_expires:

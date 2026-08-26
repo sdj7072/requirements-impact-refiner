@@ -42,6 +42,7 @@ ROOT_FILES = (
     "scripts/rir_storage.py",
     "scripts/rir_controller.py",
     "scripts/rir_delta.py",
+    "scripts/rir_delta_worker.py",
     "scripts/rir_mcp_server.py",
     "scripts/validate-impact-report.py",
 )

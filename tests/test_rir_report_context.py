@@ -1843,7 +1843,7 @@ class RirReportContextTest(unittest.TestCase):
         )
         self.assertEqual(previous.status, "stale")
 
-    def test_absent_bare_root_source_named_by_request_can_never_be_reused_as_fresh(self):
+    def test_absent_source_stays_stale_and_full_delta_call_p95_is_bounded(self):
         self.configure_graph(True)
         source = self.root / "src" / "tracked.py"
         source.parent.mkdir()
@@ -1887,19 +1887,31 @@ class RirReportContextTest(unittest.TestCase):
         previous = CONTROLLER.lookup_previous(
             CONTROLLER.PreviousLookupRequest(self.root, change, evidence)
         )
-        delta = CONTROLLER.scan_impact(
-            CONTROLLER.ScanRequest(
-                self.root,
-                change,
-                evidence,
-                "balanced",
-                previous_report_id=previous.report_id,
-                previous_revision=previous.revision,
-                changed_paths=previous.changed_paths,
-            )
+        delta_request = CONTROLLER.ScanRequest(
+            self.root,
+            change,
+            evidence,
+            "balanced",
+            previous_report_id=previous.report_id,
+            previous_revision=previous.revision,
+            changed_paths=previous.changed_paths,
         )
+        sample_count = 20
+        observations_ms = []
+        delta = None
+        for _ in range(sample_count):
+            started = time.monotonic()
+            delta = CONTROLLER.scan_impact(delta_request)
+            observations_ms.append((time.monotonic() - started) * 1000)
+        observations_ms.sort()
+        nearest_rank = ((95 * sample_count + 99) // 100) - 1
+        p95_ms = observations_ms[nearest_rank]
+        self.delta_benchmark_sample_count = sample_count
+        self.delta_benchmark_p95_ms = p95_ms
 
         self.assertIsNotNone(context)
+        self.assertIsNotNone(delta)
+        assert delta is not None
         self.assertIsNone(context.required_source_digests)
         self.assertFalse(context.source_recheck_complete)
         self.assertEqual(previous.status, "stale")
@@ -1909,6 +1921,8 @@ class RirReportContextTest(unittest.TestCase):
         self.assertEqual(delta.changed_paths, previous.changed_paths)
         self.assertTrue(delta.display_text.startswith(previous.display_text))
         self.assertLessEqual(delta.elapsed_ms, 3_000)
+        self.assertEqual(len(observations_ms), sample_count)
+        self.assertLessEqual(p95_ms, 3_000)
         delta_receipt = json.loads(
             (
                 self.root / ".requirements-impact-refiner" / "scans" / f"{delta.scan_id}.json"

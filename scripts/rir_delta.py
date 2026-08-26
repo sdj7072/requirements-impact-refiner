@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Callable
+from typing import Callable, cast
 
 MAX_DELTA_SECONDS = 3
 MAX_DELTA_SEEDS = 512
@@ -254,12 +254,16 @@ def load_trusted_previous_artifacts(
     receipt_loader: Callable[[bytes], tuple[dict[str, object] | None, Sequence[str]]],
     canonical_receipt_bytes: Callable[[Mapping[str, object]], bytes],
     max_receipt_bytes: int,
-) -> tuple[dict[str, object], dict[str, object]]:
+    expected_payload_sha256: str,
+    expected_repository_evidence_sha256: str,
+) -> tuple[dict[str, object], dict[str, object], str, str]:
     """Read one selected revision and historical graph through descriptor-bound paths."""
     root = _root(repo_root)
     report_id = _trusted_value(trusted_previous, "report_id")
     revision = _trusted_value(trusted_previous, "revision")
     markdown_sha256 = _trusted_value(trusted_previous, "markdown_sha256")
+    requirement_sha256 = _trusted_value(trusted_previous, "requirement_sha256")
+    source_inventory_sha256 = _trusted_value(trusted_previous, "source_inventory_sha256")
     if (
         _trusted_value(trusted_previous, "status") != "stale"
         or not isinstance(report_id, str)
@@ -268,6 +272,17 @@ def load_trusted_previous_artifacts(
         or revision < 1
         or not isinstance(markdown_sha256, str)
         or SHA256_PATTERN.fullmatch(markdown_sha256) is None
+        or not isinstance(requirement_sha256, str)
+        or SHA256_PATTERN.fullmatch(requirement_sha256) is None
+        or (
+            source_inventory_sha256 is not None
+            and (
+                not isinstance(source_inventory_sha256, str)
+                or SHA256_PATTERN.fullmatch(source_inventory_sha256) is None
+            )
+        )
+        or SHA256_PATTERN.fullmatch(expected_payload_sha256) is None
+        or SHA256_PATTERN.fullmatch(expected_repository_evidence_sha256) is None
     ):
         raise ValueError("delta trusted previous identity is invalid")
     if type(max_receipt_bytes) is not int or max_receipt_bytes < 1:
@@ -331,39 +346,87 @@ def load_trusted_previous_artifacts(
         controller = _json_object(controller_payload, "controller")
         if controller_payload not in _canonical_json_variants(controller):
             raise ValueError("delta controller artifact is not canonical")
-        base_fields = {
+        expected_controller_fields = {
             "schema_version",
             "draft_id",
             "report_id",
             "revision",
             "state_sha256",
             "key_map",
+            "graph_receipt",
+            "analysis_sha256",
+            "context_identity",
         }
-        optional_fields = {"graph_receipt", "analysis_sha256", "context_identity"}
         draft_id = controller.get("draft_id")
+        context_identity = controller.get("context_identity")
+        expected_context_fields = {
+            "payload_sha256",
+            "repo_root_sha256",
+            "requirement_sha256",
+            "state_sha256",
+            "repository_evidence_sha256",
+            "source_inventory_available",
+            "source_inventory_complete",
+            "source_inventory_git_tracked_only",
+            "source_inventory_sha256",
+        }
+        expected_root_sha256 = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
         if (
-            not base_fields <= set(controller) <= base_fields | optional_fields
-            or controller.get("schema_version") not in {1, 2}
+            set(controller) != expected_controller_fields
+            or controller.get("schema_version") != 2
             or not isinstance(draft_id, str)
             or re.fullmatch(r"[0-9a-f]{32}", draft_id) is None
             or controller.get("report_id") != report_id
             or controller.get("revision") != revision
             or controller.get("state_sha256") != state_sha256
             or not isinstance(controller.get("key_map"), Mapping)
+            or not isinstance(controller.get("analysis_sha256"), str)
+            or SHA256_PATTERN.fullmatch(str(controller.get("analysis_sha256"))) is None
+            or not isinstance(context_identity, Mapping)
+            or set(context_identity) != expected_context_fields
         ):
+            if controller.get("schema_version") != 2:
+                raise ValueError("delta requires controller metadata schema version 2")
             raise ValueError("delta controller artifact identity is invalid")
+        trusted_context_identity = cast(Mapping[str, object], context_identity)
+        if (
+            trusted_context_identity.get("payload_sha256") != expected_payload_sha256
+            or trusted_context_identity.get("repo_root_sha256") != expected_root_sha256
+            or trusted_context_identity.get("requirement_sha256") != requirement_sha256
+            or trusted_context_identity.get("state_sha256") != state_sha256
+            or trusted_context_identity.get("repository_evidence_sha256")
+            != expected_repository_evidence_sha256
+            or trusted_context_identity.get("source_inventory_sha256") != source_inventory_sha256
+            or not isinstance(trusted_context_identity.get("source_inventory_available"), bool)
+            or not isinstance(trusted_context_identity.get("source_inventory_complete"), bool)
+            or not isinstance(
+                trusted_context_identity.get("source_inventory_git_tracked_only"), bool
+            )
+            or (
+                trusted_context_identity.get("source_inventory_complete") is True
+                and trusted_context_identity.get("source_inventory_available") is not True
+            )
+            or (
+                trusted_context_identity.get("source_inventory_git_tracked_only") is True
+                and (
+                    trusted_context_identity.get("source_inventory_available") is not True
+                    or trusted_context_identity.get("source_inventory_complete") is not True
+                )
+            )
+        ):
+            raise ValueError("delta controller context/payload identity is invalid")
         graph_binding = controller.get("graph_receipt")
         graph: dict[str, object] = {}
-        if graph_binding is not None:
-            if (
-                not isinstance(graph_binding, Mapping)
-                or set(graph_binding) != {"receipt_id", "sha256"}
-                or not isinstance(graph_binding.get("receipt_id"), str)
-                or re.fullmatch(r"[0-9a-f]{32}", graph_binding["receipt_id"]) is None
-                or not isinstance(graph_binding.get("sha256"), str)
-                or SHA256_PATTERN.fullmatch(graph_binding["sha256"]) is None
-            ):
-                raise ValueError("delta graph binding identity is invalid")
+        if (
+            not isinstance(graph_binding, Mapping)
+            or set(graph_binding) != {"receipt_id", "sha256"}
+            or not isinstance(graph_binding.get("receipt_id"), str)
+            or re.fullmatch(r"[0-9a-f]{32}", graph_binding["receipt_id"]) is None
+            or not isinstance(graph_binding.get("sha256"), str)
+            or SHA256_PATTERN.fullmatch(graph_binding["sha256"]) is None
+        ):
+            raise ValueError("delta graph binding identity is invalid")
+        if isinstance(graph_binding, Mapping):
             graph_payload = None
             graph_name = f"{draft_id}.json"
             expected_graph_draft_id = draft_id
@@ -453,12 +516,11 @@ def load_trusted_previous_artifacts(
                 if loaded is None or receipt_errors or not isinstance(loaded, dict):
                     raise ValueError("delta promoted graph artifact is invalid")
                 graph = loaded
-            expected_root = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
             if (
                 hashlib.sha256(canonical_graph).hexdigest() != graph_binding["sha256"]
                 or graph.get("receipt_id") != graph_binding["receipt_id"]
                 or graph.get("draft_id") != expected_graph_draft_id
-                or graph.get("repo_root_sha256") != expected_root
+                or graph.get("repo_root_sha256") != expected_root_sha256
             ):
                 raise ValueError("delta graph artifact identity is invalid")
             state_settings = state.get("settings")
@@ -472,7 +534,13 @@ def load_trusted_previous_artifacts(
         )
         if pointer_after != pointer_before:
             raise ValueError("delta report pointer changed while binding artifacts")
-        return state, graph
+        trusted_graph_binding = cast(Mapping[str, object], graph_binding)
+        return (
+            state,
+            graph,
+            str(trusted_graph_binding["receipt_id"]),
+            str(trusted_graph_binding["sha256"]),
+        )
     except OSError as error:
         raise ValueError("delta artifact root is unavailable or unsafe") from error
     finally:
@@ -537,6 +605,35 @@ class DeltaSeed:
 
 
 @dataclass(frozen=True)
+class DeltaSeedSelection:
+    seeds: tuple[DeltaSeed, ...]
+    omitted_count: int
+    omitted_by_source: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.seeds, tuple) or any(
+            not isinstance(seed, DeltaSeed) for seed in self.seeds
+        ):
+            raise TypeError("delta seed selection seeds must be a tuple")
+        if type(self.omitted_count) is not int or self.omitted_count < 0:
+            raise ValueError("delta omitted seed count is invalid")
+        if (
+            not isinstance(self.omitted_by_source, Mapping)
+            or any(
+                not isinstance(source, str) or not source or type(count) is not int or count < 1
+                for source, count in self.omitted_by_source.items()
+            )
+            or sum(self.omitted_by_source.values()) != self.omitted_count
+        ):
+            raise ValueError("delta omitted seed provenance is invalid")
+        object.__setattr__(
+            self,
+            "omitted_by_source",
+            MappingProxyType(dict(sorted(self.omitted_by_source.items()))),
+        )
+
+
+@dataclass(frozen=True)
 class DeltaSourceInventory:
     digests: Mapping[str, str]
     complete: bool
@@ -567,6 +664,8 @@ class DeltaScanContext:
     changed_count: int | None
     previous_state: Mapping[str, object]
     previous_graph_receipt: Mapping[str, object]
+    previous_graph_receipt_id: str
+    previous_graph_sha256: str
     max_seconds: int
 
     def __post_init__(self) -> None:
@@ -600,6 +699,17 @@ class DeltaScanContext:
             self.previous_graph_receipt, Mapping
         ):
             raise TypeError("delta previous state and graph must be objects")
+        if (
+            re.fullmatch(r"[0-9a-f]{32}", self.previous_graph_receipt_id) is None
+            or SHA256_PATTERN.fullmatch(self.previous_graph_sha256) is None
+        ):
+            raise ValueError("delta previous graph binding is invalid")
+        canonical_graph = _canonical_graph_bytes(self.previous_graph_receipt)
+        if (
+            self.previous_graph_receipt.get("receipt_id") != self.previous_graph_receipt_id
+            or hashlib.sha256(canonical_graph).hexdigest() != self.previous_graph_sha256
+        ):
+            raise ValueError("delta previous graph does not match exact prior graph binding")
         if type(self.max_seconds) is not int or not 1 <= self.max_seconds <= MAX_DELTA_SECONDS:
             raise ValueError("delta max_seconds must be an integer from 1 to 3")
         object.__setattr__(self, "repo_root", root)
@@ -616,11 +726,18 @@ class DeltaScanContext:
     def derive_seeds(self, request_seeds: Sequence[object] = ()) -> tuple[DeltaSeed, ...]:
         return derive_delta_seeds(self, request_seeds=request_seeds)
 
-    def to_mapping(self, seeds: Sequence[DeltaSeed]) -> dict[str, object]:
-        return context_mapping(self, seeds)
+    def derive_seed_selection(self, request_seeds: Sequence[object] = ()) -> DeltaSeedSelection:
+        return derive_delta_seed_selection(self, request_seeds=request_seeds)
 
-    def merge_frontier(self, graph: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
-        return surviving_frontier(self, graph)
+    def to_mapping(self, selection: DeltaSeedSelection | Sequence[DeltaSeed]) -> dict[str, object]:
+        return context_mapping(self, selection)
+
+    def merge_frontier(
+        self,
+        graph: Mapping[str, object],
+        selection: DeltaSeedSelection | None = None,
+    ) -> tuple[Mapping[str, object], ...]:
+        return surviving_frontier(self, graph, selection)
 
 
 def _trusted_value(result: object, name: str) -> object:
@@ -655,6 +772,15 @@ def _canonical_state_bytes(value: Mapping[str, object]) -> bytes:
         raise ValueError("delta previous state is not canonical JSON") from error
 
 
+def _canonical_graph_bytes(value: Mapping[str, object]) -> bytes:
+    try:
+        return json.dumps(
+            _thaw(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except (RecursionError, TypeError, ValueError) as error:
+        raise ValueError("delta previous graph is not canonical JSON") from error
+
+
 def bind_delta_context(
     repo_root: Path | str,
     trusted_previous: object,
@@ -665,6 +791,8 @@ def bind_delta_context(
     previous_revision: int,
     changed_paths: Sequence[str],
     configured_max_seconds: object = MAX_DELTA_SECONDS,
+    previous_graph_receipt_id: str | None = None,
+    previous_graph_sha256: str | None = None,
 ) -> DeltaScanContext:
     """Bind untrusted client hints to one backend-owned stale lookup and its artifacts."""
     root = _root(repo_root)
@@ -688,6 +816,8 @@ def bind_delta_context(
         expected_root = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
         if previous_graph_receipt.get("repo_root_sha256") != expected_root:
             raise ValueError("delta previous graph identity is invalid")
+    if not isinstance(previous_graph_receipt_id, str) or not isinstance(previous_graph_sha256, str):
+        raise ValueError("delta exact prior graph binding is required")
         if not isinstance(previous_graph_receipt.get("nodes"), (list, tuple)) or not isinstance(
             previous_graph_receipt.get("paths"), (list, tuple)
         ):
@@ -712,6 +842,8 @@ def bind_delta_context(
         changed_count,
         previous_state,
         previous_graph_receipt,
+        previous_graph_receipt_id,
+        previous_graph_sha256,
         min(configured_max_seconds, MAX_DELTA_SECONDS),
     )
 
@@ -732,13 +864,13 @@ def _evidence_paths(text: object) -> tuple[str, ...]:
     return tuple(values)
 
 
-def derive_delta_seeds(
+def derive_delta_seed_selection(
     previous: DeltaScanContext,
     changed_paths: Sequence[str] | None = None,
     *,
     request_seeds: Sequence[object] = (),
-) -> tuple[DeltaSeed, ...]:
-    """Derive every trusted delta seed in priority order without truncating prior paths."""
+) -> DeltaSeedSelection:
+    """Select the first 512 unique trusted seeds and account for every omission."""
     if not isinstance(previous, DeltaScanContext):
         raise TypeError("previous must be a trusted DeltaScanContext")
     selected_changed_paths = (
@@ -748,6 +880,7 @@ def derive_delta_seeds(
         raise ValueError("delta changed paths do not match trusted previous lookup")
     ordered: list[DeltaSeed] = []
     seen: dict[tuple[str, str | None], int] = {}
+    omitted_by_source: dict[str, int] = {}
 
     def add(
         term: object,
@@ -766,6 +899,8 @@ def derive_delta_seeds(
         )
         if identity in seen:
             index = seen[identity]
+            if index < 0:
+                return
             existing = ordered[index]
             thawed_existing = _thaw(existing.provenance)
             if not isinstance(thawed_existing, dict):  # pragma: no cover - frozen mapping invariant
@@ -802,7 +937,10 @@ def derive_delta_seeds(
                 )
             return
         if len(ordered) >= MAX_DELTA_SEEDS:
-            raise ValueError("trusted delta seeds exceed their safety limit")
+            seen[identity] = -1
+            source = str(provenance.get("source") or derivation.split(":", 1)[0])
+            omitted_by_source[source] = omitted_by_source.get(source, 0) + 1
+            return
         seen[identity] = len(ordered)
         ordered.append(
             DeltaSeed(
@@ -875,7 +1013,24 @@ def derive_delta_seeds(
             str(derivation),
             {"source": "request", "derivation": str(derivation)},
         )
-    return tuple(ordered)
+    return DeltaSeedSelection(
+        tuple(ordered),
+        sum(omitted_by_source.values()),
+        omitted_by_source,
+    )
+
+
+def derive_delta_seeds(
+    previous: DeltaScanContext,
+    changed_paths: Sequence[str] | None = None,
+    *,
+    request_seeds: Sequence[object] = (),
+) -> tuple[DeltaSeed, ...]:
+    return derive_delta_seed_selection(
+        previous,
+        changed_paths,
+        request_seeds=request_seeds,
+    ).seeds
 
 
 def _expired(deadline: object | None) -> bool:
@@ -988,27 +1143,185 @@ def collect_sources(
     return DeltaSourceInventory(digests, reason is None, reason)
 
 
-def context_mapping(context: DeltaScanContext, seeds: Sequence[DeltaSeed]) -> dict[str, object]:
+def _seed_selection(
+    value: DeltaSeedSelection | Sequence[DeltaSeed],
+) -> DeltaSeedSelection:
+    if isinstance(value, DeltaSeedSelection):
+        return value
+    return DeltaSeedSelection(tuple(value), 0, {})
+
+
+def context_mapping(
+    context: DeltaScanContext,
+    selection: DeltaSeedSelection | Sequence[DeltaSeed],
+) -> dict[str, object]:
     if not isinstance(context, DeltaScanContext):
         raise TypeError("delta context must be trusted")
+    selected = _seed_selection(selection)
     return {
         "previous_report_id": context.previous_report_id,
         "previous_revision": context.previous_revision,
         "previous_markdown_sha256": context.previous_markdown_sha256,
         "previous_state_sha256": context.previous_state_sha256,
+        "previous_graph_receipt_id": context.previous_graph_receipt_id,
+        "previous_graph_sha256": context.previous_graph_sha256,
         "previous_display_text": context.previous_display_text,
         "changed_paths": list(context.changed_paths),
         "changed_count": context.changed_count,
         "max_seconds": context.max_seconds,
-        "seed_provenance": [seed.provenance_mapping() for seed in seeds],
+        "seed_provenance": [seed.provenance_mapping() for seed in selected.seeds],
+        "omitted_seed_count": selected.omitted_count,
+        "omitted_seed_provenance": dict(selected.omitted_by_source),
         "previous_frontier": [_thaw(row) for row in context.previous_frontier],
     }
 
 
-def surviving_frontier(
-    context: DeltaScanContext, graph: Mapping[str, object]
+def _mapping_rows(value: object) -> tuple[Mapping[str, object], ...]:
+    if not isinstance(value, (tuple, list)):
+        return ()
+    return tuple(row for row in value if isinstance(row, Mapping))
+
+
+def _rows_by_id(value: object) -> dict[str, Mapping[str, object]]:
+    return {str(row["id"]): row for row in _mapping_rows(value) if isinstance(row.get("id"), str)}
+
+
+def _ordered_prior_path_nodes(
+    path: Mapping[str, object],
+    nodes: Mapping[str, Mapping[str, object]],
 ) -> tuple[Mapping[str, object], ...]:
-    """Keep prior and new unknowns, plus every prior path node absent from new evidence."""
+    node_ids = path.get("nodes")
+    if not isinstance(node_ids, (tuple, list)):
+        return ()
+    result = []
+    for node_id in node_ids:
+        node = nodes.get(str(node_id))
+        if node is None:
+            return ()
+        result.append(node)
+    return tuple(result)
+
+
+def _current_path_chain(
+    path: Mapping[str, object],
+    nodes: Mapping[str, Mapping[str, object]],
+    edges: Mapping[str, Mapping[str, object]],
+) -> tuple[Mapping[str, object], ...]:
+    node_ids = path.get("nodes")
+    edge_ids = path.get("edges")
+    if (
+        not isinstance(node_ids, (tuple, list))
+        or not isinstance(edge_ids, (tuple, list))
+        or len(node_ids) < 2
+        or len(edge_ids) != len(node_ids) - 1
+    ):
+        return ()
+    chain = []
+    for index, node_id in enumerate(node_ids):
+        node = nodes.get(str(node_id))
+        if node is None:
+            return ()
+        chain.append(node)
+        if index >= len(edge_ids):
+            continue
+        edge = edges.get(str(edge_ids[index]))
+        if (
+            edge is None
+            or edge.get("source") != node_id
+            or edge.get("target") != node_ids[index + 1]
+        ):
+            return ()
+    return tuple(chain)
+
+
+def _current_matches_prior_identity(
+    prior: Mapping[str, object], current: Mapping[str, object]
+) -> bool:
+    location = prior.get("location")
+    prior_label = prior.get("label")
+    return current.get("location") == location or (
+        current.get("confidence") in {"verified-provider", "verified-source"}
+        and isinstance(prior_label, str)
+        and bool(prior_label)
+        and current.get("label") == prior_label
+    )
+
+
+def _matching_current_nodes(
+    prior_nodes: Sequence[Mapping[str, object]],
+    current_chain: Sequence[Mapping[str, object]],
+) -> tuple[Mapping[str, object], ...]:
+    matched = []
+    cursor = 0
+    for prior in prior_nodes:
+        location = prior.get("location")
+        if not isinstance(location, str):
+            return ()
+        while cursor < len(current_chain) and not _current_matches_prior_identity(
+            prior, current_chain[cursor]
+        ):
+            cursor += 1
+        if cursor >= len(current_chain):
+            return ()
+        matched.append(current_chain[cursor])
+        cursor += 1
+    return tuple(matched)
+
+
+def _current_node_verifies_prior(
+    context: DeltaScanContext,
+    prior: Mapping[str, object],
+    current: Mapping[str, object],
+) -> bool:
+    location = prior.get("location")
+    current_location = current.get("location")
+    prior_sha256 = prior.get("source_sha256")
+    current_sha256 = current.get("source_sha256")
+    if (
+        not isinstance(location, str)
+        or not isinstance(prior_sha256, str)
+        or SHA256_PATTERN.fullmatch(prior_sha256) is None
+        or not isinstance(current_sha256, str)
+        or SHA256_PATTERN.fullmatch(current_sha256) is None
+        or not isinstance(current_location, str)
+        or _source_sha256(context.repo_root, current_location) != current_sha256
+    ):
+        return False
+    if current_location != location:
+        return (
+            current.get("confidence") in {"verified-provider", "verified-source"}
+            and isinstance(prior.get("label"), str)
+            and current.get("label") == prior.get("label")
+        )
+    if current_sha256 == prior_sha256 or location in context.changed_paths:
+        return True
+    return current.get("confidence") in {"verified-provider", "verified-source"}
+
+
+def _verified_current_locations(
+    context: DeltaScanContext,
+    nodes: Mapping[str, Mapping[str, object]],
+) -> set[str]:
+    verified = set()
+    for node in nodes.values():
+        location = node.get("location")
+        source_sha256 = node.get("source_sha256")
+        if (
+            isinstance(location, str)
+            and isinstance(source_sha256, str)
+            and SHA256_PATTERN.fullmatch(source_sha256) is not None
+            and _source_sha256(context.repo_root, location) == source_sha256
+        ):
+            verified.add(location)
+    return verified
+
+
+def surviving_frontier(
+    context: DeltaScanContext,
+    graph: Mapping[str, object],
+    selection: DeltaSeedSelection | None = None,
+) -> tuple[Mapping[str, object], ...]:
+    """Keep unknowns until receipt-local paths and current source bytes revalidate them."""
     rows: list[Mapping[str, object]] = []
     identities: set[str] = set()
 
@@ -1028,16 +1341,87 @@ def surviving_frontier(
         for row in graph_frontier:
             if isinstance(row, Mapping):
                 add(row)
-    graph_nodes = graph.get("nodes", ())
-    current_locations: set[object] = set()
-    if isinstance(graph_nodes, (tuple, list)):
-        current_locations = {
-            row.get("location")
-            for row in graph_nodes
-            if isinstance(row, Mapping) and isinstance(row.get("location"), str)
-        }
+    prior_nodes = _rows_by_id(context.previous_graph_receipt.get("nodes"))
+    prior_paths = _mapping_rows(context.previous_graph_receipt.get("paths"))
+    current_nodes = _rows_by_id(graph.get("nodes"))
+    current_edges = _rows_by_id(graph.get("edges"))
+    current_paths = _mapping_rows(graph.get("paths"))
+    verified_prior_locations: set[str] = set()
+
+    for prior_path in prior_paths:
+        path_id = str(prior_path.get("id") or "previous-path")
+        ordered_prior = _ordered_prior_path_nodes(prior_path, prior_nodes)
+        survived = False
+        if ordered_prior:
+            for current_path in current_paths:
+                chain = _current_path_chain(current_path, current_nodes, current_edges)
+                matched = _matching_current_nodes(ordered_prior, chain)
+                if (
+                    matched
+                    and len(matched) == len(ordered_prior)
+                    and all(
+                        _current_node_verifies_prior(context, prior, current)
+                        for prior, current in zip(ordered_prior, matched)
+                    )
+                ):
+                    verified_prior_locations.update(
+                        str(node["location"])
+                        for node in ordered_prior
+                        if isinstance(node.get("location"), str)
+                    )
+                    survived = True
+                    break
+        if survived:
+            continue
+        prior_path_node_ids = prior_path.get("nodes")
+        frontier_node = (
+            str(prior_path_node_ids[0])
+            if isinstance(prior_path_node_ids, (tuple, list)) and prior_path_node_ids
+            else "previous-node"
+        )
+        path_risks = prior_path.get("risk_domains")
+        path_risk_domains = (
+            [str(value) for value in path_risks]
+            if isinstance(path_risks, (tuple, list))
+            else ["regression"]
+        )
+        add(
+            {
+                "id": f"DELTA-FRONTIER-{len(rows) + 1:03d}",
+                "node": frontier_node,
+                "reason": f"previous selected path remains unverified: {path_id}",
+                "risk_domains": path_risk_domains,
+                "path_id": path_id,
+                "provenance": "previous-graph-path",
+            }
+        )
+        for prior_node in ordered_prior:
+            location = prior_node.get("location")
+            label = str(location or prior_node.get("id") or "previous-node")
+            node_risks = prior_node.get("risk_domains")
+            node_risk_domains = (
+                [str(value) for value in node_risks]
+                if isinstance(node_risks, (tuple, list))
+                else ["regression"]
+            )
+            add(
+                {
+                    "id": f"DELTA-FRONTIER-{len(rows) + 1:03d}",
+                    "node": str(prior_node.get("id") or "previous-node"),
+                    "reason": (
+                        f"previous selected path node remains unverified: {path_id}:{label}"
+                    ),
+                    "risk_domains": node_risk_domains,
+                    "location": location,
+                    "path_id": path_id,
+                    "provenance": "previous-graph-path",
+                }
+            )
+
+    selected = selection or derive_delta_seed_selection(context)
+    current_locations = _verified_current_locations(context, current_nodes)
     trusted_seeds: list[tuple[DeltaSeed, Mapping[str, object]]] = []
-    for seed in derive_delta_seeds(context):
+    for seed in selected.seeds:
         primary = {key: item for key, item in seed.provenance.items() if key != "additional"}
         additional = seed.provenance.get("additional", ())
         origins: list[Mapping[str, object]] = [primary]
@@ -1050,9 +1434,11 @@ def surviving_frontier(
         if origin is not None and seed.location is not None:
             trusted_seeds.append((seed, origin))
     for seed, origin in trusted_seeds:
-        if seed.location in current_locations:
-            continue
         source = str(origin.get("source") or "previous-evidence")
+        if source == "previous-graph-path" and seed.location in verified_prior_locations:
+            continue
+        if source != "previous-graph-path" and seed.location in current_locations:
+            continue
         if source == "previous-graph-path":
             reason = f"previous selected impact remains unverified: {seed.location}"
         elif source == "previous-lookup":
@@ -1069,7 +1455,118 @@ def surviving_frontier(
                 "provenance": source,
             }
         )
+    if selected.omitted_count:
+        add(
+            {
+                "id": f"DELTA-FRONTIER-{len(rows) + 1:03d}",
+                "node": "previous-seed-selection",
+                "reason": f"{selected.omitted_count} trusted delta seeds omitted by capacity",
+                "risk_domains": ["regression"],
+                "omitted_seed_count": selected.omitted_count,
+                "omitted_seed_provenance": dict(selected.omitted_by_source),
+                "provenance": "delta-seed-capacity",
+            }
+        )
     return tuple(rows)
+
+
+def delta_timeout_fallback(
+    context: DeltaScanContext,
+    elapsed_ms: int,
+    reason: str = "delta revalidation deadline exhausted",
+) -> dict[str, object]:
+    """Build a bounded immutable fallback without reading current source bytes."""
+    if not isinstance(context, DeltaScanContext):
+        raise TypeError("delta timeout fallback requires a trusted context")
+    if type(elapsed_ms) is not int or elapsed_ms < 0:
+        raise ValueError("delta timeout elapsed time is invalid")
+    frontier: list[dict[str, object]] = []
+    identities = set()
+
+    def add(row: Mapping[str, object]) -> None:
+        if len(frontier) >= 1024:
+            return
+        thawed = _thaw(row)
+        if not isinstance(thawed, dict):
+            return
+        identity = json.dumps(thawed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if identity not in identities:
+            identities.add(identity)
+            frontier.append(thawed)
+
+    for row in context.previous_frontier:
+        add(row)
+    prior_nodes = _rows_by_id(context.previous_graph_receipt.get("nodes"))
+    for path in _mapping_rows(context.previous_graph_receipt.get("paths")):
+        path_id = str(path.get("id") or "previous-path")
+        ordered = _ordered_prior_path_nodes(path, prior_nodes)
+        add(
+            {
+                "id": f"DELTA-FRONTIER-{len(frontier) + 1:03d}",
+                "node": str(ordered[0].get("id") if ordered else "previous-node"),
+                "reason": f"previous selected path remains unverified: {path_id}",
+                "risk_domains": ["regression"],
+                "path_id": path_id,
+                "provenance": "previous-graph-path",
+            }
+        )
+        for node in ordered:
+            location = node.get("location")
+            add(
+                {
+                    "id": f"DELTA-FRONTIER-{len(frontier) + 1:03d}",
+                    "node": str(node.get("id") or "previous-node"),
+                    "reason": (
+                        "previous selected path node remains unverified: "
+                        f"{path_id}:{location or node.get('id')}"
+                    ),
+                    "risk_domains": ["regression"],
+                    "location": location,
+                    "path_id": path_id,
+                    "provenance": "previous-graph-path",
+                }
+            )
+    add(
+        {
+            "id": f"DELTA-FRONTIER-{len(frontier) + 1:03d}",
+            "node": "delta-worker",
+            "reason": reason,
+            "risk_domains": ["regression"],
+            "provenance": "delta-worker-deadline",
+        }
+    )
+    identity = _canonical_graph_bytes(
+        {
+            "report_id": context.previous_report_id,
+            "revision": context.previous_revision,
+            "graph_receipt_id": context.previous_graph_receipt_id,
+            "graph_sha256": context.previous_graph_sha256,
+            "changed_paths": list(context.changed_paths),
+        }
+    )
+    scan_id = hashlib.sha256(identity).hexdigest()[:32]
+    receipt_id = hashlib.sha256(identity + b":fallback").hexdigest()[:32]
+    receipt_sha256 = hashlib.sha256(identity + b":partial").hexdigest()
+    display = context.previous_display_text.rstrip() + "\n\n" + reason
+    return {
+        "status": "partial",
+        "scan_id": scan_id,
+        "receipt_id": receipt_id,
+        "receipt_sha256": receipt_sha256,
+        "display_text": display,
+        "risk_level": "unknown",
+        "paths": [],
+        "frontier": frontier,
+        "candidates": [],
+        "elapsed_ms": elapsed_ms,
+        "cache_status": "bypassed",
+        "can_promote": False,
+        "previous_report_id": context.previous_report_id,
+        "previous_revision": context.previous_revision,
+        "changed_paths": list(context.changed_paths),
+        "changed_count": context.changed_count,
+        "previous_display_text": context.previous_display_text,
+    }
 
 
 __all__ = [
@@ -1077,10 +1574,13 @@ __all__ = [
     "MAX_DELTA_SECONDS",
     "DeltaScanContext",
     "DeltaSeed",
+    "DeltaSeedSelection",
     "DeltaSourceInventory",
     "bind_delta_context",
     "collect_sources",
     "context_mapping",
+    "delta_timeout_fallback",
+    "derive_delta_seed_selection",
     "derive_delta_seeds",
     "load_trusted_previous_artifacts",
     "surviving_frontier",

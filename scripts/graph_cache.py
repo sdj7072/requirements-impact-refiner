@@ -245,23 +245,42 @@ def _identity(
 
 
 def _write_exclusive(path: Path, payload: bytes) -> None:
-    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    worker_token = os.environ.get("RIR_DELTA_WORKER_TOKEN")
+    if isinstance(worker_token, str) and re.fullmatch(r"[0-9a-f]{32}", worker_token):
+        temporary = path.with_name(f".{path.name}.{worker_token}.tmp")
+        descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    else:
+        temporary = None
+        descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb", closefd=False) as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(descriptor)
+        if temporary is not None:
+            os.link(temporary, path, follow_symlinks=False)
     finally:
         os.close(descriptor)
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _replace_pointer(cache_dir: Path, key: str) -> None:
     pointer = cache_dir / "current"
     if pointer.is_symlink():
         raise ValueError("cache pointer must not be a symlink")
+    worker_token = os.environ.get("RIR_DELTA_WORKER_TOKEN")
+    token_prefix = (
+        f"{worker_token}."
+        if isinstance(worker_token, str) and re.fullmatch(r"[0-9a-f]{32}", worker_token)
+        else ""
+    )
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".current.", suffix=".tmp", dir=str(cache_dir)
+        prefix=f".current.{token_prefix}", suffix=".tmp", dir=str(cache_dir)
     )
     temporary = Path(temporary_name)
     try:

@@ -274,6 +274,7 @@ class PreparedFastScan:
     scan_id: str
     repo_root_sha256: str
     delta_context: Mapping[str, object] | None = None
+    delta_seed_selection: object | None = None
 
 
 def _root(value: Path) -> Path:
@@ -338,6 +339,12 @@ class _DeltaSeedContract(Protocol):
     source_sha256: str | None
 
 
+class _DeltaSeedSelectionContract(Protocol):
+    seeds: tuple[_DeltaSeedContract, ...]
+    omitted_count: int
+    omitted_by_source: Mapping[str, int]
+
+
 class _DeltaContext(Protocol):
     previous_report_id: str
     previous_revision: int
@@ -345,13 +352,17 @@ class _DeltaContext(Protocol):
     max_seconds: int
     previous_display_text: str
 
-    def derive_seeds(
+    def derive_seed_selection(
         self, request_seeds: Sequence[DerivedSeed] = ()
-    ) -> tuple[_DeltaSeedContract, ...]: ...
+    ) -> _DeltaSeedSelectionContract: ...
 
-    def to_mapping(self, seeds: Sequence[_DeltaSeedContract]) -> dict[str, object]: ...
+    def to_mapping(self, selection: _DeltaSeedSelectionContract) -> dict[str, object]: ...
 
-    def merge_frontier(self, graph: Mapping[str, object]) -> tuple[Mapping[str, object], ...]: ...
+    def merge_frontier(
+        self,
+        graph: Mapping[str, object],
+        selection: _DeltaSeedSelectionContract | None = None,
+    ) -> tuple[Mapping[str, object], ...]: ...
 
 
 def _safe_relative(value: object) -> TypeGuard[str]:
@@ -662,11 +673,15 @@ _DELTA_CONTEXT_KEYS = {
     "previous_revision",
     "previous_markdown_sha256",
     "previous_state_sha256",
+    "previous_graph_receipt_id",
+    "previous_graph_sha256",
     "previous_display_text",
     "changed_paths",
     "changed_count",
     "max_seconds",
     "seed_provenance",
+    "omitted_seed_count",
+    "omitted_seed_provenance",
     "previous_frontier",
 }
 
@@ -681,7 +696,14 @@ def _validate_delta_mapping(value: object, seeds: object) -> tuple[str, ...]:
     revision = value["previous_revision"]
     if type(revision) is not int or revision < 1:
         errors.append("delta_context previous_revision is invalid")
-    for key in ("previous_markdown_sha256", "previous_state_sha256"):
+    graph_receipt_id = value["previous_graph_receipt_id"]
+    if not isinstance(graph_receipt_id, str) or _HEX32.fullmatch(graph_receipt_id) is None:
+        errors.append("delta_context previous_graph_receipt_id is invalid")
+    for key in (
+        "previous_markdown_sha256",
+        "previous_state_sha256",
+        "previous_graph_sha256",
+    ):
         digest = value[key]
         if not isinstance(digest, str) or _HEX64.fullmatch(digest) is None:
             errors.append(f"delta_context {key} is invalid")
@@ -730,6 +752,16 @@ def _validate_delta_mapping(value: object, seeds: object) -> tuple[str, ...]:
             ):
                 errors.append("delta_context seed_provenance is invalid")
                 break
+    omitted_count = value["omitted_seed_count"]
+    omitted_provenance = value["omitted_seed_provenance"]
+    if (
+        type(omitted_count) is not int
+        or omitted_count < 0
+        or not _mapping(omitted_provenance)
+        or any(type(count) is not int or count < 1 for count in omitted_provenance.values())
+        or sum(cast(int, count) for count in omitted_provenance.values()) != omitted_count
+    ):
+        errors.append("delta_context omitted seed provenance is invalid")
     previous_frontier = value["previous_frontier"]
     if (
         not isinstance(previous_frontier, list)
@@ -1018,7 +1050,7 @@ def _validated_delta_context(request: FastScanRequest, value: object) -> _DeltaC
         "changed_paths",
         "max_seconds",
         "previous_display_text",
-        "derive_seeds",
+        "derive_seed_selection",
         "to_mapping",
         "merge_frontier",
     )
@@ -1094,9 +1126,16 @@ def execute_fast_scan(
     *,
     coordinator: _Coordinator = graph_coordinator.trace_impact,
     delta_context: object | None = None,
+    operation_started: float | None = None,
 ) -> FastScanResult:
     delta_context = _validated_delta_context(request, delta_context)
-    prepared = prepare_fast_scan_identity(request, graph_settings, payload_sha256, delta_context)
+    prepared = prepare_fast_scan_identity(
+        request,
+        graph_settings,
+        payload_sha256,
+        delta_context,
+        operation_started=operation_started,
+    )
     locale = _request_locale(request)
     root = prepared.root
     settings = prepared.settings
@@ -1108,6 +1147,11 @@ def execute_fast_scan(
     scan_id = prepared.scan_id
     root_sha = prepared.repo_root_sha256
     delta_mapping = prepared.delta_context
+    delta_seed_selection = (
+        None
+        if prepared.delta_seed_selection is None
+        else cast(_DeltaSeedSelectionContract, prepared.delta_seed_selection)
+    )
 
     try:
         existing_payload = fast_scan_store.load_scan_receipt_bytes(root, scan_id)
@@ -1144,7 +1188,9 @@ def execute_fast_scan(
             _row_tuple(graph.get("paths", [])),
             tuple(existing["frontier"]),
             tuple(existing["candidates"]),
-            min(30_000, deadline.elapsed_ms()),
+            deadline.elapsed_ms()
+            if delta_context is not None
+            else min(30_000, deadline.elapsed_ms()),
             "hit",
             existing["can_promote"],
             previous_report_id,
@@ -1202,7 +1248,7 @@ def execute_fast_scan(
         cache_mapping = cache_value if _mapping(cache_value) else {}
         cache_status = str(cache_mapping.get("status", "bypassed"))
     if delta_context is not None:
-        merged_value = delta_context.merge_frontier(graph)
+        merged_value = delta_context.merge_frontier(graph, delta_seed_selection)
         if not isinstance(merged_value, tuple) or any(
             not isinstance(row, Mapping) for row in merged_value
         ):
@@ -1216,8 +1262,9 @@ def execute_fast_scan(
             status = "partial"
     else:
         merged_frontier = _row_tuple(graph.get("frontier", []))
-    elapsed_limit = int(delta_context.max_seconds) * 1_000 if delta_context is not None else 30_000
-    elapsed = min(elapsed_limit, deadline.elapsed_ms())
+    elapsed = (
+        deadline.elapsed_ms() if delta_context is not None else min(30_000, deadline.elapsed_ms())
+    )
     receipt = FastScanReceipt(
         1,
         status,
@@ -1277,6 +1324,8 @@ def prepare_fast_scan_identity(
     graph_settings: Mapping[str, object],
     payload_sha256: str,
     delta_context: object | None = None,
+    *,
+    operation_started: float | None = None,
 ) -> PreparedFastScan:
     root = _root(request.repo_root)
     delta_context = _validated_delta_context(request, delta_context)
@@ -1299,13 +1348,15 @@ def prepare_fast_scan_identity(
     constructor_mapping = dict(settings_mapping)
     constructor_mapping["providers"] = tuple(cast(list[str], settings_mapping["providers"]))
     settings = graph_coordinator.GraphSettings(**cast(_GraphSettingsArgs, constructor_mapping))
-    deadline = graph_coordinator.Deadline(time, settings.max_seconds)
+    deadline = graph_coordinator.Deadline(time, settings.max_seconds, started=operation_started)
     request_seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
     if delta_context is None:
         seeds = request_seeds
         delta_mapping = None
+        delta_seed_selection = None
     else:
-        derived = delta_context.derive_seeds(request_seeds)
+        delta_seed_selection = delta_context.derive_seed_selection(request_seeds)
+        derived = delta_seed_selection.seeds
         if not isinstance(derived, tuple):
             raise TypeError("trusted delta seed contract is invalid")
         seeds = tuple(
@@ -1317,7 +1368,7 @@ def prepare_fast_scan_identity(
             )
             for row in derived
         )
-        delta_mapping_value = delta_context.to_mapping(derived)
+        delta_mapping_value = delta_context.to_mapping(delta_seed_selection)
         if not _mapping(delta_mapping_value):
             raise TypeError("trusted delta context mapping is invalid")
         delta_mapping = dict(delta_mapping_value)
@@ -1358,6 +1409,7 @@ def prepare_fast_scan_identity(
         scan_id,
         root_sha,
         delta_mapping,
+        delta_seed_selection,
     )
 
 
