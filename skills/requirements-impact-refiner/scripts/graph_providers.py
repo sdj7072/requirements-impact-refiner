@@ -120,6 +120,16 @@ _LONG_VALUE_OPTIONS = frozenset(
     }
 )
 _SHORT_VALUE_OPTIONS = frozenset({"A", "B", "C", "c", "j", "k", "l", "p"})
+_DELTA_WORKER_SHARED_GROUP = False
+
+
+def _configure_delta_worker(enabled=True):
+    global _DELTA_WORKER_SHARED_GROUP
+    if not isinstance(enabled, bool):
+        raise TypeError("delta worker group flag must be boolean")
+    _DELTA_WORKER_SHARED_GROUP = enabled
+
+
 _CREDENTIAL_VALUE = re.compile(
     r"(?i)\b[a-z0-9_-]*(?:api[_-]?key|token|password|secret)"
     r"\b\s*[:=]\s*[^\s,;]+"
@@ -796,7 +806,7 @@ def _bounded_subprocess(
 ):
     if shell or not start_new_session:
         raise ValueError("provider subprocess security options are mandatory")
-    shared_delta_worker_group = os.environ.get("RIR_DELTA_WORKER") == "1"
+    shared_delta_worker_group = _DELTA_WORKER_SHARED_GROUP
     snapshot = _ExecutableSnapshot(
         Path(executable_snapshot).parent,
         Path(executable_snapshot),

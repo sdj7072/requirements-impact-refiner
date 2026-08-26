@@ -110,6 +110,7 @@
         "previous_revision",
         "previous_markdown_sha256",
         "previous_state_sha256",
+        "prior_graph_status",
         "previous_graph_receipt_id",
         "previous_graph_sha256",
         "previous_display_text",
@@ -132,12 +133,13 @@
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
+        "prior_graph_status": {"enum": ["bound", "disabled"]},
         "previous_graph_receipt_id": {
-          "type": "string",
+          "type": ["string", "null"],
           "pattern": "^[0-9a-f]{32}$"
         },
         "previous_graph_sha256": {
-          "type": "string",
+          "type": ["string", "null"],
           "pattern": "^[0-9a-f]{64}$"
         },
         "previous_display_text": {"type": "string", "minLength": 1, "maxLength": 262144},

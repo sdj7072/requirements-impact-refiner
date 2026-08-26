@@ -90,6 +90,14 @@ _IDENTITY_FIELDS = frozenset(
 )
 _INVENTORY_REASONS = frozenset({"deadline", "collection-limit", "traversal", "unreadable-source"})
 MAX_CACHE_BYTES = GRAPH.MAX_RECEIPT_BYTES * 2
+_DELTA_WORKER_TOKEN = None
+
+
+def _configure_delta_worker(token):
+    global _DELTA_WORKER_TOKEN
+    if not isinstance(token, str) or re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        raise ValueError("delta worker token is invalid")
+    _DELTA_WORKER_TOKEN = token
 
 
 def _json_depth(text: str) -> int:
@@ -245,7 +253,7 @@ def _identity(
 
 
 def _write_exclusive(path: Path, payload: bytes) -> None:
-    worker_token = os.environ.get("RIR_DELTA_WORKER_TOKEN")
+    worker_token = _DELTA_WORKER_TOKEN
     if isinstance(worker_token, str) and re.fullmatch(r"[0-9a-f]{32}", worker_token):
         temporary = path.with_name(f".{path.name}.{worker_token}.tmp")
         descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -273,7 +281,7 @@ def _replace_pointer(cache_dir: Path, key: str) -> None:
     pointer = cache_dir / "current"
     if pointer.is_symlink():
         raise ValueError("cache pointer must not be a symlink")
-    worker_token = os.environ.get("RIR_DELTA_WORKER_TOKEN")
+    worker_token = _DELTA_WORKER_TOKEN
     token_prefix = (
         f"{worker_token}."
         if isinstance(worker_token, str) and re.fullmatch(r"[0-9a-f]{32}", worker_token)

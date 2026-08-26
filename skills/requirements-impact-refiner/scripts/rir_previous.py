@@ -108,6 +108,14 @@ MAX_REQUIRED_SOURCE_MAP_BYTES = 64 * 1024
 MAX_SOURCE_RECHECK_BYTES = 4 * 1024 * 1024
 OPERATION_TIMEOUT_SECONDS = 0.25
 _TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile|filter\.)"
+_DELTA_WORKER_SHARED_GROUP = False
+
+
+def _configure_delta_worker(enabled=True):
+    global _DELTA_WORKER_SHARED_GROUP
+    if not isinstance(enabled, bool):
+        raise TypeError("delta worker group flag must be boolean")
+    _DELTA_WORKER_SHARED_GROUP = enabled
 
 
 class _UnsafeLookup(ValueError):
@@ -769,7 +777,7 @@ def _run_git_command(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            start_new_session=os.environ.get("RIR_DELTA_WORKER") != "1",
+            start_new_session=not _DELTA_WORKER_SHARED_GROUP,
         )
     except OSError:
         return None

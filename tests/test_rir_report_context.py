@@ -1884,25 +1884,31 @@ class RirReportContextTest(unittest.TestCase):
         result = FINALIZE.finalize_refinement(request)
         context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
         (self.root / "ignored.py").write_text("appeared = True\n", encoding="utf-8")
-        previous = CONTROLLER.lookup_previous(
-            CONTROLLER.PreviousLookupRequest(self.root, change, evidence)
-        )
-        delta_request = CONTROLLER.ScanRequest(
-            self.root,
-            change,
-            evidence,
-            "balanced",
-            previous_report_id=previous.report_id,
-            previous_revision=previous.revision,
-            changed_paths=previous.changed_paths,
-        )
         sample_count = 20
         observations_ms = []
+        scan_ids = set()
+        cache_statuses = []
         delta = None
-        for _ in range(sample_count):
+        previous = None
+        for index in range(sample_count):
+            (self.root / "ignored.py").write_text(f"appeared = {index}\n", encoding="utf-8")
+            previous = CONTROLLER.lookup_previous(
+                CONTROLLER.PreviousLookupRequest(self.root, change, evidence)
+            )
+            delta_request = CONTROLLER.ScanRequest(
+                self.root,
+                change,
+                evidence,
+                "balanced",
+                previous_report_id=previous.report_id,
+                previous_revision=previous.revision,
+                changed_paths=previous.changed_paths,
+            )
             started = time.monotonic()
             delta = CONTROLLER.scan_impact(delta_request)
             observations_ms.append((time.monotonic() - started) * 1000)
+            scan_ids.add(delta.scan_id)
+            cache_statuses.append(delta.cache_status)
         observations_ms.sort()
         nearest_rank = ((95 * sample_count + 99) // 100) - 1
         p95_ms = observations_ms[nearest_rank]
@@ -1911,7 +1917,9 @@ class RirReportContextTest(unittest.TestCase):
 
         self.assertIsNotNone(context)
         self.assertIsNotNone(delta)
+        self.assertIsNotNone(previous)
         assert delta is not None
+        assert previous is not None
         self.assertIsNone(context.required_source_digests)
         self.assertFalse(context.source_recheck_complete)
         self.assertEqual(previous.status, "stale")
@@ -1922,6 +1930,8 @@ class RirReportContextTest(unittest.TestCase):
         self.assertTrue(delta.display_text.startswith(previous.display_text))
         self.assertLessEqual(delta.elapsed_ms, 3_000)
         self.assertEqual(len(observations_ms), sample_count)
+        self.assertEqual(len(scan_ids), sample_count)
+        self.assertNotIn("hit", cache_statuses)
         self.assertLessEqual(p95_ms, 3_000)
         delta_receipt = json.loads(
             (

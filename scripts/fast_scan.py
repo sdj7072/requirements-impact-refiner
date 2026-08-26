@@ -673,6 +673,7 @@ _DELTA_CONTEXT_KEYS = {
     "previous_revision",
     "previous_markdown_sha256",
     "previous_state_sha256",
+    "prior_graph_status",
     "previous_graph_receipt_id",
     "previous_graph_sha256",
     "previous_display_text",
@@ -696,14 +697,20 @@ def _validate_delta_mapping(value: object, seeds: object) -> tuple[str, ...]:
     revision = value["previous_revision"]
     if type(revision) is not int or revision < 1:
         errors.append("delta_context previous_revision is invalid")
+    prior_graph_status = value["prior_graph_status"]
     graph_receipt_id = value["previous_graph_receipt_id"]
-    if not isinstance(graph_receipt_id, str) or _HEX32.fullmatch(graph_receipt_id) is None:
-        errors.append("delta_context previous_graph_receipt_id is invalid")
-    for key in (
-        "previous_markdown_sha256",
-        "previous_state_sha256",
-        "previous_graph_sha256",
-    ):
+    graph_sha256 = value["previous_graph_sha256"]
+    if prior_graph_status == "bound":
+        if not isinstance(graph_receipt_id, str) or _HEX32.fullmatch(graph_receipt_id) is None:
+            errors.append("delta_context previous_graph_receipt_id is invalid")
+        if not isinstance(graph_sha256, str) or _HEX64.fullmatch(graph_sha256) is None:
+            errors.append("delta_context previous_graph_sha256 is invalid")
+    elif prior_graph_status == "disabled":
+        if graph_receipt_id is not None or graph_sha256 is not None:
+            errors.append("disabled delta_context cannot bind a prior graph receipt")
+    else:
+        errors.append("delta_context prior_graph_status is invalid")
+    for key in ("previous_markdown_sha256", "previous_state_sha256"):
         digest = value[key]
         if not isinstance(digest, str) or _HEX64.fullmatch(digest) is None:
             errors.append(f"delta_context {key} is invalid")

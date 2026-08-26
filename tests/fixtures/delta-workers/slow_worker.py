@@ -11,21 +11,27 @@ from pathlib import Path
 
 
 def canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+
+
+def frame(result):
+    payload = canonical({"result": result})
+    return f"{len(payload):08x}\n".encode("ascii") + payload
 
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--input", type=Path, required=True)
 parser.add_argument("--sha256", required=True)
+parser.add_argument("--token", required=True)
+parser.add_argument("--parent-pid", type=int, required=True)
 args = parser.parse_args()
 payload = args.input.read_bytes()
 if hashlib.sha256(payload).hexdigest() != args.sha256:
     raise SystemExit(2)
 request = json.loads(payload)
+if request.get("worker_token") != args.token or request.get("parent_pid") != args.parent_pid:
+    raise SystemExit(2)
 scenario = os.environ.get("RIR_DELTA_TEST_SCENARIO", "after-fallback")
-if scenario == "lookup":
-    time.sleep(10)
-    raise SystemExit(0)
 
 changed_paths = request.get("changed_paths", [])
 fallback = {
@@ -54,11 +60,9 @@ fallback = {
     "changed_count": len(changed_paths),
     "previous_display_text": "trusted previous",
 }
-sys.stdout.write(canonical({"kind": "fallback", "result": fallback}) + "\n")
-sys.stdout.flush()
 
 root = Path(request["repo_root"])
-token = os.environ["RIR_DELTA_WORKER_TOKEN"]
+token = request["worker_token"]
 if scenario == "persist":
     scans = root / ".requirements-impact-refiner" / "scans"
     scans.mkdir(parents=True, exist_ok=True)
@@ -78,15 +82,37 @@ elif scenario == "descendant":
         ]
     )
     pid_path.write_text(str(child.pid), encoding="ascii")
+elif scenario == "partial-frame":
+    partial = dict(fallback)
+    partial["display_text"] = "x" * 100_000
+    framed = frame(partial)
+    os.write(sys.stdout.fileno(), framed[:70_000])
+    time.sleep(10)
+elif scenario == "overflow":
+    chunk = b"x" * 65_536
+    for _ in range(66):
+        os.write(sys.stdout.fileno(), chunk)
+    time.sleep(10)
+elif scenario == "garbage":
+    os.write(sys.stdout.fileno(), b"not-a-frame")
+    raise SystemExit(0)
+elif scenario == "extra-frame":
+    os.write(sys.stdout.fileno(), frame(fallback) + frame(fallback))
+    raise SystemExit(0)
 
-# Distinct stage names all exercise the parent's same hard boundary after a
-# trusted fallback has been published.
-if scenario in {"hash", "provider", "persist", "render", "descendant", "after-fallback"}:
+if scenario in {
+    "lookup",
+    "hash",
+    "provider",
+    "persist",
+    "render",
+    "descendant",
+    "after-fallback",
+}:
     time.sleep(10)
 
 final = dict(fallback)
 final["status"] = "complete"
 final["can_promote"] = True
 final["receipt_sha256"] = hashlib.sha256(b"complete").hexdigest()
-sys.stdout.write(canonical({"kind": "result", "result": final}) + "\n")
-sys.stdout.flush()
+os.write(sys.stdout.fileno(), frame(final))

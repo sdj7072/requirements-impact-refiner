@@ -835,7 +835,10 @@ def _is_fast_scan_store_contract(value: object) -> bool:
             type(getattr(value, name, None)) is int and getattr(value, name) > 0
             for name in ("_MAX", "_MAX_JSON_DEPTH")
         )
-        and _callables(value, ("publish_scan_receipt", "load_scan_receipt_bytes"))
+        and _callables(
+            value,
+            ("_configure_delta_worker", "publish_scan_receipt", "load_scan_receipt_bytes"),
+        )
     )
 
 
@@ -893,6 +896,7 @@ def _is_fast_scan_coordinator_graph(value: object) -> bool:
                 "_seed_key",
                 "_trace_identity",
                 "_collect_source_digests",
+                "_configure_delta_worker",
                 "trace_impact",
             ),
         )
@@ -1440,7 +1444,7 @@ def _trusted_delta_context(root: Path, request: ScanRequest, settings: Mapping[s
         request.previous_revision,
         changed_paths,
     )
-    state, graph, prior_graph_receipt_id, prior_graph_sha256 = (
+    state, graph, prior_graph_status, prior_graph_receipt_id, prior_graph_sha256 = (
         DELTA.load_trusted_previous_artifacts(
             root,
             trusted,
@@ -1467,6 +1471,7 @@ def _trusted_delta_context(root: Path, request: ScanRequest, settings: Mapping[s
         previous_revision=request.previous_revision,
         changed_paths=changed_paths,
         configured_max_seconds=configured,
+        prior_graph_status=prior_graph_status,
         previous_graph_receipt_id=prior_graph_receipt_id,
         previous_graph_sha256=prior_graph_sha256,
     )
@@ -1475,8 +1480,15 @@ def _trusted_delta_context(root: Path, request: ScanRequest, settings: Mapping[s
 _DELTA_WORKER_MAX_INPUT = 512 * 1024
 _DELTA_WORKER_MAX_OUTPUT = 4 * 1024 * 1024
 _DELTA_WORKER_MAX_ERROR = 64 * 1024
-_DELTA_WORKER_FLAG = "RIR_DELTA_WORKER"
-_DELTA_WORKER_TOKEN = "RIR_DELTA_WORKER_TOKEN"
+
+
+def _configure_delta_worker_runtime(token: str) -> None:
+    if re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        raise ValueError("delta worker token is invalid")
+    cast(Any, FAST_SCAN_STORE)._configure_delta_worker(token)
+    cast(Any, GRAPH_COORDINATOR)._configure_delta_worker(token)
+    cast(Any, PREVIOUS)._configure_delta_worker(True)
+    cast(Any, FINALIZE.REPORT_CONTEXT)._configure_delta_worker(True)
 
 
 def _worker_json_value(value: object) -> object:
@@ -1594,41 +1606,6 @@ def _scan_result_from_mapping(value: object, elapsed_ms: int):
     )
 
 
-def _generic_delta_fallback(request: ScanRequest, elapsed_ms: int, reason: str):
-    identity = canonical_bytes(
-        {
-            "repo_root": str(request.repo_root),
-            "change_request": request.change_request,
-            "evidence": list(request.evidence),
-            "reason": reason,
-        }
-    )
-    scan_id = hashlib.sha256(identity).hexdigest()[:32]
-    receipt_id = hashlib.sha256(identity + b":fallback").hexdigest()[:32]
-    receipt_sha256 = hashlib.sha256(identity + b":partial").hexdigest()
-    return FAST_SCAN.FastScanResult(
-        "partial",
-        scan_id,
-        receipt_id,
-        receipt_sha256,
-        reason,
-        "unknown",
-        (),
-        (
-            {
-                "id": "DELTA-FRONTIER-001",
-                "node": "delta-worker",
-                "reason": reason,
-                "risk_domains": ["regression"],
-            },
-        ),
-        (),
-        elapsed_ms,
-        "bypassed",
-        False,
-    )
-
-
 def _terminate_delta_worker(process: subprocess.Popen[bytes]) -> None:
     if hasattr(os, "killpg"):
         try:
@@ -1703,29 +1680,29 @@ def _cleanup_delta_worker_temps(root: Path, token: str) -> None:
                     continue
 
 
-def _delta_worker_messages(payload: bytes) -> list[Mapping[str, object]]:
-    if len(payload) > _DELTA_WORKER_MAX_OUTPUT:
-        raise ValueError("delta worker output exceeds its byte limit")
-    messages: list[Mapping[str, object]] = []
-    for raw_line in payload.splitlines():
-        if not raw_line:
-            continue
-        try:
-            value = json.loads(raw_line.decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
-            raise ValueError("delta worker output is invalid") from error
-        if (
-            not isinstance(value, dict)
-            or set(value) != {"kind", "result"}
-            or value.get("kind") not in {"fallback", "result"}
-            or json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8"
-            )
-            != raw_line
-        ):
-            raise ValueError("delta worker output is not canonical")
-        messages.append(value)
-    return messages
+def _delta_worker_frame(payload: bytes) -> Mapping[str, object]:
+    if len(payload) < 9 or len(payload) > _DELTA_WORKER_MAX_OUTPUT:
+        raise ValueError("delta worker frame size is invalid")
+    header = payload[:9]
+    if re.fullmatch(rb"[0-9a-f]{8}\n", header) is None:
+        raise ValueError("delta worker frame header is invalid")
+    declared = int(header[:8], 16)
+    body = payload[9:]
+    if declared > _DELTA_WORKER_MAX_OUTPUT - 9 or declared != len(body):
+        raise ValueError("delta worker frame length is invalid")
+    try:
+        value = json.loads(body.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        raise ValueError("delta worker frame payload is invalid") from error
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    if not isinstance(value, dict) or set(value) != {"result"} or canonical != body:
+        raise ValueError("delta worker frame is not one canonical result")
+    result = value["result"]
+    if not isinstance(result, Mapping):
+        raise ValueError("delta worker frame result is invalid")
+    return result
 
 
 def _read_delta_worker_output(
@@ -1784,6 +1761,57 @@ def _read_delta_worker_output(
         process.stderr.close()
 
 
+def _run_delta_worker(
+    worker: Path,
+    root: Path,
+    input_path: Path,
+    input_sha256: str,
+    token: str,
+    environment: Mapping[str, str],
+    work_deadline: float,
+) -> Mapping[str, object] | None:
+    try:
+        process = subprocess.Popen(
+            (
+                sys.executable,
+                str(worker),
+                "--input",
+                str(input_path),
+                "--sha256",
+                input_sha256,
+                "--token",
+                token,
+                "--parent-pid",
+                str(os.getpid()),
+            ),
+            cwd=str(root),
+            env=dict(environment),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError:
+        return None
+    try:
+        stdout, stderr, timed_out, overflow = _read_delta_worker_output(process, work_deadline)
+        if process.poll() is not None and hasattr(os, "killpg"):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        if timed_out or overflow or stderr or process.returncode != 0:
+            return None
+        try:
+            return _delta_worker_frame(stdout)
+        except ValueError:
+            return None
+    finally:
+        if process.poll() is None:
+            _terminate_delta_worker(process)
+
+
 def _execute_delta_worker(
     request: ScanRequest,
     max_seconds: float,
@@ -1807,6 +1835,24 @@ def _execute_delta_worker(
         raise ImportError("delta worker sibling is unsafe")
     if not selected_worker.is_file() or selected_worker.is_symlink():
         raise ValueError("delta worker path is unsafe")
+    cleanup_reserve = min(0.075, max_seconds / 4)
+    work_deadline = operation_started + max_seconds - cleanup_reserve
+    fallback_mapping = _prepare_delta_fallback_in_process(request, operation_started)
+    fallback_value = dict(fallback_mapping)
+    fallback_value["status"] = "partial"
+    fallback_value["can_promote"] = False
+    elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
+    trusted_fallback = _scan_result_from_mapping(fallback_value, elapsed_ms)
+    if (
+        trusted_fallback.previous_report_id != request.previous_report_id
+        or trusted_fallback.previous_revision != request.previous_revision
+        or trusted_fallback.changed_paths != tuple(request.changed_paths)
+        or trusted_fallback.previous_display_text is None
+    ):
+        raise ValueError("delta parent fallback identity is invalid")
+    if time.monotonic() >= work_deadline:
+        elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
+        return _scan_result_from_mapping(_scan_result_mapping(trusted_fallback), elapsed_ms)
     request_value = {
         "schema_version": 1,
         "repo_root": str(root),
@@ -1818,7 +1864,11 @@ def _execute_delta_worker(
         "changed_paths": list(request.changed_paths),
         "operation_started": operation_started,
         "max_seconds": max_seconds,
+        "worker_token": None,
+        "parent_pid": os.getpid(),
     }
+    token = secrets.token_hex(16)
+    request_value["worker_token"] = token
     request_payload = canonical_bytes(request_value)
     if len(request_payload) > _DELTA_WORKER_MAX_INPUT:
         raise ValueError("delta worker input exceeds its byte limit")
@@ -1826,9 +1876,6 @@ def _execute_delta_worker(
     worker_temp.chmod(0o700)
     input_path = worker_temp / "input.json"
     descriptor = -1
-    token = secrets.token_hex(16)
-    process = None
-    stdout = b""
     try:
         descriptor = os.open(input_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.fchmod(descriptor, 0o600)
@@ -1848,8 +1895,6 @@ def _execute_delta_worker(
             "TMPDIR": str(worker_temp),
             "TMP": str(worker_temp),
             "TEMP": str(worker_temp),
-            _DELTA_WORKER_FLAG: "1",
-            _DELTA_WORKER_TOKEN: token,
         }
         system_root = os.environ.get("SYSTEMROOT")
         if system_root:
@@ -1859,58 +1904,34 @@ def _execute_delta_worker(
                 if not name.startswith("RIR_DELTA_TEST_") or not isinstance(value, str):
                     raise ValueError("delta worker test environment is invalid")
                 environment[name] = value
-        cleanup_reserve = min(0.075, max_seconds / 4)
-        work_deadline = operation_started + max_seconds - cleanup_reserve
         if time.monotonic() >= work_deadline:
             elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
-            return _generic_delta_fallback(
-                request,
-                elapsed_ms,
-                "Delta revalidation timed out before the worker could start.",
-            )
-        process = subprocess.Popen(
-            (
-                sys.executable,
-                str(selected_worker),
-                "--input",
-                str(input_path),
-                "--sha256",
-                hashlib.sha256(request_payload).hexdigest(),
-            ),
-            cwd=str(root),
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-            close_fds=True,
+            return _scan_result_from_mapping(_scan_result_mapping(trusted_fallback), elapsed_ms)
+        request_sha256 = hashlib.sha256(request_payload).hexdigest()
+        result_mapping = _run_delta_worker(
+            selected_worker,
+            root,
+            input_path,
+            request_sha256,
+            token,
+            environment,
+            work_deadline,
         )
-        stdout, stderr, timed_out, overflow = _read_delta_worker_output(process, work_deadline)
-        if process.poll() is not None and hasattr(os, "killpg"):
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
-                pass
-        if overflow or len(stderr) > _DELTA_WORKER_MAX_ERROR:
-            raise ValueError("delta worker error output exceeds its byte limit")
         elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
-        messages = _delta_worker_messages(stdout)
-        fallbacks = [message["result"] for message in messages if message["kind"] == "fallback"]
-        results = [message["result"] for message in messages if message["kind"] == "result"]
-        if not timed_out and process.returncode == 0 and results:
-            return _scan_result_from_mapping(results[-1], elapsed_ms)
-        if fallbacks:
-            fallback = dict(cast(Mapping[str, object], fallbacks[-1]))
-            fallback["status"] = "partial"
-            fallback["can_promote"] = False
-            return _scan_result_from_mapping(fallback, elapsed_ms)
-        if timed_out:
-            return _generic_delta_fallback(
-                request,
-                elapsed_ms,
-                "Delta revalidation timed out before a trusted previous report was established.",
-            )
-        raise ValueError("delta worker failed before producing a trusted result")
+        if result_mapping is None:
+            return _scan_result_from_mapping(_scan_result_mapping(trusted_fallback), elapsed_ms)
+        try:
+            result = _scan_result_from_mapping(result_mapping, elapsed_ms)
+        except ValueError:
+            return _scan_result_from_mapping(_scan_result_mapping(trusted_fallback), elapsed_ms)
+        if (
+            result.previous_report_id != trusted_fallback.previous_report_id
+            or result.previous_revision != trusted_fallback.previous_revision
+            or result.changed_paths != trusted_fallback.changed_paths
+            or result.previous_display_text != trusted_fallback.previous_display_text
+        ):
+            return _scan_result_from_mapping(_scan_result_mapping(trusted_fallback), elapsed_ms)
+        return result
     finally:
         if descriptor >= 0:
             os.close(descriptor)
@@ -1918,8 +1939,6 @@ def _execute_delta_worker(
             input_path.unlink()
         except OSError:
             pass
-        if process is not None and process.poll() is None:
-            _terminate_delta_worker(process)
         _cleanup_delta_worker_temps(root, token)
         shutil.rmtree(worker_temp, ignore_errors=True)
 
@@ -1928,20 +1947,12 @@ def _scan_impact_in_process(
     request: ScanRequest,
     *,
     operation_started: float | None = None,
-    fallback_callback: Callable[[Mapping[str, object]], None] | None = None,
 ):
     root = _root(request.repo_root)
     if not isinstance(request.evidence, tuple):
         raise ValueError("scan evidence must be a tuple")
     settings = SETTINGS.resolve(root, request.audience_override, None)
     delta_context = _trusted_delta_context(root, request, settings)
-    if delta_context is not None and fallback_callback is not None:
-        elapsed_ms = (
-            0
-            if operation_started is None
-            else max(0, round((time.monotonic() - operation_started) * 1000))
-        )
-        fallback_callback(DELTA.delta_timeout_fallback(delta_context, elapsed_ms))
     return FAST_SCAN.execute_fast_scan(
         FAST_SCAN.FastScanRequest(
             root,
@@ -1962,6 +1973,20 @@ def _scan_impact_in_process(
     )
 
 
+def _prepare_delta_fallback_in_process(
+    request: ScanRequest, operation_started: float
+) -> Mapping[str, object]:
+    root = _root(request.repo_root)
+    if not isinstance(request.evidence, tuple):
+        raise ValueError("scan evidence must be a tuple")
+    settings = SETTINGS.resolve(root, request.audience_override, None)
+    delta_context = _trusted_delta_context(root, request, settings)
+    if delta_context is None:
+        raise ValueError("delta fallback requires trusted stale context")
+    elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
+    return DELTA.delta_timeout_fallback(delta_context, elapsed_ms)
+
+
 def scan_impact(request: ScanRequest) -> ScanResult:
     operation_started = time.monotonic()
     root = _root(request.repo_root)
@@ -1972,14 +1997,11 @@ def scan_impact(request: ScanRequest) -> ScanResult:
         or request.previous_revision is not None
         or bool(request.changed_paths)
     )
-    if delta_requested and os.environ.get(_DELTA_WORKER_FLAG) != "1":
+    if delta_requested:
         settings = SETTINGS.resolve(root, request.audience_override, None)
         max_seconds = min(_configured_delta_max_seconds(root, settings), 3)
         return _execute_delta_worker(request, max_seconds, operation_started)
-    return _scan_impact_in_process(
-        request,
-        operation_started=operation_started if delta_requested else None,
-    )
+    return _scan_impact_in_process(request)
 
 
 def _promoted_scan(root, request, settings):

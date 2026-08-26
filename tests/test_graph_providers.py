@@ -346,26 +346,38 @@ class ProviderRunnerTest(unittest.TestCase):
         self.assertFalse(captured["directory"].exists())
 
     def test_delta_worker_provider_inherits_worker_process_group(self):
-        captured = {}
+        captured = []
         real_popen = PROVIDERS.subprocess.Popen
 
         def recording_popen(*args, **kwargs):
-            captured["start_new_session"] = kwargs.get("start_new_session")
+            captured.append(kwargs.get("start_new_session"))
             return real_popen(*args, **kwargs)
 
         with (
             mock.patch.dict(os.environ, {"RIR_DELTA_WORKER": "1"}),
             mock.patch.object(PROVIDERS.subprocess, "Popen", side_effect=recording_popen),
         ):
-            result = PROVIDERS.run_provider(
+            ambient = PROVIDERS.run_provider(
                 PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
                 ("--version",),
                 self.repo,
                 PROVIDERS.Deadline(time, 2),
             )
+        PROVIDERS._configure_delta_worker(True)
+        try:
+            with mock.patch.object(PROVIDERS.subprocess, "Popen", side_effect=recording_popen):
+                configured = PROVIDERS.run_provider(
+                    PROVIDERS.ProviderSpec("ast-grep", self.fake_binary),
+                    ("--version",),
+                    self.repo,
+                    PROVIDERS.Deadline(time, 2),
+                )
+        finally:
+            PROVIDERS._configure_delta_worker(False)
 
-        self.assertEqual(result.status, "ready")
-        self.assertIs(captured["start_new_session"], False)
+        self.assertEqual(ambient.status, "ready")
+        self.assertEqual(configured.status, "ready")
+        self.assertEqual(captured, [True, False])
 
     def test_runner_error_path_removes_snapshot(self):
         captured = {}

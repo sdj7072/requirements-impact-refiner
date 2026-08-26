@@ -31,6 +31,8 @@ INPUT_KEYS = {
     "changed_paths",
     "operation_started",
     "max_seconds",
+    "worker_token",
+    "parent_pid",
 }
 
 
@@ -70,15 +72,15 @@ def _read_input(path: Path, expected_sha256: str) -> dict[str, object]:
     return value
 
 
-def _emit(kind: str, result: Mapping[str, object]) -> None:
+def _emit(result: Mapping[str, object]) -> None:
     payload = json.dumps(
-        {"kind": kind, "result": result},
+        {"result": result},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
-    )
-    sys.stdout.write(payload + "\n")
-    sys.stdout.flush()
+    ).encode("utf-8")
+    frame = f"{len(payload):08x}\n".encode("ascii") + payload
+    os.write(sys.stdout.fileno(), frame)
 
 
 def _request(value: Mapping[str, object]):
@@ -116,13 +118,14 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--sha256", required=True)
+    parser.add_argument("--token", required=True)
+    parser.add_argument("--parent-pid", type=int, required=True)
     args = parser.parse_args(argv)
     if (
-        os.environ.get("RIR_DELTA_WORKER") != "1"
-        or re.fullmatch(r"[0-9a-f]{32}", os.environ.get("RIR_DELTA_WORKER_TOKEN", "")) is None
+        re.fullmatch(r"[0-9a-f]{64}", args.sha256) is None
+        or re.fullmatch(r"[0-9a-f]{32}", args.token) is None
+        or args.parent_pid != os.getppid()
     ):
-        raise ValueError("delta worker environment is invalid")
-    if re.fullmatch(r"[0-9a-f]{64}", args.sha256) is None:
         raise ValueError("delta worker input digest is invalid")
     value = _read_input(args.input, args.sha256)
     operation_started = value["operation_started"]
@@ -134,15 +137,18 @@ def main(argv=None) -> int:
         or isinstance(max_seconds, bool)
         or max_seconds <= 0
         or max_seconds > 3
+        or value["worker_token"] != args.token
+        or value["parent_pid"] != args.parent_pid
     ):
         raise ValueError("delta worker deadline is invalid")
+    rir_controller._configure_delta_worker_runtime(args.token)
     request = _request(value)
-    result = rir_controller._scan_impact_in_process(
+    scan = rir_controller._scan_impact_in_process(
         request,
         operation_started=float(operation_started),
-        fallback_callback=lambda fallback: _emit("fallback", fallback),
     )
-    _emit("result", rir_controller._scan_result_mapping(result))
+    result = rir_controller._scan_result_mapping(scan)
+    _emit(result)
     return 0
 
 

@@ -9,6 +9,14 @@ from pathlib import Path
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX = 4 * 1024 * 1024
+_DELTA_WORKER_TOKEN = None
+
+
+def _configure_delta_worker(token):
+    global _DELTA_WORKER_TOKEN
+    if not isinstance(token, str) or _ID.fullmatch(token) is None:
+        raise ValueError("delta worker token is invalid")
+    _DELTA_WORKER_TOKEN = token
 
 
 def _json_depth(text: str) -> int:
@@ -130,7 +138,7 @@ def publish_scan_receipt(root, scan_id, payload):
     if not isinstance(payload, bytes) or not payload or len(payload) > _MAX:
         raise ValueError("scan receipt payload is invalid")
     directory_fd = _scan_dir(root)
-    worker_token = os.environ.get("RIR_DELTA_WORKER_TOKEN")
+    worker_token = _DELTA_WORKER_TOKEN
     token = (
         worker_token
         if isinstance(worker_token, str) and re.fullmatch(r"[0-9a-f]{32}", worker_token)
