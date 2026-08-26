@@ -38,6 +38,7 @@ ROOT_FILES = (
     "scripts/rir_lineage.py",
     "scripts/rir_previous.py",
     "scripts/rir_previous_renderer.py",
+    "scripts/rir_performance.py",
     "scripts/rir_report_context.py",
     "scripts/rir_storage.py",
     "scripts/rir_controller.py",

@@ -162,7 +162,13 @@ class RirControllerCliTest(unittest.TestCase):
                 "reason",
                 "elapsed_ms",
                 "candidates",
+                "performance_metrics",
             },
+        )
+        self.assertIsNone(payload["performance_metrics"]["actual_input_tokens"])
+        self.assertEqual(
+            payload["performance_metrics"]["previous_lookup"]["elapsed_ms"],
+            payload["elapsed_ms"],
         )
         self.assertTrue(payload["display_text"].startswith("## Previous Impact Report\n"))
         self.assertNotIn("# Requirements Impact Report\n", payload["display_text"])

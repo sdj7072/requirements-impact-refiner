@@ -190,6 +190,10 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual((result.report_id, result.revision), ("RPT-001", 1))
         self.assertEqual(result.baseline_commit, self.baseline_commit)
         self.assertIn("**Freshness:** fresh", result.display_text or "")
+        self.assertEqual(result.performance_metrics.previous_lookup.elapsed_ms, result.elapsed_ms)
+        self.assertGreater(result.performance_metrics.previous_lookup.bytes_read, 0)
+        self.assertGreater(result.performance_metrics.reused_previous_bytes, 0)
+        self.assertIsNone(result.performance_metrics.actual_input_tokens)
 
     def test_fresh_lookup_preserves_detailed_request_and_evidence_bounds(self):
         request_text = "x" * 5000

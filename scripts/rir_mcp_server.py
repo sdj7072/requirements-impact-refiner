@@ -845,6 +845,10 @@ def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
     reason = getattr(value, "reason", None)
     elapsed_ms = getattr(value, "elapsed_ms", None)
     candidates = getattr(value, "candidates", ())
+    performance_metrics = getattr(value, "performance_metrics", None)
+    performance_type = getattr(
+        getattr(rir_controller, "PERFORMANCE", None), "PerformanceMetrics", None
+    )
     if (
         status not in {"none", "fresh", "stale", "ambiguous"}
         or not isinstance(requirement_sha256, str)
@@ -862,6 +866,13 @@ def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
         or not all(_is_previous_candidate(candidate) for candidate in candidates)
         or tuple(sorted(candidates, key=lambda candidate: candidate.report_id)) != candidates
         or len({candidate.report_id for candidate in candidates}) != len(candidates)
+        or (
+            performance_metrics is not None
+            and (
+                not isinstance(performance_type, type)
+                or not isinstance(performance_metrics, performance_type)
+            )
+        )
     ):
         return False
     try:
@@ -946,6 +957,10 @@ def _is_scan_result(value: object) -> TypeGuard[_ScanResult]:
     changed_paths = getattr(value, "changed_paths", ())
     changed_count = getattr(value, "changed_count", None)
     previous_display_text = getattr(value, "previous_display_text", None)
+    performance_metrics = getattr(value, "performance_metrics", None)
+    performance_type = getattr(
+        getattr(rir_controller, "PERFORMANCE", None), "PerformanceMetrics", None
+    )
     delta_present = (
         previous_report_id is not None
         or previous_revision is not None
@@ -994,6 +1009,13 @@ def _is_scan_result(value: object) -> TypeGuard[_ScanResult]:
         and isinstance(elapsed_ms, int)
         and not isinstance(elapsed_ms, bool)
         and isinstance(getattr(value, "can_promote", None), bool)
+        and (
+            performance_metrics is None
+            or (
+                isinstance(performance_type, type)
+                and isinstance(performance_metrics, performance_type)
+            )
+        )
         and delta_valid
     )
 
@@ -1336,6 +1358,10 @@ def _previous(arguments: object) -> dict[str, object]:
             for candidate in result.candidates
         ],
     }
+    performance_metrics = getattr(result, "performance_metrics", None)
+    metrics_mapping = getattr(performance_metrics, "to_mapping", None)
+    if callable(metrics_mapping):
+        structured["performance_metrics"] = metrics_mapping()
     if not _is_json_value(structured):
         raise _ControllerContractError("controller previous result is not JSON-safe")
     content = [] if result.display_text is None else [{"type": "text", "text": result.display_text}]
@@ -1551,6 +1577,10 @@ def _scan(arguments: object) -> dict[str, object]:
         "cache_status": result.cache_status,
         "can_promote": result.can_promote,
     }
+    performance_metrics = getattr(result, "performance_metrics", None)
+    metrics_mapping = getattr(performance_metrics, "to_mapping", None)
+    if callable(metrics_mapping):
+        structured["performance_metrics"] = metrics_mapping()
     previous_report_id = getattr(result, "previous_report_id", None)
     if previous_report_id is not None:
         structured.update(

@@ -7,9 +7,11 @@ from evals.harness.models import RunStatus
 from evals.harness.performance import (
     FastScanPerformanceObservation,
     GraphPerformanceObservation,
+    InstantPerformanceObservation,
     PerformanceObservation,
     evaluate_fast_scan_gate,
     evaluate_graph_smoke,
+    evaluate_instant_performance_gate,
     evaluate_smoke_gate,
 )
 
@@ -34,6 +36,80 @@ GRAPH_IDS = (
 
 
 class PerformanceBudgetTest(unittest.TestCase):
+    def instant_rows(self):
+        return (
+            InstantPerformanceObservation(
+                case_id="fresh-1",
+                path="fresh",
+                elapsed_ms=299,
+                provider_calls=0,
+                graph_calls=0,
+                model_calls=0,
+                estimated_input_tokens=0,
+                baseline_input_tokens=3500,
+                expected_frontier=("Z",),
+                observed_frontier=("Z",),
+            ),
+            InstantPerformanceObservation(
+                case_id="delta-1",
+                path="stale_delta",
+                elapsed_ms=2999,
+                provider_calls=0,
+                graph_calls=1,
+                model_calls=0,
+                estimated_input_tokens=700,
+                baseline_input_tokens=3500,
+                expected_frontier=("C", "D", "Z"),
+                observed_frontier=("C", "D", "Z"),
+            ),
+            InstantPerformanceObservation(
+                case_id="repeat-1",
+                path="repeated",
+                elapsed_ms=20,
+                provider_calls=0,
+                graph_calls=0,
+                model_calls=0,
+                estimated_input_tokens=100,
+                baseline_input_tokens=3500,
+                expected_frontier=("Z",),
+                observed_frontier=("Z",),
+            ),
+        )
+
+    def test_instant_gate_enforces_latency_calls_tokens_and_frontier(self):
+        result = evaluate_instant_performance_gate(self.instant_rows())
+
+        self.assertTrue(result.passed, result.errors)
+        self.assertEqual(result.previous_lookup_p95_ms, 299)
+        self.assertEqual(result.stale_delta_p95_ms, 2999)
+
+        rows = self.instant_rows()
+        mutations = {
+            "previous lookup p95 exceeds 300 ms": (replace(rows[0], elapsed_ms=301), *rows[1:]),
+            "stale delta p95 exceeds 3000 ms": (
+                rows[0],
+                replace(rows[1], elapsed_ms=3001),
+                rows[2],
+            ),
+            "fresh reuse performed provider, graph, or model work": (
+                replace(rows[0], graph_calls=1),
+                *rows[1:],
+            ),
+            "repeated request did not reduce estimated input below v0.5": (
+                rows[0],
+                rows[1],
+                replace(rows[2], estimated_input_tokens=3500),
+            ),
+            "instant path lost an expected frontier": (
+                rows[0],
+                replace(rows[1], observed_frontier=("C", "D")),
+                rows[2],
+            ),
+        }
+        for expected, mutated in mutations.items():
+            with self.subTest(expected=expected):
+                self.assertIn(expected, evaluate_instant_performance_gate(mutated).errors)
+
     def observation(self, case_id):
         impact_ids = () if case_id == "NEG-debugging" else ("IMP-001",)
         return PerformanceObservation(

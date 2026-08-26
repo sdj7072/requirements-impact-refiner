@@ -102,6 +102,50 @@
       "type": "string",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
     },
+    "performance_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "previous_lookup",
+        "inventory_delta",
+        "compact_graph",
+        "reused_previous_bytes",
+        "new_evidence_bytes",
+        "estimated_input_tokens",
+        "estimated_output_tokens",
+        "actual_input_tokens",
+        "actual_output_tokens",
+        "cache_status",
+        "total_elapsed_ms"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "actual_input_tokens": {"type": "null"},
+            "actual_output_tokens": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "actual_input_tokens": {"type": "integer"},
+            "actual_output_tokens": {"type": "integer"}
+          }
+        }
+      ],
+      "properties": {
+        "previous_lookup": {"$ref": "#/$defs/phaseMetric"},
+        "inventory_delta": {"$ref": "#/$defs/phaseMetric"},
+        "compact_graph": {"$ref": "#/$defs/phaseMetric"},
+        "reused_previous_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
+        "new_evidence_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
+        "estimated_input_tokens": {"type": "integer", "minimum": 0, "maximum": 4194304},
+        "estimated_output_tokens": {"type": "integer", "minimum": 0, "maximum": 4194304},
+        "actual_input_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "actual_output_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "cache_status": {"enum": ["hit", "miss", "bypassed"]},
+        "total_elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 30000}
+      }
+    },
     "delta_context": {
       "type": "object",
       "additionalProperties": false,
@@ -180,6 +224,19 @@
           "additionalProperties": {"type": "integer", "minimum": 1}
         },
         "previous_frontier": {"type": "array", "maxItems": 512, "items": {"type": "object"}}
+      }
+    }
+  },
+  "$defs": {
+    "phaseMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["elapsed_ms", "bytes_read", "serialized_bytes", "cache_status"],
+      "properties": {
+        "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 30000},
+        "bytes_read": {"type": "integer", "minimum": 0, "maximum": 16777216},
+        "serialized_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
+        "cache_status": {"type": ["string", "null"], "enum": ["hit", "miss", "bypassed", null]}
       }
     }
   }

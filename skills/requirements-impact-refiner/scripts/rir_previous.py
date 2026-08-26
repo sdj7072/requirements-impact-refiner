@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Callable, Literal, Protocol, cast
 
@@ -79,6 +79,11 @@ class _PreviousRendererContract(Protocol):
     ) -> object: ...
 
     def render_previous(self, result: object, compact_state: Mapping[str, object]) -> str: ...
+
+
+class _PerformanceContract(Protocol):
+    PhaseMetric: type
+    PerformanceMetrics: type
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -203,6 +208,26 @@ def _load_previous_renderer() -> _PreviousRendererContract:
 RENDERER = _load_previous_renderer()
 
 
+def _is_performance_contract(value: object) -> TypeGuard[_PerformanceContract]:
+    return (
+        RENDERER.module_uses_sibling(value, "rir_performance.py")
+        and isinstance(getattr(value, "PhaseMetric", None), type)
+        and isinstance(getattr(value, "PerformanceMetrics", None), type)
+    )
+
+
+PERFORMANCE = cast(
+    _PerformanceContract,
+    RENDERER.load_local_module(
+        "rir_performance.py",
+        "rir_performance",
+        "_rir_previous_performance_",
+        _is_performance_contract,
+        "performance metrics",
+    ),
+)
+
+
 def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContract]:
     return (
         RENDERER.module_uses_sibling(value, "rir_report_context.py")
@@ -315,6 +340,7 @@ class PreviousReportResult:
     reason: str
     elapsed_ms: int
     candidates: tuple[PreviousReportCandidate, ...] = ()
+    performance_metrics: object = field(default_factory=PERFORMANCE.PerformanceMetrics)
 
     def __post_init__(self) -> None:
         if self.status not in STATUS_VALUES:
@@ -335,6 +361,8 @@ class PreviousReportResult:
             raise ValueError("previous result changed count is invalid")
         if type(self.elapsed_ms) is not int or self.elapsed_ms < 0:
             raise ValueError("previous result elapsed time is invalid")
+        if not isinstance(self.performance_metrics, PERFORMANCE.PerformanceMetrics):
+            raise TypeError("previous result performance metrics are invalid")
         if not isinstance(self.reason, str) or not self.reason.strip():
             raise ValueError("previous result reason is required")
         if (
@@ -399,6 +427,8 @@ class _CurrentCandidate:
     requirement_sha256: str
     context: object | None
     incompatible_context: bool
+    bytes_read: int
+    reused_bytes: int
 
 
 @dataclass(frozen=True)
@@ -674,6 +704,8 @@ def _read_candidate(root: Path, reports_fd: int, report_id: str, deadline: float
         requirement_sha256=requirement_sha256,
         context=context,
         incompatible_context=legacy_context_present and context is None,
+        bytes_read=len(pointer_payload) + len(state_payload) + len(markdown_payload),
+        reused_bytes=len(state_payload) + len(markdown_payload),
     )
 
 
@@ -1459,6 +1491,20 @@ def _elapsed_ms(started_ns: int) -> int:
     return max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
 
 
+def _lookup_metrics(elapsed_ms: int, *, bytes_read: int = 0, reused_bytes: int = 0):
+    cache_status = "hit" if reused_bytes else "miss"
+    return PERFORMANCE.PerformanceMetrics(
+        previous_lookup=PERFORMANCE.PhaseMetric(
+            elapsed_ms=elapsed_ms,
+            bytes_read=bytes_read,
+            cache_status=cache_status,
+        ),
+        reused_previous_bytes=reused_bytes,
+        cache_status=cache_status,
+        total_elapsed_ms=elapsed_ms,
+    )
+
+
 def _unselected(
     status: Literal["none", "ambiguous"],
     requirement_sha256: str,
@@ -1466,6 +1512,7 @@ def _unselected(
     started_ns: int,
     candidates: tuple[PreviousReportCandidate, ...] = (),
 ) -> PreviousReportResult:
+    elapsed_ms = _elapsed_ms(started_ns)
     return PreviousReportResult(
         status=status,
         report_id=None,
@@ -1479,8 +1526,9 @@ def _unselected(
         source_inventory_sha256=None,
         display_text=None,
         reason=reason,
-        elapsed_ms=_elapsed_ms(started_ns),
+        elapsed_ms=elapsed_ms,
         candidates=candidates,
+        performance_metrics=_lookup_metrics(elapsed_ms),
     )
 
 
@@ -1506,6 +1554,7 @@ def _selected_result(
     started_ns: int,
 ) -> PreviousReportResult:
     context = candidate.context
+    elapsed_ms = _elapsed_ms(started_ns)
     base = PreviousReportResult(
         status=status,
         report_id=candidate.report_id,
@@ -1519,7 +1568,12 @@ def _selected_result(
         source_inventory_sha256=getattr(context, "source_inventory_sha256", None),
         display_text=None,
         reason=reason,
-        elapsed_ms=_elapsed_ms(started_ns),
+        elapsed_ms=elapsed_ms,
+        performance_metrics=_lookup_metrics(
+            elapsed_ms,
+            bytes_read=candidate.bytes_read,
+            reused_bytes=candidate.reused_bytes,
+        ),
     )
     try:
         display = RENDERER.render_previous(base, candidate.state)
@@ -1530,7 +1584,17 @@ def _selected_result(
             "selected previous report could not be rendered safely",
             started_ns,
         )
-    return replace(base, display_text=display, elapsed_ms=_elapsed_ms(started_ns))
+    elapsed_ms = _elapsed_ms(started_ns)
+    return replace(
+        base,
+        display_text=display,
+        elapsed_ms=elapsed_ms,
+        performance_metrics=_lookup_metrics(
+            elapsed_ms,
+            bytes_read=candidate.bytes_read,
+            reused_bytes=candidate.reused_bytes,
+        ),
+    )
 
 
 def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:

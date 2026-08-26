@@ -10,7 +10,7 @@ import stat
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -27,6 +27,7 @@ import fast_scan_renderer
 import fast_scan_store
 import graph_builtin
 import graph_coordinator
+import rir_performance
 
 MAX_CHANGE_BYTES = 4 * 1024
 MAX_EVIDENCE_ROWS = 32
@@ -126,7 +127,7 @@ _REQUIRED_KEYS = {
     "can_promote",
     "created_at",
 }
-_OPTIONAL_KEYS = {"delta_context"}
+_OPTIONAL_KEYS = {"delta_context", "performance_metrics"}
 _STATUSES = {"complete", "partial", "needs_input"}
 _RISKS = {"low", "medium", "high", "critical", "unknown"}
 _CACHE = {"hit", "miss", "bypassed"}
@@ -204,6 +205,9 @@ class FastScanReceipt:
     can_promote: bool
     created_at: str
     delta_context: Mapping[str, object] | None = None
+    performance_metrics: rir_performance.PerformanceMetrics = field(
+        default_factory=rir_performance.PerformanceMetrics
+    )
 
     def __post_init__(self):
         object.__setattr__(self, "settings", _freeze(self.settings))
@@ -214,6 +218,8 @@ class FastScanReceipt:
         object.__setattr__(self, "candidates", tuple(_freeze(row) for row in self.candidates))
         if self.delta_context is not None:
             object.__setattr__(self, "delta_context", _freeze(self.delta_context))
+        if not isinstance(self.performance_metrics, rir_performance.PerformanceMetrics):
+            raise TypeError("performance_metrics must be PerformanceMetrics")
 
     def to_mapping(self) -> dict[str, object]:
         value = {
@@ -238,6 +244,7 @@ class FastScanReceipt:
         }
         if self.delta_context is not None:
             value["delta_context"] = _thaw(self.delta_context)
+        value["performance_metrics"] = self.performance_metrics.to_mapping()
         return value
 
 
@@ -260,6 +267,13 @@ class FastScanResult:
     changed_paths: tuple[str, ...] = ()
     changed_count: int | None = None
     previous_display_text: str | None = None
+    performance_metrics: rir_performance.PerformanceMetrics = field(
+        default_factory=rir_performance.PerformanceMetrics
+    )
+
+    def __post_init__(self):
+        if not isinstance(self.performance_metrics, rir_performance.PerformanceMetrics):
+            raise TypeError("performance_metrics must be PerformanceMetrics")
 
 
 @dataclass(frozen=True)
@@ -844,6 +858,12 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
     delta_value = value.get("delta_context")
     if delta_value is not None:
         errors.extend(_validate_delta_mapping(delta_value, value["seeds"]))
+    performance_value = value.get("performance_metrics")
+    if performance_value is not None:
+        try:
+            rir_performance.PerformanceMetrics.from_mapping(performance_value)
+        except (TypeError, ValueError):
+            errors.append("performance_metrics is invalid")
     seeds = value["seeds"]
     seed_maximum = MAX_DELTA_SEEDS if delta_value is not None else MAX_SEEDS
     if not isinstance(seeds, list) or len(seeds) > seed_maximum:
@@ -1136,12 +1156,16 @@ def execute_fast_scan(
     operation_started: float | None = None,
 ) -> FastScanResult:
     delta_context = _validated_delta_context(request, delta_context)
+    inventory_started_ns = time.monotonic_ns()
     prepared = prepare_fast_scan_identity(
         request,
         graph_settings,
         payload_sha256,
         delta_context,
         operation_started=operation_started,
+    )
+    inventory_elapsed_ms = min(
+        30_000, max(0, (time.monotonic_ns() - inventory_started_ns) // 1_000_000)
     )
     locale = _request_locale(request)
     root = prepared.root
@@ -1159,6 +1183,9 @@ def execute_fast_scan(
         if prepared.delta_seed_selection is None
         else cast(_DeltaSeedSelectionContract, prepared.delta_seed_selection)
     )
+    inventory_payload = json.dumps(
+        inventory_mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
 
     try:
         existing_payload = fast_scan_store.load_scan_receipt_bytes(root, scan_id)
@@ -1185,6 +1212,21 @@ def execute_fast_scan(
             changed_count,
             previous_display,
         ) = _delta_result_fields(existing.get("delta_context"))
+        elapsed = (
+            deadline.elapsed_ms()
+            if delta_context is not None
+            else min(30_000, deadline.elapsed_ms())
+        )
+        performance_metrics = rir_performance.PerformanceMetrics(
+            inventory_delta=rir_performance.PhaseMetric(
+                elapsed_ms=inventory_elapsed_ms,
+                serialized_bytes=len(inventory_payload),
+                cache_status="hit",
+            ),
+            reused_previous_bytes=len(existing_payload),
+            cache_status="hit",
+            total_elapsed_ms=elapsed,
+        )
         return FastScanResult(
             existing["status"],
             scan_id,
@@ -1195,9 +1237,7 @@ def execute_fast_scan(
             _row_tuple(graph.get("paths", [])),
             tuple(existing["frontier"]),
             tuple(existing["candidates"]),
-            deadline.elapsed_ms()
-            if delta_context is not None
-            else min(30_000, deadline.elapsed_ms()),
+            elapsed,
             "hit",
             existing["can_promote"],
             previous_report_id,
@@ -1205,6 +1245,7 @@ def execute_fast_scan(
             changed_paths,
             changed_count,
             previous_display,
+            performance_metrics,
         )
     candidates: list[Mapping[str, object]] = []
     merged_frontier: tuple[Mapping[str, object], ...] = ()
@@ -1221,6 +1262,7 @@ def execute_fast_scan(
         risk_level = "unknown"
         cache_status = "bypassed"
     else:
+        graph_started_ns = time.monotonic_ns()
         graph = _graph_mapping(
             coordinator(
                 root,
@@ -1230,6 +1272,9 @@ def execute_fast_scan(
                 deadline=deadline,
                 source_inventory=source_inventory,
             )
+        )
+        graph_elapsed_ms = min(
+            30_000, max(0, (time.monotonic_ns() - graph_started_ns) // 1_000_000)
         )
         receipt_value = graph["receipt_id"]
         if not isinstance(receipt_value, str):
@@ -1254,6 +1299,8 @@ def execute_fast_scan(
         cache_value = graph.get("cache", {})
         cache_mapping = cache_value if _mapping(cache_value) else {}
         cache_status = str(cache_mapping.get("status", "bypassed"))
+    if not seeds:
+        graph_elapsed_ms = 0
     if delta_context is not None:
         merged_value = delta_context.merge_frontier(graph, delta_seed_selection)
         if not isinstance(merged_value, tuple) or any(
@@ -1271,6 +1318,38 @@ def execute_fast_scan(
         merged_frontier = _row_tuple(graph.get("frontier", []))
     elapsed = (
         deadline.elapsed_ms() if delta_context is not None else min(30_000, deadline.elapsed_ms())
+    )
+    graph_payload = (
+        json.dumps(_thaw(graph), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        if graph
+        else b""
+    )
+    previous_payload = None
+    reused_sha256 = None
+    if delta_mapping is not None:
+        previous_value = delta_mapping.get("previous_display_text")
+        if isinstance(previous_value, str):
+            previous_payload = previous_value.encode("utf-8")
+            reused_sha256 = hashlib.sha256(previous_payload).hexdigest()
+    performance_metrics = rir_performance.measure(
+        previous=previous_payload,
+        delta=inventory_payload,
+        compact_graph_payload=graph_payload,
+        reused_sha256=reused_sha256,
+        inventory_delta=rir_performance.PhaseMetric(
+            elapsed_ms=inventory_elapsed_ms,
+            serialized_bytes=len(inventory_payload),
+            cache_status=cache_status,
+        ),
+        compact_graph=rir_performance.PhaseMetric(
+            elapsed_ms=graph_elapsed_ms,
+            serialized_bytes=len(graph_payload),
+            cache_status=cache_status,
+        ),
+        cache_status=cache_status,
+        total_elapsed_ms=elapsed,
     )
     receipt = FastScanReceipt(
         1,
@@ -1292,11 +1371,17 @@ def execute_fast_scan(
         status == "complete",
         datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         delta_mapping,
+        performance_metrics,
     )
-    payload = canonical_fast_scan_bytes(receipt)
-    fast_scan_store.publish_scan_receipt(root, scan_id, payload)
     mapping = receipt.to_mapping()
     display = fast_scan_renderer.render_fast_scan(mapping, request.audience, locale)
+    performance_metrics = replace(
+        performance_metrics,
+        estimated_output_tokens=rir_performance.estimate_tokens(display.encode("utf-8")),
+    )
+    receipt = replace(receipt, performance_metrics=performance_metrics)
+    payload = canonical_fast_scan_bytes(receipt)
+    fast_scan_store.publish_scan_receipt(root, scan_id, payload)
     digest = hashlib.sha256(payload).hexdigest()
     (
         previous_report_id,
@@ -1323,6 +1408,7 @@ def execute_fast_scan(
         changed_paths,
         changed_count,
         previous_display,
+        performance_metrics,
     )
 
 

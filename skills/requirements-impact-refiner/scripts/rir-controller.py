@@ -234,6 +234,10 @@ def _previous(args) -> int:
             for candidate in result.candidates
         ],
     }
+    performance_metrics = getattr(result, "performance_metrics", None)
+    metrics_mapping = getattr(performance_metrics, "to_mapping", None)
+    if callable(metrics_mapping):
+        payload["performance_metrics"] = metrics_mapping()
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0
 
@@ -303,6 +307,10 @@ def _scan(args) -> int:
             "cache_status": result.cache_status,
             "can_promote": result.can_promote,
         }
+        performance_metrics = getattr(result, "performance_metrics", None)
+        metrics_mapping = getattr(performance_metrics, "to_mapping", None)
+        if callable(metrics_mapping):
+            payload["performance_metrics"] = metrics_mapping()
         previous_report_id = getattr(result, "previous_report_id", None)
         if previous_report_id is not None:
             payload.update(

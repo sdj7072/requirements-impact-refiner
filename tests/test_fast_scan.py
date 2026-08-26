@@ -388,7 +388,9 @@ class FastScanTest(unittest.TestCase):
             "created_at",
         }
         self.assertEqual(set(schema["required"]), expected)
-        self.assertEqual(set(schema["properties"]), expected | {"delta_context"})
+        self.assertEqual(
+            set(schema["properties"]), expected | {"delta_context", "performance_metrics"}
+        )
         self.assertFalse(schema["additionalProperties"])
 
     def test_execute_calls_graph_once_persists_and_renders(self):
@@ -489,6 +491,11 @@ class FastScanTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(second.scan_id, first.scan_id)
         self.assertEqual(second.cache_status, "hit")
+        self.assertEqual(second.performance_metrics.cache_status, "hit")
+        self.assertEqual(second.performance_metrics.compact_graph.serialized_bytes, 0)
+        self.assertEqual(second.performance_metrics.new_evidence_bytes, 0)
+        self.assertEqual(second.performance_metrics.estimated_input_tokens, 0)
+        self.assertGreater(second.performance_metrics.reused_previous_bytes, 0)
 
         source.write_text('FIELD = "profile.displayName"\n# changed\n', encoding="utf-8")
         third = fast_scan.execute_fast_scan(

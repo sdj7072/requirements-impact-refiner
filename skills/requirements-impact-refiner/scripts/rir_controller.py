@@ -907,6 +907,7 @@ def _is_fast_scan_shape(value: object) -> bool:
     store = getattr(value, "fast_scan_store", None)
     builtin = getattr(value, "graph_builtin", None)
     coordinator = getattr(value, "graph_coordinator", None)
+    performance = getattr(value, "rir_performance", None)
     return (
         _module_uses_sibling(value, SCRIPT_DIR / "fast_scan.py")
         and _module_uses_sibling(renderer, SCRIPT_DIR / "fast_scan_renderer.py")
@@ -915,6 +916,8 @@ def _is_fast_scan_shape(value: object) -> bool:
         and _is_fast_scan_store_contract(store)
         and _module_uses_sibling(builtin, SCRIPT_DIR / "graph_builtin.py")
         and _is_fast_scan_coordinator_graph(coordinator)
+        and _module_uses_sibling(performance, SCRIPT_DIR / "rir_performance.py")
+        and _classes(performance, ("PhaseMetric", "PerformanceMetrics"))
         and getattr(builtin, "GRAPH", None) is getattr(coordinator, "GRAPH", None)
         and _classes(
             value,
@@ -985,6 +988,7 @@ def _is_payload_identity_contract(value: object) -> bool:
             "scripts/fast_scan_store.py",
             "scripts/rir_previous.py",
             "scripts/rir_previous_renderer.py",
+            "scripts/rir_performance.py",
             "scripts/rir_controller.py",
             "scripts/rir_delta.py",
             "scripts/rir_delta_worker.py",
@@ -1211,6 +1215,17 @@ def _load_controller_fast_scan_graph():
         _is_delta_contract,
         "delta scan",
     )
+    performance = _load_controller_sibling(
+        "rir_performance.py",
+        "rir_performance",
+        "_rir_controller_performance_",
+        lambda value: (
+            _module_uses_sibling(value, SCRIPT_DIR / "rir_performance.py")
+            and _classes(value, ("PhaseMetric", "PerformanceMetrics"))
+            and _callables(value, ("estimate_tokens", "measure", "with_actual_usage"))
+        ),
+        "performance metrics",
+    )
 
     def valid(value: object) -> bool:
         return (
@@ -1219,6 +1234,7 @@ def _load_controller_fast_scan_graph():
             and getattr(value, "fast_scan_store", None) is store
             and getattr(value, "graph_builtin", None) is GRAPH_COORDINATOR.BUILTIN
             and getattr(value, "graph_coordinator", None) is GRAPH_COORDINATOR
+            and getattr(value, "rir_performance", None) is performance
         )
 
     fast_scan_module = _load_controller_sibling(
@@ -1232,6 +1248,7 @@ def _load_controller_fast_scan_graph():
             "fast_scan_store": cast(ModuleType, store),
             "graph_builtin": cast(ModuleType, GRAPH_COORDINATOR.BUILTIN),
             "graph_coordinator": cast(ModuleType, GRAPH_COORDINATOR),
+            "rir_performance": cast(ModuleType, performance),
         },
         rewire_validator=_is_fast_scan_shape,
     )
@@ -1242,7 +1259,7 @@ def _load_controller_fast_scan_graph():
         _is_payload_identity_contract,
         "payload identity",
     )
-    return renderer, store, fast_scan_module, payload_identity_module, delta
+    return renderer, store, fast_scan_module, payload_identity_module, delta, performance
 
 
 (
@@ -1251,6 +1268,7 @@ def _load_controller_fast_scan_graph():
     FAST_SCAN,
     PAYLOAD_IDENTITY,
     DELTA,
+    PERFORMANCE,
 ) = _load_controller_fast_scan_graph()
 fast_scan_renderer = FAST_SCAN_RENDERER
 fast_scan_store = FAST_SCAN_STORE
@@ -1519,7 +1537,7 @@ def _worker_json_value(value: object) -> object:
 
 def _scan_result_mapping(result: object) -> dict[str, object]:
     typed = cast(Any, result)
-    return {
+    mapping = {
         "status": typed.status,
         "scan_id": typed.scan_id,
         "receipt_id": typed.receipt_id,
@@ -1538,6 +1556,10 @@ def _scan_result_mapping(result: object) -> dict[str, object]:
         "changed_count": getattr(typed, "changed_count", None),
         "previous_display_text": getattr(typed, "previous_display_text", None),
     }
+    performance_metrics = getattr(typed, "performance_metrics", None)
+    if isinstance(performance_metrics, PERFORMANCE.PerformanceMetrics):
+        mapping["performance_metrics"] = performance_metrics.to_mapping()
+    return mapping
 
 
 _DELTA_WORKER_RESULT_KEYS = frozenset(
@@ -1559,12 +1581,16 @@ _DELTA_WORKER_RESULT_KEYS = frozenset(
         "changed_paths",
         "changed_count",
         "previous_display_text",
+        "performance_metrics",
     }
 )
 
 
 def _scan_result_from_mapping(value: object, elapsed_ms: int):
-    if not isinstance(value, Mapping) or set(value) != _DELTA_WORKER_RESULT_KEYS:
+    if not isinstance(value, Mapping) or set(value) not in {
+        _DELTA_WORKER_RESULT_KEYS,
+        _DELTA_WORKER_RESULT_KEYS - {"performance_metrics"},
+    }:
         raise ValueError("delta worker result shape is invalid")
     status = value["status"]
     can_promote = value["can_promote"]
@@ -1603,6 +1629,25 @@ def _scan_result_from_mapping(value: object, elapsed_ms: int):
         or not previous_display.strip()
     ):
         raise ValueError("delta worker previous result identity is invalid")
+    performance_value = value.get("performance_metrics")
+    if performance_value is None:
+        reused_bytes = (
+            len(previous_display.encode("utf-8")) if isinstance(previous_display, str) else 0
+        )
+        performance_metrics = PERFORMANCE.PerformanceMetrics(
+            reused_previous_bytes=reused_bytes,
+            cache_status=value["cache_status"],
+            total_elapsed_ms=min(30_000, elapsed_ms),
+        )
+    else:
+        performance_mapping = (
+            dict(performance_value) if isinstance(performance_value, Mapping) else {}
+        )
+        performance_mapping["total_elapsed_ms"] = min(30_000, elapsed_ms)
+        try:
+            performance_metrics = PERFORMANCE.PerformanceMetrics.from_mapping(performance_mapping)
+        except (TypeError, ValueError) as error:
+            raise ValueError("delta worker performance metrics are invalid") from error
     return FAST_SCAN.FastScanResult(
         status,
         value["scan_id"],
@@ -1621,6 +1666,7 @@ def _scan_result_from_mapping(value: object, elapsed_ms: int):
         tuple(value["changed_paths"]),
         value["changed_count"],
         previous_display,
+        performance_metrics,
     )
 
 
@@ -1708,6 +1754,9 @@ def _generic_delta_preflight_fallback(request: ScanRequest, elapsed_ms: int, rea
         elapsed_ms,
         "bypassed",
         False,
+        performance_metrics=PERFORMANCE.PerformanceMetrics(
+            cache_status="bypassed", total_elapsed_ms=min(30_000, elapsed_ms)
+        ),
     )
 
 
@@ -2914,6 +2963,7 @@ def _is_previous_shape(value: object) -> bool:
         and _module_uses_sibling(
             getattr(value, "RENDERER", None), SCRIPT_DIR / "rir_previous_renderer.py"
         )
+        and getattr(value, "PERFORMANCE", None) is PERFORMANCE
         and _classes(
             value,
             ("PreviousLookupRequest", "PreviousReportCandidate", "PreviousReportResult"),
@@ -2943,6 +2993,7 @@ PREVIOUS = cast(
             "rir_report_context": cast(ModuleType, FINALIZE.REPORT_CONTEXT),
             "payload_identity": cast(ModuleType, PAYLOAD_IDENTITY),
             "rir_previous_renderer": cast(ModuleType, PREVIOUS_RENDERER),
+            "rir_performance": cast(ModuleType, PERFORMANCE),
         },
         rewire_validator=_is_previous_shape,
     ),

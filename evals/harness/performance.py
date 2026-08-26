@@ -30,6 +30,9 @@ GRAPH_NEGATIVE_CASE_ID = "GRAPH-negative-no-change"
 MAX_MEDIAN_GRAPH_DURATION_MS = 10_000
 MAX_GRAPH_DURATION_MS = 30_000
 MAX_FAST_SCAN_OUTPUT_WORDS = 180
+MAX_PREVIOUS_LOOKUP_P95_MS = 300
+MAX_STALE_DELTA_P95_MS = 3_000
+V05_REPEATED_INPUT_TOKEN_BASELINE = 3_500
 
 
 @dataclass(frozen=True)
@@ -124,8 +127,104 @@ class FastScanGateResult:
     median_output_words: float
 
 
+@dataclass(frozen=True)
+class InstantPerformanceObservation:
+    case_id: str
+    path: str
+    elapsed_ms: int
+    provider_calls: int
+    graph_calls: int
+    model_calls: int
+    estimated_input_tokens: int
+    baseline_input_tokens: int
+    expected_frontier: tuple[str, ...]
+    observed_frontier: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class InstantPerformanceGateResult:
+    passed: bool
+    errors: tuple[str, ...]
+    previous_lookup_p95_ms: int
+    stale_delta_p95_ms: int
+    repeated_median_estimated_input_tokens: float
+
+
 def _median(values: Sequence[int]) -> float:
     return float(median(values)) if values else 0.0
+
+
+def _p95(values: Sequence[int]) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    rank = max(1, (95 * len(ordered) + 99) // 100)
+    return ordered[rank - 1]
+
+
+def evaluate_instant_performance_gate(
+    observations: Sequence[InstantPerformanceObservation],
+) -> InstantPerformanceGateResult:
+    errors = []
+    rows = tuple(row for row in observations if isinstance(row, InstantPerformanceObservation))
+    if len(rows) != len(observations):
+        errors.append("instant observations contain invalid rows")
+    if len({row.case_id for row in rows}) != len(rows):
+        errors.append("instant observations contain duplicate case IDs")
+    if {row.path for row in rows} != {"fresh", "stale_delta", "repeated"}:
+        errors.append("instant observations must cover fresh, stale_delta, and repeated paths")
+    for row in rows:
+        if (
+            not isinstance(row.case_id, str)
+            or not row.case_id
+            or row.path not in {"fresh", "stale_delta", "repeated"}
+            or any(
+                type(value) is not int or value < 0
+                for value in (
+                    row.elapsed_ms,
+                    row.provider_calls,
+                    row.graph_calls,
+                    row.model_calls,
+                    row.estimated_input_tokens,
+                    row.baseline_input_tokens,
+                )
+            )
+            or not isinstance(row.expected_frontier, tuple)
+            or not isinstance(row.observed_frontier, tuple)
+            or any(
+                not isinstance(item, str)
+                for item in (*row.expected_frontier, *row.observed_frontier)
+            )
+        ):
+            errors.append(f"{row.case_id} has malformed instant performance evidence")
+
+    fresh = tuple(row for row in rows if row.path == "fresh")
+    stale = tuple(row for row in rows if row.path == "stale_delta")
+    repeated = tuple(row for row in rows if row.path == "repeated")
+    previous_p95 = _p95([row.elapsed_ms for row in fresh])
+    stale_p95 = _p95([row.elapsed_ms for row in stale])
+    if previous_p95 > MAX_PREVIOUS_LOOKUP_P95_MS:
+        errors.append("previous lookup p95 exceeds 300 ms")
+    if stale_p95 > MAX_STALE_DELTA_P95_MS:
+        errors.append("stale delta p95 exceeds 3000 ms")
+    if any((row.provider_calls, row.graph_calls, row.model_calls) != (0, 0, 0) for row in fresh):
+        errors.append("fresh reuse performed provider, graph, or model work")
+    repeated_median = _median([row.estimated_input_tokens for row in repeated])
+    if any(row.baseline_input_tokens != V05_REPEATED_INPUT_TOKEN_BASELINE for row in repeated):
+        errors.append("repeated request baseline is not the pinned v0.5 value")
+    baseline_median = float(V05_REPEATED_INPUT_TOKEN_BASELINE)
+    if repeated and repeated_median >= baseline_median:
+        errors.append("repeated request did not reduce estimated input below v0.5")
+    if any(not set(row.expected_frontier) <= set(row.observed_frontier) for row in rows):
+        errors.append("instant path lost an expected frontier")
+    unique = tuple(sorted(set(errors)))
+    return InstantPerformanceGateResult(
+        not unique,
+        unique,
+        previous_p95,
+        stale_p95,
+        repeated_median,
+    )
 
 
 def evaluate_smoke_gate(
