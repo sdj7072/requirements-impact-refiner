@@ -337,6 +337,49 @@ class RirStorageTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), canonical_bytes(consumed))
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_completion_metadata_binds_analysis_and_report_context_identity(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        key_map = {"impacts": {"member-edit": "IMP-001"}}
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": True,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": "8" * 64,
+        }
+
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            key_map,
+            {"receipt_id": "3" * 32, "sha256": "4" * 64},
+            "9" * 64,
+            context_identity,
+        )
+        current = SimpleNamespace(
+            report_id="RPT-001",
+            revision=1,
+            state_path=(
+                self.root
+                / ".requirements-impact-refiner"
+                / "reports"
+                / "RPT-001"
+                / "revision-0001.json"
+            ),
+        )
+        current.state_path.write_bytes(state_bytes)
+
+        metadata = STORAGE.load_controller_completion_metadata(current)
+
+        self.assertEqual(metadata["analysis_sha256"], "9" * 64)
+        self.assertEqual(metadata["context_identity"], context_identity)
+        self.assertEqual(metadata["key_map"], key_map)
+        self.assertEqual(STORAGE.load_controller_metadata(current), key_map)
+
     def test_controller_clean_path_reuses_the_canonical_storage_module(self):
         self.assertIs(CONTROLLER.STORAGE, STORAGE)
         self.assertIs(CONTROLLER.fcntl, STORAGE.fcntl)
@@ -345,6 +388,10 @@ class RirStorageTest(unittest.TestCase):
             ("_write_private_draft", "write_private_draft"),
             ("_draft_path", "draft_path"),
             ("_load_controller_metadata", "load_controller_metadata"),
+            (
+                "_load_controller_completion_metadata",
+                "load_controller_completion_metadata",
+            ),
             ("_report_lock", "report_lock"),
             ("_write_controller_metadata", "write_controller_metadata"),
             ("_consume", "consume_draft"),

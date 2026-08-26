@@ -42,6 +42,8 @@ class _StorageContract(Protocol):
 
     def draft_path(self, root: Path, draft_id: str) -> Path: ...
 
+    def load_controller_completion_metadata(self, current): ...
+
     def report_lock(self, root: Path, report_id: str, deadline: object = None): ...
 
     def write_controller_metadata(
@@ -51,6 +53,8 @@ class _StorageContract(Protocol):
         state_bytes: bytes,
         key_map: Mapping[str, object],
         graph_receipt: Mapping[str, object] | None = None,
+        analysis_sha256: str | None = None,
+        context_identity: Mapping[str, object] | None = None,
     ) -> None: ...
 
     def consume_draft(self, path: Path, draft: dict[str, object], published, key_map) -> None: ...
@@ -115,6 +119,8 @@ class _ReportStoreContract(Protocol):
     impact_renderer: _ImpactRendererContract
     ReportStoreError: type[Exception]
 
+    def load_current(self, repo_root: Path, report_id: str): ...
+
     def publish_revision(
         self, repo_root: Path, state_bytes: bytes, *, resume_partial: bool = False
     ): ...
@@ -127,7 +133,10 @@ class _ReportStoreContract(Protocol):
 class _ReportContextContract(Protocol):
     ReportContext: type
     MAX_CONTEXT_BYTES: int
+    MAX_REQUIREMENT_INPUT_BYTES: int
     MAX_REQUIREMENT_BYTES: int
+
+    def canonical_requirement_text(self, request: str) -> str: ...
 
     def canonical_requirement_sha256(self, request: str) -> str: ...
 
@@ -317,6 +326,7 @@ def _is_lineage_contract(value: object) -> TypeGuard[_LineageContract]:
                 "root_path",
                 "load_private_draft",
                 "draft_path",
+                "load_controller_completion_metadata",
                 "report_lock",
                 "write_controller_metadata",
                 "consume_draft",
@@ -335,7 +345,7 @@ def _is_lineage_contract(value: object) -> TypeGuard[_LineageContract]:
         and _callables(compact_state, ("load_state_bytes", "validate_state"))
         and _callables(renderer, ("render_compact", "render_markdown"))
         and isinstance(getattr(report_store, "ReportStoreError", None), type)
-        and _callables(report_store, ("publish_revision", "report_directory"))
+        and _callables(report_store, ("load_current", "publish_revision", "report_directory"))
         and _callables(
             value,
             ("current_lineage", "legacy_key_map", "allocate_ids", "map_keys", "build_state"),
@@ -483,11 +493,16 @@ def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContra
         and _classes(value, ("ReportContext",))
         and all(
             type(getattr(value, name, None)) is int and getattr(value, name) > 0
-            for name in ("MAX_CONTEXT_BYTES", "MAX_REQUIREMENT_BYTES")
+            for name in (
+                "MAX_CONTEXT_BYTES",
+                "MAX_REQUIREMENT_INPUT_BYTES",
+                "MAX_REQUIREMENT_BYTES",
+            )
         )
         and _callables(
             value,
             (
+                "canonical_requirement_text",
                 "canonical_requirement_sha256",
                 "repo_root_sha256",
                 "created_at_utc",
@@ -1006,6 +1021,8 @@ _RUNTIME_CALLABLES = (
     "validate_graph_coverage",
     "build_state",
     "canonical_bytes",
+    "load_current",
+    "load_controller_completion_metadata",
     "write_controller_metadata",
     "publish_revision",
     "load_state_bytes",
@@ -1050,6 +1067,8 @@ def default_runtime() -> Mapping[str, object]:
         "validate_graph_coverage": GRAPH_DELIVERY.validate_graph_coverage,
         "build_state": LINEAGE.build_state,
         "canonical_bytes": CONTRACTS.canonical_bytes,
+        "load_current": REPORT_STORE.load_current,
+        "load_controller_completion_metadata": STORAGE.load_controller_completion_metadata,
         "write_controller_metadata": STORAGE.write_controller_metadata,
         "publish_revision": REPORT_STORE.publish_revision,
         "report_store_error": REPORT_STORE.ReportStoreError,
@@ -1146,6 +1165,184 @@ def _existing_context_matches(
     )
 
 
+def _context_identity(
+    repo_sha256: str,
+    requirement_sha256: str,
+    source_inventory_sha256: str | None,
+    source_inventory_available: bool,
+    source_inventory_complete: bool,
+    payload_sha256: str,
+) -> dict[str, object]:
+    return {
+        "repo_root_sha256": repo_sha256,
+        "requirement_sha256": requirement_sha256,
+        "source_inventory_sha256": source_inventory_sha256,
+        "source_inventory_available": source_inventory_available,
+        "source_inventory_complete": source_inventory_complete,
+        "payload_sha256": payload_sha256,
+    }
+
+
+def _draft_graph_receipt_identity(draft: Mapping[str, object]) -> dict[str, str] | None:
+    promoted = draft.get("promoted_scan")
+    if isinstance(promoted, Mapping):
+        receipt_id = promoted.get("receipt_id")
+        receipt_sha256 = promoted.get("receipt_sha256")
+        if isinstance(receipt_id, str) and isinstance(receipt_sha256, str):
+            return {"receipt_id": receipt_id, "sha256": receipt_sha256}
+    bound = draft.get("graph_receipt")
+    if isinstance(bound, Mapping):
+        receipt_id = bound.get("receipt_id")
+        receipt_sha256 = bound.get("sha256")
+        if isinstance(receipt_id, str) and isinstance(receipt_sha256, str):
+            return {"receipt_id": receipt_id, "sha256": receipt_sha256}
+    return None
+
+
+def _verified_published_display(runtime: Mapping[str, object], published):
+    try:
+        state_bytes = published.state_path.read_bytes()
+    except OSError as error:
+        raise ValueError("published state could not be verified") from error
+    stored_state, errors = _operation(runtime, "load_state_bytes")(state_bytes)
+    if errors or stored_state is None:
+        raise ValueError("published state could not be verified")
+    report = stored_state.get("report")
+    if (
+        not isinstance(report, Mapping)
+        or report.get("id") != published.report_id
+        or report.get("revision") != published.revision
+    ):
+        raise ValueError("published state could not be verified")
+    stored_settings = stored_state.get("settings")
+    delivery = stored_settings.get("delivery") if isinstance(stored_settings, Mapping) else None
+    if not isinstance(delivery, str):
+        raise ValueError("published state could not be verified")
+    display = (
+        _operation(runtime, "render_compact")(stored_state)
+        if delivery == "compact"
+        else _operation(runtime, "render_markdown")(stored_state)
+    )
+    if display.endswith("\n"):
+        display = display[:-1]
+    return state_bytes, stored_state, delivery, display
+
+
+def _result(runtime: Mapping[str, object], published, delivery: str, display: str):
+    return _operation(runtime, "result_type")(
+        status="published",
+        report_id=published.report_id,
+        revision=published.revision,
+        delivery=delivery,
+        display_text=display,
+        state_path=published.state_path,
+        markdown_path=published.markdown_path,
+        markdown_sha256=published.markdown_sha256,
+    )
+
+
+def _resume_completed_publication(
+    root: Path,
+    draft: Mapping[str, object],
+    request,
+    analysis_sha256: str,
+    runtime: Mapping[str, object],
+):
+    report_id = draft.get("report_id")
+    revision = draft.get("revision")
+    if not isinstance(report_id, str) or type(revision) is not int or revision < 1:
+        return None
+    current = _operation(runtime, "load_current")(root, report_id)
+    if current is None or current.report_id != report_id or current.revision != revision:
+        return None
+    metadata = _operation(runtime, "load_controller_completion_metadata")(current)
+    if not isinstance(metadata, Mapping):
+        return None
+    if (
+        metadata.get("draft_id") != draft.get("draft_id")
+        or metadata.get("report_id") != report_id
+        or metadata.get("revision") != revision
+        or metadata.get("analysis_sha256") != analysis_sha256
+        or not isinstance(metadata.get("key_map"), Mapping)
+        or not isinstance(metadata.get("context_identity"), Mapping)
+    ):
+        return None
+    settings = draft.get("settings")
+    graph_settings = settings.get("impact_graph") if isinstance(settings, Mapping) else None
+    if not isinstance(graph_settings, Mapping):
+        return None
+    expected_graph = _draft_graph_receipt_identity(draft)
+    metadata_graph = metadata.get("graph_receipt")
+    if graph_settings.get("enabled") is True:
+        if (
+            expected_graph is None
+            or metadata_graph != expected_graph
+            or request.graph_receipt_id != expected_graph["receipt_id"]
+        ):
+            return None
+    elif (
+        request.graph_receipt_id is not None
+        or expected_graph is not None
+        or metadata_graph is not None
+    ):
+        return None
+    context_type = runtime.get("context_type")
+    if not isinstance(context_type, type) or context_type is not REPORT_CONTEXT.ReportContext:
+        raise TypeError("finalize report context type is invalid")
+    context = _operation(runtime, "load_report_context")(root, report_id, revision)
+    if context is None:
+        return None
+    request_value = draft.get("request")
+    if not isinstance(request_value, str):
+        return None
+    identity = metadata["context_identity"]
+    source_sha256 = identity.get("source_inventory_sha256")
+    source_available = identity.get("source_inventory_available")
+    source_complete = identity.get("source_inventory_complete")
+    if (
+        (source_sha256 is not None and not isinstance(source_sha256, str))
+        or not isinstance(source_available, bool)
+        or not isinstance(source_complete, bool)
+    ):
+        return None
+    repo_sha256 = _operation(runtime, "repo_root_sha256")(root)
+    requirement_sha256 = _operation(runtime, "canonical_requirement_sha256")(request_value)
+    payload_sha256 = _operation(runtime, "payload_sha256")()
+    if (
+        identity.get("repo_root_sha256") != repo_sha256
+        or identity.get("requirement_sha256") != requirement_sha256
+        or identity.get("payload_sha256") != payload_sha256
+        or not _existing_context_matches(
+            context,
+            context_type,
+            report_id=report_id,
+            revision=revision,
+            markdown_sha256=current.markdown_sha256,
+            repo_sha256=repo_sha256,
+            requirement_sha256=requirement_sha256,
+            source_inventory_sha256=source_sha256,
+            source_inventory_available=source_available,
+            source_inventory_complete=source_complete,
+            payload_sha256=payload_sha256,
+        )
+    ):
+        return None
+    state_bytes, stored_state, delivery, display = _verified_published_display(runtime, current)
+    if hashlib.sha256(state_bytes).hexdigest() != metadata.get("state_sha256"):
+        return None
+    original = stored_state.get("original_requirement")
+    if not isinstance(original, Mapping) or original.get("request") != request_value:
+        return None
+    _operation(runtime, "publish_report_context")(root, context)
+    _operation(runtime, "consume_draft")(
+        _operation(runtime, "draft_path")(root, str(draft["draft_id"])),
+        draft,
+        current,
+        metadata["key_map"],
+    )
+    return _result(runtime, current, delivery, display)
+
+
 def _finalize(request, runtime: Mapping[str, object]):
     root = _operation(runtime, "root_path")(request.repo_root)
     maximum = runtime.get("max_finalize_bytes")
@@ -1160,6 +1357,12 @@ def _finalize(request, runtime: Mapping[str, object]):
         draft = load_draft(root, request.draft_id)
         if draft.get("consumed") is True:
             raise ValueError("draft is already consumed")
+        analysis_sha256 = hashlib.sha256(
+            _operation(runtime, "canonical_bytes")(request.analysis)
+        ).hexdigest()
+        resumed = _resume_completed_publication(root, draft, request, analysis_sha256, runtime)
+        if resumed is not None:
+            return resumed
         settings_value = draft.get("settings")
         graph_settings = (
             settings_value.get("impact_graph") if isinstance(settings_value, dict) else None
@@ -1190,6 +1393,14 @@ def _finalize(request, runtime: Mapping[str, object]):
         repo_sha256 = _operation(runtime, "repo_root_sha256")(root)
         payload_sha256 = _operation(runtime, "payload_sha256")()
         source_sha256, source_available, source_complete = _source_inventory_identity(graph_context)
+        context_identity = _context_identity(
+            repo_sha256,
+            requirement_sha256,
+            source_sha256,
+            source_available,
+            source_complete,
+            payload_sha256,
+        )
         created_at = _operation(runtime, "created_at_utc")()
         baseline = _operation(runtime, "probe_git_baseline")(root)
         if (
@@ -1211,6 +1422,8 @@ def _finalize(request, runtime: Mapping[str, object]):
                 "receipt_id": graph_context["receipt"]["receipt_id"],
                 "sha256": graph_context["sha256"],
             },
+            analysis_sha256,
+            context_identity,
         )
         report_store_error = runtime.get("report_store_error")
         if not isinstance(report_store_error, type) or not issubclass(
@@ -1223,22 +1436,9 @@ def _finalize(request, runtime: Mapping[str, object]):
             )
         except (FileExistsError, report_store_error) as error:
             raise ValueError(f"controller publication failed: {error}") from error
-        stored_state, errors = _operation(runtime, "load_state_bytes")(
-            published.state_path.read_bytes()
+        _stored_bytes, _stored_state, delivery, display = _verified_published_display(
+            runtime, published
         )
-        if errors or stored_state is None:
-            raise ValueError("published state could not be verified")
-        stored_settings = stored_state.get("settings")
-        delivery = stored_settings.get("delivery") if isinstance(stored_settings, dict) else None
-        if not isinstance(delivery, str):
-            raise ValueError("published state could not be verified")
-        display = (
-            _operation(runtime, "render_compact")(stored_state)
-            if delivery == "compact"
-            else _operation(runtime, "render_markdown")(stored_state)
-        )
-        if display.endswith("\n"):
-            display = display[:-1]
         context_type = runtime.get("context_type")
         if not isinstance(context_type, type) or context_type is not REPORT_CONTEXT.ReportContext:
             raise TypeError("finalize report context type is invalid")
@@ -1284,16 +1484,7 @@ def _finalize(request, runtime: Mapping[str, object]):
             published,
             key_map,
         )
-    return _operation(runtime, "result_type")(
-        status="published",
-        report_id=published.report_id,
-        revision=published.revision,
-        delivery=delivery,
-        display_text=display,
-        state_path=published.state_path,
-        markdown_path=published.markdown_path,
-        markdown_sha256=published.markdown_sha256,
-    )
+    return _result(runtime, published, delivery, display)
 
 
 def finalize_refinement(

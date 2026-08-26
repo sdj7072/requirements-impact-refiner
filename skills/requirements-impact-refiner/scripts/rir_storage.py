@@ -289,7 +289,23 @@ report_store = REPORT_STORE
 
 
 MAX_DRAFT_BYTES = 4 * 1024 * 1024
+MAX_CONTROLLER_METADATA_BYTES = 256 * 1024
 DRAFT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+_RECEIPT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+_CONTROLLER_METADATA_BASE_FIELDS = frozenset(
+    {"schema_version", "draft_id", "report_id", "revision", "state_sha256", "key_map"}
+)
+_CONTEXT_IDENTITY_FIELDS = frozenset(
+    {
+        "repo_root_sha256",
+        "requirement_sha256",
+        "source_inventory_sha256",
+        "source_inventory_available",
+        "source_inventory_complete",
+        "payload_sha256",
+    }
+)
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -378,26 +394,105 @@ def _controller_metadata_path(report_id: str, revision: int, root: Path) -> Path
     return report_dir / f"revision-{revision:04d}.controller.json"
 
 
-def _load_controller_metadata(current) -> dict[str, object] | None:
+def _valid_context_identity(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != _CONTEXT_IDENTITY_FIELDS:
+        return False
+    for key in ("repo_root_sha256", "requirement_sha256", "payload_sha256"):
+        digest = value.get(key)
+        if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
+            return False
+    available = value.get("source_inventory_available")
+    complete = value.get("source_inventory_complete")
+    inventory_digest = value.get("source_inventory_sha256")
+    if not isinstance(available, bool) or not isinstance(complete, bool):
+        return False
+    if complete and not available:
+        return False
+    if available:
+        return (
+            isinstance(inventory_digest, str)
+            and _SHA256_PATTERN.fullmatch(inventory_digest) is not None
+        )
+    return inventory_digest is None
+
+
+def _load_controller_completion_metadata(current) -> dict[str, object] | None:
     path = current.state_path.with_name(f"revision-{current.revision:04d}.controller.json")
     if not path.exists():
         return None
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("controller lineage metadata is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = None
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        descriptor = os.open(path, flags)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+            or metadata.st_size <= 0
+            or metadata.st_size > MAX_CONTROLLER_METADATA_BYTES
+        ):
+            raise ValueError("controller lineage metadata is unsafe")
+        raw = _read_bounded_descriptor(
+            descriptor, MAX_CONTROLLER_METADATA_BYTES, "controller lineage metadata"
+        )
+        payload = json.loads(raw.decode("utf-8", errors="strict"))
         current_state_sha256 = hashlib.sha256(current.state_path.read_bytes()).hexdigest()
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"controller lineage metadata is invalid: {error}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    allowed_fields = _CONTROLLER_METADATA_BASE_FIELDS | {
+        "graph_receipt",
+        "analysis_sha256",
+        "context_identity",
+    }
+    fields = set(payload) if isinstance(payload, dict) else set()
+    completion_fields = {"analysis_sha256", "context_identity"}
+    graph_receipt = payload.get("graph_receipt") if isinstance(payload, dict) else None
+    graph_valid = "graph_receipt" not in fields or (
+        isinstance(graph_receipt, dict)
+        and set(graph_receipt) == {"receipt_id", "sha256"}
+        and isinstance(graph_receipt.get("receipt_id"), str)
+        and _RECEIPT_ID_PATTERN.fullmatch(graph_receipt["receipt_id"]) is not None
+        and isinstance(graph_receipt.get("sha256"), str)
+        and _SHA256_PATTERN.fullmatch(graph_receipt["sha256"]) is not None
+    )
     if (
         not isinstance(payload, dict)
+        or not _CONTROLLER_METADATA_BASE_FIELDS <= fields <= allowed_fields
+        or bool(fields & completion_fields) != (completion_fields <= fields)
+        or _canonical_bytes(payload) != raw
+        or type(payload.get("schema_version")) is not int
+        or payload.get("schema_version") != 1
+        or not isinstance(payload.get("draft_id"), str)
+        or DRAFT_ID_PATTERN.fullmatch(payload["draft_id"]) is None
         or payload.get("report_id") != current.report_id
         or payload.get("revision") != current.revision
+        or type(payload.get("revision")) is not int
         or payload.get("state_sha256") != current_state_sha256
+        or _SHA256_PATTERN.fullmatch(str(payload.get("state_sha256"))) is None
         or not isinstance(payload.get("key_map"), dict)
+        or not graph_valid
+        or (
+            completion_fields <= fields
+            and (
+                not isinstance(payload.get("analysis_sha256"), str)
+                or _SHA256_PATTERN.fullmatch(payload["analysis_sha256"]) is None
+                or not _valid_context_identity(payload.get("context_identity"))
+            )
+        )
     ):
         raise ValueError("controller lineage metadata identity is invalid")
-    return payload["key_map"]
+    return payload
+
+
+def _load_controller_metadata(current) -> dict[str, object] | None:
+    metadata = _load_controller_completion_metadata(current)
+    if metadata is None:
+        return None
+    return cast(dict[str, object], metadata["key_map"])
 
 
 def _draft_path(root: Path, draft_id: str) -> Path:
@@ -1732,6 +1827,8 @@ def _write_controller_metadata(
     state_bytes: bytes,
     key_map: Mapping[str, object],
     graph_receipt: Mapping[str, object] | None = None,
+    analysis_sha256: str | None = None,
+    context_identity: Mapping[str, object] | None = None,
 ) -> None:
     revision_value = _int_value(draft["revision"])
     path = _controller_metadata_path(str(draft["report_id"]), revision_value, root)
@@ -1745,6 +1842,17 @@ def _write_controller_metadata(
     }
     if graph_receipt is not None:
         metadata["graph_receipt"] = dict(graph_receipt)
+    if (analysis_sha256 is None) != (context_identity is None):
+        raise ValueError("controller completion identity must be complete")
+    if analysis_sha256 is not None and context_identity is not None:
+        if (
+            not isinstance(analysis_sha256, str)
+            or _SHA256_PATTERN.fullmatch(analysis_sha256) is None
+            or not _valid_context_identity(dict(context_identity))
+        ):
+            raise ValueError("controller completion identity is invalid")
+        metadata["analysis_sha256"] = analysis_sha256
+        metadata["context_identity"] = dict(context_identity)
     payload = _canonical_bytes(metadata)
     temporary = None
     try:
@@ -1800,6 +1908,7 @@ root_path = _root
 write_private_draft = _write_private_draft
 controller_metadata_path = _controller_metadata_path
 load_controller_metadata = _load_controller_metadata
+load_controller_completion_metadata = _load_controller_completion_metadata
 draft_path = _draft_path
 load_private_draft = load_draft
 replace_private_draft = _replace_private_draft

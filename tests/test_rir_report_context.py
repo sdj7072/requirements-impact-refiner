@@ -6,6 +6,7 @@ import importlib.util
 import inspect
 import json
 import os
+import socket
 import stat
 import subprocess
 import sys
@@ -143,6 +144,32 @@ class RirReportContextTest(unittest.TestCase):
             graph_receipt_id,
         )
 
+    def promoted_finalize_case(self):
+        self.configure_graph(True)
+        (self.root / "api").mkdir()
+        source = self.root / "api" / "profile.py"
+        source.write_text('FIELD = "profile.displayName"\n', encoding="utf-8")
+        scan = CONTROLLER.scan_impact(
+            CONTROLLER.ScanRequest(self.root, "Rename profile.displayName", (), "balanced")
+        )
+        draft = CONTROLLER.begin_refinement(
+            CONTROLLER.BeginRequest(
+                self.root,
+                "Rename profile.displayName",
+                (),
+                "generic",
+                scan_id=scan.scan_id,
+            )
+        )
+        request = self.finalize_request(draft, scan.receipt_id)
+        request.analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in scan.paths]
+        if not request.analysis["impacts"][0]["graph_path_keys"]:
+            request.analysis["impacts"][0]["coverage_rationale"] = (
+                "Fast Scan found no closed repository path."
+            )
+        request.analysis["impacts"][0]["evidence_level"] = "unknown"
+        return source, scan, draft, request
+
     def test_requirement_digest_is_nfc_and_whitespace_stable_without_collapsing_semantics(self):
         composed = "  프로필   Caf\u00e9\n변경  "
         decomposed = "프로필 Cafe\u0301 변경"
@@ -168,6 +195,33 @@ class RirReportContextTest(unittest.TestCase):
             with self.subTest(request_type=type(request).__name__):
                 with self.assertRaises((TypeError, ValueError)):
                     CONTEXT.canonical_requirement_sha256(request)
+
+    def test_requirement_bounds_apply_after_normalization_and_match_begin_admission(self):
+        self.configure_graph(False)
+        whitespace_heavy = " " * (64 * 1024 + 1) + "프로필   변경"
+        self.assertEqual(
+            CONTEXT.canonical_requirement_sha256(whitespace_heavy),
+            CONTEXT.canonical_requirement_sha256("프로필 변경"),
+        )
+        draft = self.begin(whitespace_heavy)
+        self.assertEqual(
+            CONTROLLER.load_draft(self.root, draft.draft_id)["request"], whitespace_heavy
+        )
+
+        exact_normalized = "x" * (64 * 1024)
+        CONTEXT.canonical_requirement_sha256(exact_normalized)
+        self.begin(exact_normalized)
+        semantic_overflow = exact_normalized + "x"
+        with self.assertRaisesRegex(ValueError, "64 KiB"):
+            CONTEXT.canonical_requirement_sha256(semantic_overflow)
+        with self.assertRaisesRegex(ValueError, "64 KiB"):
+            self.begin(semantic_overflow)
+
+        raw_overflow = " " * (256 * 1024 + 1) + "small"
+        with self.assertRaisesRegex(ValueError, "256 KiB"):
+            CONTEXT.canonical_requirement_sha256(raw_overflow)
+        with self.assertRaisesRegex(ValueError, "256 KiB"):
+            self.begin(raw_overflow)
 
     def test_context_is_bound_to_one_published_revision_with_canonical_private_bytes(self):
         published = self.publish_report(revision=2)
@@ -203,6 +257,194 @@ class RirReportContextTest(unittest.TestCase):
             ),
         )
         self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
+
+    def test_context_link_cleanup_precedes_the_durable_directory_fsync(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        events: list[str] = []
+        linked = False
+        real_link = CONTEXT.os.link
+        real_unlink = CONTEXT.os.unlink
+        real_fsync = CONTEXT.os.fsync
+
+        def recording_link(*args, **kwargs):
+            nonlocal linked
+            result = real_link(*args, **kwargs)
+            linked = True
+            events.append("link")
+            return result
+
+        def recording_unlink(*args, **kwargs):
+            if linked:
+                events.append("unlink")
+            return real_unlink(*args, **kwargs)
+
+        def recording_fsync(descriptor):
+            if linked:
+                events.append("fsync")
+            return real_fsync(descriptor)
+
+        with (
+            mock.patch.object(CONTEXT.os, "link", side_effect=recording_link),
+            mock.patch.object(CONTEXT.os, "unlink", side_effect=recording_unlink),
+            mock.patch.object(CONTEXT.os, "fsync", side_effect=recording_fsync),
+        ):
+            path = CONTEXT.publish_report_context(self.root, context)
+
+        self.assertEqual(events, ["link", "unlink", "fsync"])
+        self.assertEqual(path.stat().st_nlink, 1)
+
+    def test_context_unlink_failure_is_retryable_and_never_returns_nlink_two(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        real_unlink = CONTEXT.os.unlink
+
+        def failing_context_unlink(name, *args, **kwargs):
+            if str(name).endswith(".tmp"):
+                raise OSError("injected context cleanup failure")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(CONTEXT.os, "unlink", side_effect=failing_context_unlink):
+            with self.assertRaisesRegex(ValueError, "cleanup"):
+                CONTEXT.publish_report_context(self.root, context)
+
+        self.assertEqual(path.stat().st_nlink, 2)
+        self.assertEqual(len(tuple(path.parent.glob(f".{path.name}.*.tmp"))), 1)
+
+        self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
+        self.assertEqual(path.stat().st_nlink, 1)
+        self.assertEqual(tuple(path.parent.glob(f".{path.name}.*.tmp")), ())
+
+    def test_context_retry_recovers_a_verified_crash_alias_only(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        real_unlink = CONTEXT.os.unlink
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crashing_context_unlink(name, *args, **kwargs):
+            if str(name).endswith(".tmp"):
+                raise SimulatedCrash("link completed before process crash")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(CONTEXT.os, "unlink", side_effect=crashing_context_unlink):
+            with self.assertRaises(SimulatedCrash):
+                CONTEXT.publish_report_context(self.root, context)
+
+        verified_alias = tuple(path.parent.glob(f".{path.name}.*.tmp"))
+        self.assertEqual(len(verified_alias), 1)
+        self.assertEqual(path.stat().st_nlink, 2)
+        foreign_alias = path.parent / f".{path.name}.{'f' * 16}.tmp"
+        foreign_alias.write_bytes(path.read_bytes())
+        foreign_alias.chmod(0o600)
+
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+        self.assertFalse(verified_alias[0].exists())
+        self.assertTrue(foreign_alias.exists())
+        self.assertEqual(path.stat().st_nlink, 1)
+
+    def test_context_crash_recovery_scan_is_bounded_without_unlinking_alias(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = CONTEXT.publish_report_context(self.root, context)
+        verified_alias = path.parent / f".{path.name}.{'a' * 16}.tmp"
+        os.link(path, verified_alias)
+        for index in range(CONTEXT.MAX_RECOVERY_ENTRIES + 1):
+            (path.parent / f"filler-{index:04d}").write_bytes(b"x")
+
+        with self.assertRaisesRegex(ValueError, "entry limit"):
+            CONTEXT.load_report_context(self.root, "RPT-001", 1)
+
+        self.assertTrue(verified_alias.exists())
+        self.assertEqual(path.stat().st_nlink, 2)
+
+    def test_context_directory_fsync_failure_leaves_a_single_link_for_retry(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        real_unlink = CONTEXT.os.unlink
+        real_fsync = CONTEXT.os.fsync
+        cleaned = False
+        failed = False
+
+        def recording_unlink(*args, **kwargs):
+            nonlocal cleaned
+            result = real_unlink(*args, **kwargs)
+            cleaned = True
+            return result
+
+        def failing_directory_fsync(descriptor):
+            nonlocal failed
+            if cleaned and not failed:
+                failed = True
+                raise OSError("injected directory fsync failure")
+            return real_fsync(descriptor)
+
+        with (
+            mock.patch.object(CONTEXT.os, "unlink", side_effect=recording_unlink),
+            mock.patch.object(CONTEXT.os, "fsync", side_effect=failing_directory_fsync),
+        ):
+            with self.assertRaisesRegex(ValueError, "fsync"):
+                CONTEXT.publish_report_context(self.root, context)
+
+        self.assertEqual(path.stat().st_nlink, 1)
+        self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires POSIX FIFO support")
+    def test_special_context_artifacts_are_opened_nonblocking_and_rejected(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = CONTEXT.publish_report_context(self.root, context)
+        path.unlink()
+        os.mkfifo(path, 0o600)
+        real_open = CONTEXT.os.open
+
+        def guarded_open(name, flags, *args, **kwargs):
+            if name == path.name:
+                self.assertTrue(flags & os.O_NONBLOCK)
+            return real_open(name, flags, *args, **kwargs)
+
+        with mock.patch.object(CONTEXT.os, "open", side_effect=guarded_open):
+            with self.assertRaises(ValueError):
+                CONTEXT.load_report_context(self.root, "RPT-001", 1)
+
+        path.unlink()
+
+    @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "requires Unix-domain sockets")
+    def test_unix_socket_context_artifact_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="r") as short_temporary:
+            short_root = Path(short_temporary).resolve()
+            short_state = copy.deepcopy(self.base_state)
+            short_report = STORE.publish_revision(short_root, canonical_bytes(short_state))
+            context = CONTEXT.ReportContext(
+                schema_version=1,
+                report_id="RPT-001",
+                revision=1,
+                markdown_sha256=short_report.markdown_sha256,
+                repo_root_sha256=hashlib.sha256(str(short_root).encode("utf-8")).hexdigest(),
+                requirement_sha256=CONTEXT.canonical_requirement_sha256("프로필 변경"),
+                source_inventory_sha256="4" * 64,
+                payload_sha256="5" * 64,
+                created_at="2026-08-25T12:34:56.123456Z",
+                baseline_commit=None,
+                baseline_clean=False,
+            )
+            socket_path = CONTEXT.publish_report_context(short_root, context)
+            socket_path.unlink()
+            endpoint = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                try:
+                    endpoint.bind(str(socket_path))
+                except PermissionError:
+                    self.skipTest("sandbox does not permit Unix-domain socket binding")
+                os.chmod(socket_path, 0o600)
+                with self.assertRaises(ValueError):
+                    CONTEXT.load_report_context(short_root, "RPT-001", 1)
+            finally:
+                endpoint.close()
 
     def test_inventory_unavailable_and_incomplete_are_explicit_and_never_complete(self):
         published = self.publish_report()
@@ -262,7 +504,7 @@ class RirReportContextTest(unittest.TestCase):
         cases = (
             {"schema_version": True},
             {"report_id": "RPT-01"},
-            {"revision": 10_000},
+            {"revision": 0},
             {"markdown_sha256": "A" * 64},
             {"source_inventory_available": 1},
             {"source_inventory_complete": 1},
@@ -275,6 +517,25 @@ class RirReportContextTest(unittest.TestCase):
             with self.subTest(changes=changes):
                 with self.assertRaises((TypeError, ValueError)):
                     replace(valid, **changes)
+
+    def test_context_accepts_every_positive_nonboolean_report_revision(self):
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
+        report_dir.mkdir(parents=True)
+        markdown = report_dir / "revision-10000.md"
+        markdown.write_bytes(b"immutable revision 10000\n")
+        context = self.sample_context(
+            revision=10_000,
+            markdown_sha256=hashlib.sha256(markdown.read_bytes()).hexdigest(),
+        )
+
+        path = CONTEXT.publish_report_context(self.root, context)
+
+        self.assertEqual(path.name, "revision-10000.context.json")
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 10_000), context)
+        for invalid in (0, -1, True):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    CONTEXT.load_report_context(self.root, "RPT-001", invalid)
 
     def test_missing_report_and_unsafe_repository_roots_fail_conservatively(self):
         self.assertIsNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
@@ -389,6 +650,84 @@ class RirReportContextTest(unittest.TestCase):
 
         tracked.write_text("dirty\n", encoding="utf-8")
         self.assertEqual(CONTEXT.probe_git_baseline(self.root), (expected, False))
+
+    def test_git_baseline_rejects_dirty_divergent_and_uninitialized_submodules(self):
+        def initialize(repository: Path) -> None:
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "rir@example.invalid"],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=repository, check=True)
+
+        with tempfile.TemporaryDirectory() as child_temporary:
+            child = Path(child_temporary).resolve()
+            initialize(child)
+            child_file = child / "child.txt"
+            child_file.write_text("one\n", encoding="utf-8")
+            subprocess.run(["git", "add", "child.txt"], cwd=child, check=True)
+            subprocess.run(["git", "commit", "-qm", "child baseline"], cwd=child, check=True)
+
+            initialize(self.root)
+            parent_file = self.root / "parent.txt"
+            parent_file.write_text("parent\n", encoding="utf-8")
+            subprocess.run(["git", "add", "parent.txt"], cwd=self.root, check=True)
+            subprocess.run(["git", "commit", "-qm", "parent baseline"], cwd=self.root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    "-q",
+                    str(child),
+                    "deps/child",
+                ],
+                cwd=self.root,
+                check=True,
+            )
+            subprocess.run(["git", "commit", "-qam", "add submodule"], cwd=self.root, check=True)
+            parent_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            checkout = self.root / "deps" / "child"
+            checked_out_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=checkout,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, True))
+            (checkout / "child.txt").write_text("dirty\n", encoding="utf-8")
+            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, False))
+            (checkout / "child.txt").write_text("one\n", encoding="utf-8")
+
+            subprocess.run(
+                ["git", "config", "user.email", "rir@example.invalid"],
+                cwd=checkout,
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=checkout, check=True)
+            (checkout / "child.txt").write_text("two\n", encoding="utf-8")
+            subprocess.run(["git", "add", "child.txt"], cwd=checkout, check=True)
+            subprocess.run(["git", "commit", "-qm", "diverge"], cwd=checkout, check=True)
+            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, False))
+            subprocess.run(["git", "checkout", "-q", checked_out_commit], cwd=checkout, check=True)
+
+            subprocess.run(
+                ["git", "submodule", "deinit", "-q", "-f", "--", "deps/child"],
+                cwd=self.root,
+                check=True,
+            )
+            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, False))
 
     def test_non_git_and_git_execution_failure_are_unproven_not_errors(self):
         self.assertEqual(CONTEXT.probe_git_baseline(self.root), (None, False))
@@ -568,6 +907,35 @@ class RirReportContextTest(unittest.TestCase):
         self.assertIsNotNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
         self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
+    def test_context_cleanup_failure_leaves_draft_unconsumed_and_retry_recovers(self):
+        self.configure_graph(False)
+        draft = self.begin("Context cleanup failure remains retryable.")
+        request = self.finalize_request(draft)
+        real_unlink = FINALIZE.REPORT_CONTEXT.os.unlink
+
+        def failing_context_unlink(name, *args, **kwargs):
+            if str(name).endswith(".context.json") is False and str(name).endswith(".tmp"):
+                raise OSError("injected context cleanup failure")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(
+            FINALIZE.REPORT_CONTEXT.os,
+            "unlink",
+            side_effect=failing_context_unlink,
+        ):
+            with self.assertRaisesRegex(ValueError, "cleanup"):
+                FINALIZE.finalize_refinement(request)
+
+        path = self.context_path()
+        self.assertEqual(path.stat().st_nlink, 2)
+        self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+        result = FINALIZE.finalize_refinement(request)
+
+        self.assertEqual(result.revision, 1)
+        self.assertEqual(path.stat().st_nlink, 1)
+        self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
     def test_retry_reuses_an_exact_context_written_before_process_interruption(self):
         self.configure_graph(False)
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
@@ -608,6 +976,108 @@ class RirReportContextTest(unittest.TestCase):
 
         self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), first)
         self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_completed_graph_context_retries_before_source_or_git_revalidation(self):
+        source, _scan, draft, request = self.promoted_finalize_case()
+        runtime = dict(FINALIZE.default_runtime())
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        runtime["consume_draft"] = mock.Mock(
+            side_effect=SimulatedCrash("context durable before draft consumption")
+        )
+        with self.assertRaises(SimulatedCrash):
+            FINALIZE.finalize_refinement(request, _runtime=runtime)
+
+        current = FINALIZE.REPORT_STORE.load_current(self.root, "RPT-001")
+        context = CONTEXT.load_report_context(self.root, "RPT-001", 1)
+        self.assertIsNotNone(current)
+        self.assertIsNotNone(context)
+        self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+        source.write_text('FIELD = "profile.renamed"\n', encoding="utf-8")
+
+        retry_runtime = dict(FINALIZE.default_runtime())
+        forbidden = (
+            "load_graph_context",
+            "load_promoted_scan_context",
+            "validate_analysis",
+            "validate_graph_coverage",
+            "build_state",
+            "probe_git_baseline",
+            "write_controller_metadata",
+            "publish_revision",
+        )
+        for name in forbidden:
+            retry_runtime[name] = mock.Mock(side_effect=AssertionError(f"unexpected {name}"))
+
+        result = FINALIZE.finalize_refinement(request, _runtime=retry_runtime)
+
+        self.assertEqual((result.report_id, result.revision), ("RPT-001", 1))
+        self.assertEqual(result.markdown_sha256, current.markdown_sha256)
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+        self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+        for name in forbidden:
+            retry_runtime[name].assert_not_called()
+
+    def test_missing_context_cannot_skip_safe_graph_reconstruction(self):
+        source, _scan, draft, request = self.promoted_finalize_case()
+        runtime = dict(FINALIZE.default_runtime())
+        runtime["publish_report_context"] = mock.Mock(
+            side_effect=ValueError("injected missing context")
+        )
+        with self.assertRaisesRegex(ValueError, "injected missing context"):
+            FINALIZE.finalize_refinement(request, _runtime=runtime)
+        self.assertIsNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
+        source.write_text('FIELD = "profile.renamed"\n', encoding="utf-8")
+
+        retry_runtime = dict(FINALIZE.default_runtime())
+        graph_revalidation = mock.Mock(side_effect=ValueError("stale graph reconstruction"))
+        retry_runtime["load_promoted_scan_context"] = graph_revalidation
+        with self.assertRaisesRegex(ValueError, "stale graph reconstruction"):
+            FINALIZE.finalize_refinement(request, _runtime=retry_runtime)
+
+        graph_revalidation.assert_called_once()
+        self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_foreign_context_or_changed_analysis_cannot_skip_graph_revalidation(self):
+        _source, _scan, draft, request = self.promoted_finalize_case()
+        runtime = dict(FINALIZE.default_runtime())
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        runtime["consume_draft"] = mock.Mock(side_effect=SimulatedCrash("before consume"))
+        with self.assertRaises(SimulatedCrash):
+            FINALIZE.finalize_refinement(request, _runtime=runtime)
+        exact_context = CONTEXT.load_report_context(self.root, "RPT-001", 1)
+        self.assertIsNotNone(exact_context)
+
+        foreign_runtime = dict(FINALIZE.default_runtime())
+        foreign_runtime["load_report_context"] = mock.Mock(
+            return_value=replace(exact_context, payload_sha256="6" * 64)
+        )
+        foreign_graph = mock.Mock(side_effect=ValueError("foreign context revalidation"))
+        foreign_runtime["load_promoted_scan_context"] = foreign_graph
+        with self.assertRaisesRegex(ValueError, "foreign context revalidation"):
+            FINALIZE.finalize_refinement(request, _runtime=foreign_runtime)
+        foreign_graph.assert_called_once()
+
+        changed_analysis = copy.deepcopy(request.analysis)
+        changed_analysis["scope"][0]["evidence"] += " Changed after publication."
+        changed_request = CONTROLLER.FinalizeRequest(
+            self.root,
+            draft.draft_id,
+            changed_analysis,
+            request.graph_receipt_id,
+        )
+        changed_runtime = dict(FINALIZE.default_runtime())
+        changed_graph = mock.Mock(side_effect=ValueError("changed analysis revalidation"))
+        changed_runtime["load_promoted_scan_context"] = changed_graph
+        with self.assertRaisesRegex(ValueError, "changed analysis revalidation"):
+            FINALIZE.finalize_refinement(changed_request, _runtime=changed_runtime)
+        changed_graph.assert_called_once()
+        self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
     def test_finalize_resolves_its_local_context_dependency_under_foreign_aliases(self):
         script = r"""

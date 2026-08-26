@@ -92,6 +92,8 @@ class _ControllerStorageContract(Protocol):
 
     def load_controller_metadata(self, current: object) -> dict[str, object] | None: ...
 
+    def load_controller_completion_metadata(self, current: object) -> dict[str, object] | None: ...
+
     def cas_replace_private_draft(
         self, root: Path, draft_id: str, expected: bytes, replacement: bytes
     ) -> None: ...
@@ -107,6 +109,8 @@ class _ControllerStorageContract(Protocol):
         state_bytes: bytes,
         key_map: Mapping[str, object],
         graph_receipt: Mapping[str, object] | None = None,
+        analysis_sha256: str | None = None,
+        context_identity: Mapping[str, object] | None = None,
     ) -> None: ...
 
     def consume_draft(self, path: Path, draft: dict[str, object], published, key_map) -> None: ...
@@ -257,6 +261,7 @@ def _is_controller_storage_contract(value: object) -> TypeGuard[_ControllerStora
         "draft_path",
         "controller_metadata_path",
         "load_controller_metadata",
+        "load_controller_completion_metadata",
         "cas_replace_private_draft",
         "recover_private_draft_transaction",
         "report_lock",
@@ -386,6 +391,7 @@ _root = STORAGE.root_path
 _write_private_draft = STORAGE.write_private_draft
 _controller_metadata_path = STORAGE.controller_metadata_path
 _load_controller_metadata = STORAGE.load_controller_metadata
+_load_controller_completion_metadata = STORAGE.load_controller_completion_metadata
 _draft_path = STORAGE.draft_path
 load_draft = STORAGE.load_private_draft
 _replace_private_draft = STORAGE.replace_private_draft
@@ -1413,8 +1419,9 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         not isinstance(item, str) or not item.strip() for item in request.repository_evidence
     ):
         raise ValueError("repository_evidence must contain nonempty strings")
+    normalized_request = FINALIZE.REPORT_CONTEXT.canonical_requirement_text(request.request)
     _bounded(
-        {"request": request.request, "repository_evidence": request.repository_evidence},
+        {"request": normalized_request, "repository_evidence": request.repository_evidence},
         MAX_BEGIN_BYTES,
         "begin input",
     )
@@ -1716,6 +1723,7 @@ def _is_finalize_contract(value: object) -> bool:
     finalize_storage = getattr(value, "STORAGE", None)
     finalize_report_store = getattr(value, "REPORT_STORE", None)
     finalize_graph_delivery = getattr(value, "GRAPH_DELIVERY", None)
+    finalize_context = getattr(value, "REPORT_CONTEXT", None)
     return (
         _module_uses_sibling(value, SCRIPT_DIR / "rir_finalize.py")
         and _module_uses_sibling(finalize_lineage, SCRIPT_DIR / "rir_lineage.py")
@@ -1728,6 +1736,10 @@ def _is_finalize_contract(value: object) -> bool:
         and getattr(finalize_storage, "report_store", None) is finalize_report_store
         and _module_uses_sibling(finalize_graph_delivery, SCRIPT_DIR / "rir_graph_delivery.py")
         and _is_graph_delivery_contract(finalize_graph_delivery)
+        and _module_uses_sibling(finalize_context, SCRIPT_DIR / "rir_report_context.py")
+        and callable(getattr(finalize_context, "canonical_requirement_text", None))
+        and callable(getattr(finalize_context, "load_report_context", None))
+        and callable(getattr(finalize_context, "publish_report_context", None))
         and callable(getattr(value, "finalize_refinement", None))
         and callable(getattr(value, "default_runtime", None))
     )

@@ -22,11 +22,13 @@ REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 COMMIT_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z")
+MAX_REQUIREMENT_INPUT_BYTES = 256 * 1024
 MAX_REQUIREMENT_BYTES = 64 * 1024
 MAX_CONTEXT_BYTES = 8 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
 GIT_TIMEOUT_SECONDS = 0.25
+MAX_RECOVERY_ENTRIES = 256
 _CONTEXT_FIELDS = frozenset(
     {
         "schema_version",
@@ -67,7 +69,7 @@ class ReportContext:
             raise ValueError("report context schema_version must be 1")
         if type(self.report_id) is not str or REPORT_ID_PATTERN.fullmatch(self.report_id) is None:
             raise ValueError("report context report_id is invalid")
-        if type(self.revision) is not int or not 1 <= self.revision <= 9999:
+        if type(self.revision) is not int or self.revision < 1:
             raise ValueError("report context revision is invalid")
         for label, value in (
             ("markdown_sha256", self.markdown_sha256),
@@ -112,14 +114,21 @@ class UnsafeGitOutput(ValueError):
     """Git emitted output that cannot safely participate in report identity."""
 
 
-def canonical_requirement_sha256(request: str) -> str:
+def canonical_requirement_text(request: str) -> str:
     if type(request) is not str:
         raise TypeError("requirement must be text")
-    if len(request.encode("utf-8")) > MAX_REQUIREMENT_BYTES:
-        raise ValueError("requirement exceeds 64 KiB")
+    if len(request.encode("utf-8")) > MAX_REQUIREMENT_INPUT_BYTES:
+        raise ValueError("requirement input exceeds 256 KiB")
     normalized = unicodedata.normalize("NFC", " ".join(request.split()))
     if not normalized:
         raise ValueError("requirement must be nonblank")
+    if len(normalized.encode("utf-8")) > MAX_REQUIREMENT_BYTES:
+        raise ValueError("normalized requirement exceeds 64 KiB")
+    return normalized
+
+
+def canonical_requirement_sha256(request: str) -> str:
+    normalized = canonical_requirement_text(request)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
@@ -150,7 +159,7 @@ def _root(value: Path) -> Path:
 def _validate_identity(report_id: str, revision: int) -> None:
     if type(report_id) is not str or REPORT_ID_PATTERN.fullmatch(report_id) is None:
         raise ValueError("invalid report ID")
-    if type(revision) is not int or not 1 <= revision <= 9999:
+    if type(revision) is not int or revision < 1:
         raise ValueError("invalid report revision")
 
 
@@ -192,8 +201,30 @@ def _read_bounded_file(
     maximum: int,
     *,
     private: bool,
+    allowed_links: frozenset[int] = frozenset({1}),
+    expected_owner: int | None = None,
 ) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    payload, _metadata = _read_bounded_artifact(
+        directory_fd,
+        name,
+        maximum,
+        private=private,
+        allowed_links=allowed_links,
+        expected_owner=expected_owner,
+    )
+    return payload
+
+
+def _read_bounded_artifact(
+    directory_fd: int,
+    name: str,
+    maximum: int,
+    *,
+    private: bool,
+    allowed_links: frozenset[int],
+    expected_owner: int | None,
+) -> tuple[bytes, os.stat_result]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(name, flags, dir_fd=directory_fd)
     except OSError as error:
@@ -202,8 +233,13 @@ def _read_bounded_file(
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_size < 0 or metadata.st_size > maximum:
             raise ValueError(f"report artifact is unsafe: {name}")
-        if private and (stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1):
-            raise ValueError(f"report context is not private: {name}")
+        if private:
+            if (
+                stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_nlink not in allowed_links
+                or (expected_owner is not None and metadata.st_uid != expected_owner)
+            ):
+                raise ValueError(f"report context is not private: {name}")
         payload = bytearray()
         while len(payload) <= maximum:
             chunk = os.read(descriptor, min(64 * 1024, maximum + 1 - len(payload)))
@@ -212,7 +248,7 @@ def _read_bounded_file(
             payload.extend(chunk)
         if len(payload) > maximum:
             raise ValueError(f"report artifact exceeds its byte limit: {name}")
-        return bytes(payload)
+        return bytes(payload), metadata
     finally:
         os.close(descriptor)
 
@@ -287,12 +323,105 @@ def _from_payload(payload: bytes) -> ReportContext:
     return context
 
 
-def _load_from_directory(directory_fd: int, report_id: str, revision: int) -> ReportContext:
+def _load_context_artifact(
+    directory_fd: int,
+    report_id: str,
+    revision: int,
+    *,
+    allowed_links: frozenset[int] = frozenset({1}),
+) -> tuple[ReportContext, bytes, os.stat_result]:
     name = f"revision-{revision:04d}.context.json"
-    context = _from_payload(_read_bounded_file(directory_fd, name, MAX_CONTEXT_BYTES, private=True))
+    expected_owner = os.fstat(directory_fd).st_uid
+    payload, metadata = _read_bounded_artifact(
+        directory_fd,
+        name,
+        MAX_CONTEXT_BYTES,
+        private=True,
+        allowed_links=allowed_links,
+        expected_owner=expected_owner,
+    )
+    context = _from_payload(payload)
     if context.report_id != report_id or context.revision != revision:
         raise ValueError("report context identity does not match its filename")
+    return context, payload, metadata
+
+
+def _load_from_directory(directory_fd: int, report_id: str, revision: int) -> ReportContext:
+    context, _payload, _metadata = _load_context_artifact(directory_fd, report_id, revision)
     return context
+
+
+def _context_temporary_pattern(name: str) -> re.Pattern[str]:
+    return re.compile(rf"{re.escape('.' + name + '.')}[0-9a-f]{{16}}\.tmp")
+
+
+def _fsync_context_directory(directory_fd: int) -> None:
+    try:
+        os.fsync(directory_fd)
+    except OSError as error:
+        raise ValueError("cannot fsync report context directory") from error
+
+
+def _unlink_context_temporary(directory_fd: int, temporary: str) -> None:
+    try:
+        os.unlink(temporary, dir_fd=directory_fd)
+    except OSError as error:
+        raise ValueError("cannot cleanup report context temporary") from error
+
+
+def _load_or_recover_context(
+    directory_fd: int,
+    report_id: str,
+    revision: int,
+) -> ReportContext:
+    name = f"revision-{revision:04d}.context.json"
+    context, payload, target = _load_context_artifact(
+        directory_fd,
+        report_id,
+        revision,
+        allowed_links=frozenset({1, 2}),
+    )
+    if target.st_nlink == 1:
+        return context
+    expected_owner = os.fstat(directory_fd).st_uid
+    pattern = _context_temporary_pattern(name)
+    verified_aliases: list[str] = []
+    try:
+        with os.scandir(directory_fd) as entries:
+            for count, entry in enumerate(entries, start=1):
+                if count > MAX_RECOVERY_ENTRIES:
+                    raise ValueError("report context recovery exceeds its entry limit")
+                if pattern.fullmatch(entry.name) is None:
+                    continue
+                try:
+                    alias_payload, alias = _read_bounded_artifact(
+                        directory_fd,
+                        entry.name,
+                        MAX_CONTEXT_BYTES,
+                        private=True,
+                        allowed_links=frozenset({2}),
+                        expected_owner=expected_owner,
+                    )
+                except ValueError:
+                    continue
+                if (
+                    alias.st_dev == target.st_dev
+                    and alias.st_ino == target.st_ino
+                    and alias_payload == payload
+                ):
+                    verified_aliases.append(entry.name)
+    except OSError as error:
+        raise ValueError("cannot inspect report context recovery aliases") from error
+    if len(verified_aliases) != 1:
+        raise ValueError("report context recovery alias is invalid")
+    _unlink_context_temporary(directory_fd, verified_aliases[0])
+    _fsync_context_directory(directory_fd)
+    recovered, recovered_payload, recovered_metadata = _load_context_artifact(
+        directory_fd, report_id, revision
+    )
+    if recovered != context or recovered_payload != payload or recovered_metadata.st_nlink != 1:
+        raise ValueError("report context recovery verification failed")
+    return recovered
 
 
 def publish_report_context(root: Path, context: ReportContext) -> Path:
@@ -313,6 +442,18 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
     try:
         if _markdown_sha256(directory_fd, context.revision) != context.markdown_sha256:
             raise ValueError("report context Markdown digest is invalid")
+        try:
+            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise ValueError("report context is unsafe") from error
+        else:
+            existing = _load_or_recover_context(directory_fd, context.report_id, context.revision)
+            if existing != context:
+                raise FileExistsError(name)
+            _fsync_context_directory(directory_fd)
+            return resolved / ".requirements-impact-refiner" / "reports" / context.report_id / name
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
         temporary_created = True
@@ -332,25 +473,37 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
                 follow_symlinks=False,
             )
         except FileExistsError:
-            existing = _load_from_directory(directory_fd, context.report_id, context.revision)
+            if descriptor is not None:
+                os.close(descriptor)
+            descriptor = None
+            _unlink_context_temporary(directory_fd, temporary)
+            temporary_created = False
+            _fsync_context_directory(directory_fd)
+            existing = _load_or_recover_context(directory_fd, context.report_id, context.revision)
             if existing != context:
                 raise FileExistsError(name) from None
         else:
-            os.fsync(directory_fd)
+            _unlink_context_temporary(directory_fd, temporary)
+            temporary_created = False
+            _fsync_context_directory(directory_fd)
+            if _load_from_directory(directory_fd, context.report_id, context.revision) != context:
+                raise ValueError("published report context could not be verified")
     except FileExistsError:
         raise
     except (OSError, ValueError) as error:
+        if descriptor is not None:
+            os.close(descriptor)
+            descriptor = None
+        if temporary_created:
+            _unlink_context_temporary(directory_fd, temporary)
+            temporary_created = False
+            _fsync_context_directory(directory_fd)
         if isinstance(error, ValueError):
             raise
         raise ValueError(f"cannot publish report context: {error}") from error
     finally:
         if descriptor is not None:
             os.close(descriptor)
-        if temporary_created:
-            try:
-                os.unlink(temporary, dir_fd=directory_fd)
-            except OSError:
-                pass
         os.close(directory_fd)
     return resolved / ".requirements-impact-refiner" / "reports" / context.report_id / name
 
@@ -369,7 +522,7 @@ def load_report_context(root: Path, report_id: str, revision: int) -> ReportCont
             return None
         except OSError as error:
             raise ValueError("report context is unsafe") from error
-        context = _load_from_directory(directory_fd, report_id, revision)
+        context = _load_or_recover_context(directory_fd, report_id, revision)
         expected_root = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
         if context.repo_root_sha256 != expected_root:
             raise ValueError("report context repository identity is invalid")
@@ -519,7 +672,7 @@ def probe_git_baseline(root: Path) -> tuple[str | None, bool]:
             "status",
             "--porcelain=v1",
             "--untracked-files=normal",
-            "--ignore-submodules=all",
+            "--ignore-submodules=none",
             "--no-renames",
         ),
     )
@@ -527,4 +680,13 @@ def probe_git_baseline(root: Path) -> tuple[str | None, bool]:
         return commit, False
     if b"\0" in status_result[1]:
         raise UnsafeGitOutput("Git status output contains NUL")
-    return commit, status_result[1] == b""
+    if status_result[1] != b"":
+        return commit, False
+    submodule_result = _run_git(resolved, ("submodule", "status", "--recursive"))
+    if submodule_result is None or submodule_result[0] != 0:
+        return commit, False
+    if b"\0" in submodule_result[1]:
+        raise UnsafeGitOutput("Git submodule output contains NUL")
+    if any(not line.startswith(b" ") for line in submodule_result[1].splitlines()):
+        return commit, False
+    return commit, True
