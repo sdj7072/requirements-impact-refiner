@@ -14,9 +14,15 @@ def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
 
-def frame(result):
-    payload = canonical({"result": result})
-    return f"{len(payload):08x}\n".encode("ascii") + payload
+def frame(kind, payload, token):
+    body = canonical({"kind": kind, "payload": payload, "token": token})
+    return f"{len(body):08x}\n".encode("ascii") + body
+
+
+def write(payload):
+    offset = 0
+    while offset < len(payload):
+        offset += os.write(sys.stdout.fileno(), payload[offset:])
 
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -25,13 +31,24 @@ parser.add_argument("--sha256", required=True)
 parser.add_argument("--token", required=True)
 parser.add_argument("--parent-pid", type=int, required=True)
 args = parser.parse_args()
-payload = args.input.read_bytes()
-if hashlib.sha256(payload).hexdigest() != args.sha256:
+input_payload = args.input.read_bytes()
+if hashlib.sha256(input_payload).hexdigest() != args.sha256:
     raise SystemExit(2)
-request = json.loads(payload)
+request = json.loads(input_payload)
 if request.get("worker_token") != args.token or request.get("parent_pid") != args.parent_pid:
     raise SystemExit(2)
 scenario = os.environ.get("RIR_DELTA_TEST_SCENARIO", "after-fallback")
+
+if scenario == "settings":
+    time.sleep(10)
+    raise SystemExit(0)
+
+effective_seconds = 1 if scenario == "configured-one" else 3
+write(frame("control", {"effective_max_seconds": effective_seconds}, args.token))
+
+if scenario in {"lookup", "artifact"}:
+    time.sleep(10)
+    raise SystemExit(0)
 
 changed_paths = request.get("changed_paths", [])
 fallback = {
@@ -60,6 +77,10 @@ fallback = {
     "changed_count": len(changed_paths),
     "previous_display_text": "trusted previous",
 }
+fallback_token = "f" * 32 if scenario == "forged-frame" else args.token
+write(frame("trusted_fallback", fallback, fallback_token))
+if scenario == "forged-frame":
+    time.sleep(10)
 
 root = Path(request["repo_root"])
 token = request["worker_token"]
@@ -85,29 +106,30 @@ elif scenario == "descendant":
 elif scenario == "partial-frame":
     partial = dict(fallback)
     partial["display_text"] = "x" * 100_000
-    framed = frame(partial)
-    os.write(sys.stdout.fileno(), framed[:70_000])
+    framed = frame("result", partial, args.token)
+    write(framed[:70_000])
     time.sleep(10)
 elif scenario == "overflow":
+    write(f"{4 * 1024 * 1024 + 1:08x}\n".encode("ascii"))
     chunk = b"x" * 65_536
-    for _ in range(66):
-        os.write(sys.stdout.fileno(), chunk)
+    for _ in range(65):
+        write(chunk)
     time.sleep(10)
 elif scenario == "garbage":
-    os.write(sys.stdout.fileno(), b"not-a-frame")
+    write(b"not-a-frame")
     raise SystemExit(0)
 elif scenario == "extra-frame":
-    os.write(sys.stdout.fileno(), frame(fallback) + frame(fallback))
+    write(frame("trusted_fallback", fallback, args.token))
     raise SystemExit(0)
 
 if scenario in {
-    "lookup",
     "hash",
     "provider",
     "persist",
     "render",
     "descendant",
     "after-fallback",
+    "configured-one",
 }:
     time.sleep(10)
 
@@ -115,4 +137,4 @@ final = dict(fallback)
 final["status"] = "complete"
 final["can_promote"] = True
 final["receipt_sha256"] = hashlib.sha256(b"complete").hexdigest()
-os.write(sys.stdout.fileno(), frame(final))
+write(frame("result", final, args.token))

@@ -20,6 +20,9 @@ if str(SCRIPT_DIR) not in sys.path:
 import rir_controller  # noqa: E402
 
 MAX_INPUT_BYTES = 512 * 1024
+MAX_CONTROL_FRAME_BYTES = 1024
+MAX_FALLBACK_FRAME_BYTES = 4 * 1024 * 1024
+MAX_RESULT_FRAME_BYTES = 4 * 1024 * 1024
 INPUT_KEYS = {
     "schema_version",
     "repo_root",
@@ -72,15 +75,29 @@ def _read_input(path: Path, expected_sha256: str) -> dict[str, object]:
     return value
 
 
-def _emit(result: Mapping[str, object]) -> None:
-    payload = json.dumps(
-        {"result": result},
+def _emit(kind: str, payload: Mapping[str, object], token: str) -> None:
+    maximum = {
+        "control": MAX_CONTROL_FRAME_BYTES,
+        "trusted_fallback": MAX_FALLBACK_FRAME_BYTES,
+        "result": MAX_RESULT_FRAME_BYTES,
+    }.get(kind)
+    if maximum is None or re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        raise ValueError("delta worker output frame type is invalid")
+    body = json.dumps(
+        {"kind": kind, "payload": payload, "token": token},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    frame = f"{len(payload):08x}\n".encode("ascii") + payload
-    os.write(sys.stdout.fileno(), frame)
+    if not body or len(body) > maximum:
+        raise ValueError("delta worker output frame exceeds its byte limit")
+    frame = f"{len(body):08x}\n".encode("ascii") + body
+    offset = 0
+    while offset < len(frame):
+        written = os.write(sys.stdout.fileno(), frame[offset:])
+        if written <= 0:
+            raise OSError("delta worker output pipe closed")
+        offset += written
 
 
 def _request(value: Mapping[str, object]):
@@ -143,12 +160,25 @@ def main(argv=None) -> int:
         raise ValueError("delta worker deadline is invalid")
     rir_controller._configure_delta_worker_runtime(args.token)
     request = _request(value)
+
+    def control(effective_max_seconds: int) -> None:
+        _emit(
+            "control",
+            {"effective_max_seconds": effective_max_seconds},
+            args.token,
+        )
+
+    def fallback(result: Mapping[str, object]) -> None:
+        _emit("trusted_fallback", result, args.token)
+
     scan = rir_controller._scan_impact_in_process(
         request,
         operation_started=float(operation_started),
+        _worker_control_callback=control,
+        _worker_fallback_callback=fallback,
     )
     result = rir_controller._scan_result_mapping(scan)
-    _emit(result)
+    _emit("result", result, args.token)
     return 0
 
 

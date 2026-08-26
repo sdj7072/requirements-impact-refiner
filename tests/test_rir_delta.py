@@ -482,22 +482,35 @@ class DeltaScanTest(unittest.TestCase):
         trusted = trusted_previous()
         lookup_requests = []
         scan_calls = []
+        stage_events = []
         settings = {
             "audience": "technical",
             "audience_source": "request",
             "delivery": "compact",
             "delivery_source": "default",
-            "delta_max_seconds": 9,
+            "delta_max_seconds": 1,
             "impact_graph": graph_receipt(self.root)["settings"],
         }
 
         def lookup(request):
             lookup_requests.append(request)
+            stage_events.append("lookup")
             return trusted
 
         def execute(request, graph_settings, payload_sha256, **kwargs):
             scan_calls.append((request, graph_settings, payload_sha256, kwargs))
+            stage_events.append("scan")
             return SimpleNamespace(status="partial")
+
+        def load_artifacts(*_args, **_kwargs):
+            stage_events.append("artifact")
+            return (
+                previous_state(),
+                prior_graph,
+                "bound",
+                prior_graph_id,
+                prior_graph_sha256,
+            )
 
         prior_graph = graph_receipt(self.root)
         prior_graph_id, prior_graph_sha256 = graph_identity(prior_graph)
@@ -513,13 +526,7 @@ class DeltaScanTest(unittest.TestCase):
                 mock.patch.object(
                     CONTROLLER.DELTA,
                     "load_trusted_previous_artifacts",
-                    return_value=(
-                        previous_state(),
-                        prior_graph,
-                        "bound",
-                        prior_graph_id,
-                        prior_graph_sha256,
-                    ),
+                    side_effect=load_artifacts,
                 )
             )
             stack.enter_context(
@@ -537,7 +544,10 @@ class DeltaScanTest(unittest.TestCase):
                     previous_report_id="RPT-001",
                     previous_revision=2,
                     changed_paths=("a.py",),
-                )
+                ),
+                operation_started=time.monotonic(),
+                _worker_control_callback=lambda maximum: stage_events.append(f"control:{maximum}"),
+                _worker_fallback_callback=lambda _fallback: stage_events.append("fallback"),
             )
 
         self.assertEqual(result.status, "partial")
@@ -552,9 +562,12 @@ class DeltaScanTest(unittest.TestCase):
         self.assertEqual(scan_request.previous_report_id, "RPT-001")
         self.assertEqual(scan_request.previous_revision, 2)
         self.assertEqual(scan_request.changed_paths, ("a.py",))
-        self.assertEqual(scan_request.delta_max_seconds, 9)
+        self.assertEqual(scan_request.delta_max_seconds, 1)
         self.assertEqual(type(kwargs["delta_context"]).__name__, "DeltaScanContext")
         self.assertEqual(kwargs["delta_context"].previous_report_id, "RPT-001")
+        self.assertEqual(stage_events[0], "control:1")
+        self.assertLess(stage_events.index("artifact"), stage_events.index("fallback"))
+        self.assertLess(stage_events.index("fallback"), stage_events.index("scan"))
 
     def test_controller_rejects_fresh_or_mismatched_hints_without_scanning(self):
         settings = {
@@ -608,12 +621,23 @@ class DeltaScanTest(unittest.TestCase):
             2,
             ("a.py",),
         )
-        with mock.patch.object(
-            CONTROLLER, "_execute_delta_worker", return_value=sentinel
-        ) as worker:
-            with mock.patch.dict(os.environ, {"RIR_DELTA_WORKER": "1"}):
-                self.assertIs(CONTROLLER.scan_impact(delta_request), sentinel)
+        with (
+            mock.patch.object(CONTROLLER, "_execute_delta_worker", return_value=sentinel) as worker,
+            mock.patch.object(
+                CONTROLLER, "_root", side_effect=AssertionError("parent resolved repository")
+            ),
+            mock.patch.object(
+                CONTROLLER.SETTINGS,
+                "resolve",
+                side_effect=AssertionError("parent loaded settings"),
+            ),
+            mock.patch.dict(os.environ, {"RIR_DELTA_WORKER": "1"}),
+        ):
+            self.assertIs(CONTROLLER.scan_impact(delta_request), sentinel)
         self.assertEqual(worker.call_count, 1)
+        self.assertIs(worker.call_args.args[0], delta_request)
+        self.assertEqual(worker.call_args.args[1], 3)
+        self.assertIsInstance(worker.call_args.args[2], float)
 
         ordinary = SimpleNamespace(status="complete")
         with ExitStack() as stack:
@@ -632,7 +656,7 @@ class DeltaScanTest(unittest.TestCase):
             )
         self.assertIs(result, ordinary)
 
-    def test_parent_retains_trusted_fallback_before_scan_worker_spawn(self):
+    def test_parent_spawns_before_repository_trust_and_preflight_timeout_is_identity_free(self):
         request = CONTROLLER.ScanRequest(
             self.root,
             "Change OriginSignal negotiation",
@@ -642,34 +666,79 @@ class DeltaScanTest(unittest.TestCase):
             2,
             ("a.py",),
         )
-        fallback = DELTA.delta_timeout_fallback(self.chain_context(), 0)
-        events = []
-
-        def prepare(_request, _started):
-            events.append("fallback")
-            return fallback
-
-        def run_worker(*_args, **_kwargs):
-            events.append("worker")
-            return None
-
+        started = time.monotonic()
         with (
             mock.patch.object(
-                CONTROLLER, "_prepare_delta_fallback_in_process", side_effect=prepare
+                CONTROLLER, "_root", side_effect=AssertionError("parent resolved repository")
             ),
-            mock.patch.object(CONTROLLER, "_run_delta_worker", side_effect=run_worker),
+            mock.patch.object(
+                CONTROLLER.SETTINGS,
+                "resolve",
+                side_effect=AssertionError("parent loaded settings"),
+            ),
+            mock.patch.object(
+                CONTROLLER,
+                "lookup_previous",
+                side_effect=AssertionError("parent performed previous lookup"),
+            ),
+            mock.patch.object(
+                CONTROLLER,
+                "_payload_sha256",
+                side_effect=AssertionError("parent hashed payload"),
+            ),
         ):
             result = CONTROLLER._execute_delta_worker(
                 request,
-                3,
-                time.monotonic(),
+                0.25,
+                started,
                 worker_path=SLOW_WORKER,
+                worker_environment={"RIR_DELTA_TEST_SCENARIO": "lookup"},
             )
 
-        self.assertEqual(events, ["fallback", "worker"])
-        self.assertEqual(result.previous_report_id, "RPT-001")
+        self.assertLessEqual(round((time.monotonic() - started) * 1000), 350)
+        self.assertIsNone(result.previous_report_id)
+        self.assertIsNone(result.previous_revision)
+        self.assertEqual(result.changed_paths, ())
+        self.assertIsNone(result.previous_display_text)
+        self.assertEqual(result.paths, ())
+        self.assertIn("preflight", result.display_text)
         self.assertEqual(result.status, "partial")
         self.assertFalse(result.can_promote)
+
+    def test_worker_filesystem_trust_failure_returns_identity_free_partial(self):
+        missing_root = Path(self.temporary.name) / "missing-repository"
+        request = CONTROLLER.ScanRequest(
+            missing_root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+
+        result = CONTROLLER._execute_delta_worker(request, 0.5, time.monotonic())
+
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
+        self.assertIsNone(result.previous_report_id)
+        self.assertEqual(result.changed_paths, ())
+        self.assertEqual(result.paths, ())
+        self.assertIn("preflight", result.frontier[0]["reason"])
+
+    def test_parent_rejects_syntactically_incomplete_delta_hints_before_spawn(self):
+        requests = (
+            CONTROLLER.ScanRequest(self.root, "Change a.py", (), "technical", "RPT-001", None, ()),
+            CONTROLLER.ScanRequest(self.root, "Change a.py", (), "technical", None, 2, ("a.py",)),
+            CONTROLLER.ScanRequest(
+                self.root, "Change a.py", (), "technical", None, None, ("a.py",)
+            ),
+        )
+
+        for request in requests:
+            with self.subTest(request=request):
+                with self.assertRaisesRegex(ValueError, "all-or-none"):
+                    CONTROLLER._execute_delta_worker(request, 1, time.monotonic())
 
     def test_mcp_scan_accepts_delta_hints_and_returns_previous_summary(self):
         arguments = {
@@ -949,22 +1018,16 @@ class DeltaScanTest(unittest.TestCase):
             2,
             ("a.py",),
         )
-        with mock.patch.object(
-            CONTROLLER,
-            "_prepare_delta_fallback_in_process",
-            return_value=fallback,
-        ):
-            timed_out = CONTROLLER._execute_delta_worker(
-                request,
-                0.25,
-                started,
-                worker_path=SLOW_WORKER,
-                worker_environment={"RIR_DELTA_TEST_SCENARIO": "after-fallback"},
-            )
+        timed_out = CONTROLLER._execute_delta_worker(
+            request,
+            0.25,
+            started,
+            worker_path=SLOW_WORKER,
+            worker_environment={"RIR_DELTA_TEST_SCENARIO": "after-fallback"},
+        )
         self.assertEqual(timed_out.previous_report_id, "RPT-001")
         self.assertEqual(timed_out.status, "partial")
         self.assertFalse(timed_out.can_promote)
-        self.assertTrue(any("prior graph disabled" in row["reason"] for row in timed_out.frontier))
 
     def test_dense_timeout_fallback_reserves_deadline_and_origin_omission_summary(self):
         changed_paths = tuple(f"changed/{index:04d}.py" for index in range(4096))
@@ -1298,7 +1361,7 @@ class DeltaScanTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "delta_max_seconds"):
                     self.context(configured_max_seconds=invalid)
 
-    def test_whole_call_worker_bounds_slow_lookup_hash_provider_persist_and_render(self):
+    def test_whole_call_worker_bounds_slow_preflight_and_post_fallback_stages(self):
         request = CONTROLLER.ScanRequest(
             self.root,
             "Change OriginSignal negotiation",
@@ -1308,32 +1371,41 @@ class DeltaScanTest(unittest.TestCase):
             2,
             ("a.py",),
         )
-        fallback = DELTA.delta_timeout_fallback(self.chain_context(), 0)
-        for scenario in ("lookup", "hash", "provider", "persist", "render"):
+        for scenario in (
+            "settings",
+            "lookup",
+            "artifact",
+            "hash",
+            "provider",
+            "persist",
+            "render",
+        ):
             with self.subTest(scenario=scenario):
                 started = time.monotonic()
-                with mock.patch.object(
-                    CONTROLLER,
-                    "_prepare_delta_fallback_in_process",
-                    return_value=fallback,
-                ):
-                    result = CONTROLLER._execute_delta_worker(
-                        request,
-                        0.25,
-                        started,
-                        worker_path=SLOW_WORKER,
-                        worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
-                    )
+                result = CONTROLLER._execute_delta_worker(
+                    request,
+                    0.25,
+                    started,
+                    worker_path=SLOW_WORKER,
+                    worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
+                )
                 actual_ms = round((time.monotonic() - started) * 1000)
                 self.assertLessEqual(actual_ms, 350)
                 self.assertGreaterEqual(result.elapsed_ms, 150)
                 self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 100)
                 self.assertEqual(result.status, "partial")
                 self.assertFalse(result.can_promote)
-                self.assertEqual(result.previous_report_id, "RPT-001")
+                if scenario in {"settings", "lookup", "artifact"}:
+                    self.assertIsNone(result.previous_report_id)
+                    self.assertEqual(result.changed_paths, ())
+                    self.assertEqual(result.paths, ())
+                    self.assertIn("preflight", result.display_text)
+                else:
+                    self.assertEqual(result.previous_report_id, "RPT-001")
+                    self.assertEqual(result.changed_paths, ("a.py",))
                 self.assertFalse(list((self.root / ".requirements-impact-refiner").rglob("*.tmp")))
 
-    def test_trusted_parent_fallback_handles_partial_overflow_garbage_and_extra_frames(self):
+    def test_complete_trusted_frame_handles_partial_overflow_garbage_and_extra_frames(self):
         request = CONTROLLER.ScanRequest(
             self.root,
             "Change OriginSignal negotiation",
@@ -1343,22 +1415,16 @@ class DeltaScanTest(unittest.TestCase):
             2,
             ("a.py",),
         )
-        fallback = DELTA.delta_timeout_fallback(self.chain_context(), 0)
         for scenario in ("partial-frame", "overflow", "garbage", "extra-frame"):
             with self.subTest(scenario=scenario):
                 started = time.monotonic()
-                with mock.patch.object(
-                    CONTROLLER,
-                    "_prepare_delta_fallback_in_process",
-                    return_value=fallback,
-                ):
-                    result = CONTROLLER._execute_delta_worker(
-                        request,
-                        0.35,
-                        started,
-                        worker_path=SLOW_WORKER,
-                        worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
-                    )
+                result = CONTROLLER._execute_delta_worker(
+                    request,
+                    0.35,
+                    started,
+                    worker_path=SLOW_WORKER,
+                    worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
+                )
                 actual_ms = round((time.monotonic() - started) * 1000)
                 self.assertLessEqual(actual_ms, 450)
                 self.assertEqual(result.status, "partial")
@@ -1366,6 +1432,54 @@ class DeltaScanTest(unittest.TestCase):
                 self.assertEqual(result.previous_report_id, "RPT-001")
                 self.assertEqual(result.previous_revision, 2)
                 self.assertEqual(result.changed_paths, ("a.py",))
+
+    def test_complete_authenticated_fallback_and_result_frames_return_result(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+
+        result = CONTROLLER._execute_delta_worker(
+            request,
+            1,
+            time.monotonic(),
+            worker_path=SLOW_WORKER,
+            worker_environment={"RIR_DELTA_TEST_SCENARIO": "success"},
+        )
+
+        self.assertEqual(result.status, "complete")
+        self.assertTrue(result.can_promote)
+        self.assertEqual(result.previous_report_id, "RPT-001")
+        self.assertEqual(result.changed_paths, ("a.py",))
+
+    def test_forged_fallback_frame_is_not_retained_as_trusted(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+
+        result = CONTROLLER._execute_delta_worker(
+            request,
+            0.25,
+            time.monotonic(),
+            worker_path=SLOW_WORKER,
+            worker_environment={"RIR_DELTA_TEST_SCENARIO": "forged-frame"},
+        )
+
+        self.assertIsNone(result.previous_report_id)
+        self.assertEqual(result.changed_paths, ())
+        self.assertIn("preflight", result.display_text)
+        self.assertFalse(result.can_promote)
 
     def test_whole_call_timeout_kills_descendants_and_leaves_no_zombie(self):
         marker = Path(self.temporary.name) / "descendant-marker"
@@ -1380,23 +1494,17 @@ class DeltaScanTest(unittest.TestCase):
             ("a.py",),
         )
         started = time.monotonic()
-        fallback = DELTA.delta_timeout_fallback(self.chain_context(), 0)
-        with mock.patch.object(
-            CONTROLLER,
-            "_prepare_delta_fallback_in_process",
-            return_value=fallback,
-        ):
-            result = CONTROLLER._execute_delta_worker(
-                request,
-                0.35,
-                started,
-                worker_path=SLOW_WORKER,
-                worker_environment={
-                    "RIR_DELTA_TEST_SCENARIO": "descendant",
-                    "RIR_DELTA_TEST_MARKER": str(marker),
-                    "RIR_DELTA_TEST_CHILD_PID": str(child_pid_path),
-                },
-            )
+        result = CONTROLLER._execute_delta_worker(
+            request,
+            0.35,
+            started,
+            worker_path=SLOW_WORKER,
+            worker_environment={
+                "RIR_DELTA_TEST_SCENARIO": "descendant",
+                "RIR_DELTA_TEST_MARKER": str(marker),
+                "RIR_DELTA_TEST_CHILD_PID": str(child_pid_path),
+            },
+        )
         actual_ms = round((time.monotonic() - started) * 1000)
 
         self.assertEqual(result.status, "partial")
@@ -1409,7 +1517,35 @@ class DeltaScanTest(unittest.TestCase):
         self.assertFalse(process_exists(child_pid), "delta worker descendant survived cleanup")
         self.assertFalse(marker.exists(), "delta worker descendant executed after timeout")
 
-    def test_worker_validates_private_input_and_emits_one_canonical_result_frame(self):
+    def test_authenticated_control_frame_tightens_configured_deadline_to_one_second(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        started = time.monotonic()
+
+        result = CONTROLLER._execute_delta_worker(
+            request,
+            3,
+            started,
+            worker_path=SLOW_WORKER,
+            worker_environment={"RIR_DELTA_TEST_SCENARIO": "configured-one"},
+        )
+
+        actual_ms = round((time.monotonic() - started) * 1000)
+        self.assertGreaterEqual(actual_ms, 850)
+        self.assertLessEqual(actual_ms, 1_100)
+        self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 100)
+        self.assertEqual(result.previous_report_id, "RPT-001")
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
+
+    def test_worker_emits_authenticated_control_fallback_then_result_frames(self):
         input_path = Path(self.temporary.name) / "worker-input.json"
         token = "a" * 32
         parent_pid = os.getppid()
@@ -1453,9 +1589,17 @@ class DeltaScanTest(unittest.TestCase):
             previous_display_text="trusted previous",
         )
 
-        def execute(request, *, operation_started):
+        def execute(
+            request,
+            *,
+            operation_started,
+            _worker_control_callback,
+            _worker_fallback_callback,
+        ):
             self.assertEqual(request.previous_report_id, "RPT-001")
             self.assertIsInstance(operation_started, float)
+            _worker_control_callback(2)
+            _worker_fallback_callback(fallback)
             return final
 
         with (
@@ -1483,13 +1627,23 @@ class DeltaScanTest(unittest.TestCase):
 
         self.assertEqual(scan_exit, 0)
         configure.assert_called_once_with(token)
-        emit.assert_called_once_with(CONTROLLER._scan_result_mapping(final))
+        self.assertEqual(
+            emit.call_args_list,
+            [
+                mock.call("control", {"effective_max_seconds": 2}, token),
+                mock.call("trusted_fallback", fallback, token),
+                mock.call("result", CONTROLLER._scan_result_mapping(final), token),
+            ],
+        )
 
         with tempfile.TemporaryFile(mode="w+b") as output:
             with mock.patch.object(WORKER.sys, "stdout", output):
-                WORKER._emit(fallback)
+                WORKER._emit("trusted_fallback", fallback, token)
             output.seek(0)
-            self.assertEqual(CONTROLLER._delta_worker_frame(output.read()), fallback)
+            self.assertEqual(
+                CONTROLLER._delta_worker_frame(output.read(), token),
+                ("trusted_fallback", fallback),
+            )
 
         with self.assertRaisesRegex(ValueError, "digest"):
             WORKER._read_input(input_path, "0" * 64)
