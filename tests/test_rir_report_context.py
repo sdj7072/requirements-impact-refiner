@@ -6,11 +6,13 @@ import importlib.util
 import inspect
 import json
 import os
+import signal
 import socket
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 import unittest
 from dataclasses import replace
@@ -346,16 +348,33 @@ class RirReportContextTest(unittest.TestCase):
         self.assertTrue(foreign_alias.exists())
         self.assertEqual(path.stat().st_nlink, 1)
 
-    def test_context_crash_recovery_scan_is_bounded_without_unlinking_alias(self):
+    def test_context_crash_recovery_ignores_long_lineage_entries(self):
         published = self.publish_report()
         context = self.sample_context(markdown_sha256=published.markdown_sha256)
         path = CONTEXT.publish_report_context(self.root, context)
         verified_alias = path.parent / f".{path.name}.{'a' * 16}.tmp"
         os.link(path, verified_alias)
-        for index in range(CONTEXT.MAX_RECOVERY_ENTRIES + 1):
-            (path.parent / f"filler-{index:04d}").write_bytes(b"x")
+        for revision in range(2, 132):
+            for suffix in ("json", "md", "controller.json", "context.json"):
+                (path.parent / f"revision-{revision:04d}.{suffix}").write_bytes(b"x")
 
-        with self.assertRaisesRegex(ValueError, "entry limit"):
+        self.assertGreater(len(tuple(path.parent.iterdir())), 500)
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+        self.assertFalse(verified_alias.exists())
+        self.assertEqual(path.stat().st_nlink, 1)
+
+    def test_context_crash_recovery_bounds_only_exact_temp_candidates(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = CONTEXT.publish_report_context(self.root, context)
+        verified_alias = path.parent / f".{path.name}.{'f' * 16}.tmp"
+        os.link(path, verified_alias)
+        for index in range(CONTEXT.MAX_RECOVERY_CANDIDATES + 1):
+            candidate = path.parent / f".{path.name}.{index:016x}.tmp"
+            candidate.write_bytes(path.read_bytes())
+            candidate.chmod(0o600)
+
+        with self.assertRaisesRegex(ValueError, "candidate limit"):
             CONTEXT.load_report_context(self.root, "RPT-001", 1)
 
         self.assertTrue(verified_alias.exists())
@@ -733,6 +752,68 @@ class RirReportContextTest(unittest.TestCase):
         self.assertEqual(CONTEXT.probe_git_baseline(self.root), (None, False))
         with mock.patch.object(CONTEXT, "_run_git", return_value=None):
             self.assertEqual(CONTEXT.probe_git_baseline(self.root), (None, False))
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
+    def test_git_timeout_kills_the_entire_descendant_process_group(self):
+        fake_bin = self.root / "fake-bin"
+        fake_bin.mkdir()
+        marker = self.root / "descendant-survived"
+        child_pid_path = self.root / "child.pid"
+        child_code = (
+            "import pathlib,sys,time\n"
+            "time.sleep(1.5)\n"
+            "pathlib.Path(sys.argv[1]).write_text('survived', encoding='utf-8')\n"
+        )
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            f"#!{sys.executable}\n"
+            "import pathlib,subprocess,time\n"
+            f"child = subprocess.Popen([{sys.executable!r}, '-c', {child_code!r}, "
+            f"{str(marker)!r}])\n"
+            f"pathlib.Path({str(child_pid_path)!r}).write_text(str(child.pid), encoding='utf-8')\n"
+            "time.sleep(10.0)\n",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o700)
+        child_pid: int | None = None
+        real_popen = subprocess.Popen
+
+        def launch_fake_git(_command, **kwargs):
+            return real_popen([sys.executable, str(fake_git)], **kwargs)
+
+        def process_exists(process_id: int) -> bool:
+            try:
+                os.kill(process_id, 0)
+            except ProcessLookupError:
+                return False
+            except PermissionError:
+                return True
+            return True
+
+        try:
+            with (
+                mock.patch.object(
+                    CONTEXT.subprocess,
+                    "Popen",
+                    side_effect=launch_fake_git,
+                ),
+                mock.patch.object(CONTEXT, "GIT_TIMEOUT_SECONDS", 0.3),
+            ):
+                self.assertIsNone(CONTEXT._run_git(self.root, ("rev-parse", "HEAD")))
+            self.assertTrue(child_pid_path.is_file())
+            child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 0.5
+            while process_exists(child_pid) and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(process_exists(child_pid), "Git descendant survived timeout cleanup")
+            time.sleep(1.0)
+            self.assertFalse(marker.exists(), "Git descendant executed after timeout")
+        finally:
+            if child_pid is not None and process_exists(child_pid):
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
         with mock.patch.object(CONTEXT.subprocess, "Popen", side_effect=OSError("blocked")):
             self.assertEqual(CONTEXT.probe_git_baseline(self.root), (None, False))
         with mock.patch.object(
@@ -914,7 +995,7 @@ class RirReportContextTest(unittest.TestCase):
         real_unlink = FINALIZE.REPORT_CONTEXT.os.unlink
 
         def failing_context_unlink(name, *args, **kwargs):
-            if str(name).endswith(".context.json") is False and str(name).endswith(".tmp"):
+            if ".context.json." in str(name) and str(name).endswith(".tmp"):
                 raise OSError("injected context cleanup failure")
             return real_unlink(name, *args, **kwargs)
 
@@ -935,6 +1016,78 @@ class RirReportContextTest(unittest.TestCase):
         self.assertEqual(result.revision, 1)
         self.assertEqual(path.stat().st_nlink, 1)
         self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_oversized_completion_metadata_fails_before_report_or_consumption(self):
+        self.configure_graph(False)
+        draft = self.begin("Oversized completion metadata cannot publish.")
+        request = self.finalize_request(draft)
+        runtime = dict(FINALIZE.default_runtime())
+        real_build_state = runtime["build_state"]
+
+        def oversized_key_map(selected_draft, analysis, graph_context):
+            state, _key_map = real_build_state(selected_draft, analysis, graph_context)
+            return state, {"padding": "x" * FINALIZE.STORAGE.MAX_CONTROLLER_METADATA_BYTES}
+
+        runtime["build_state"] = oversized_key_map
+        with self.assertRaisesRegex(ValueError, "256 KiB"):
+            FINALIZE.finalize_refinement(request, _runtime=runtime)
+
+        self.assertIsNone(FINALIZE.REPORT_STORE.load_current(self.root, "RPT-001"))
+        self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_finalize_retries_metadata_cleanup_failure_before_consumption(self):
+        self.configure_graph(False)
+        draft = self.begin("Metadata cleanup failure remains retryable.")
+        request = self.finalize_request(draft)
+        real_unlink = FINALIZE.STORAGE.os.unlink
+
+        def failing_metadata_unlink(name, *args, **kwargs):
+            if "revision-0001.controller.json" in str(name):
+                raise OSError("injected metadata cleanup failure")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(
+            FINALIZE.STORAGE.os,
+            "unlink",
+            side_effect=failing_metadata_unlink,
+        ):
+            with self.assertRaisesRegex(ValueError, "cleanup"):
+                FINALIZE.finalize_refinement(request)
+
+        self.assertIsNone(FINALIZE.REPORT_STORE.load_current(self.root, "RPT-001"))
+        self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+        result = FINALIZE.finalize_refinement(request)
+
+        self.assertEqual(result.revision, 1)
+        self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_finalize_cannot_resume_with_arbitrarily_linked_metadata(self):
+        self.configure_graph(False)
+        draft = self.begin("Unreadable metadata cannot consume the draft.")
+        request = self.finalize_request(draft)
+        runtime = dict(FINALIZE.default_runtime())
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        runtime["consume_draft"] = mock.Mock(side_effect=SimulatedCrash("before consumption"))
+        with self.assertRaises(SimulatedCrash):
+            FINALIZE.finalize_refinement(request, _runtime=runtime)
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        arbitrary = metadata_path.with_name("arbitrary-metadata-hardlink")
+        os.link(metadata_path, arbitrary)
+
+        with self.assertRaisesRegex(ValueError, "recovery alias"):
+            FINALIZE.finalize_refinement(request)
+
+        self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
     def test_retry_reuses_an_exact_context_written_before_process_interruption(self):
         self.configure_graph(False)

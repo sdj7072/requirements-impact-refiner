@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import selectors
+import signal
 import stat
 import subprocess
 import time
@@ -28,7 +29,7 @@ MAX_CONTEXT_BYTES = 8 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
 GIT_TIMEOUT_SECONDS = 0.25
-MAX_RECOVERY_ENTRIES = 256
+MAX_RECOVERY_CANDIDATES = 256
 _CONTEXT_FIELDS = frozenset(
     {
         "schema_version",
@@ -386,13 +387,15 @@ def _load_or_recover_context(
     expected_owner = os.fstat(directory_fd).st_uid
     pattern = _context_temporary_pattern(name)
     verified_aliases: list[str] = []
+    candidate_count = 0
     try:
         with os.scandir(directory_fd) as entries:
-            for count, entry in enumerate(entries, start=1):
-                if count > MAX_RECOVERY_ENTRIES:
-                    raise ValueError("report context recovery exceeds its entry limit")
+            for entry in entries:
                 if pattern.fullmatch(entry.name) is None:
                     continue
+                candidate_count += 1
+                if candidate_count > MAX_RECOVERY_CANDIDATES:
+                    raise ValueError("report context recovery exceeds its candidate limit")
                 try:
                     alias_payload, alias = _read_bounded_artifact(
                         directory_fd,
@@ -550,7 +553,28 @@ def _git_environment() -> dict[str, str]:
 
 
 def _stop_process(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is None:
+    group_signaled = False
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            group_signaled = True
+        except OSError:
+            pass
+    if not group_signaled and process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=0.05)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    elif process.poll() is None:
         try:
             process.kill()
         except OSError:
@@ -585,6 +609,7 @@ def _run_git(root: Path, arguments: Sequence[str]) -> tuple[int, bytes] | None:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
     except OSError:
         return None
@@ -637,6 +662,8 @@ def _run_git(root: Path, arguments: Sequence[str]) -> tuple[int, bytes] | None:
         except subprocess.TimeoutExpired:
             _stop_process(process)
             return None
+        if returncode != 0:
+            _stop_process(process)
         return returncode, bytes(payload)
     except OSError:
         _stop_process(process)

@@ -380,6 +380,338 @@ class RirStorageTest(unittest.TestCase):
         self.assertEqual(metadata["key_map"], key_map)
         self.assertEqual(STORAGE.load_controller_metadata(current), key_map)
 
+    def test_completion_metadata_size_contract_is_symmetric_at_the_boundary(self):
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        state_bytes = b'{"schema_version":1}\n'
+        for delta in (-1, 0, 1):
+            with self.subTest(delta=delta), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                draft = {
+                    "consumed": False,
+                    "draft_id": DRAFT_ID,
+                    "repo_root": str(root),
+                    "report_id": "RPT-001",
+                    "revision": 1,
+                }
+                metadata = {
+                    "analysis_sha256": "9" * 64,
+                    "context_identity": context_identity,
+                    "draft_id": DRAFT_ID,
+                    "key_map": {"padding": ""},
+                    "report_id": "RPT-001",
+                    "revision": 1,
+                    "schema_version": 1,
+                    "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
+                }
+                base_size = len(canonical_bytes(metadata))
+                padding = STORAGE.MAX_CONTROLLER_METADATA_BYTES - base_size + delta
+                self.assertGreater(padding, 0)
+                key_map = {"padding": "x" * padding}
+                metadata["key_map"] = key_map
+                self.assertEqual(
+                    len(canonical_bytes(metadata)),
+                    STORAGE.MAX_CONTROLLER_METADATA_BYTES + delta,
+                )
+                metadata_path = (
+                    root
+                    / ".requirements-impact-refiner"
+                    / "reports"
+                    / "RPT-001"
+                    / "revision-0001.controller.json"
+                )
+                if delta > 0:
+                    with self.assertRaisesRegex(ValueError, "256 KiB"):
+                        STORAGE.write_controller_metadata(
+                            root,
+                            draft,
+                            state_bytes,
+                            key_map,
+                            None,
+                            "9" * 64,
+                            context_identity,
+                        )
+                    self.assertFalse(metadata_path.exists())
+                    continue
+                STORAGE.write_controller_metadata(
+                    root,
+                    draft,
+                    state_bytes,
+                    key_map,
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+                state_path = metadata_path.with_name("revision-0001.json")
+                state_path.write_bytes(state_bytes)
+                current = SimpleNamespace(
+                    report_id="RPT-001",
+                    revision=1,
+                    state_path=state_path,
+                )
+                loaded = STORAGE.load_controller_completion_metadata(current)
+                self.assertEqual(loaded["key_map"], key_map)
+
+    def test_completion_metadata_depth_is_rejected_before_publication(self):
+        nested = {}
+        for _index in range(STORAGE.MAX_CONTROLLER_METADATA_DEPTH + 1):
+            nested = {"nested": nested}
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+
+        with self.assertRaisesRegex(ValueError, "depth"):
+            STORAGE.write_controller_metadata(
+                self.root,
+                draft,
+                b'{"schema_version":1}\n',
+                nested,
+                None,
+                "9" * 64,
+                context_identity,
+            )
+
+        self.assertFalse(
+            (
+                self.root
+                / ".requirements-impact-refiner"
+                / "reports"
+                / "RPT-001"
+                / "revision-0001.controller.json"
+            ).exists()
+        )
+
+    def test_completion_metadata_cleanup_failure_is_mandatory_and_retryable(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        key_map = {"impacts": {"member-edit": "IMP-001"}}
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        real_unlink = STORAGE.os.unlink
+
+        def failing_metadata_unlink(name, *args, **kwargs):
+            if "revision-0001.controller.json" in str(name):
+                raise OSError("injected metadata cleanup failure")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(STORAGE.os, "unlink", side_effect=failing_metadata_unlink):
+            with self.assertRaisesRegex(ValueError, "cleanup"):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    key_map,
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        self.assertEqual(metadata_path.stat().st_nlink, 2)
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            key_map,
+            None,
+            "9" * 64,
+            context_identity,
+        )
+        self.assertEqual(metadata_path.stat().st_nlink, 1)
+        self.assertEqual(tuple(metadata_path.parent.glob(f".{metadata_path.name}.*.tmp")), ())
+
+    def test_completion_metadata_crash_recovers_across_long_lineage(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        key_map = {"impacts": {"member-edit": "IMP-001"}}
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        real_unlink = STORAGE.os.unlink
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crashing_metadata_unlink(name, *args, **kwargs):
+            if "revision-0001.controller.json" in str(name):
+                raise SimulatedCrash("metadata linked before cleanup")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(STORAGE.os, "unlink", side_effect=crashing_metadata_unlink):
+            with self.assertRaises(SimulatedCrash):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    key_map,
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        for revision in range(2, 132):
+            for suffix in ("json", "md", "controller.json", "context.json"):
+                (metadata_path.parent / f"revision-{revision:04d}.{suffix}").write_bytes(b"x")
+        self.assertGreater(len(tuple(metadata_path.parent.iterdir())), 500)
+
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            key_map,
+            None,
+            "9" * 64,
+            context_identity,
+        )
+
+        self.assertEqual(metadata_path.stat().st_nlink, 1)
+
+    def test_completion_metadata_fsync_failure_retries_single_link(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        real_unlink = STORAGE.os.unlink
+        real_fsync = STORAGE.os.fsync
+        cleaned = False
+        failed = False
+
+        def recording_unlink(*args, **kwargs):
+            nonlocal cleaned
+            result = real_unlink(*args, **kwargs)
+            if "revision-0001.controller.json" in str(args[0]):
+                cleaned = True
+            return result
+
+        def failing_directory_fsync(descriptor):
+            nonlocal failed
+            if cleaned and not failed:
+                failed = True
+                raise OSError("injected metadata directory fsync failure")
+            return real_fsync(descriptor)
+
+        with (
+            mock.patch.object(STORAGE.os, "unlink", side_effect=recording_unlink),
+            mock.patch.object(STORAGE.os, "fsync", side_effect=failing_directory_fsync),
+        ):
+            with self.assertRaisesRegex(ValueError, "fsync"):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    {},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        self.assertEqual(metadata_path.stat().st_nlink, 1)
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            {},
+            None,
+            "9" * 64,
+            context_identity,
+        )
+
+    def test_completion_metadata_arbitrary_hardlink_is_not_recovered(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            {},
+            None,
+            "9" * 64,
+            context_identity,
+        )
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        state_path = metadata_path.with_name("revision-0001.json")
+        state_path.write_bytes(state_bytes)
+        arbitrary = metadata_path.with_name("arbitrary-metadata-hardlink")
+        os.link(metadata_path, arbitrary)
+        current = SimpleNamespace(
+            report_id="RPT-001",
+            revision=1,
+            state_path=state_path,
+        )
+
+        with self.assertRaisesRegex(ValueError, "recovery alias"):
+            STORAGE.load_controller_completion_metadata(current)
+
+        self.assertTrue(arbitrary.exists())
+        self.assertEqual(metadata_path.stat().st_nlink, 2)
+
     def test_controller_clean_path_reuses_the_canonical_storage_module(self):
         self.assertIs(CONTROLLER.STORAGE, STORAGE)
         self.assertIs(CONTROLLER.fcntl, STORAGE.fcntl)
