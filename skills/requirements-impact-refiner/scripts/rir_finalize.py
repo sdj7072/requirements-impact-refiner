@@ -151,6 +151,8 @@ class _ReportContextContract(Protocol):
 
     def probe_source_inventory_git(self, root: Path, source_digests: Mapping[str, str]): ...
 
+    def prepare_required_source_recheck(self, root: Path, source_digests: Mapping[str, str]): ...
+
     def publish_report_context(self, root: Path, context): ...
 
     def load_report_context(self, root: Path, report_id: str, revision: int): ...
@@ -523,6 +525,7 @@ def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContra
                 "created_at_utc",
                 "probe_git_baseline",
                 "probe_source_inventory_git",
+                "prepare_required_source_recheck",
                 "publish_report_context",
                 "load_report_context",
             ),
@@ -1078,6 +1081,7 @@ _RUNTIME_CALLABLES = (
     "created_at_utc",
     "probe_git_baseline",
     "probe_source_inventory_git",
+    "prepare_required_source_recheck",
     "payload_sha256",
     "load_report_context",
     "publish_report_context",
@@ -1127,6 +1131,7 @@ def default_runtime() -> Mapping[str, object]:
         "created_at_utc": REPORT_CONTEXT.created_at_utc,
         "probe_git_baseline": REPORT_CONTEXT.probe_git_baseline,
         "probe_source_inventory_git": REPORT_CONTEXT.probe_source_inventory_git,
+        "prepare_required_source_recheck": REPORT_CONTEXT.prepare_required_source_recheck,
         "payload_sha256": _payload_sha256,
         "load_report_context": REPORT_CONTEXT.load_report_context,
         "publish_report_context": REPORT_CONTEXT.publish_report_context,
@@ -1210,8 +1215,15 @@ def _existing_context_matches(
     source_inventory_available: bool,
     source_inventory_complete: bool,
     source_inventory_git_tracked_only: bool,
+    required_source_digests: Mapping[str, str] | None,
+    source_recheck_complete: bool,
     payload_sha256: str,
 ) -> bool:
+    context_required_source_digests = getattr(context, "required_source_digests", None)
+    if context_required_source_digests is not None and not isinstance(
+        context_required_source_digests, Mapping
+    ):
+        return False
     return (
         isinstance(context, context_type)
         and getattr(context, "schema_version", None) == 2
@@ -1227,6 +1239,13 @@ def _existing_context_matches(
         and getattr(context, "source_inventory_complete", None) is source_inventory_complete
         and getattr(context, "source_inventory_git_tracked_only", None)
         is source_inventory_git_tracked_only
+        and (
+            None
+            if context_required_source_digests is None
+            else dict(context_required_source_digests)
+        )
+        == (None if required_source_digests is None else dict(required_source_digests))
+        and getattr(context, "source_recheck_complete", None) is source_recheck_complete
         and getattr(context, "payload_sha256", None) == payload_sha256
     )
 
@@ -1429,6 +1448,8 @@ def _resume_completed_publication(
             source_inventory_available=source_available,
             source_inventory_complete=source_complete,
             source_inventory_git_tracked_only=source_tracked_only,
+            required_source_digests=getattr(context, "required_source_digests", None),
+            source_recheck_complete=getattr(context, "source_recheck_complete", False),
             payload_sha256=payload_sha256,
         )
     ):
@@ -1526,10 +1547,22 @@ def _finalize(request, runtime: Mapping[str, object]):
             )
         if not explicit_paths_complete:
             source_digests = None
+        required_source_digests: dict[str, str] | None = None
+        source_recheck_complete = False
+        if source_available and source_complete and source_digests is not None:
+            prepared = _operation(runtime, "prepare_required_source_recheck")(root, source_digests)
+            if (
+                not isinstance(prepared, tuple)
+                or len(prepared) != 2
+                or (prepared[0] is not None and not isinstance(prepared[0], dict))
+                or not isinstance(prepared[1], bool)
+            ):
+                raise TypeError("finalize required source recheck result is invalid")
+            required_source_digests, source_recheck_complete = prepared
         state_sha256 = hashlib.sha256(state_bytes).hexdigest()
         baseline = (
-            _operation(runtime, "probe_source_inventory_git")(root, source_digests)
-            if source_available and source_complete and source_digests is not None
+            _operation(runtime, "probe_source_inventory_git")(root, required_source_digests)
+            if source_recheck_complete and required_source_digests is not None
             else (*_operation(runtime, "probe_git_baseline")(root), False)
         )
         if (
@@ -1607,6 +1640,8 @@ def _finalize(request, runtime: Mapping[str, object]):
                 source_inventory_available=source_available,
                 source_inventory_complete=source_complete,
                 source_inventory_git_tracked_only=source_inventory_git_tracked_only,
+                required_source_digests=required_source_digests,
+                source_recheck_complete=source_recheck_complete,
             )
         else:
             if not _existing_context_matches(
@@ -1623,6 +1658,8 @@ def _finalize(request, runtime: Mapping[str, object]):
                 source_inventory_available=source_available,
                 source_inventory_complete=source_complete,
                 source_inventory_git_tracked_only=source_inventory_git_tracked_only,
+                required_source_digests=required_source_digests,
+                source_recheck_complete=source_recheck_complete,
                 payload_sha256=payload_sha256,
             ):
                 raise ValueError("published report context does not match finalization identity")

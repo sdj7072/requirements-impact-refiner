@@ -76,6 +76,8 @@ class RirReportContextTest(unittest.TestCase):
         source_inventory_available: bool = True,
         source_inventory_complete: bool = True,
         source_inventory_git_tracked_only: bool = False,
+        required_source_digests: dict[str, str] | None = None,
+        source_recheck_complete: bool = False,
         baseline_commit: str | None = None,
         baseline_clean: bool = False,
         state_sha256: str | None = None,
@@ -111,6 +113,8 @@ class RirReportContextTest(unittest.TestCase):
             source_inventory_available=source_inventory_available,
             source_inventory_complete=source_inventory_complete,
             source_inventory_git_tracked_only=source_inventory_git_tracked_only,
+            required_source_digests=required_source_digests,
+            source_recheck_complete=source_recheck_complete,
         )
 
     def context_path(self, revision: int = 1) -> Path:
@@ -160,12 +164,60 @@ class RirReportContextTest(unittest.TestCase):
             source_inventory_available=True,
             source_inventory_complete=True,
             source_inventory_git_tracked_only=False,
+            required_source_digests={"z.py": "7" * 64, "a.py": "6" * 64},
+            source_recheck_complete=True,
         )
 
         path = CONTEXT.publish_report_context(self.root, context)
 
         self.assertEqual(path.name, "revision-0001.context-v2.json")
         self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+        self.assertEqual(list(context.required_source_digests), ["a.py", "z.py"])
+
+    def test_pre_recheck_v2_context_migrates_to_incomplete_source_recheck(self):
+        published = self.publish_report()
+        context = self.sample_context(
+            markdown_sha256=published.markdown_sha256,
+            required_source_digests={"app.py": "6" * 64},
+            source_recheck_complete=True,
+        )
+        path = CONTEXT.publish_report_context(self.root, context)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        del payload["required_source_digests"]
+        del payload["source_recheck_complete"]
+        path.write_bytes(canonical_bytes(payload))
+
+        migrated = CONTEXT.load_report_context(self.root, "RPT-001", 1)
+
+        self.assertIsNotNone(migrated)
+        self.assertIsNone(migrated.required_source_digests)
+        self.assertFalse(migrated.source_recheck_complete)
+
+    def test_required_source_digest_map_is_canonical_and_bounded(self):
+        published = self.publish_report()
+        context = self.sample_context(
+            markdown_sha256=published.markdown_sha256,
+            required_source_digests={"z.py": "7" * 64, "a.py": "6" * 64},
+            source_recheck_complete=True,
+        )
+
+        self.assertEqual(list(context.required_source_digests), ["a.py", "z.py"])
+        with self.assertRaisesRegex(ValueError, "required source digest map"):
+            replace(context, required_source_digests=None, source_recheck_complete=True)
+        with mock.patch.object(CONTEXT, "MAX_REQUIRED_SOURCE_DIGESTS", 1):
+            with self.assertRaisesRegex(ValueError, "count limit"):
+                replace(
+                    context,
+                    required_source_digests={"a.py": "6" * 64, "z.py": "7" * 64},
+                )
+        with mock.patch.object(CONTEXT, "MAX_REQUIRED_SOURCE_PATH_BYTES", 4):
+            with self.assertRaisesRegex(ValueError, "path byte limit"):
+                replace(context, required_source_digests={"long.py": "6" * 64})
+        with mock.patch.object(CONTEXT, "MAX_REQUIRED_SOURCE_MAP_BYTES", 2):
+            with self.assertRaisesRegex(ValueError, "serialized byte limit"):
+                replace(context, required_source_digests={"a.py": "6" * 64})
+        with self.assertRaisesRegex(ValueError, "UTF-8"):
+            replace(context, required_source_digests={"bad\ud800.py": "6" * 64})
 
     def test_repository_evidence_digest_preserves_order_and_duplicates(self):
         first = CONTEXT.canonical_repository_evidence_sha256(("alpha", "alpha", "beta"))
@@ -351,6 +403,7 @@ class RirReportContextTest(unittest.TestCase):
                     "payload_sha256": "5" * 64,
                     "repo_root_sha256": hashlib.sha256(str(self.root).encode("utf-8")).hexdigest(),
                     "report_id": "RPT-001",
+                    "required_source_digests": None,
                     "requirement_sha256": CONTEXT.canonical_requirement_sha256("프로필 변경"),
                     "repository_evidence_sha256": CONTEXT.canonical_repository_evidence_sha256(()),
                     "revision": 2,
@@ -359,6 +412,7 @@ class RirReportContextTest(unittest.TestCase):
                     "source_inventory_complete": True,
                     "source_inventory_git_tracked_only": False,
                     "source_inventory_sha256": "4" * 64,
+                    "source_recheck_complete": False,
                 }
             ),
         )
@@ -1628,6 +1682,8 @@ class RirReportContextTest(unittest.TestCase):
         self.assertFalse(context.source_inventory_complete)
         self.assertFalse(context.source_inventory_git_tracked_only)
         self.assertIsNone(context.source_inventory_sha256)
+        self.assertIsNone(context.required_source_digests)
+        self.assertFalse(context.source_recheck_complete)
         self.assertIsNone(context.baseline_commit)
         self.assertFalse(context.baseline_clean)
         self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
@@ -1715,6 +1771,8 @@ class RirReportContextTest(unittest.TestCase):
         self.assertTrue(context.source_inventory_available)
         self.assertIs(context.source_inventory_complete, inventory["complete"])
         self.assertTrue(context.source_inventory_git_tracked_only)
+        self.assertEqual(dict(context.required_source_digests), inventory["digests"])
+        self.assertTrue(context.source_recheck_complete)
         self.assertEqual(
             context.state_sha256,
             hashlib.sha256(result.state_path.read_bytes()).hexdigest(),
@@ -1775,12 +1833,99 @@ class RirReportContextTest(unittest.TestCase):
         required_digests = graph_context["source_inventory"]["required_digests"]
         self.assertEqual(required_digests["generated/api.py"], generated_seed["source_sha256"])
         self.assertNotIn("generated/later.py", required_digests)
+        self.assertIsNone(context.required_source_digests)
+        self.assertFalse(context.source_recheck_complete)
         self.assertTrue(context.source_inventory_complete)
         self.assertFalse(context.source_inventory_git_tracked_only)
         (generated / "later.py").write_text("appeared = True\n", encoding="utf-8")
         previous = CONTROLLER.lookup_previous(
             CONTROLLER.PreviousLookupRequest(self.root, change, ())
         )
+        self.assertEqual(previous.status, "stale")
+
+    def test_complete_recheck_map_unions_inventory_with_readable_explicit_seed(self):
+        self.configure_graph(True)
+        tracked = self.root / "tracked.py"
+        tracked.write_text("stable = True\n", encoding="utf-8")
+        generated = self.root / "generated"
+        generated.mkdir()
+        explicit = generated / "api.py"
+        explicit.write_text("generated = True\n", encoding="utf-8")
+        tracked_digest = hashlib.sha256(tracked.read_bytes()).hexdigest()
+        explicit_digest = hashlib.sha256(explicit.read_bytes()).hexdigest()
+        required = {"tracked.py": tracked_digest, "generated/api.py": explicit_digest}
+        draft = self.begin("Change generated/api.py")
+        request = self.finalize_request(draft, "9" * 32)
+        runtime = dict(FINALIZE.default_runtime())
+        runtime["load_graph_context"] = lambda *args: {
+            "receipt": {"receipt_id": "9" * 32},
+            "sha256": "8" * 64,
+            "source_inventory": {
+                "sha256": "7" * 64,
+                "complete": True,
+                "digests": {"tracked.py": tracked_digest},
+                "required_digests": required,
+                "required_complete": True,
+            },
+        }
+        runtime["validate_analysis"] = lambda *args: None
+        runtime["validate_graph_coverage"] = lambda *args: None
+        runtime["build_state"] = lambda selected_draft, analysis, graph: (
+            FINALIZE.LINEAGE.build_state(selected_draft, analysis, None)
+        )
+
+        result = FINALIZE.finalize_refinement(request, _runtime=runtime)
+
+        context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
+        self.assertEqual(dict(context.required_source_digests), required)
+        self.assertTrue(context.source_recheck_complete)
+        self.assertFalse(context.source_inventory_git_tracked_only)
+
+    def test_required_source_count_overflow_persists_stale_recheck_contract(self):
+        self.configure_graph(True)
+        required = {}
+        for index in range(CONTEXT.MAX_REQUIRED_SOURCE_DIGESTS + 1):
+            relative = f"src/source-{index:03d}.py"
+            source = self.root / relative
+            source.parent.mkdir(exist_ok=True)
+            source.write_text(f"VALUE = {index}\n", encoding="utf-8")
+            required[relative] = hashlib.sha256(source.read_bytes()).hexdigest()
+        change = "Change bounded source inventory"
+        draft = self.begin(change)
+        request = self.finalize_request(draft, "9" * 32)
+        runtime = dict(FINALIZE.default_runtime())
+        runtime["load_graph_context"] = lambda *args: {
+            "receipt": {"receipt_id": "9" * 32},
+            "sha256": "8" * 64,
+            "source_inventory": {
+                "sha256": "7" * 64,
+                "complete": True,
+                "digests": required,
+                "required_digests": required,
+                "required_complete": True,
+            },
+        }
+        runtime["validate_analysis"] = lambda *args: None
+        runtime["validate_graph_coverage"] = lambda *args: None
+        runtime["build_state"] = lambda selected_draft, analysis, graph: (
+            FINALIZE.LINEAGE.build_state(selected_draft, analysis, None)
+        )
+
+        result = FINALIZE.finalize_refinement(request, _runtime=runtime)
+        context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
+        previous = CONTROLLER.lookup_previous(
+            CONTROLLER.PreviousLookupRequest(
+                self.root,
+                change,
+                (
+                    "authorizeProjectEdit permits owner and admin",
+                    "workspace invitations default to member",
+                ),
+            )
+        )
+
+        self.assertIsNone(context.required_source_digests)
+        self.assertFalse(context.source_recheck_complete)
         self.assertEqual(previous.status, "stale")
 
     def test_explicit_path_candidate_overflow_finalizes_with_incomplete_proof(self):
@@ -1793,6 +1938,8 @@ class RirReportContextTest(unittest.TestCase):
         context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
         self.assertIsNotNone(context)
         self.assertFalse(context.source_inventory_git_tracked_only)
+        self.assertIsNone(context.required_source_digests)
+        self.assertFalse(context.source_recheck_complete)
         previous = CONTROLLER.lookup_previous(
             CONTROLLER.PreviousLookupRequest(
                 self.root,

@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 
 REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
@@ -28,19 +29,22 @@ MAX_REQUIREMENT_INPUT_BYTES = 256 * 1024
 MAX_REQUIREMENT_BYTES = 64 * 1024
 MAX_EVIDENCE_BYTES = 256 * 1024
 MAX_EVIDENCE_ROW_BYTES = 64 * 1024
-MAX_CONTEXT_BYTES = 8 * 1024
+MAX_CONTEXT_BYTES = 80 * 1024
 MAX_STATE_BYTES = 4 * 1024 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
 MAX_GIT_TREE_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_GIT_BLOB_OUTPUT_BYTES = 32 * 1024 * 1024
-MAX_REQUIRED_SOURCE_PATHS = 512
-MAX_REQUIRED_SOURCE_PATH_BYTES = 256 * 1024
+MAX_REQUIRED_SOURCE_DIGESTS = 64
+MAX_REQUIRED_SOURCE_PATH_BYTES = 1024
+MAX_REQUIRED_SOURCE_MAP_BYTES = 64 * 1024
+MAX_REQUIRED_SOURCE_QUERY_BYTES = 64 * 1024
+MAX_SOURCE_RECHECK_BYTES = 4 * 1024 * 1024
 GIT_SOURCE_PROOF_TIMEOUT_SECONDS = 5.0
 GIT_TIMEOUT_SECONDS = 0.25
 MAX_CONTEXT_STAGE_CANDIDATES = 8
 _TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile|filter\.)"
-_CONTEXT_FIELDS = frozenset(
+_PRE_SOURCE_RECHECK_CONTEXT_FIELDS = frozenset(
     {
         "schema_version",
         "report_id",
@@ -60,6 +64,50 @@ _CONTEXT_FIELDS = frozenset(
         "baseline_clean",
     }
 )
+_CONTEXT_FIELDS = _PRE_SOURCE_RECHECK_CONTEXT_FIELDS | {
+    "required_source_digests",
+    "source_recheck_complete",
+}
+
+
+def _canonical_required_source_path(value: str) -> str:
+    if type(value) is not str or not value or "\\" in value:
+        raise ValueError("required source digest path is unsafe")
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ValueError("required source digest path is not UTF-8") from error
+    if len(encoded) > MAX_REQUIRED_SOURCE_PATH_BYTES:
+        raise ValueError("required source digest path exceeds its path byte limit")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError("required source digest path is unsafe")
+    return value
+
+
+def canonical_required_source_digests(value: Mapping[str, str]) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise TypeError("required source digests must be a mapping")
+    if len(value) > MAX_REQUIRED_SOURCE_DIGESTS:
+        raise ValueError("required source digest map exceeds its count limit")
+    normalized: dict[str, str] = {}
+    for path, digest in value.items():
+        relative = _canonical_required_source_path(path)
+        if type(digest) is not str or SHA256_PATTERN.fullmatch(digest) is None:
+            raise ValueError("required source digest map contains an invalid SHA-256 digest")
+        normalized[relative] = digest
+    normalized = dict(sorted(normalized.items()))
+    payload = json.dumps(
+        normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if len(payload) > MAX_REQUIRED_SOURCE_MAP_BYTES:
+        raise ValueError("required source digest map exceeds its serialized byte limit")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -80,6 +128,8 @@ class ReportContext:
     source_inventory_available: bool = True
     source_inventory_complete: bool = True
     source_inventory_git_tracked_only: bool = False
+    required_source_digests: Mapping[str, str] | None = None
+    source_recheck_complete: bool = False
 
     def __post_init__(self) -> None:
         if type(self.schema_version) is not int or self.schema_version != 2:
@@ -104,6 +154,14 @@ class ReportContext:
             raise TypeError("report context source_inventory_complete must be boolean")
         if type(self.source_inventory_git_tracked_only) is not bool:
             raise TypeError("report context source_inventory_git_tracked_only must be boolean")
+        if type(self.source_recheck_complete) is not bool:
+            raise TypeError("report context source_recheck_complete must be boolean")
+        if self.required_source_digests is None:
+            if self.source_recheck_complete:
+                raise ValueError("complete source recheck requires a required source digest map")
+        else:
+            normalized = canonical_required_source_digests(self.required_source_digests)
+            object.__setattr__(self, "required_source_digests", MappingProxyType(normalized))
         if self.source_inventory_available:
             if (
                 type(self.source_inventory_sha256) is not str
@@ -118,6 +176,10 @@ class ReportContext:
             not self.source_inventory_available or not self.source_inventory_complete
         ):
             raise ValueError("tracked-only source inventory must be available and complete")
+        if self.source_recheck_complete and (
+            not self.source_inventory_available or not self.source_inventory_complete
+        ):
+            raise ValueError("complete source recheck requires a complete source inventory")
         if (
             type(self.created_at) is not str
             or len(self.created_at.encode("utf-8")) > 64
@@ -332,6 +394,12 @@ def _mapping(context: ReportContext) -> dict[str, object]:
         "source_inventory_available": context.source_inventory_available,
         "source_inventory_complete": context.source_inventory_complete,
         "source_inventory_git_tracked_only": context.source_inventory_git_tracked_only,
+        "required_source_digests": (
+            None
+            if context.required_source_digests is None
+            else dict(context.required_source_digests)
+        ),
+        "source_recheck_complete": context.source_recheck_complete,
         "payload_sha256": context.payload_sha256,
         "created_at": context.created_at,
         "baseline_commit": context.baseline_commit,
@@ -356,8 +424,17 @@ def _from_payload(payload: bytes) -> ReportContext:
         value = json.loads(payload.decode("utf-8", errors="strict"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError("report context payload is invalid") from error
-    if not isinstance(value, Mapping) or set(value) != _CONTEXT_FIELDS:
+    fields = frozenset(value) if isinstance(value, Mapping) else frozenset()
+    if not isinstance(value, Mapping) or fields not in (
+        _CONTEXT_FIELDS,
+        _PRE_SOURCE_RECHECK_CONTEXT_FIELDS,
+    ):
         raise ValueError("report context payload has an invalid schema")
+    legacy_recheck_shape = fields == _PRE_SOURCE_RECHECK_CONTEXT_FIELDS
+    if (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "utf-8"
+    ) != payload:
+        raise ValueError("report context payload is not canonical")
     try:
         context = ReportContext(
             schema_version=value["schema_version"],
@@ -376,10 +453,16 @@ def _from_payload(payload: bytes) -> ReportContext:
             source_inventory_available=value["source_inventory_available"],
             source_inventory_complete=value["source_inventory_complete"],
             source_inventory_git_tracked_only=value["source_inventory_git_tracked_only"],
+            required_source_digests=(
+                None if legacy_recheck_shape else value["required_source_digests"]
+            ),
+            source_recheck_complete=(
+                False if legacy_recheck_shape else value["source_recheck_complete"]
+            ),
         )
     except (TypeError, ValueError) as error:
         raise ValueError("report context payload has invalid values") from error
-    if _canonical_bytes(context) != payload:
+    if not legacy_recheck_shape and _canonical_bytes(context) != payload:
         raise ValueError("report context payload is not canonical")
     return context
 
@@ -902,7 +985,7 @@ def _run_git(
     input_stream = None
     try:
         if input_payload is not None:
-            if len(input_payload) > MAX_REQUIRED_SOURCE_PATH_BYTES:
+            if len(input_payload) > MAX_REQUIRED_SOURCE_QUERY_BYTES:
                 raise UnsafeGitOutput("Git input exceeds its byte limit")
             input_stream = tempfile.TemporaryFile()
             input_stream.write(input_payload)
@@ -1121,17 +1204,10 @@ def _proof_deadline(deadline: float) -> None:
 
 
 def _required_path(value: str) -> str:
-    path = Path(value)
-    if (
-        not value
-        or path.is_absolute()
-        or ".." in path.parts
-        or "\x00" in value
-        or "\n" in value
-        or "\r" in value
-    ):
-        raise ValueError("source inventory contains an unsafe path")
-    return path.as_posix()
+    try:
+        return _canonical_required_source_path(value)
+    except (TypeError, ValueError):
+        raise ValueError("source inventory contains an unsafe path") from None
 
 
 def _git_bytes(
@@ -1227,34 +1303,147 @@ def _batch_blob_sha256(
     return result
 
 
-def _worktree_source_sha256(root: Path, relative: str) -> str:
+def _same_path_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+        and stat.S_IFMT(left.st_mode) == stat.S_IFMT(right.st_mode)
+    )
+
+
+def _source_file_identity(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _worktree_source_digest(
+    root: Path,
+    relative: str,
+    maximum: int,
+    deadline: float,
+) -> tuple[str, int]:
     parts = PurePosixPath(relative).parts
     directory_fd = os.open(root, _directory_flags())
     opened = [directory_fd]
+    bindings: list[tuple[int, str, int]] = []
     try:
+        _proof_deadline(deadline)
+        root_fd_metadata = os.fstat(directory_fd)
+        root_path_metadata = os.stat(root, follow_symlinks=False)
+        if not _same_path_identity(root_fd_metadata, root_path_metadata):
+            raise ValueError("required worktree source root identity changed")
         for part in parts[:-1]:
-            directory_fd = os.open(part, _directory_flags(), dir_fd=directory_fd)
-            opened.append(directory_fd)
+            _proof_deadline(deadline)
+            parent_fd = directory_fd
+            child_fd = os.open(part, _directory_flags(), dir_fd=parent_fd)
+            opened.append(child_fd)
+            child_metadata = os.fstat(child_fd)
+            path_metadata = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(child_metadata.st_mode) or not _same_path_identity(
+                child_metadata, path_metadata
+            ):
+                raise ValueError("required worktree source directory identity changed")
+            bindings.append((parent_fd, part, child_fd))
+            directory_fd = child_fd
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         descriptor = os.open(parts[-1], flags, dir_fd=directory_fd)
         opened.append(descriptor)
         metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_GIT_BLOB_OUTPUT_BYTES:
+        path_metadata = os.stat(parts[-1], dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_size < 0
+            or metadata.st_size > maximum
+            or not _same_path_identity(metadata, path_metadata)
+            or _source_file_identity(metadata) != _source_file_identity(path_metadata)
+        ):
             raise ValueError("required worktree source is unsafe")
+        initial_identity = _source_file_identity(metadata)
         digest = hashlib.sha256()
         remaining = metadata.st_size
         while remaining:
+            _proof_deadline(deadline)
             chunk = os.read(descriptor, min(64 * 1024, remaining))
             if not chunk:
                 raise ValueError("required worktree source is truncated")
             digest.update(chunk)
             remaining -= len(chunk)
-        return digest.hexdigest()
+        if os.read(descriptor, 1):
+            raise ValueError("required worktree source grew during hashing")
+        final_metadata = os.fstat(descriptor)
+        final_path_metadata = os.stat(parts[-1], dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            _source_file_identity(final_metadata) != initial_identity
+            or _source_file_identity(final_path_metadata) != initial_identity
+        ):
+            raise ValueError("required worktree source changed during hashing")
+        for parent_fd, name, child_fd in reversed(bindings):
+            if not _same_path_identity(
+                os.fstat(child_fd),
+                os.stat(name, dir_fd=parent_fd, follow_symlinks=False),
+            ):
+                raise ValueError("required worktree source path identity changed")
+        if not _same_path_identity(os.fstat(opened[0]), os.stat(root, follow_symlinks=False)):
+            raise ValueError("required worktree source root identity changed")
+        _proof_deadline(deadline)
+        return digest.hexdigest(), metadata.st_size
     except OSError as error:
         raise ValueError("required worktree source is unavailable") from error
     finally:
         for descriptor in reversed(opened):
             os.close(descriptor)
+
+
+def _hash_worktree_sources(
+    root: Path,
+    required: Mapping[str, str],
+    deadline: float,
+) -> dict[str, str]:
+    observed: dict[str, str] = {}
+    remaining = MAX_SOURCE_RECHECK_BYTES
+    for path in sorted(required):
+        digest, size = _worktree_source_digest(root, path, remaining, deadline)
+        remaining -= size
+        observed[path] = digest
+    return observed
+
+
+def _worktree_source_sha256(root: Path, relative: str) -> str:
+    digest, _size = _worktree_source_digest(
+        root,
+        relative,
+        MAX_SOURCE_RECHECK_BYTES,
+        time.monotonic() + GIT_SOURCE_PROOF_TIMEOUT_SECONDS,
+    )
+    return digest
+
+
+def prepare_required_source_recheck(
+    root: Path,
+    source_digests: Mapping[str, str],
+) -> tuple[dict[str, str] | None, bool]:
+    try:
+        resolved = _root(root)
+        normalized = canonical_required_source_digests(source_digests)
+    except (OSError, TypeError, ValueError):
+        return None, False
+    try:
+        observed = _hash_worktree_sources(
+            resolved,
+            normalized,
+            time.monotonic() + GIT_SOURCE_PROOF_TIMEOUT_SECONDS,
+        )
+    except (OSError, TimeoutError, ValueError):
+        return normalized, False
+    return normalized, observed == normalized
 
 
 def _read_optional_git_attributes(path: Path) -> bytes | None:
@@ -1406,7 +1595,7 @@ def _prove_required_sources(
     )
     if any(mode == "160000" and kind == "commit" for mode, kind, _object_id in tree.values()):
         raise ValueError("Git gitlinks are outside the freshness proof scope")
-    if any(_worktree_source_sha256(root, path) != digest for path, digest in required.items()):
+    if _hash_worktree_sources(root, required, deadline) != required:
         raise ValueError("required worktree source digest does not match report evidence")
     observed = _batch_blob_sha256(root, scope, commit, tuple(sorted(required)))
     if observed != required:
@@ -1415,7 +1604,7 @@ def _prove_required_sources(
     after = _capture_repository_git_state(root, commit, deadline)
     if before[1:] != after[1:]:
         raise ValueError("Git repository state changed during source proof")
-    if any(_worktree_source_sha256(root, path) != digest for path, digest in required.items()):
+    if _hash_worktree_sources(root, required, deadline) != required:
         raise ValueError("required worktree source changed during source proof")
     return commit
 
@@ -1432,9 +1621,7 @@ def probe_source_inventory_git(
     ):
         raise ValueError("source inventory must map paths to SHA-256 digests")
     try:
-        normalized = {_required_path(path): digest for path, digest in source_digests.items()}
-        if len(normalized) > MAX_REQUIRED_SOURCE_PATHS:
-            raise ValueError("source inventory exceeds its path limit")
+        normalized = canonical_required_source_digests(source_digests)
         commit = _prove_required_sources(
             resolved,
             None,

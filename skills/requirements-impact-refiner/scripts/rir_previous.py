@@ -100,6 +100,10 @@ MAX_CHANGED_PATHS = 4096
 MAX_CHANGED_PATH_BYTES = 4096
 MAX_REPORT_ENTRIES = 4096
 MAX_REPORT_LINEAGES = 1000
+MAX_REQUIRED_SOURCE_DIGESTS = 64
+MAX_REQUIRED_SOURCE_PATH_BYTES = 1024
+MAX_REQUIRED_SOURCE_MAP_BYTES = 64 * 1024
+MAX_SOURCE_RECHECK_BYTES = 4 * 1024 * 1024
 OPERATION_TIMEOUT_SECONDS = 0.25
 _TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile|filter\.)"
 
@@ -361,6 +365,15 @@ class _GitSnapshot:
     changed_count: int | None
     worktree_clean: bool
     reason: str
+
+
+@dataclass(frozen=True)
+class _GitProofState:
+    commit: str
+    status_payload: bytes
+    status_paths: tuple[str, ...]
+    index_flags: bytes
+    transforms: tuple[tuple[str, bytes | None], ...]
 
 
 def _root(value: Path) -> Path:
@@ -818,6 +831,165 @@ def _diff_paths(payload: bytes) -> tuple[str, ...]:
     return tuple(sorted(paths))
 
 
+def _required_source_digest_map(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise _GitUnavailable("required source digest map is unavailable")
+    if len(value) > MAX_REQUIRED_SOURCE_DIGESTS:
+        raise _GitUnavailable("required source digest map exceeds its count limit")
+    normalized: dict[str, str] = {}
+    for path, digest in value.items():
+        if not isinstance(path, str) or not path or "\\" in path:
+            raise _GitUnavailable("required source path is unsafe")
+        try:
+            encoded_path = path.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise _GitUnavailable("required source path is not UTF-8") from error
+        if len(encoded_path) > MAX_REQUIRED_SOURCE_PATH_BYTES:
+            raise _GitUnavailable("required source path exceeds its byte limit")
+        pure = PurePosixPath(path)
+        if (
+            pure.is_absolute()
+            or pure.as_posix() != path
+            or any(part in {"", ".", ".."} for part in pure.parts)
+            or any(ord(character) < 32 or ord(character) == 127 for character in path)
+        ):
+            raise _GitUnavailable("required source path is unsafe")
+        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+            raise _GitUnavailable("required source digest is invalid")
+        normalized[path] = digest
+    normalized = dict(sorted(normalized.items()))
+    payload = json.dumps(
+        normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if len(payload) > MAX_REQUIRED_SOURCE_MAP_BYTES:
+        raise _GitUnavailable("required source digest map exceeds its serialized byte limit")
+    return normalized
+
+
+def _same_path_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+        and stat.S_IFMT(left.st_mode) == stat.S_IFMT(right.st_mode)
+    )
+
+
+def _source_file_identity(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _source_deadline(deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise _GitUnavailable("required source proof exceeded the lookup deadline")
+
+
+def _hash_required_source(
+    root: Path,
+    relative: str,
+    maximum: int,
+    deadline: float,
+) -> tuple[str, int]:
+    parts = PurePosixPath(relative).parts
+    opened: list[int] = []
+    bindings: list[tuple[int, str, int]] = []
+    try:
+        _source_deadline(deadline)
+        directory_fd = os.open(root, _directory_flags())
+        opened.append(directory_fd)
+        root_fd_metadata = os.fstat(directory_fd)
+        root_path_metadata = os.stat(root, follow_symlinks=False)
+        if not _same_path_identity(root_fd_metadata, root_path_metadata):
+            raise _GitUnavailable("required source root identity changed")
+        for part in parts[:-1]:
+            _source_deadline(deadline)
+            parent_fd = directory_fd
+            child_fd = os.open(part, _directory_flags(), dir_fd=parent_fd)
+            opened.append(child_fd)
+            child_metadata = os.fstat(child_fd)
+            path_metadata = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(child_metadata.st_mode) or not _same_path_identity(
+                child_metadata, path_metadata
+            ):
+                raise _GitUnavailable("required source directory identity changed")
+            bindings.append((parent_fd, part, child_fd))
+            directory_fd = child_fd
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(parts[-1], flags, dir_fd=directory_fd)
+        opened.append(descriptor)
+        metadata = os.fstat(descriptor)
+        path_metadata = os.stat(parts[-1], dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_size < 0
+            or metadata.st_size > maximum
+            or not _same_path_identity(metadata, path_metadata)
+            or _source_file_identity(metadata) != _source_file_identity(path_metadata)
+        ):
+            if metadata.st_size > maximum:
+                raise _GitUnavailable("required source bytes exceed the recheck byte limit")
+            raise _GitUnavailable("required source is not a safe regular file")
+        initial_identity = _source_file_identity(metadata)
+        digest = hashlib.sha256()
+        remaining = metadata.st_size
+        while remaining:
+            _source_deadline(deadline)
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                raise _GitUnavailable("required source was truncated during hashing")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise _GitUnavailable("required source grew during hashing")
+        final_metadata = os.fstat(descriptor)
+        final_path_metadata = os.stat(parts[-1], dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            _source_file_identity(final_metadata) != initial_identity
+            or _source_file_identity(final_path_metadata) != initial_identity
+        ):
+            raise _GitUnavailable("required source identity changed during hashing")
+        for parent_fd, name, child_fd in reversed(bindings):
+            if not _same_path_identity(
+                os.fstat(child_fd),
+                os.stat(name, dir_fd=parent_fd, follow_symlinks=False),
+            ):
+                raise _GitUnavailable("required source path identity changed during hashing")
+        if not _same_path_identity(os.fstat(opened[0]), os.stat(root, follow_symlinks=False)):
+            raise _GitUnavailable("required source root identity changed during hashing")
+        _source_deadline(deadline)
+        return digest.hexdigest(), metadata.st_size
+    except _GitUnavailable:
+        raise
+    except OSError as error:
+        raise _GitUnavailable("required source is unavailable or unsafe") from error
+    finally:
+        for descriptor in reversed(opened):
+            os.close(descriptor)
+
+
+def _hash_required_sources(
+    root: Path,
+    required: Mapping[str, str],
+    deadline: float,
+) -> dict[str, str]:
+    normalized = _required_source_digest_map(required)
+    remaining = MAX_SOURCE_RECHECK_BYTES
+    observed: dict[str, str] = {}
+    for path in normalized:
+        digest, size = _hash_required_source(root, path, remaining, deadline)
+        remaining -= size
+        observed[path] = digest
+    return observed
+
+
 def _successful(result: _GitCommandResult | None, label: str) -> bytes:
     if result is None:
         raise _GitUnavailable(f"{label} timed out or is unavailable")
@@ -1101,34 +1273,81 @@ def _checkout_transform_snapshot(
     return tuple(snapshots)
 
 
-def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _GitSnapshot:
+def _capture_git_proof_state(
+    root: Path,
+    scope: tuple[str, str],
+    git_dir: Path,
+    deadline: float,
+) -> _GitProofState:
+    _check_deadline(deadline)
+    if _replacement_refs_present(git_dir):
+        raise _GitUnavailable("Git replacement refs are present")
+    commit = _filesystem_head(git_dir)
+    transforms = _checkout_transform_snapshot(root, scope, git_dir, deadline)
+    status_payload = _successful(
+        _run_git_command(
+            root,
+            (
+                *scope,
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=normal",
+                "--ignore-submodules=none",
+                "--no-renames",
+            ),
+            deadline,
+        ),
+        "Git status",
+    )
+    status_paths = _status_paths(status_payload)
+    index_flags = _index_flags_snapshot(root, scope, deadline)
+    _check_deadline(deadline)
+    return _GitProofState(commit, status_payload, status_paths, index_flags, transforms)
+
+
+def _assert_stable_git_proof(before: _GitProofState, after: _GitProofState) -> None:
+    if after.commit != before.commit:
+        raise _GitUnavailable("Git HEAD changed during freshness proof")
+    if after.status_payload != before.status_payload or after.status_paths != before.status_paths:
+        raise _GitUnavailable("Git working tree changed during freshness proof")
+    if after.index_flags != before.index_flags:
+        raise _GitUnavailable("Git index changed during freshness proof")
+    if after.transforms != before.transforms:
+        raise _GitUnavailable("Git checkout transform state changed during freshness proof")
+
+
+def _probe_git(
+    root: Path,
+    baseline_commit: str | None,
+    deadline: float,
+    required_source_digests: Mapping[str, str] | None = None,
+) -> _GitSnapshot:
     try:
         scope = _worktree_scope(root, deadline)
         git_dir = Path(scope[0].split("=", 1)[1])
-        if _replacement_refs_present(git_dir):
-            raise _GitUnavailable("Git replacement refs are present")
-        commit = _filesystem_head(git_dir)
-        transforms_before = _checkout_transform_snapshot(root, scope, git_dir, deadline)
-        status_payload = _successful(
-            _run_git_command(
-                root,
-                (
-                    *scope,
-                    "status",
-                    "--porcelain=v1",
-                    "-z",
-                    "--untracked-files=normal",
-                    "--ignore-submodules=none",
-                    "--no-renames",
-                ),
-                deadline,
-            ),
-            "Git status",
+        before = _capture_git_proof_state(root, scope, git_dir, deadline)
+        required = (
+            None
+            if required_source_digests is None
+            else _required_source_digest_map(required_source_digests)
         )
-        status_paths = _status_paths(status_payload)
-        index_flags_before = _index_flags_snapshot(root, scope, deadline)
+        prove_sources = (
+            required is not None
+            and not before.status_paths
+            and baseline_commit is not None
+            and baseline_commit == before.commit
+        )
+        source_error: _GitUnavailable | None = None
+        observed_before: dict[str, str] | None = None
+        if prove_sources:
+            assert required is not None
+            try:
+                observed_before = _hash_required_sources(root, required, deadline)
+            except _GitUnavailable as error:
+                source_error = error
         diff_paths: tuple[str, ...] = ()
-        if baseline_commit is not None and baseline_commit != commit:
+        if baseline_commit is not None and baseline_commit != before.commit:
             diff_payload = _successful(
                 _run_git_command(
                     root,
@@ -1141,7 +1360,7 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
                         "--no-textconv",
                         "-z",
                         baseline_commit,
-                        commit,
+                        before.commit,
                         "--",
                     ),
                     deadline,
@@ -1149,45 +1368,28 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
                 "Git diff",
             )
             diff_paths = _diff_paths(diff_payload)
-        final_status_payload = _successful(
-            _run_git_command(
-                root,
-                (
-                    *scope,
-                    "status",
-                    "--porcelain=v1",
-                    "-z",
-                    "--untracked-files=normal",
-                    "--ignore-submodules=none",
-                    "--no-renames",
-                ),
-                deadline,
-            ),
-            "Git status",
-        )
-        if _status_paths(final_status_payload) != status_paths:
-            raise _GitUnavailable("Git working tree changed during freshness proof")
-        index_flags_after = _index_flags_snapshot(root, scope, deadline)
-        if index_flags_after != index_flags_before:
-            raise _GitUnavailable("Git index changed during freshness proof")
-        transforms_after = _checkout_transform_snapshot(root, scope, git_dir, deadline)
-        if transforms_after != transforms_before:
-            raise _GitUnavailable("Git checkout transform state changed during freshness proof")
-        after_commit = _filesystem_head(git_dir)
-        if after_commit != commit:
-            raise _GitUnavailable("Git HEAD changed during freshness proof")
-        changed = tuple(sorted(set(status_paths) | set(diff_paths)))
+        after = _capture_git_proof_state(root, scope, git_dir, deadline)
+        _assert_stable_git_proof(before, after)
+        if source_error is not None:
+            raise source_error
+        if prove_sources:
+            assert required is not None and observed_before is not None
+            if observed_before != required:
+                raise _GitUnavailable("required source bytes do not match report evidence")
+            if _hash_required_sources(root, required, deadline) != required:
+                raise _GitUnavailable("required source bytes changed during freshness proof")
+        changed = tuple(sorted(set(before.status_paths) | set(diff_paths)))
         if len(changed) > MAX_CHANGED_PATHS:
             raise _GitUnavailable("Git changed path count exceeds its limit")
         return _GitSnapshot(
             available=True,
-            commit=commit,
+            commit=before.commit,
             changed_paths=changed,
             changed_count=len(changed),
-            worktree_clean=not status_paths,
+            worktree_clean=not before.status_paths,
             reason="Git freshness proof is complete",
         )
-    except _GitUnavailable as error:
+    except (_GitUnavailable, _LookupDeadline) as error:
         return _GitSnapshot(
             available=False,
             commit=None,
@@ -1370,12 +1572,23 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
         )
     candidate = matching[0]
     baseline_commit = getattr(candidate.context, "baseline_commit", None)
-    snapshot = _probe_git(root, baseline_commit, deadline)
     context = candidate.context
     if context is None:  # pragma: no cover - selected candidates require a v2 context
         return _unselected(
             "none", requirement_sha256, "previous report context is unavailable", started_ns
         )
+    can_attempt_fresh = (
+        getattr(context, "source_inventory_available", False)
+        and getattr(context, "source_inventory_complete", False)
+        and getattr(context, "baseline_clean", False)
+        and baseline_commit is not None
+        and getattr(context, "source_inventory_git_tracked_only", False)
+        and getattr(context, "source_recheck_complete", False)
+    )
+    required_source_digests = (
+        getattr(context, "required_source_digests", None) if can_attempt_fresh else None
+    )
+    snapshot = _probe_git(root, baseline_commit, deadline, required_source_digests)
     if not getattr(context, "source_inventory_available", False) or not getattr(
         context, "source_inventory_complete", False
     ):
@@ -1403,6 +1616,24 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
             requirement_sha256,
             snapshot,
             "source inventory is not proven Git-tracked",
+            started_ns,
+        )
+    if not getattr(context, "source_recheck_complete", False):
+        return _selected_result(
+            "stale",
+            candidate,
+            requirement_sha256,
+            snapshot,
+            "required source byte recheck is incomplete",
+            started_ns,
+        )
+    if getattr(context, "required_source_digests", None) is None:
+        return _selected_result(
+            "stale",
+            candidate,
+            requirement_sha256,
+            snapshot,
+            "required source digest map is unavailable",
             started_ns,
         )
     if not snapshot.available:

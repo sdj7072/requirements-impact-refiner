@@ -100,6 +100,8 @@ class PreviousLookupTest(unittest.TestCase):
         inventory_complete: bool = True,
         source_inventory_sha256: str | None = "4" * 64,
         source_inventory_git_tracked_only: bool | None = None,
+        required_source_digests: dict[str, str] | None = None,
+        source_recheck_complete: bool | None = None,
         repository_evidence: tuple[str, ...] = (),
     ) -> tuple[Path, dict[str, object], object | None]:
         state = json.loads(STATE_FIXTURE.read_text(encoding="utf-8"))
@@ -129,6 +131,9 @@ class PreviousLookupTest(unittest.TestCase):
         (report_dir / "current.json").write_bytes(canonical_bytes(pointer))
         context = None
         if with_context:
+            if required_source_digests is None:
+                app = self.root / "app.py"
+                required_source_digests = {"app.py": hashlib.sha256(app.read_bytes()).hexdigest()}
             context = CONTEXT.ReportContext(
                 schema_version=2,
                 report_id=report_id,
@@ -154,15 +159,26 @@ class PreviousLookupTest(unittest.TestCase):
                     if source_inventory_git_tracked_only is None
                     else source_inventory_git_tracked_only
                 ),
+                required_source_digests=required_source_digests,
+                source_recheck_complete=(
+                    inventory_available and inventory_complete
+                    if source_recheck_complete is None
+                    else source_recheck_complete
+                ),
             )
             CONTEXT.publish_report_context(self.root, context)
         return report_dir, pointer, context
 
     def test_exact_clean_match_is_fresh(self):
-        self.publish()
+        _report_dir, _pointer, context = self.publish()
 
         result = PREVIOUS.lookup_previous(self.request())
 
+        self.assertEqual(
+            dict(context.required_source_digests),
+            {"app.py": hashlib.sha256((self.root / "app.py").read_bytes()).hexdigest()},
+        )
+        self.assertTrue(context.source_recheck_complete)
         self.assertEqual(result.status, "fresh")
         self.assertEqual(result.changed_paths, ())
         self.assertEqual(result.changed_count, 0)
@@ -367,6 +383,20 @@ class PreviousLookupTest(unittest.TestCase):
 
         self.assertEqual(result.status, "stale")
 
+    def test_pre_recheck_v2_context_migrates_to_stale(self):
+        report_dir, pointer, _context = self.publish()
+        context_path = report_dir / f"revision-{pointer['revision']:04d}.context-v2.json"
+        payload = json.loads(context_path.read_text(encoding="utf-8"))
+        del payload["required_source_digests"]
+        del payload["source_recheck_complete"]
+        context_path.write_bytes(canonical_bytes(payload))
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("recheck", result.reason.lower())
+        self.assertIsNotNone(result.display_text)
+
     def test_unclean_recorded_baseline_is_stale_never_fresh(self):
         self.publish(baseline_clean=False, baseline_commit=None)
 
@@ -395,6 +425,142 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "stale")
         self.assertEqual(result.changed_paths, ("alpha.py", "zeta.py"))
         self.assertEqual(result.changed_count, 2)
+
+    def test_ignored_explicit_source_bytes_are_rechecked(self):
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + "ignored.py\n", encoding="utf-8"
+        )
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore explicit source")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        ignored = self.root / "ignored.py"
+        ignored.write_text("value = 'report'\n", encoding="utf-8")
+        recorded = hashlib.sha256(ignored.read_bytes()).hexdigest()
+        self.publish(
+            required_source_digests={"ignored.py": recorded},
+            source_recheck_complete=True,
+            source_inventory_git_tracked_only=True,
+        )
+        ignored.write_text("value = 'changed'\n", encoding="utf-8")
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(self.git("status", "--porcelain").stdout, "")
+        self.assertEqual(result.status, "stale")
+        self.assertIn("source", result.reason.lower())
+
+    def test_source_mutation_between_git_samples_is_caught_by_final_byte_sample(self):
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + "ignored.py\n", encoding="utf-8"
+        )
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore explicit source")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        ignored = self.root / "ignored.py"
+        ignored.write_text("value = 'report'\n", encoding="utf-8")
+        self.publish(
+            required_source_digests={
+                "ignored.py": hashlib.sha256(ignored.read_bytes()).hexdigest()
+            },
+            source_recheck_complete=True,
+            source_inventory_git_tracked_only=True,
+        )
+        real_hash = PREVIOUS._hash_required_sources
+        samples = 0
+
+        def hash_sources(root, required, deadline):
+            nonlocal samples
+            observed = real_hash(root, required, deadline)
+            samples += 1
+            if samples == 1:
+                ignored.write_text("value = 'changed between samples'\n", encoding="utf-8")
+            return observed
+
+        with mock.patch.object(PREVIOUS, "_hash_required_sources", side_effect=hash_sources):
+            result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(samples, 2)
+        self.assertEqual(self.git("status", "--porcelain").stdout, "")
+        self.assertEqual(result.status, "stale")
+        self.assertIn("source", result.reason.lower())
+
+    def test_ignored_attributes_and_filter_aba_around_status_cannot_hide_source_bytes(self):
+        info_exclude = self.root / ".git" / "info" / "exclude"
+        info_exclude.write_text(
+            info_exclude.read_text(encoding="utf-8") + "\n.gitattributes\n",
+            encoding="utf-8",
+        )
+        self.publish()
+        app = self.root / "app.py"
+        app.write_text(
+            "def rename_profile(name: str) -> str:\n    return 'compromised'\n",
+            encoding="utf-8",
+        )
+        attributes = self.root / ".gitattributes"
+        real_runner = PREVIOUS._run_git_command
+
+        def runner(root, arguments, deadline, **kwargs):
+            if "status" not in arguments:
+                return real_runner(root, arguments, deadline, **kwargs)
+            attributes.write_text("app.py filter=race\n", encoding="utf-8")
+            self.git(
+                "config",
+                "filter.race.clean",
+                "sed s/return.*compromised.*/return\\ name.strip()/",
+            )
+            try:
+                result = real_runner(root, arguments, deadline, **kwargs)
+                self.assertIsNotNone(result)
+                return PREVIOUS._GitCommandResult(result.returncode, b"")
+            finally:
+                self.git("config", "--unset-all", "filter.race.clean")
+                attributes.unlink()
+
+        with mock.patch.object(PREVIOUS, "_run_git_command", side_effect=runner):
+            result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("source", result.reason.lower())
+        self.assertFalse(attributes.exists())
+
+    def test_source_recheck_byte_bound_overflow_is_stale(self):
+        self.publish()
+
+        with mock.patch.object(PREVIOUS, "MAX_SOURCE_RECHECK_BYTES", 1):
+            result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("byte limit", result.reason.lower())
+
+    def test_required_source_symlink_is_stale_even_when_target_bytes_match(self):
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + "ignored-*.py\n", encoding="utf-8"
+        )
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore explicit source links")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        source = self.root / "ignored-source.py"
+        target = self.root / "ignored-target.py"
+        source.write_text("value = 'same'\n", encoding="utf-8")
+        target.write_bytes(source.read_bytes())
+        self.publish(
+            required_source_digests={
+                "ignored-source.py": hashlib.sha256(source.read_bytes()).hexdigest()
+            },
+            source_recheck_complete=True,
+            source_inventory_git_tracked_only=True,
+        )
+        source.unlink()
+        source.symlink_to(target.name)
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(self.git("status", "--porcelain").stdout, "")
+        self.assertEqual(result.status, "stale")
+        self.assertIn("source", result.reason.lower())
 
     def test_assume_unchanged_and_skip_worktree_flags_are_stale(self):
         for flag in ("--assume-unchanged", "--skip-worktree"):
@@ -911,22 +1077,44 @@ class PreviousLookupTest(unittest.TestCase):
         generated.mkdir()
         for index in range(1000):
             (generated / f"generated-{index:04d}.txt").write_text("ignored\n", encoding="utf-8")
-        clean_git = PREVIOUS._GitSnapshot(
-            available=True,
-            commit=self.baseline_commit,
-            changed_paths=(),
-            changed_count=0,
-            worktree_clean=True,
-            reason="pinned clean Git evidence",
-        )
         samples = []
-        with mock.patch.object(PREVIOUS, "_probe_git", return_value=clean_git):
-            self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
-            for _index in range(20):
-                started = time.perf_counter_ns()
-                result = PREVIOUS.lookup_previous(self.request())
-                samples.append((time.perf_counter_ns() - started) / 1_000_000)
-                self.assertEqual(result.status, "fresh")
+        self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
+        for _index in range(20):
+            started = time.perf_counter_ns()
+            result = PREVIOUS.lookup_previous(self.request())
+            samples.append((time.perf_counter_ns() - started) / 1_000_000)
+            self.assertEqual(result.status, "fresh")
+        samples.sort()
+        p95 = samples[math.ceil(len(samples) * 0.95) - 1]
+
+        self.assertLessEqual(p95, 300.0, samples)
+
+    def test_maximum_source_recheck_budget_keeps_warm_p95_within_budget(self):
+        sources = self.root / "bounded-sources"
+        sources.mkdir()
+        file_bytes = PREVIOUS.MAX_SOURCE_RECHECK_BYTES // PREVIOUS.MAX_REQUIRED_SOURCE_DIGESTS
+        required = {}
+        for index in range(PREVIOUS.MAX_REQUIRED_SOURCE_DIGESTS):
+            source = sources / f"source-{index:02d}.py"
+            source.write_bytes(bytes([index]) * file_bytes)
+            relative = source.relative_to(self.root).as_posix()
+            required[relative] = hashlib.sha256(source.read_bytes()).hexdigest()
+        self.git("add", "bounded-sources")
+        self.git("commit", "-qm", "bounded source recheck fixture")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        self.publish(
+            required_source_digests=required,
+            source_recheck_complete=True,
+            source_inventory_git_tracked_only=True,
+        )
+
+        samples = []
+        self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
+        for _index in range(20):
+            started = time.perf_counter_ns()
+            result = PREVIOUS.lookup_previous(self.request())
+            samples.append((time.perf_counter_ns() - started) / 1_000_000)
+            self.assertEqual(result.status, "fresh")
         samples.sort()
         p95 = samples[math.ceil(len(samples) * 0.95) - 1]
 
