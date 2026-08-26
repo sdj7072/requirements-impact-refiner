@@ -297,8 +297,12 @@ class FastScanTest(unittest.TestCase):
             ("model_calls", True),
             ("model_calls", -1),
             ("accounting_exclusions", [f"row-{index}" for index in range(17)]),
-            ("accounting_exclusions", ["한" * 85 + "é"]),
+            ("accounting_exclusions", ["😀" * 257]),
             ("accounting_exclusions", ["same", "same"]),
+            (
+                "accounting_exclusions",
+                ["😀" * 255 + chr(ord("a") + index) for index in range(16)],
+            ),
         )
         for field, malformed in mutations:
             with self.subTest(field=field, malformed=malformed):

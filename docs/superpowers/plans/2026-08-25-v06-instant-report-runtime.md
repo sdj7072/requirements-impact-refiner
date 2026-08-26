@@ -371,7 +371,10 @@ fields. Keep model estimates and actual usage null while `model_calls=0`; only a
 trusted client/model result boundary may populate them. Record lookup,
 inventory/delta, compact serialization, scoped accounted reuse/new evidence,
 named exclusions, cache status, persisted analysis time, and result-only
-operation time. Metrics do not enter scan identity or evidence confidence.
+operation time. Exclusion strings use standard Draft 2020-12 `maxLength=256`
+Unicode-character semantics; the complete canonical UTF-8 metrics mapping has
+a separate 16 KiB runtime ceiling documented by schema `$comment`. Metrics do
+not enter scan identity or evidence confidence.
 
 - [ ] **Step 4: Add measured-fixture performance gates**
 

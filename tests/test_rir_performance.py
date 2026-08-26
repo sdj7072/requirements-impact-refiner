@@ -196,11 +196,10 @@ class RirPerformanceTest(unittest.TestCase):
         performance = load_performance()
         base = performance.PerformanceMetrics().to_mapping()
         too_many = [f"exclusion-{index:02d}" for index in range(17)]
-        unicode_257_bytes = "한" * 85 + "é"
-        self.assertEqual(len(unicode_257_bytes.encode()), 257)
+        unicode_257_characters = "😀" * 257
         invalid = (
             too_many,
-            [unicode_257_bytes],
+            [unicode_257_characters],
             ["duplicate", "duplicate"],
             [""],
         )
@@ -215,6 +214,28 @@ class RirPerformanceTest(unittest.TestCase):
         unsorted = ("z-last", "a-first")
         valid = performance.PerformanceMetrics(accounting_exclusions=unsorted)
         self.assertEqual(valid.accounting_exclusions, unsorted)
+        unicode_256_characters = "😀" * 256
+        self.assertEqual(len(unicode_256_characters), 256)
+        self.assertEqual(
+            performance.PerformanceMetrics(
+                accounting_exclusions=(unicode_256_characters,)
+            ).accounting_exclusions,
+            (unicode_256_characters,),
+        )
+
+    def test_canonical_metrics_mapping_has_an_overall_utf8_byte_ceiling(self):
+        performance = load_performance()
+        base = "😀" * 255
+        exclusions = tuple(base + chr(ord("a") + index) for index in range(16))
+        mapping = performance.PerformanceMetrics().to_mapping()
+        mapping["accounting_exclusions"] = list(exclusions)
+        canonical = json.dumps(
+            mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        self.assertGreater(len(canonical), performance.MAX_METRICS_MAPPING_BYTES)
+
+        with self.assertRaisesRegex(ValueError, "canonical byte limit"):
+            performance.PerformanceMetrics.from_mapping(mapping)
 
     def test_trusted_actual_usage_accepts_bounded_complete_pairs(self):
         performance = load_performance()

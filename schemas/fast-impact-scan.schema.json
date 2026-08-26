@@ -104,6 +104,7 @@
     },
     "performance_metrics": {
       "type": "object",
+      "$comment": "Runtime additionally caps canonical UTF-8 serialization at 16384 bytes; Draft 2020-12 has no serialized-byte-length keyword.",
       "additionalProperties": false,
       "required": [
         "previous_lookup",
@@ -179,8 +180,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256,
-            "x-maxUtf8Bytes": 256
+            "maxLength": 256
           }
         },
         "estimated_serialized_input_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},

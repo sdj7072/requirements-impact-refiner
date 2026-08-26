@@ -727,8 +727,12 @@ class DeltaScanTest(unittest.TestCase):
             ("model_calls", True),
             ("model_calls", -1),
             ("accounting_exclusions", [f"row-{index}" for index in range(17)]),
-            ("accounting_exclusions", ["한" * 85 + "é"]),
+            ("accounting_exclusions", ["😀" * 257]),
             ("accounting_exclusions", ["same", "same"]),
+            (
+                "accounting_exclusions",
+                ["😀" * 255 + chr(ord("a") + index) for index in range(16)],
+            ),
         )
         for field, malformed in mutations:
             with self.subTest(field=field, malformed=malformed):
@@ -738,6 +742,24 @@ class DeltaScanTest(unittest.TestCase):
                     ValueError, "delta worker performance metrics are invalid"
                 ):
                     CONTROLLER._scan_result_from_mapping(mapping, 1)
+
+    def test_draft2020_exclusion_length_matches_runtime_character_semantics(self):
+        schema = json.loads(
+            (ROOT / "schemas" / "fast-impact-scan.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
+        item_schema = schema["properties"]["performance_metrics"]["properties"][
+            "accounting_exclusions"
+        ]["items"]
+        accepted = "😀" * 256
+        rejected = "😀" * 257
+
+        MCP._validate_schema(accepted, item_schema, "exclusion")
+        with self.assertRaisesRegex(ValueError, "too long"):
+            MCP._validate_schema(rejected, item_schema, "exclusion")
+        FAST_SCAN.rir_performance.PerformanceMetrics(accounting_exclusions=(accepted,))
+        with self.assertRaisesRegex(ValueError, "accounting_exclusions"):
+            FAST_SCAN.rir_performance.PerformanceMetrics(accounting_exclusions=(rejected,))
 
     def test_worker_filesystem_trust_failure_returns_identity_free_partial(self):
         missing_root = Path(self.temporary.name) / "missing-repository"

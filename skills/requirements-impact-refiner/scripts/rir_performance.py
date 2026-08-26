@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 MAX_METRIC_BYTES = 16 * 1024 * 1024
+MAX_METRICS_MAPPING_BYTES = 16 * 1024
 MAX_INTEGER = 2_147_483_647
 CACHE_STATUSES = frozenset({"hit", "miss", "bypassed"})
 _PHASE_KEYS = frozenset({"elapsed_ms", "bytes_read", "serialized_bytes", "cache_status"})
@@ -178,7 +180,10 @@ class PerformanceMetrics:
             raise ValueError("accounting_exclusions violates its collection bound")
         try:
             exclusions_valid = all(
-                isinstance(row, str) and row != "" and len(row.encode("utf-8")) <= 256
+                isinstance(row, str)
+                and row != ""
+                and len(row) <= 256
+                and isinstance(row.encode("utf-8"), bytes)
                 for row in self.accounting_exclusions
             ) and len(set(self.accounting_exclusions)) == len(self.accounting_exclusions)
         except (TypeError, UnicodeEncodeError):
@@ -222,6 +227,19 @@ class PerformanceMetrics:
             and self.operation_elapsed_ms < self.analysis_elapsed_ms
         ):
             raise ValueError("operation_elapsed_ms cannot precede analysis_elapsed_ms")
+        try:
+            canonical_size = len(
+                json.dumps(
+                    self.to_mapping(),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+        except (RecursionError, TypeError, UnicodeEncodeError, ValueError) as error:
+            raise ValueError("performance metrics are not canonical UTF-8 JSON") from error
+        if canonical_size > MAX_METRICS_MAPPING_BYTES:
+            raise ValueError("performance metrics exceed the canonical byte limit")
 
     @classmethod
     def from_payloads(cls, **kwargs) -> PerformanceMetrics:
