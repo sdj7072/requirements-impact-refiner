@@ -1184,6 +1184,161 @@ class RirReportContextTest(unittest.TestCase):
         redirected = CONTEXT.probe_source_inventory_git(self.root, inventory)
         self.assertFalse(redirected[2])
 
+    def test_source_inventory_git_proof_binds_required_digest_to_commit_blob(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        source = self.root / "api.py"
+        source.write_text("value = 'commit'\n", encoding="utf-8")
+        subprocess.run(["git", "add", "api.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        wrong = {"api.py": hashlib.sha256(b"different bytes\n").hexdigest()}
+
+        self.assertEqual(
+            CONTEXT.probe_source_inventory_git(self.root, wrong),
+            (commit, True, False),
+        )
+
+    def test_source_inventory_git_proof_rejects_checkout_and_index_flag_races(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        source = self.root / "api.py"
+        source.write_text("value = 'A'\n", encoding="utf-8")
+        subprocess.run(["git", "add", "api.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "A"], cwd=self.root, check=True)
+        commit_a = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        digest_a = hashlib.sha256(source.read_bytes()).hexdigest()
+        source.write_text("value = 'B'\n", encoding="utf-8")
+        subprocess.run(["git", "commit", "-qam", "B"], cwd=self.root, check=True)
+        commit_b = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.root, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        subprocess.run(["git", "checkout", "-q", commit_a], cwd=self.root, check=True)
+        real_run_git = CONTEXT._run_git
+        switched = False
+
+        def checkout_race(root, arguments, **kwargs):
+            nonlocal switched
+            result = real_run_git(root, arguments, **kwargs)
+            if not switched and "HEAD^{commit}" in arguments:
+                switched = True
+                subprocess.run(["git", "checkout", "-q", commit_b], cwd=self.root, check=True)
+            return result
+
+        with mock.patch.object(CONTEXT, "_run_git", side_effect=checkout_race):
+            checkout_result = CONTEXT.probe_source_inventory_git(self.root, {"api.py": digest_a})
+        self.assertFalse(checkout_result[2])
+
+        subprocess.run(["git", "checkout", "-q", commit_a], cwd=self.root, check=True)
+        raced = False
+
+        def index_race(root, arguments, **kwargs):
+            nonlocal raced
+            result = real_run_git(root, arguments, **kwargs)
+            if not raced and "ls-files" in arguments:
+                raced = True
+                subprocess.run(
+                    ["git", "update-index", "--assume-unchanged", "api.py"],
+                    cwd=self.root,
+                    check=True,
+                )
+                source.write_text("hidden edit\n", encoding="utf-8")
+            return result
+
+        with mock.patch.object(CONTEXT, "_run_git", side_effect=index_race):
+            index_result = CONTEXT.probe_source_inventory_git(self.root, {"api.py": digest_a})
+        self.assertFalse(index_result[2])
+
+    def test_source_inventory_git_proof_accepts_clean_source_bearing_submodule(self):
+        child_temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(child_temporary.cleanup)
+        child = Path(child_temporary.name).resolve()
+        for repository in (child, self.root):
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "rir@example.invalid"],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=repository, check=True)
+        child_source = child / "api.py"
+        child_source.write_text("value = 'submodule'\n", encoding="utf-8")
+        subprocess.run(["git", "add", "api.py"], cwd=child, check=True)
+        subprocess.run(["git", "commit", "-qm", "child"], cwd=child, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                str(child),
+                "deps/child",
+            ],
+            cwd=self.root,
+            check=True,
+        )
+        (self.root / ".gitignore").write_text(".requirements-impact-refiner/\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qam", "add child"], cwd=self.root, check=True)
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        checkout_source = self.root / "deps" / "child" / "api.py"
+        required = {"deps/child/api.py": hashlib.sha256(checkout_source.read_bytes()).hexdigest()}
+
+        self.assertEqual(
+            CONTEXT.probe_source_inventory_git(self.root, required),
+            (commit, True, True),
+        )
+        published = self.publish_report()
+        original_request = self.base_state["original_requirement"]["request"]
+        context = CONTEXT.ReportContext(
+            schema_version=2,
+            report_id="RPT-001",
+            revision=1,
+            markdown_sha256=published.markdown_sha256,
+            state_sha256=hashlib.sha256(published.state_path.read_bytes()).hexdigest(),
+            repo_root_sha256=CONTEXT.repo_root_sha256(self.root),
+            requirement_sha256=CONTEXT.canonical_requirement_sha256(original_request),
+            repository_evidence_sha256=CONTEXT.canonical_repository_evidence_sha256(()),
+            source_inventory_sha256=FINALIZE.GRAPH_DELIVERY.source_inventory_sha256(required),
+            payload_sha256=FINALIZE._payload_sha256(),
+            created_at="2026-08-25T12:34:56Z",
+            baseline_commit=commit,
+            baseline_clean=True,
+            source_inventory_available=True,
+            source_inventory_complete=True,
+            source_inventory_git_tracked_only=True,
+        )
+        CONTEXT.publish_report_context(self.root, context)
+
+        previous = CONTROLLER.lookup_previous(
+            CONTROLLER.PreviousLookupRequest(self.root, original_request, ())
+        )
+
+        self.assertEqual(previous.status, "fresh", previous.reason)
+
     def test_git_baseline_rejects_dirty_divergent_and_uninitialized_submodules(self):
         def initialize(repository: Path) -> None:
             subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
@@ -1511,6 +1666,65 @@ class RirReportContextTest(unittest.TestCase):
             CONTEXT.canonical_repository_evidence_sha256(()),
         )
 
+    def test_explicit_ignored_generated_seed_is_required_and_never_tracked_only(self):
+        self.configure_graph(True)
+        generated = self.root / "generated"
+        generated.mkdir()
+        source = generated / "api.py"
+        source.write_text("def generated_api():\n    return True\n", encoding="utf-8")
+        (self.root / ".gitignore").write_text(
+            ".requirements-impact-refiner/\ngenerated/\n", encoding="utf-8"
+        )
+        (self.root / "tracked.py").write_text("stable = True\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
+        change = "Change generated/api.py generated_api"
+        scan = CONTROLLER.scan_impact(CONTROLLER.ScanRequest(self.root, change, (), "balanced"))
+        draft = CONTROLLER.begin_refinement(
+            CONTROLLER.BeginRequest(self.root, change, (), "generic", scan_id=scan.scan_id)
+        )
+        request = self.finalize_request(draft, scan.receipt_id)
+        request.analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in scan.paths]
+        if not request.analysis["impacts"][0]["graph_path_keys"]:
+            request.analysis["impacts"][0]["coverage_rationale"] = (
+                "Fast Scan found no closed repository path."
+            )
+        request.analysis["impacts"][0]["evidence_level"] = "unknown"
+
+        runtime = dict(FINALIZE.default_runtime())
+        observed_required: dict[str, str] = {}
+        real_probe = runtime["probe_source_inventory_git"]
+
+        def capture_required(root, required):
+            observed_required.update(required)
+            return real_probe(root, required)
+
+        runtime["probe_source_inventory_git"] = capture_required
+        result = FINALIZE.finalize_refinement(request, _runtime=runtime)
+        context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
+        wrapper = json.loads(
+            (
+                self.root / ".requirements-impact-refiner" / "scans" / f"{scan.scan_id}.json"
+            ).read_text(encoding="utf-8")
+        )
+        generated_seed = next(
+            row for row in wrapper["seeds"] if row["location"] == "generated/api.py"
+        )
+
+        self.assertIsNotNone(context)
+        self.assertEqual(
+            generated_seed["source_sha256"], hashlib.sha256(source.read_bytes()).hexdigest()
+        )
+        self.assertNotIn("generated/api.py", wrapper["source_inventory"]["digests"])
+        self.assertEqual(observed_required["generated/api.py"], generated_seed["source_sha256"])
+        self.assertTrue(context.source_inventory_complete)
+        self.assertFalse(context.source_inventory_git_tracked_only)
+
     def test_context_failure_leaves_published_report_and_unconsumed_draft_for_retry(self):
         self.configure_graph(False)
         draft = self.begin("Context failure remains retryable.")
@@ -1538,6 +1752,168 @@ class RirReportContextTest(unittest.TestCase):
         self.assertTrue(old_context.is_file())
         self.assertTrue((published.state_path.parent / "revision-0001.context-v2.json").is_file())
         self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_literal_v1_metadata_and_context_migrate_stale_then_consume(self):
+        self.configure_graph(False)
+        source = self.root / "source.py"
+        source.write_text("value = 'old'\n", encoding="utf-8")
+        legacy_inventory_sha256 = FINALIZE.GRAPH_DELIVERY.source_inventory_sha256(
+            {"source.py": hashlib.sha256(source.read_bytes()).hexdigest()}
+        )
+        (self.root / ".gitignore").write_text(".requirements-impact-refiner/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "legacy baseline"], cwd=self.root, check=True)
+        legacy_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        draft_result = self.begin("Migrate literal v1 context safely.")
+        request = self.finalize_request(draft_result)
+        draft = CONTROLLER.load_draft(self.root, draft_result.draft_id)
+        state, key_map = FINALIZE.LINEAGE.build_state(draft, request.analysis, None)
+        state_bytes = FINALIZE.CONTRACTS.canonical_bytes(state)
+        published = FINALIZE.REPORT_STORE.publish_revision(
+            self.root, state_bytes, resume_partial=True
+        )
+        analysis_sha256 = hashlib.sha256(
+            FINALIZE.CONTRACTS.canonical_bytes(request.analysis)
+        ).hexdigest()
+        requirement_sha256 = CONTEXT.canonical_requirement_sha256(draft["request"])
+        old_context_identity = {
+            "repo_root_sha256": CONTEXT.repo_root_sha256(self.root),
+            "requirement_sha256": requirement_sha256,
+            "source_inventory_sha256": legacy_inventory_sha256,
+            "source_inventory_available": True,
+            "source_inventory_complete": True,
+            "payload_sha256": "5" * 64,
+        }
+        old_metadata = {
+            "schema_version": 1,
+            "draft_id": draft["draft_id"],
+            "report_id": draft["report_id"],
+            "revision": draft["revision"],
+            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
+            "key_map": key_map,
+            "analysis_sha256": analysis_sha256,
+            "context_identity": old_context_identity,
+        }
+        metadata_path = published.state_path.with_name("revision-0001.controller.json")
+        metadata_path.write_bytes(canonical_bytes(old_metadata))
+        os.chmod(metadata_path, 0o600)
+        old_context = {
+            "schema_version": 1,
+            "report_id": "RPT-001",
+            "revision": 1,
+            "markdown_sha256": published.markdown_sha256,
+            **old_context_identity,
+            "created_at": "2026-08-25T12:34:56Z",
+            "baseline_commit": legacy_commit,
+            "baseline_clean": True,
+        }
+        old_context_path = published.state_path.with_name("revision-0001.context.json")
+        old_context_path.write_bytes(canonical_bytes(old_context))
+        os.chmod(old_context_path, 0o600)
+        source.write_text("value = 'changed after v1 publication'\n", encoding="utf-8")
+
+        result = FINALIZE.finalize_refinement(request)
+
+        migrated = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
+        self.assertIsNotNone(migrated)
+        self.assertFalse(migrated.source_inventory_git_tracked_only)
+        self.assertEqual(migrated.state_sha256, hashlib.sha256(state_bytes).hexdigest())
+        self.assertTrue(old_context_path.is_file())
+        self.assertTrue(
+            FINALIZE.STORAGE.load_private_draft(self.root, draft_result.draft_id)["consumed"]
+        )
+        previous = CONTROLLER.lookup_previous(
+            CONTROLLER.PreviousLookupRequest(
+                self.root, draft["request"], tuple(draft["repository_evidence"])
+            )
+        )
+        self.assertEqual(previous.status, "stale")
+        self.assertIn("Git-tracked", previous.reason)
+
+    def test_legacy_metadata_migration_rejects_wrong_draft_analysis_and_state(self):
+        self.configure_graph(False)
+        draft_result = self.begin("Reject mismatched v1 migration.")
+        request = self.finalize_request(draft_result)
+        draft = CONTROLLER.load_draft(self.root, draft_result.draft_id)
+        state, key_map = FINALIZE.LINEAGE.build_state(draft, request.analysis, None)
+        state_bytes = FINALIZE.CONTRACTS.canonical_bytes(state)
+        published = FINALIZE.REPORT_STORE.publish_revision(
+            self.root, state_bytes, resume_partial=True
+        )
+        analysis_sha256 = hashlib.sha256(
+            FINALIZE.CONTRACTS.canonical_bytes(request.analysis)
+        ).hexdigest()
+        old_metadata = {
+            "schema_version": 1,
+            "draft_id": draft["draft_id"],
+            "report_id": draft["report_id"],
+            "revision": draft["revision"],
+            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
+            "key_map": key_map,
+            "analysis_sha256": analysis_sha256,
+            "context_identity": {
+                "repo_root_sha256": CONTEXT.repo_root_sha256(self.root),
+                "requirement_sha256": CONTEXT.canonical_requirement_sha256(draft["request"]),
+                "source_inventory_sha256": None,
+                "source_inventory_available": False,
+                "source_inventory_complete": False,
+                "payload_sha256": "5" * 64,
+            },
+        }
+        metadata_path = published.state_path.with_name("revision-0001.controller.json")
+        original = canonical_bytes(old_metadata)
+        metadata_path.write_bytes(original)
+        os.chmod(metadata_path, 0o600)
+        evidence_sha256 = CONTEXT.canonical_repository_evidence_sha256(
+            tuple(draft["repository_evidence"])
+        )
+        context_identity = {
+            "repo_root_sha256": CONTEXT.repo_root_sha256(self.root),
+            "requirement_sha256": CONTEXT.canonical_requirement_sha256(draft["request"]),
+            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
+            "repository_evidence_sha256": evidence_sha256,
+            "source_inventory_sha256": None,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
+            "payload_sha256": FINALIZE._payload_sha256(),
+        }
+        cases = (
+            (dict(draft, draft_id="f" * 32), state_bytes, analysis_sha256),
+            (draft, state_bytes, "e" * 64),
+            (draft, state_bytes + b"tamper", analysis_sha256),
+        )
+        for selected_draft, selected_state, selected_analysis in cases:
+            with self.subTest(
+                draft_id=selected_draft["draft_id"],
+                analysis=selected_analysis,
+                tampered=selected_state != state_bytes,
+            ):
+                with self.assertRaises(ValueError):
+                    FINALIZE.STORAGE.migrate_legacy_controller_metadata(
+                        self.root,
+                        selected_draft,
+                        selected_state,
+                        key_map,
+                        None,
+                        selected_analysis,
+                        context_identity,
+                    )
+                self.assertEqual(metadata_path.read_bytes(), original)
+        self.assertFalse(
+            FINALIZE.STORAGE.load_private_draft(self.root, draft_result.draft_id)["consumed"]
+        )
 
     def test_context_cleanup_failure_leaves_draft_unconsumed_and_retry_recovers(self):
         self.configure_graph(False)

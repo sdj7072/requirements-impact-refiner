@@ -420,24 +420,107 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "stale")
         self.assertIn("worktree", result.reason.lower())
 
+    def test_descriptor_safe_git_control_parsing_and_packed_head(self):
+        git_dir = self.root / ".git"
+        self.git("pack-refs", "--all", "--prune")
+        self.assertEqual(PREVIOUS._filesystem_head(git_dir), self.baseline_commit)
+        head_path = git_dir / "HEAD"
+        original_head = head_path.read_bytes()
+        try:
+            for payload in (
+                b"\xff\n",
+                b"not-a-head\n",
+                b"ref: ../escape\n",
+                b"ref: refs/heads/missing\n",
+            ):
+                with self.subTest(head=payload):
+                    head_path.write_bytes(payload)
+                    with self.assertRaises(PREVIOUS._GitUnavailable):
+                        PREVIOUS._filesystem_head(git_dir)
+        finally:
+            head_path.write_bytes(original_head)
+
+        config = git_dir / "config"
+        original_config = config.read_bytes()
+        try:
+            config.write_bytes(original_config + b"\n[include]\npath = /tmp/foreign\n")
+            self.assertFalse(PREVIOUS._configured_worktree_matches(self.root, git_dir))
+            config.write_bytes(original_config + b"\n[broken\n")
+            with self.assertRaises(PREVIOUS._GitUnavailable):
+                PREVIOUS._configured_worktree_matches(self.root, git_dir)
+        finally:
+            config.write_bytes(original_config)
+
+        oversized = self.root / "oversized-control"
+        oversized.write_bytes(b"x" * 5)
+        with self.assertRaises(PREVIOUS._GitUnavailable):
+            PREVIOUS._read_git_control_file(oversized, 4)
+
+        unsafe_root = Path(self.temporary.name) / "unsafe-git-marker"
+        unsafe_root.mkdir()
+        marker = unsafe_root / ".git"
+        marker.write_text("gitdir: missing\n", encoding="utf-8")
+        with self.assertRaises(PREVIOUS._GitUnavailable):
+            PREVIOUS._filesystem_git_dir(unsafe_root)
+        marker.unlink()
+        marker.symlink_to(git_dir, target_is_directory=True)
+        with self.assertRaises(PREVIOUS._GitUnavailable):
+            PREVIOUS._filesystem_git_dir(unsafe_root)
+
+    def test_gitlink_index_parser_rejects_malformed_and_duplicate_entries(self):
+        malformed = (
+            b"H malformed\0",
+            b"H 160000 not-a-commit 0\tdeps/child\0",
+            (
+                b"H 160000 "
+                + b"a" * 40
+                + b" 0\tdeps/child\0H 160000 "
+                + b"b" * 40
+                + b" 0\tdeps/child\0"
+            ),
+        )
+        for payload in malformed:
+            with self.subTest(payload=payload[:60]):
+                with self.assertRaises(PREVIOUS._GitUnavailable):
+                    PREVIOUS._gitlinks_from_index(payload)
+
     def test_head_change_between_freshness_probes_is_stale(self):
         self.publish()
-        real_runner = PREVIOUS._run_git_command
+        real_head = PREVIOUS._filesystem_head
         head_calls = 0
 
-        def runner(root, arguments, deadline):
+        def head(git_dir):
             nonlocal head_calls
-            if "rev-parse" in arguments and "--verify" in arguments:
-                head_calls += 1
-                if head_calls > 1:
-                    return PREVIOUS._GitCommandResult(0, b"f" * 40 + b"\n")
-            return real_runner(root, arguments, deadline)
+            head_calls += 1
+            if head_calls > 1:
+                return "f" * 40
+            return real_head(git_dir)
+
+        with mock.patch.object(PREVIOUS, "_filesystem_head", side_effect=head):
+            result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("HEAD", result.reason)
+
+    def test_index_flag_race_hiding_a_real_edit_is_stale(self):
+        self.publish()
+        real_runner = PREVIOUS._run_git_command
+        raced = False
+
+        def runner(root, arguments, deadline):
+            nonlocal raced
+            result = real_runner(root, arguments, deadline)
+            if not raced and "ls-files" in arguments:
+                raced = True
+                self.git("update-index", "--assume-unchanged", "app.py")
+                (self.root / "app.py").write_text("hidden = True\n", encoding="utf-8")
+            return result
 
         with mock.patch.object(PREVIOUS, "_run_git_command", side_effect=runner):
             result = PREVIOUS.lookup_previous(self.request())
 
         self.assertEqual(result.status, "stale")
-        self.assertIn("HEAD", result.reason)
+        self.assertIn("index", result.reason.lower())
 
     def test_changed_head_is_stale_and_lists_commit_delta_paths(self):
         self.publish()
@@ -512,14 +595,11 @@ class PreviousLookupTest(unittest.TestCase):
 
     def test_unproved_submodule_state_is_stale_never_fresh(self):
         self.publish()
-        real_runner = PREVIOUS._run_git_command
-
-        def runner(root, arguments, deadline):
-            if "submodule" in arguments and "status" in arguments:
-                return PREVIOUS._GitCommandResult(0, b"-" + b"a" * 40 + b" vendor/lib\n")
-            return real_runner(root, arguments, deadline)
-
-        with mock.patch.object(PREVIOUS, "_run_git_command", side_effect=runner):
+        with mock.patch.object(
+            PREVIOUS,
+            "_submodule_index_snapshots",
+            side_effect=PREVIOUS._GitUnavailable("Git submodule state is not clean"),
+        ):
             result = PREVIOUS.lookup_previous(self.request())
 
         self.assertEqual(result.status, "stale")
@@ -548,7 +628,8 @@ class PreviousLookupTest(unittest.TestCase):
         self.git("commit", "-qam", "add submodule")
         self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
         self.publish()
-        self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
+        clean_result = PREVIOUS.lookup_previous(self.request())
+        self.assertEqual(clean_result.status, "fresh", clean_result.reason)
 
         checkout = self.root / "deps" / "child"
         subprocess.run(
@@ -559,7 +640,7 @@ class PreviousLookupTest(unittest.TestCase):
         result = PREVIOUS.lookup_previous(self.request())
 
         self.assertEqual(result.status, "stale")
-        self.assertIn("submodule index", result.reason)
+        self.assertIn("index", result.reason.lower())
 
     def test_legacy_single_lineage_never_discloses_identity_or_body(self):
         self.publish(with_context=False)

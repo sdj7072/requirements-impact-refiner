@@ -814,63 +814,238 @@ def _decode_single_path(payload: bytes, label: str) -> Path:
     return Path(value)
 
 
-def _worktree_scope(root: Path, deadline: float) -> tuple[str, str]:
-    git_dir_payload = _successful(
-        _run_git_command(root, ("rev-parse", "--absolute-git-dir"), deadline),
-        "Git directory",
-    )
-    git_dir = _decode_single_path(git_dir_payload, "Git directory")
+def _filesystem_git_dir(root: Path) -> Path:
+    marker = root / ".git"
     try:
-        git_dir = git_dir.resolve(strict=True)
+        metadata = marker.lstat()
     except OSError as error:
         raise _GitUnavailable("Git directory is unavailable") from error
-    if not git_dir.is_dir():
-        raise _GitUnavailable("Git directory is invalid")
-    scope = (f"--git-dir={git_dir}", f"--work-tree={root}")
-    configured = _run_git_command(
-        root, (*scope, "config", "--local", "--get", "core.worktree"), deadline
-    )
-    if configured is None:
-        raise _GitUnavailable("Git core.worktree could not be verified")
-    if configured.returncode == 0:
-        configured_path = _decode_single_path(configured.output, "Git core.worktree")
-        configured_root = (
-            configured_path if configured_path.is_absolute() else git_dir / configured_path
-        ).resolve()
-        if configured_root != root:
-            raise _GitUnavailable("Git core.worktree redirects outside the repository")
-    elif configured.returncode != 1:
-        raise _GitUnavailable("Git core.worktree could not be verified")
-    top_payload = _successful(
-        _run_git_command(root, (*scope, "rev-parse", "--show-toplevel"), deadline),
-        "Git worktree",
-    )
+    if stat.S_ISDIR(metadata.st_mode) and not marker.is_symlink():
+        return marker.resolve()
+    if not stat.S_ISREG(metadata.st_mode) or marker.is_symlink() or metadata.st_size > 4096:
+        raise _GitUnavailable("Git directory marker is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        top = _decode_single_path(top_payload, "Git worktree").resolve(strict=True)
+        descriptor = os.open(marker, flags)
+        try:
+            payload = os.read(descriptor, 4097)
+        finally:
+            os.close(descriptor)
     except OSError as error:
-        raise _GitUnavailable("Git worktree is unavailable") from error
-    if top != root:
-        raise _GitUnavailable("Git worktree identity does not match the repository")
+        raise _GitUnavailable("Git directory marker is unavailable") from error
+    try:
+        text = payload.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError as error:
+        raise _GitUnavailable("Git directory marker is not UTF-8") from error
+    prefix = "gitdir: "
+    if not text.startswith(prefix) or "\n" in text or "\r" in text:
+        raise _GitUnavailable("Git directory marker is invalid")
+    value = Path(text[len(prefix) :])
+    git_dir = value if value.is_absolute() else marker.parent / value
+    try:
+        resolved = git_dir.resolve(strict=True)
+    except OSError as error:
+        raise _GitUnavailable("Git directory is unavailable") from error
+    if not resolved.is_dir():
+        raise _GitUnavailable("Git directory is invalid")
+    return resolved
+
+
+def _read_git_control_file(path: Path, maximum: int) -> bytes | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise _GitUnavailable("Git control file is unavailable") from error
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode) or metadata.st_size > maximum:
+        raise _GitUnavailable("Git control file is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+        try:
+            payload = os.read(descriptor, maximum + 1)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise _GitUnavailable("Git control file is unavailable") from error
+    if len(payload) > maximum:
+        raise _GitUnavailable("Git control file exceeds its byte limit")
+    return payload
+
+
+def _filesystem_common_dir(git_dir: Path) -> Path:
+    common_dir = git_dir
+    commondir_payload = _read_git_control_file(git_dir / "commondir", 4096)
+    if commondir_payload is not None:
+        try:
+            value = commondir_payload.decode("utf-8", errors="strict").strip()
+        except UnicodeDecodeError as error:
+            raise _GitUnavailable("Git common directory is not UTF-8") from error
+        if not value or "\n" in value or "\r" in value:
+            raise _GitUnavailable("Git common directory is invalid")
+        candidate = Path(value)
+        try:
+            common_dir = (candidate if candidate.is_absolute() else git_dir / candidate).resolve(
+                strict=True
+            )
+        except OSError as error:
+            raise _GitUnavailable("Git common directory is unavailable") from error
+        if not common_dir.is_dir():
+            raise _GitUnavailable("Git common directory is invalid")
+    return common_dir
+
+
+def _filesystem_head(git_dir: Path) -> str:
+    payload = _read_git_control_file(git_dir / "HEAD", 4096)
+    if payload is None:
+        raise _GitUnavailable("Git HEAD is unavailable")
+    try:
+        value = payload.decode("ascii", errors="strict").strip()
+    except UnicodeDecodeError as error:
+        raise _GitUnavailable("Git HEAD is not ASCII") from error
+    if COMMIT_PATTERN.fullmatch(value) is not None:
+        return value
+    prefix = "ref: "
+    if not value.startswith(prefix):
+        raise _GitUnavailable("Git HEAD is invalid")
+    reference = value[len(prefix) :]
+    reference_path = PurePosixPath(reference)
+    if (
+        not reference.startswith("refs/")
+        or reference_path.is_absolute()
+        or ".." in reference_path.parts
+    ):
+        raise _GitUnavailable("Git HEAD reference is unsafe")
+    common_dir = _filesystem_common_dir(git_dir)
+    loose = _read_git_control_file(common_dir.joinpath(*reference_path.parts), 4096)
+    if loose is not None:
+        try:
+            commit = loose.decode("ascii", errors="strict").strip()
+        except UnicodeDecodeError as error:
+            raise _GitUnavailable("Git HEAD reference is not ASCII") from error
+        if COMMIT_PATTERN.fullmatch(commit) is None:
+            raise _GitUnavailable("Git HEAD reference is invalid")
+        return commit
+    packed = _read_git_control_file(common_dir / "packed-refs", 4 * 1024 * 1024)
+    if packed is None:
+        raise _GitUnavailable("Git HEAD reference is unavailable")
+    try:
+        lines = packed.decode("ascii", errors="strict").splitlines()
+    except UnicodeDecodeError as error:
+        raise _GitUnavailable("Git packed refs are not ASCII") from error
+    matches = [line.split(" ", 1)[0] for line in lines if line.endswith(" " + reference)]
+    if len(matches) != 1 or COMMIT_PATTERN.fullmatch(matches[0]) is None:
+        raise _GitUnavailable("Git HEAD reference is unavailable")
+    return matches[0]
+
+
+def _configured_worktree_matches(root: Path, git_dir: Path) -> bool:
+    common_dir = _filesystem_common_dir(git_dir)
+    configured_paths: list[Path] = []
+    for config_path in (common_dir / "config", git_dir / "config.worktree"):
+        payload = _read_git_control_file(config_path, 256 * 1024)
+        if payload is None:
+            continue
+        try:
+            text = payload.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise _GitUnavailable("Git local config is not UTF-8") from error
+        section = ""
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith(("#", ";")):
+                continue
+            if line.startswith("["):
+                if not line.endswith("]"):
+                    raise _GitUnavailable("Git local config is malformed")
+                section = line[1:-1].split(maxsplit=1)[0].strip('"').lower()
+                if section in {"include", "includeif"}:
+                    return False
+                continue
+            key, separator, value = line.partition("=")
+            if section == "core" and key.strip().lower() == "worktree":
+                if not separator:
+                    return False
+                configured = value.strip().strip('"')
+                if not configured:
+                    return False
+                configured_path = Path(configured)
+                configured_paths.append(
+                    configured_path
+                    if configured_path.is_absolute()
+                    else config_path.parent / configured_path
+                )
+    return all(path.resolve() == root for path in configured_paths)
+
+
+def _worktree_scope(root: Path, deadline: float) -> tuple[str, str]:
+    git_dir = _filesystem_git_dir(root)
+    scope = (f"--git-dir={git_dir}", f"--work-tree={root}")
+    if not _configured_worktree_matches(root, git_dir):
+        raise _GitUnavailable("Git core.worktree redirects outside the repository")
     return scope
 
 
-def _index_flags_clean(root: Path, scope: tuple[str, str], deadline: float) -> bool:
+def _index_flags_snapshot(root: Path, scope: tuple[str, str], deadline: float) -> bytes:
     payload = _successful(
-        _run_git_command(root, (*scope, "ls-files", "-v", "-z"), deadline),
+        _run_git_command(root, (*scope, "ls-files", "-s", "-v", "-z"), deadline),
         "Git index flags",
     )
     if not payload:
-        return True
+        return payload
     records = payload.split(b"\0")
     if records[-1] != b"":
         raise _GitUnavailable("Git index flags output is incomplete")
     for record in records[:-1]:
-        if len(record) < 3 or record[1:2] != b" ":
+        header, separator, path = record.partition(b"\t")
+        fields = header.split(b" ")
+        if not separator or len(fields) != 4 or len(fields[0]) != 1:
             raise _GitUnavailable("Git index flags output is malformed")
-        _safe_changed_path(record[2:])
-        if record[:1] != b"H":
-            return False
-    return True
+        _safe_changed_path(path)
+        if fields[0] != b"H":
+            raise _GitUnavailable("Git index visibility flags are present")
+    return payload
+
+
+def _gitlinks_from_index(payload: bytes) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for record in payload.split(b"\0")[:-1]:
+        header, separator, path_payload = record.partition(b"\t")
+        fields = header.split(b" ")
+        if not separator or len(fields) != 4:
+            raise _GitUnavailable("Git index output is malformed")
+        if fields[1] != b"160000" or fields[3] != b"0":
+            continue
+        path = _safe_changed_path(path_payload)
+        try:
+            commit = fields[2].decode("ascii", errors="strict")
+        except UnicodeDecodeError as error:
+            raise _GitUnavailable("Git gitlink object is not ASCII") from error
+        if COMMIT_PATTERN.fullmatch(commit) is None or path in result:
+            raise _GitUnavailable("Git gitlink object is invalid")
+        result[path] = commit
+    return result
+
+
+def _submodule_index_snapshots(
+    root: Path, flags: bytes, deadline: float
+) -> list[tuple[Path, tuple[str, str], str, bytes]]:
+    snapshots: list[tuple[Path, tuple[str, str], str, bytes]] = []
+    for path, expected_head in sorted(_gitlinks_from_index(flags).items()):
+        submodule_root = (root / path).resolve()
+        try:
+            submodule_root.relative_to(root)
+        except ValueError as error:
+            raise _GitUnavailable("Git submodule path escapes the repository") from error
+        submodule_scope = _worktree_scope(submodule_root, deadline)
+        submodule_git_dir = Path(submodule_scope[0].split("=", 1)[1])
+        if _filesystem_head(submodule_git_dir) != expected_head:
+            raise _GitUnavailable("Git submodule HEAD does not match its gitlink")
+        submodule_flags = _index_flags_snapshot(submodule_root, submodule_scope, deadline)
+        snapshots.append((submodule_root, submodule_scope, expected_head, submodule_flags))
+        snapshots.extend(_submodule_index_snapshots(submodule_root, submodule_flags, deadline))
+    return snapshots
 
 
 def _clean_submodule_paths(payload: bytes) -> tuple[str, ...] | None:
@@ -895,16 +1070,8 @@ def _clean_submodule_paths(payload: bytes) -> tuple[str, ...] | None:
 def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _GitSnapshot:
     try:
         scope = _worktree_scope(root, deadline)
-        commit_payload = _successful(
-            _run_git_command(root, (*scope, "rev-parse", "--verify", "HEAD^{commit}"), deadline),
-            "Git HEAD",
-        )
-        try:
-            commit = commit_payload.decode("ascii", errors="strict").strip()
-        except UnicodeDecodeError as error:
-            raise _GitUnavailable("Git HEAD is not ASCII") from error
-        if COMMIT_PATTERN.fullmatch(commit) is None:
-            raise _GitUnavailable("Git HEAD is invalid")
+        git_dir = Path(scope[0].split("=", 1)[1])
+        commit = _filesystem_head(git_dir)
         status_payload = _successful(
             _run_git_command(
                 root,
@@ -922,24 +1089,9 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
             "Git status",
         )
         status_paths = _status_paths(status_payload)
-        if not _index_flags_clean(root, scope, deadline):
-            raise _GitUnavailable("Git index visibility flags are present")
-        submodule_payload = _successful(
-            _run_git_command(root, (*scope, "submodule", "status", "--recursive"), deadline),
-            "Git submodule status",
-        )
-        submodule_paths = _clean_submodule_paths(submodule_payload)
-        submodules_clean = submodule_paths is not None
-        if submodule_paths is not None:
-            for submodule_path in submodule_paths:
-                submodule_root = (root / submodule_path).resolve()
-                try:
-                    submodule_root.relative_to(root)
-                except ValueError as error:
-                    raise _GitUnavailable("Git submodule path escapes the repository") from error
-                submodule_scope = _worktree_scope(submodule_root, deadline)
-                if not _index_flags_clean(submodule_root, submodule_scope, deadline):
-                    raise _GitUnavailable("Git submodule index visibility flags are present")
+        index_flags_before = _index_flags_snapshot(root, scope, deadline)
+        submodule_snapshots = _submodule_index_snapshots(root, index_flags_before, deadline)
+        submodules_clean = True
         diff_paths: tuple[str, ...] = ()
         if baseline_commit is not None and baseline_commit != commit:
             diff_payload = _successful(
@@ -980,14 +1132,15 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
         )
         if _status_paths(final_status_payload) != status_paths:
             raise _GitUnavailable("Git working tree changed during freshness proof")
-        after_payload = _successful(
-            _run_git_command(root, (*scope, "rev-parse", "--verify", "HEAD^{commit}"), deadline),
-            "Git HEAD",
-        )
-        try:
-            after_commit = after_payload.decode("ascii", errors="strict").strip()
-        except UnicodeDecodeError as error:
-            raise _GitUnavailable("Git HEAD is not ASCII") from error
+        if _index_flags_snapshot(root, scope, deadline) != index_flags_before:
+            raise _GitUnavailable("Git index changed during freshness proof")
+        for submodule_root, submodule_scope, expected_head, submodule_flags in submodule_snapshots:
+            submodule_git_dir = Path(submodule_scope[0].split("=", 1)[1])
+            if _filesystem_head(submodule_git_dir) != expected_head:
+                raise _GitUnavailable("Git submodule HEAD changed during freshness proof")
+            if _index_flags_snapshot(submodule_root, submodule_scope, deadline) != submodule_flags:
+                raise _GitUnavailable("Git submodule index changed during freshness proof")
+        after_commit = _filesystem_head(git_dir)
         if after_commit != commit:
             raise _GitUnavailable("Git HEAD changed during freshness proof")
         changed = tuple(sorted(set(status_paths) | set(diff_paths)))

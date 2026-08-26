@@ -1875,6 +1875,23 @@ def load_graph_context(
         receipt,
         deadline=deadline,
     )
+    required_digests = dict(source_digests)
+    required_complete = True
+    for seed in binding["seeds"]:
+        location = seed.get("location")
+        if location is None or location in required_digests:
+            continue
+        candidates = {
+            row.get("source_sha256")
+            for row in [*receipt["nodes"], *receipt["edges"]]
+            if row.get("location") == location and row.get("source_sha256") is not None
+        }
+        if len(candidates) > 1:
+            raise ValueError("graph seed digest conflicts across receipt evidence")
+        if len(candidates) != 1:
+            required_complete = False
+            continue
+        required_digests[location] = cast(str, next(iter(candidates)))
     return {
         "receipt": receipt,
         "sha256": digest,
@@ -1883,6 +1900,8 @@ def load_graph_context(
             "sha256": inventory_sha256,
             "complete": source_inventory_complete,
             "digests": dict(source_digests),
+            "required_digests": required_digests,
+            "required_complete": required_complete,
         },
     }
 

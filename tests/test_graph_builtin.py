@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import os
 import sys
@@ -122,6 +123,23 @@ class GraphBuiltinTest(unittest.TestCase):
             locations = {node.location for node in result.nodes}
             self.assertEqual(locations, {"src/main.py"})
             self.assertTrue({"binary", "invalid-utf8"} <= set(result.skipped.values()))
+
+    def test_explicit_generated_seed_keeps_its_digest_outside_default_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            generated = root / "generated"
+            generated.mkdir()
+            source = generated / "api.py"
+            source.write_text("def generated_api():\n    return True\n", encoding="utf-8")
+
+            result = scan(
+                root,
+                seeds=(BUILTIN.ScanSeed("generated_api", "generated/api.py"),),
+            )
+
+            node = next(row for row in result.nodes if row.location == "generated/api.py")
+            self.assertEqual(node.source_sha256, hashlib.sha256(source.read_bytes()).hexdigest())
+            self.assertNotIn("generated/api.py", result.source_digests)
 
     def test_unreadable_subtree_is_an_unknown_frontier_not_closed_coverage(self):
         with tempfile.TemporaryDirectory() as temporary:

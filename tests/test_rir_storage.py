@@ -313,7 +313,7 @@ class RirStorageTest(unittest.TestCase):
             "key_map": key_map,
             "report_id": "RPT-001",
             "revision": 1,
-            "schema_version": 1,
+            "schema_version": 2,
             "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
         }
         self.assertEqual(metadata_path.read_bytes(), canonical_bytes(metadata))
@@ -382,6 +382,64 @@ class RirStorageTest(unittest.TestCase):
         self.assertEqual(metadata["context_identity"], context_identity)
         self.assertEqual(metadata["key_map"], key_map)
         self.assertEqual(STORAGE.load_controller_metadata(current), key_map)
+
+    def test_legacy_completion_metadata_validator_accepts_only_exact_v1_identity(self):
+        state_sha256 = "1" * 64
+        legacy = {
+            "schema_version": 1,
+            "draft_id": DRAFT_ID,
+            "report_id": "RPT-001",
+            "revision": 1,
+            "state_sha256": state_sha256,
+            "key_map": {"impacts": {}},
+            "analysis_sha256": "2" * 64,
+            "context_identity": {
+                "repo_root_sha256": "3" * 64,
+                "requirement_sha256": "4" * 64,
+                "source_inventory_sha256": None,
+                "source_inventory_available": False,
+                "source_inventory_complete": False,
+                "payload_sha256": "5" * 64,
+            },
+        }
+        raw = canonical_bytes(legacy)
+        self.assertEqual(
+            STORAGE._validate_legacy_controller_metadata_bytes(
+                raw,
+                report_id="RPT-001",
+                revision=1,
+                state_sha256=state_sha256,
+            ),
+            legacy,
+        )
+        variants = (
+            {**legacy, "schema_version": 2},
+            {**legacy, "draft_id": "bad"},
+            {**legacy, "state_sha256": "6" * 64},
+            {**legacy, "analysis_sha256": "bad"},
+            {**legacy, "context_identity": {}},
+            {**legacy, "unknown": True},
+            {
+                **legacy,
+                "graph_receipt": {"receipt_id": "bad", "sha256": "7" * 64},
+            },
+        )
+        for value in variants:
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    STORAGE._validate_legacy_controller_metadata_bytes(
+                        canonical_bytes(value),
+                        report_id="RPT-001",
+                        revision=1,
+                        state_sha256=state_sha256,
+                    )
+        with self.assertRaises(ValueError):
+            STORAGE._validate_legacy_controller_metadata_bytes(
+                b"{}",
+                report_id="RPT-001",
+                revision=1,
+                state_sha256=state_sha256,
+            )
 
     def test_partial_metadata_stage_is_reader_invisible_and_does_not_block_replacement(self):
         draft, _path = self.write_draft()
@@ -1211,7 +1269,7 @@ class RirStorageTest(unittest.TestCase):
                     "key_map": {"padding": ""},
                     "report_id": "RPT-001",
                     "revision": 1,
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
                 }
                 base_size = len(canonical_bytes(metadata))

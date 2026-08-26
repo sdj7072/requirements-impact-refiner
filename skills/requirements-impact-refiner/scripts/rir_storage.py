@@ -311,6 +311,16 @@ _CONTEXT_IDENTITY_FIELDS = frozenset(
         "payload_sha256",
     }
 )
+_LEGACY_CONTEXT_IDENTITY_FIELDS = frozenset(
+    {
+        "repo_root_sha256",
+        "requirement_sha256",
+        "source_inventory_sha256",
+        "source_inventory_available",
+        "source_inventory_complete",
+        "payload_sha256",
+    }
+)
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -433,6 +443,31 @@ def _valid_context_identity(value: object) -> bool:
     return inventory_digest is None
 
 
+def _valid_legacy_context_identity(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != _LEGACY_CONTEXT_IDENTITY_FIELDS:
+        return False
+    for key in ("repo_root_sha256", "requirement_sha256", "payload_sha256"):
+        digest = value.get(key)
+        if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
+            return False
+    available = value.get("source_inventory_available")
+    complete = value.get("source_inventory_complete")
+    inventory = value.get("source_inventory_sha256")
+    return bool(
+        isinstance(available, bool)
+        and isinstance(complete, bool)
+        and not (complete and not available)
+        and (
+            (
+                available
+                and isinstance(inventory, str)
+                and _SHA256_PATTERN.fullmatch(inventory) is not None
+            )
+            or (not available and inventory is None)
+        )
+    )
+
+
 def _json_depth(text: str) -> int:
     depth = 0
     peak = 0
@@ -497,7 +532,7 @@ def _validate_controller_metadata_bytes(
         or bool(fields & completion_fields) != (completion_fields <= fields)
         or _canonical_bytes(payload) != raw
         or type(payload.get("schema_version")) is not int
-        or payload.get("schema_version") != 1
+        or payload.get("schema_version") != 2
         or not isinstance(payload.get("draft_id"), str)
         or DRAFT_ID_PATTERN.fullmatch(payload["draft_id"]) is None
         or payload.get("report_id") != report_id
@@ -916,6 +951,119 @@ def _load_controller_completion_metadata(current) -> dict[str, object] | None:
     if recovered is None:
         return None
     return recovered[0]
+
+
+def _validate_legacy_controller_metadata_bytes(
+    raw: bytes,
+    *,
+    report_id: str,
+    revision: int,
+    state_sha256: str,
+) -> dict[str, object]:
+    if not raw or len(raw) > MAX_CONTROLLER_METADATA_BYTES:
+        raise ValueError("legacy controller metadata exceeds 256 KiB")
+    try:
+        text = raw.decode("utf-8", errors="strict")
+        value = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("legacy controller metadata is invalid") from error
+    expected_fields = _CONTROLLER_METADATA_BASE_FIELDS | {
+        "analysis_sha256",
+        "context_identity",
+    }
+    if isinstance(value, dict) and "graph_receipt" in value:
+        expected_fields = expected_fields | {"graph_receipt"}
+    graph = value.get("graph_receipt") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected_fields
+        or _json_depth(text) > MAX_CONTROLLER_METADATA_DEPTH
+        or _canonical_bytes(value) != raw
+        or type(value.get("schema_version")) is not int
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("draft_id"), str)
+        or DRAFT_ID_PATTERN.fullmatch(value["draft_id"]) is None
+        or value.get("report_id") != report_id
+        or type(value.get("revision")) is not int
+        or value.get("revision") != revision
+        or value.get("state_sha256") != state_sha256
+        or not isinstance(value.get("key_map"), dict)
+        or not isinstance(value.get("analysis_sha256"), str)
+        or _SHA256_PATTERN.fullmatch(value["analysis_sha256"]) is None
+        or not _valid_legacy_context_identity(value.get("context_identity"))
+        or (
+            graph is not None
+            and (
+                not isinstance(graph, dict)
+                or set(graph) != {"receipt_id", "sha256"}
+                or not isinstance(graph.get("receipt_id"), str)
+                or _RECEIPT_ID_PATTERN.fullmatch(graph["receipt_id"]) is None
+                or not isinstance(graph.get("sha256"), str)
+                or _SHA256_PATTERN.fullmatch(graph["sha256"]) is None
+            )
+        )
+    ):
+        raise ValueError("legacy controller metadata identity is invalid")
+    return value
+
+
+def _read_legacy_controller_metadata_artifact(
+    path: Path,
+    *,
+    report_id: str,
+    revision: int,
+    state_sha256: str,
+) -> tuple[dict[str, object], bytes]:
+    directory_fd = _controller_metadata_directory_fd(path)
+    descriptor = None
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path.name, flags, dir_fd=directory_fd)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != os.fstat(directory_fd).st_uid
+            or metadata.st_nlink != 1
+            or metadata.st_size <= 0
+            or metadata.st_size > MAX_CONTROLLER_METADATA_BYTES
+        ):
+            raise ValueError("legacy controller metadata is unsafe")
+        raw = _read_bounded_descriptor(
+            descriptor, MAX_CONTROLLER_METADATA_BYTES, "legacy controller metadata"
+        )
+        return (
+            _validate_legacy_controller_metadata_bytes(
+                raw,
+                report_id=report_id,
+                revision=revision,
+                state_sha256=state_sha256,
+            ),
+            raw,
+        )
+    except OSError as error:
+        raise ValueError("legacy controller metadata is unavailable") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(directory_fd)
+
+
+def _load_legacy_controller_completion_metadata(current) -> dict[str, object] | None:
+    path = current.state_path.with_name(f"revision-{current.revision:04d}.controller.json")
+    if not path.exists() or path.is_symlink():
+        return None
+    try:
+        state_sha256 = hashlib.sha256(current.state_path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise ValueError("legacy controller state is unavailable") from error
+    value, _raw = _read_legacy_controller_metadata_artifact(
+        path,
+        report_id=current.report_id,
+        revision=current.revision,
+        state_sha256=state_sha256,
+    )
+    return value
 
 
 def _load_controller_metadata(current) -> dict[str, object] | None:
@@ -2281,7 +2429,7 @@ def _write_controller_metadata(
     report_id = str(draft["report_id"])
     state_sha256 = hashlib.sha256(state_bytes).hexdigest()
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "draft_id": draft["draft_id"],
         "report_id": draft["report_id"],
         "revision": draft["revision"],
@@ -2421,11 +2569,121 @@ def _write_controller_metadata(
         os.close(directory_fd)
 
 
+def _migrate_legacy_controller_metadata(
+    root: Path,
+    draft: Mapping[str, object],
+    state_bytes: bytes,
+    key_map: Mapping[str, object],
+    graph_receipt: Mapping[str, object] | None,
+    analysis_sha256: str,
+    context_identity: Mapping[str, object],
+) -> None:
+    resolved = _root(root)
+    report_id = str(draft.get("report_id"))
+    revision = _int_value(draft.get("revision"))
+    current = report_store.load_current(resolved, report_id)
+    if current is None or current.revision != revision or current.report_id != report_id:
+        raise ValueError("legacy migration requires the exact published revision")
+    try:
+        selected_state = current.state_path.read_bytes()
+    except OSError as error:
+        raise ValueError("legacy migration state is unavailable") from error
+    state_sha256 = hashlib.sha256(state_bytes).hexdigest()
+    if selected_state != state_bytes or hashlib.sha256(selected_state).hexdigest() != state_sha256:
+        raise ValueError("legacy migration state does not match the published revision")
+    path = _controller_metadata_path(report_id, revision, resolved)
+    legacy, _legacy_raw = _read_legacy_controller_metadata_artifact(
+        path,
+        report_id=report_id,
+        revision=revision,
+        state_sha256=state_sha256,
+    )
+    if (
+        legacy.get("draft_id") != draft.get("draft_id")
+        or legacy.get("analysis_sha256") != analysis_sha256
+        or legacy.get("key_map") != dict(key_map)
+        or legacy.get("graph_receipt") != (None if graph_receipt is None else dict(graph_receipt))
+        or not _valid_context_identity(dict(context_identity))
+    ):
+        raise ValueError("legacy migration identity does not match the current finalization")
+    metadata = {
+        "schema_version": 2,
+        "draft_id": draft["draft_id"],
+        "report_id": report_id,
+        "revision": revision,
+        "state_sha256": state_sha256,
+        "key_map": dict(key_map),
+        "analysis_sha256": analysis_sha256,
+        "context_identity": dict(context_identity),
+    }
+    if graph_receipt is not None:
+        metadata["graph_receipt"] = dict(graph_receipt)
+    payload = _canonical_bytes(metadata)
+    _validate_controller_metadata_bytes(
+        payload,
+        report_id=report_id,
+        revision=revision,
+        state_sha256=state_sha256,
+    )
+    directory_fd = _controller_metadata_directory_fd(path)
+    descriptor = None
+    stage = None
+    stage_created = False
+    try:
+        stage, descriptor, initial = _open_controller_metadata_stage(directory_fd, path.name)
+        stage_created = True
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise OSError("legacy metadata migration write made no progress")
+            offset += written
+        os.fsync(descriptor)
+        _verify_controller_metadata_stage(
+            directory_fd,
+            stage,
+            descriptor,
+            initial,
+            payload,
+            report_id=report_id,
+            revision=revision,
+            state_sha256=state_sha256,
+        )
+        os.replace(stage, path.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        stage_created = False
+        _fsync_controller_metadata_directory(directory_fd)
+        verified, verified_raw, verified_metadata = _read_controller_metadata_artifact(
+            directory_fd,
+            path.name,
+            report_id=report_id,
+            revision=revision,
+            state_sha256=state_sha256,
+            allowed_links=frozenset({1}),
+        )
+        if (
+            verified_raw != payload
+            or verified.get("draft_id") != draft.get("draft_id")
+            or verified_metadata.st_nlink != 1
+        ):
+            raise ValueError("legacy controller metadata migration could not be verified")
+    except (OSError, ValueError) as error:
+        if descriptor is not None and stage is not None and stage_created:
+            _cleanup_controller_metadata_stage(directory_fd, stage, descriptor)
+        if isinstance(error, ValueError):
+            raise
+        raise ValueError("legacy controller metadata migration failed") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(directory_fd)
+
+
 root_path = _root
 write_private_draft = _write_private_draft
 controller_metadata_path = _controller_metadata_path
 load_controller_metadata = _load_controller_metadata
 load_controller_completion_metadata = _load_controller_completion_metadata
+load_legacy_controller_completion_metadata = _load_legacy_controller_completion_metadata
 draft_path = _draft_path
 load_private_draft = load_draft
 replace_private_draft = _replace_private_draft
@@ -2434,3 +2692,4 @@ cas_replace_private_draft = _cas_replace_private_draft
 consume_draft = _consume
 report_lock = _report_lock
 write_controller_metadata = _write_controller_metadata
+migrate_legacy_controller_metadata = _migrate_legacy_controller_metadata

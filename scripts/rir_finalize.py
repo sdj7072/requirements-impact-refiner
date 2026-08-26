@@ -44,6 +44,8 @@ class _StorageContract(Protocol):
 
     def load_controller_completion_metadata(self, current): ...
 
+    def load_legacy_controller_completion_metadata(self, current): ...
+
     def report_lock(self, root: Path, report_id: str, deadline: object = None): ...
 
     def write_controller_metadata(
@@ -56,6 +58,8 @@ class _StorageContract(Protocol):
         analysis_sha256: str | None = None,
         context_identity: Mapping[str, object] | None = None,
     ) -> None: ...
+
+    def migrate_legacy_controller_metadata(self, *args, **kwargs) -> None: ...
 
     def consume_draft(self, path: Path, draft: dict[str, object], published, key_map) -> None: ...
 
@@ -154,6 +158,8 @@ class _ReportContextContract(Protocol):
     def publish_report_context(self, root: Path, context): ...
 
     def load_report_context(self, root: Path, report_id: str, revision: int): ...
+
+    def load_legacy_report_context(self, root: Path, report_id: str, revision: int): ...
 
 
 class _BuiltinContract(Protocol):
@@ -332,8 +338,10 @@ def _is_lineage_contract(value: object) -> TypeGuard[_LineageContract]:
                 "load_private_draft",
                 "draft_path",
                 "load_controller_completion_metadata",
+                "load_legacy_controller_completion_metadata",
                 "report_lock",
                 "write_controller_metadata",
+                "migrate_legacy_controller_metadata",
                 "consume_draft",
             ),
         )
@@ -517,6 +525,7 @@ def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContra
                 "probe_source_inventory_git",
                 "publish_report_context",
                 "load_report_context",
+                "load_legacy_report_context",
             ),
         )
     )
@@ -1007,6 +1016,29 @@ def load_promoted_scan_context(
     ):
         raise ValueError("promoted Fast Scan source inventory is invalid")
     inventory_digests = cast(dict[str, str], inventory["digests"])
+    required_digests = dict(inventory_digests)
+    required_complete = True
+    seeds = wrapper.get("seeds")
+    if not isinstance(seeds, list):
+        raise ValueError("promoted Fast Scan seed identity is invalid")
+    for row in seeds:
+        if not isinstance(row, Mapping):
+            raise ValueError("promoted Fast Scan seed identity is invalid")
+        location = row.get("location")
+        digest = row.get("source_sha256")
+        if location is None:
+            continue
+        if (
+            not isinstance(location, str)
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            required_complete = False
+            continue
+        existing = required_digests.get(location)
+        if existing is not None and existing != digest:
+            raise ValueError("promoted Fast Scan seed digest conflicts with source inventory")
+        required_digests[location] = digest
     return {
         "receipt": receipt,
         "sha256": binding["receipt_sha256"],
@@ -1015,6 +1047,8 @@ def load_promoted_scan_context(
             "sha256": GRAPH_DELIVERY.source_inventory_sha256(inventory_digests),
             "complete": inventory["complete"],
             "digests": dict(inventory_digests),
+            "required_digests": required_digests,
+            "required_complete": required_complete,
         },
     }
 
@@ -1032,7 +1066,9 @@ _RUNTIME_CALLABLES = (
     "canonical_bytes",
     "load_current",
     "load_controller_completion_metadata",
+    "load_legacy_controller_completion_metadata",
     "write_controller_metadata",
+    "migrate_legacy_controller_metadata",
     "publish_revision",
     "load_state_bytes",
     "render_compact",
@@ -1046,6 +1082,7 @@ _RUNTIME_CALLABLES = (
     "probe_source_inventory_git",
     "payload_sha256",
     "load_report_context",
+    "load_legacy_report_context",
     "publish_report_context",
     "draft_path",
     "consume_draft",
@@ -1080,7 +1117,9 @@ def default_runtime() -> Mapping[str, object]:
         "canonical_bytes": CONTRACTS.canonical_bytes,
         "load_current": REPORT_STORE.load_current,
         "load_controller_completion_metadata": STORAGE.load_controller_completion_metadata,
+        "load_legacy_controller_completion_metadata": STORAGE.load_legacy_controller_completion_metadata,
         "write_controller_metadata": STORAGE.write_controller_metadata,
+        "migrate_legacy_controller_metadata": STORAGE.migrate_legacy_controller_metadata,
         "publish_revision": REPORT_STORE.publish_revision,
         "report_store_error": REPORT_STORE.ReportStoreError,
         "load_state_bytes": COMPACT_STATE.load_state_bytes,
@@ -1095,6 +1134,7 @@ def default_runtime() -> Mapping[str, object]:
         "probe_source_inventory_git": REPORT_CONTEXT.probe_source_inventory_git,
         "payload_sha256": _payload_sha256,
         "load_report_context": REPORT_CONTEXT.load_report_context,
+        "load_legacy_report_context": REPORT_CONTEXT.load_legacy_report_context,
         "publish_report_context": REPORT_CONTEXT.publish_report_context,
         "draft_path": STORAGE.draft_path,
         "consume_draft": STORAGE.consume_draft,
@@ -1131,16 +1171,23 @@ def _source_inventory_identity(
         digest = promoted.get("sha256")
         complete = promoted.get("complete")
         digests = promoted.get("digests")
+        required_digests = promoted.get("required_digests")
+        required_complete = promoted.get("required_complete")
         if (
             isinstance(digest, str)
             and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
             and isinstance(complete, bool)
             and isinstance(digests, Mapping)
+            and isinstance(required_digests, Mapping)
+            and isinstance(required_complete, bool)
             and all(
                 isinstance(key, str) and isinstance(value, str) for key, value in digests.items()
             )
         ):
-            return digest, True, complete, dict(cast(Mapping[str, str], digests))
+            required = (
+                dict(cast(Mapping[str, str], required_digests)) if required_complete else None
+            )
+            return digest, True, complete, required
     binding = graph_context.get("binding")
     if isinstance(binding, Mapping):
         digest = binding.get("source_inventory_sha256")
@@ -1272,6 +1319,139 @@ def _result(runtime: Mapping[str, object], published, delivery: str, display: st
     )
 
 
+def _resume_legacy_completed_publication(
+    root: Path,
+    draft: Mapping[str, object],
+    request,
+    analysis_sha256: str,
+    runtime: Mapping[str, object],
+    current,
+    metadata: Mapping[str, object],
+):
+    report_id = str(draft["report_id"])
+    revision_value = draft.get("revision")
+    if type(revision_value) is not int:
+        return None
+    revision = revision_value
+    if (
+        metadata.get("draft_id") != draft.get("draft_id")
+        or metadata.get("report_id") != report_id
+        or metadata.get("revision") != revision
+        or metadata.get("analysis_sha256") != analysis_sha256
+        or not isinstance(metadata.get("key_map"), Mapping)
+    ):
+        return None
+    settings = draft.get("settings")
+    graph_settings = settings.get("impact_graph") if isinstance(settings, Mapping) else None
+    if not isinstance(graph_settings, Mapping):
+        return None
+    expected_graph = _draft_graph_receipt_identity(draft)
+    metadata_graph = metadata.get("graph_receipt")
+    if graph_settings.get("enabled") is True:
+        if (
+            expected_graph is None
+            or metadata_graph != expected_graph
+            or request.graph_receipt_id != expected_graph["receipt_id"]
+        ):
+            return None
+    elif (
+        request.graph_receipt_id is not None
+        or expected_graph is not None
+        or metadata_graph is not None
+    ):
+        return None
+    legacy_context = _operation(runtime, "load_legacy_report_context")(root, report_id, revision)
+    if not isinstance(legacy_context, Mapping):
+        return None
+    request_value = draft.get("request")
+    evidence_value = draft.get("repository_evidence")
+    if (
+        not isinstance(request_value, str)
+        or not isinstance(evidence_value, list)
+        or not all(isinstance(item, str) for item in evidence_value)
+    ):
+        return None
+    repo_sha256 = _operation(runtime, "repo_root_sha256")(root)
+    requirement_sha256 = _operation(runtime, "canonical_requirement_sha256")(request_value)
+    evidence_sha256 = _operation(runtime, "canonical_repository_evidence_sha256")(
+        tuple(evidence_value)
+    )
+    state_bytes, stored_state, delivery, display = _verified_published_display(runtime, current)
+    state_sha256 = hashlib.sha256(state_bytes).hexdigest()
+    if (
+        metadata.get("state_sha256") != state_sha256
+        or legacy_context.get("report_id") != report_id
+        or legacy_context.get("revision") != revision
+        or legacy_context.get("markdown_sha256") != current.markdown_sha256
+        or legacy_context.get("repo_root_sha256") != repo_sha256
+        or legacy_context.get("requirement_sha256") != requirement_sha256
+    ):
+        return None
+    original = stored_state.get("original_requirement")
+    if not isinstance(original, Mapping) or original.get("request") != request_value:
+        return None
+    source_sha256 = legacy_context.get("source_inventory_sha256")
+    source_available = legacy_context.get("source_inventory_available")
+    source_complete = legacy_context.get("source_inventory_complete")
+    if (
+        (source_sha256 is not None and not isinstance(source_sha256, str))
+        or not isinstance(source_available, bool)
+        or not isinstance(source_complete, bool)
+    ):
+        return None
+    payload_sha256 = _operation(runtime, "payload_sha256")()
+    context_identity = _context_identity(
+        repo_sha256,
+        requirement_sha256,
+        state_sha256,
+        evidence_sha256,
+        cast(Any, source_sha256),
+        source_available,
+        source_complete,
+        False,
+        payload_sha256,
+    )
+    graph_receipt = cast(Any, metadata_graph)
+    _operation(runtime, "migrate_legacy_controller_metadata")(
+        root,
+        draft,
+        state_bytes,
+        metadata["key_map"],
+        graph_receipt,
+        analysis_sha256,
+        context_identity,
+    )
+    context_type = runtime.get("context_type")
+    if not isinstance(context_type, type) or context_type is not REPORT_CONTEXT.ReportContext:
+        raise TypeError("finalize report context type is invalid")
+    migrated_context = _operation(runtime, "context_type")(
+        schema_version=2,
+        report_id=report_id,
+        revision=revision,
+        markdown_sha256=current.markdown_sha256,
+        state_sha256=state_sha256,
+        repo_root_sha256=repo_sha256,
+        requirement_sha256=requirement_sha256,
+        repository_evidence_sha256=evidence_sha256,
+        source_inventory_sha256=source_sha256,
+        payload_sha256=payload_sha256,
+        created_at=legacy_context["created_at"],
+        baseline_commit=legacy_context["baseline_commit"],
+        baseline_clean=legacy_context["baseline_clean"],
+        source_inventory_available=source_available,
+        source_inventory_complete=source_complete,
+        source_inventory_git_tracked_only=False,
+    )
+    _operation(runtime, "publish_report_context")(root, migrated_context)
+    _operation(runtime, "consume_draft")(
+        _operation(runtime, "draft_path")(root, str(draft["draft_id"])),
+        draft,
+        current,
+        metadata["key_map"],
+    )
+    return _result(runtime, current, delivery, display)
+
+
 def _resume_completed_publication(
     root: Path,
     draft: Mapping[str, object],
@@ -1286,7 +1466,24 @@ def _resume_completed_publication(
     current = _operation(runtime, "load_current")(root, report_id)
     if current is None or current.report_id != report_id or current.revision != revision:
         return None
-    metadata = _operation(runtime, "load_controller_completion_metadata")(current)
+    try:
+        metadata = _operation(runtime, "load_controller_completion_metadata")(current)
+    except ValueError as current_error:
+        try:
+            legacy = _operation(runtime, "load_legacy_controller_completion_metadata")(current)
+        except ValueError:
+            raise current_error from None
+        if not isinstance(legacy, Mapping):
+            raise current_error from None
+        return _resume_legacy_completed_publication(
+            root,
+            draft,
+            request,
+            analysis_sha256,
+            runtime,
+            current,
+            legacy,
+        )
     if not isinstance(metadata, Mapping):
         return None
     if (

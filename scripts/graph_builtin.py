@@ -1097,8 +1097,35 @@ def scan_repository(
             assert seed is not None
             label = _safe_graph_text(seed.term, sensitive_literals)
             risk = _risk_domains(seed.location, seed.term)
+            source_sha256 = None
+            if seed.location is not None:
+                explicit_payload, explicit_reason = _read_regular_file(
+                    root,
+                    seed.location,
+                    DEFAULT_MAX_FILE_BYTES,
+                    None,
+                    read_allowed=True,
+                )
+                if (
+                    explicit_reason is None
+                    and explicit_payload is not None
+                    and b"\x00" not in explicit_payload
+                ):
+                    try:
+                        explicit_payload.decode("utf-8", errors="strict")
+                    except UnicodeDecodeError:
+                        pass
+                    else:
+                        source_sha256 = hashlib.sha256(explicit_payload).hexdigest()
             node = GraphNode(
-                node_id, "symbol", label, seed.location, "builtin", "lexical", None, risk
+                node_id,
+                "symbol",
+                label,
+                seed.location,
+                "builtin",
+                "lexical",
+                source_sha256,
+                risk,
             )
         else:
             text, _, digest, *_rest = documents[location]

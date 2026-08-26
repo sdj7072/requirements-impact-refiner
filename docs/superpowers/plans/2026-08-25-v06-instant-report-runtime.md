@@ -152,7 +152,7 @@ class PreviousReportResult:
     elapsed_ms: int
 ```
 
-Use a 250ms operation deadline and bounded output for explicitly scoped Git probes. Only a matching v2 state/evidence/payload context, stable HEAD, clean tracked/untracked worktree and submodules, tracked-only inventory, and absence of assume-unchanged/skip-worktree flags is `fresh`. Missing/slow Git or incomplete proof is `stale`; missing context is `none`. Multiple matching lineages are `ambiguous` without body disclosure.
+Use a 250ms operation deadline and bounded output for explicitly scoped Git probes. Only a matching v2 state/evidence/payload context, equal before/after HEAD/status/index snapshots, clean recursive submodules, and a finalize-time commit-blob proof for every inventory or explicit seed path is `fresh`. Missing/slow Git, index races, unbound generated seeds, divergent gitlinks, or incomplete proof is `stale`; missing context is `none`. Multiple matching lineages are `ambiguous` without body disclosure. Exact interrupted v1 metadata/context may migrate atomically to v2 only for the same draft, analysis, state, Markdown, and revision, with tracked-source proof forced false.
 
 `render_previous` reads the already-published compact state, prefixes status,
 creation time, baseline commit, changed-file count, and freshness, then appends
