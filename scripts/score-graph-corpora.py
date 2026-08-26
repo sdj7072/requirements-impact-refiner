@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -17,7 +18,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType, ModuleType
 from typing import TypeVar
@@ -82,6 +83,8 @@ class CorpusCase:
     id: str
     commit: str
     sources: tuple[SourceScope, ...]
+    candidate_rule: object
+    candidate_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -328,7 +331,10 @@ def load_expectations(path: Path, specifications: Sequence[object]) -> Expectati
                     allow_empty=True,
                 )
             )
-        corpora.append(CorpusCase(corpus_id, commit, tuple(sources)))
+        candidate_rule = getattr(by_id[corpus_id], "candidate_rule", None)
+        if not isinstance(candidate_rule, FETCHER.CandidateRule):
+            raise CorpusScoreError("corpus candidate rule is unavailable")
+        corpora.append(CorpusCase(corpus_id, commit, tuple(sources), candidate_rule))
     if tuple(seen_ids) != expected_order or not expected:
         raise CorpusScoreError("relationship corpora must match catalog order exactly")
     high_risk = {_relationship_text(key) for key, value in expected.items() if value}
@@ -340,6 +346,45 @@ def load_expectations(path: Path, specifications: Sequence[object]) -> Expectati
         MappingProxyType(labelled_modules),
         MappingProxyType({provider: frozenset(rows) for provider, rows in disclosures.items()}),
     )
+
+
+def derive_candidate_paths(
+    rule: object,
+    head_paths: frozenset[str],
+) -> tuple[str, ...]:
+    """Apply one catalog rule to exact HEAD paths without expected-edge input."""
+    if not isinstance(rule, FETCHER.CandidateRule):
+        raise CorpusScoreError("corpus candidate rule is unavailable")
+    candidates = []
+    for value in sorted(head_paths):
+        path = PurePosixPath(_safe_path(value, "HEAD candidate path"))
+        parent = path.parent.as_posix()
+        if rule.root == ".":
+            within_root = parent == "." if not rule.recursive else True
+        elif rule.recursive:
+            within_root = parent == rule.root or parent.startswith(rule.root + "/")
+        else:
+            within_root = parent == rule.root
+        if within_root and fnmatch.fnmatchcase(path.name, rule.pattern):
+            candidates.append(path.as_posix())
+    if not candidates:
+        raise CorpusScoreError("candidate rule selected no files from pinned HEAD")
+    if len(candidates) > rule.maximum_files:
+        raise CorpusScoreError("candidate rule exceeds its bounded file count")
+    return tuple(candidates)
+
+
+def prepare_candidate_case(
+    corpus: CorpusCase,
+    head_paths: frozenset[str],
+) -> CorpusCase:
+    candidates = derive_candidate_paths(corpus.candidate_rule, head_paths)
+    required = {source.path for source in corpus.sources} | {
+        imported.target for source in corpus.sources for imported in source.internal_imports
+    }
+    if not required <= set(candidates):
+        raise CorpusScoreError("candidate rule excludes a labelled source or expected target")
+    return replace(corpus, candidate_files=candidates)
 
 
 def resolve_import_target(
@@ -547,12 +592,20 @@ def score_observations(
     ast_grep_gates["passed"] = all(ast_grep_gates.values())
     provider_reports["ast-grep"]["passed"] = ast_grep_gates["passed"]
     median_duration, hard_duration = _duration_summary(durations)
+    candidate_rules = (provenance or {}).get("candidate_rules", [])
+    if not isinstance(candidate_rules, list):
+        raise CorpusScoreError("candidate rule provenance is malformed")
+    candidate_file_count = sum(
+        len(observations_by_run[(corpus, "builtin")].scope_manifest) for corpus in corpora
+    )
     report: dict[str, object] = {
         "schema_version": 2,
         "scope": {
-            "kind": "fully-labelled-source-imports",
+            "kind": "scoped-static-internal-import-discovery",
             "source_count": len({(key[0], key[1]) for key in expected_set}),
             "relationship_count": len(expected_set),
+            "candidate_file_count": candidate_file_count,
+            "candidate_rules": candidate_rules,
         },
         "provenance": dict(provenance or {}),
         "limits": {
@@ -702,9 +755,9 @@ class ScopedShadow:
 
 @contextlib.contextmanager
 def _scoped_shadow(corpus: CorpusCase, checkout: Path) -> Iterator[ScopedShadow]:
-    candidates = {source.path for source in corpus.sources} | {
-        imported.target for source in corpus.sources for imported in source.internal_imports
-    }
+    if not corpus.candidate_files:
+        raise CorpusScoreError("candidate files are unavailable for scoped shadow")
+    candidates = set(corpus.candidate_files)
     source_digests = {source.path: source.sha256 for source in corpus.sources}
     with tempfile.TemporaryDirectory(prefix="rir-builtin-scope-") as temporary:
         root = Path(temporary).resolve()
@@ -818,6 +871,8 @@ def _runtime() -> tuple[ModuleType, ModuleType]:
 
 def run_builtin(corpus: CorpusCase, checkout: Path) -> EngineObservation:
     _verify_scoped_sources(corpus, checkout)
+    if not corpus.candidate_files:
+        corpus = prepare_candidate_case(corpus, _repository_files(checkout))
     builtin, _ = _runtime()
     with _scoped_shadow(corpus, checkout) as shadow:
         seeds = tuple(builtin.ScanSeed(source.path, source.path) for source in corpus.sources)
@@ -1048,6 +1103,20 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _candidate_rule_report(corpus: CorpusCase) -> dict[str, object]:
+    rule = corpus.candidate_rule
+    if not isinstance(rule, FETCHER.CandidateRule):
+        raise CorpusScoreError("corpus candidate rule is unavailable")
+    return {
+        "corpus": corpus.id,
+        "root": rule.root,
+        "pattern": rule.pattern,
+        "recursive": rule.recursive,
+        "maximum_files": rule.maximum_files,
+        "candidate_count": len(corpus.candidate_files),
+    }
+
+
 def run_evaluation(
     catalog_path: Path,
     expected_path: Path,
@@ -1066,8 +1135,20 @@ def run_evaluation(
     by_id = {specification.id: specification for specification in specifications}
 
     def evaluate() -> tuple[dict[str, object], bytes]:
+        head_trees = FETCHER.verified_head_trees(
+            catalog_path,
+            destination,
+            repository_root=repository_root,
+            allow_local_repositories=allow_local_repositories,
+        )
         observations = []
-        for corpus in expectations.corpora:
+        runtime_cases = []
+        for declared_corpus in expectations.corpora:
+            tree = head_trees.get(declared_corpus.id)
+            if not isinstance(tree, Mapping):
+                raise CorpusScoreError("verified HEAD manifest is unavailable")
+            corpus = prepare_candidate_case(declared_corpus, frozenset(tree))
+            runtime_cases.append(corpus)
             checkout = Path(destination).resolve(strict=True) / by_id[corpus.id].checkout
             _verify_scoped_sources(corpus, checkout)
             observations.append(builtin_runner(corpus, checkout))
@@ -1077,6 +1158,7 @@ def run_evaluation(
             "expectations_sha256": _file_sha256(expected_path),
             "destination": str(Path(destination).resolve(strict=True)),
             "commits": [corpus.commit for corpus in expectations.corpora],
+            "candidate_rules": [_candidate_rule_report(corpus) for corpus in runtime_cases],
         }
         return score_observations(
             expectations.expected,

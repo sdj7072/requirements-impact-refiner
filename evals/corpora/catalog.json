@@ -10,6 +10,12 @@
       "license_path": "LICENSE.txt",
       "license_sha256": "9a8ad106a394e853bfe21f42f4e72d592819a22805d991b5f3275029292b658d",
       "preserved_license": "LICENSES/pallets-click.txt",
+      "candidate_rule": {
+        "root": "src/click",
+        "pattern": "*.py",
+        "recursive": false,
+        "maximum_files": 64
+      },
       "provenance": {
         "repository": "https://github.com/pallets/click.git",
         "commit": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
@@ -25,6 +31,12 @@
       "license_path": "license",
       "license_sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
       "preserved_license": "LICENSES/sindresorhus-slugify.txt",
+      "candidate_rule": {
+        "root": ".",
+        "pattern": "*.js",
+        "recursive": false,
+        "maximum_files": 16
+      },
       "provenance": {
         "repository": "https://github.com/sindresorhus/slugify.git",
         "commit": "7c318bd1aa4b4affab29761f15a9604323fe2a3b",

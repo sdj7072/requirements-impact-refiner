@@ -44,6 +44,24 @@ class GraphCorpusCatalogTests(unittest.TestCase):
         self.assertEqual(catalog[0]["license"], "BSD-3-Clause")
         self.assertEqual(catalog[1]["commit"], "7c318bd1aa4b4affab29761f15a9604323fe2a3b")
         self.assertEqual(catalog[1]["license"], "MIT")
+        self.assertEqual(
+            catalog[0]["candidate_rule"],
+            {
+                "root": "src/click",
+                "pattern": "*.py",
+                "recursive": False,
+                "maximum_files": 64,
+            },
+        )
+        self.assertEqual(
+            catalog[1]["candidate_rule"],
+            {
+                "root": ".",
+                "pattern": "*.js",
+                "recursive": False,
+                "maximum_files": 16,
+            },
+        )
 
         for row in catalog:
             with self.subTest(corpus=row["id"]):
@@ -131,6 +149,12 @@ class GraphCorpusFetchTests(unittest.TestCase):
                     "license_path": "LICENSE.txt",
                     "license_sha256": hashlib.sha256(license_bytes).hexdigest(),
                     "preserved_license": "LICENSES/fixture.txt",
+                    "candidate_rule": {
+                        "root": ".",
+                        "pattern": "*.py",
+                        "recursive": False,
+                        "maximum_files": 16,
+                    },
                     "provenance": {
                         "repository": remote.resolve().as_uri(),
                         "commit": commit,
@@ -1047,6 +1071,10 @@ class GraphCorpusScoreTests(unittest.TestCase):
         self.assertEqual(len(loaded.corpora), 2)
         self.assertEqual(len(loaded.expected), 2)
         self.assertEqual(
+            loaded.corpora[0].candidate_rule,
+            scorer.FETCHER.CandidateRule("src/click", "*.py", False, 64),
+        )
+        self.assertEqual(
             loaded.disclosed_high_risk_misses,
             {"builtin": frozenset(), "ast-grep": frozenset()},
         )
@@ -1186,11 +1214,25 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 ),
                 ("external-package",),
             )
+            candidate_rule = scorer.FETCHER.CandidateRule(".", "*.js", False, 16)
             corpus = scorer.CorpusCase(
                 "fixture",
                 "f" * 40,
                 (scope,),
+                candidate_rule,
             )
+
+            excluded_case = scorer.CorpusCase(
+                "fixture",
+                "f" * 40,
+                (scope,),
+                candidate_rule,
+            )
+            with self.assertRaisesRegex(scorer.CorpusScoreError, "candidate rule excludes"):
+                scorer.prepare_candidate_case(
+                    excluded_case,
+                    frozenset({"source.js", "other.js"}),
+                )
 
             with self.assertRaisesRegex(scorer.CorpusScoreError, "ast-grep executable"):
                 scorer.run_ast_grep(corpus, root, root / "missing-ast-grep")
@@ -1201,11 +1243,13 @@ class GraphCorpusScoreTests(unittest.TestCase):
             self.assertEqual(
                 dict(builtin.scope_manifest),
                 {
+                    "other.js": hashlib.sha256(b"export default 2;\n").hexdigest(),
                     "source.js": hashlib.sha256(original_source.encode()).hexdigest(),
                     "target.js": hashlib.sha256(b"export default 1;\n").hexdigest(),
                 },
             )
             self.assertIsNone(builtin.detail)
+            self.assertEqual(len(builtin.scope_manifest), 3)
             self.assertLessEqual(builtin.duration_ms, 30_000)
 
             executable = ROOT / ".quality-venv/bin/ast-grep"
@@ -1230,6 +1274,39 @@ class GraphCorpusScoreTests(unittest.TestCase):
             self.assertRegex(ast_grep.executable_sha256, r"^[0-9a-f]{64}$")
             self.assertLessEqual(ast_grep.duration_ms, 30_000)
 
+            decoy_source = original_source + "import otherValue from './other.js';\n"
+            source.write_text(decoy_source, encoding="utf-8")
+            decoy_scope = scorer.SourceScope(
+                "source.js",
+                "javascript",
+                hashlib.sha256(decoy_source.encode()).hexdigest(),
+                scope.internal_imports,
+                (*scope.external_imports, "./other.js"),
+            )
+            decoy_builtin = scorer.run_builtin(
+                scorer.CorpusCase(
+                    "fixture",
+                    "f" * 40,
+                    (decoy_scope,),
+                    candidate_rule,
+                ),
+                root,
+            )
+            self.assertEqual(
+                decoy_builtin.predictions,
+                (("source.js", "other.js"), ("source.js", "target.js")),
+            )
+            decoy_report, _ = scorer.score_observations(
+                {("fixture", "source.js", "target.js"): True},
+                (decoy_builtin, ast_grep),
+                {"builtin": set(), "ast-grep": set()},
+            )
+            self.assertEqual(decoy_report["providers"]["builtin"]["false_positive"], 1)
+            self.assertEqual(decoy_report["providers"]["builtin"]["precision"], 0.5)
+            self.assertFalse(decoy_report["providers"]["builtin"]["passed"])
+            self.assertFalse(decoy_report["passed"])
+            source.write_text(original_source, encoding="utf-8")
+
             package = root / "pkg"
             package.mkdir()
             python_source_text = "from __future__ import annotations\nfrom .target import Target\n"
@@ -1250,7 +1327,12 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 ("__future__",),
             )
             python_observation = scorer.run_ast_grep(
-                scorer.CorpusCase("python-fixture", "e" * 40, (python_scope,)),
+                scorer.CorpusCase(
+                    "python-fixture",
+                    "e" * 40,
+                    (python_scope,),
+                    scorer.FETCHER.CandidateRule("pkg", "*.py", False, 16),
+                ),
                 root,
                 executable,
             )
@@ -1272,7 +1354,12 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 scope.external_imports,
             )
             dropped_observation = scorer.run_ast_grep(
-                scorer.CorpusCase("fixture", "f" * 40, (dropped_scope,)),
+                scorer.CorpusCase(
+                    "fixture",
+                    "f" * 40,
+                    (dropped_scope,),
+                    candidate_rule,
+                ),
                 root,
                 executable,
             )
@@ -1292,7 +1379,12 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 scope.external_imports,
             )
             mutated_ast_grep = scorer.run_ast_grep(
-                scorer.CorpusCase("fixture", "f" * 40, (mutated_scope,)),
+                scorer.CorpusCase(
+                    "fixture",
+                    "f" * 40,
+                    (mutated_scope,),
+                    candidate_rule,
+                ),
                 root,
                 executable,
             )

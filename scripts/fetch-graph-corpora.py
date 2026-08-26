@@ -47,10 +47,12 @@ _CORPUS_KEYS = frozenset(
         "license_path",
         "license_sha256",
         "preserved_license",
+        "candidate_rule",
         "provenance",
     }
 )
 _PROVENANCE_KEYS = frozenset({"repository", "commit", "license_path"})
+_CANDIDATE_RULE_KEYS = frozenset({"root", "pattern", "recursive", "maximum_files"})
 _ALLOWED_LICENSES = frozenset({"Apache-2.0", "BSD-3-Clause", "MIT"})
 _ALLOWED_TREE_MODES = frozenset({"100644", "100755"})
 _SAFE_GIT_OPTIONS = (
@@ -85,10 +87,22 @@ _OFFICIAL_CORPORA = (
         "MIT",
     ),
 )
+_OFFICIAL_CANDIDATE_RULES = {
+    "pallets-click": ("src/click", "*.py", False, 64),
+    "sindresorhus-slugify": (".", "*.js", False, 16),
+}
 
 
 class CorpusError(RuntimeError):
     """A corpus failed a provenance, process, or filesystem boundary."""
+
+
+@dataclass(frozen=True)
+class CandidateRule:
+    root: str
+    pattern: str
+    recursive: bool
+    maximum_files: int
 
 
 @dataclass(frozen=True)
@@ -102,6 +116,7 @@ class CorpusSpec:
     license_sha256: str
     preserved_license: Path
     license_bytes: bytes
+    candidate_rule: CandidateRule
 
 
 @dataclass
@@ -246,6 +261,30 @@ def load_catalog(
         preserved_relative = _safe_relative(
             raw_row["preserved_license"], "preserved corpus license"
         )
+        candidate = raw_row["candidate_rule"]
+        if not isinstance(candidate, dict) or set(candidate) != _CANDIDATE_RULE_KEYS:
+            raise CorpusError("corpus candidate rule is invalid")
+        candidate_root = candidate["root"]
+        if candidate_root != ".":
+            candidate_root = _safe_relative(candidate_root, "candidate rule root")
+        pattern = candidate["pattern"]
+        recursive = candidate["recursive"]
+        maximum_files = candidate["maximum_files"]
+        if (
+            not isinstance(pattern, str)
+            or re.fullmatch(r"\*\.[A-Za-z0-9]+", pattern) is None
+            or recursive is not False
+            or isinstance(maximum_files, bool)
+            or not isinstance(maximum_files, int)
+            or not 1 <= maximum_files <= 500
+        ):
+            raise CorpusError("corpus candidate rule is invalid")
+        candidate_rule = CandidateRule(
+            candidate_root,
+            pattern,
+            recursive,
+            maximum_files,
+        )
         provenance = raw_row["provenance"]
         if (
             not isinstance(provenance, dict)
@@ -275,6 +314,7 @@ def load_catalog(
                 digest,
                 preserved,
                 license_bytes,
+                candidate_rule,
             )
         )
     result = tuple(rows)
@@ -284,6 +324,17 @@ def load_catalog(
         != _OFFICIAL_CORPORA
     ):
         raise CorpusError("checked-in corpus catalog does not match the approved pins")
+    if selected == CATALOG_PATH.resolve() and any(
+        (
+            row.candidate_rule.root,
+            row.candidate_rule.pattern,
+            row.candidate_rule.recursive,
+            row.candidate_rule.maximum_files,
+        )
+        != _OFFICIAL_CANDIDATE_RULES.get(row.id)
+        for row in result
+    ):
+        raise CorpusError("checked-in corpus candidate rules do not match approved scope")
     return result
 
 
@@ -1295,6 +1346,58 @@ def verify_corpora(
         if isinstance(error, CorpusError):
             raise
         raise CorpusError("corpus verification failed") from error
+    finally:
+        _close_destination(handle)
+
+
+def verified_head_trees(
+    catalog_path: Path,
+    destination: Path,
+    *,
+    repository_root: Path = ROOT,
+    allow_local_repositories: bool = False,
+    git_executable: Path | None = None,
+) -> dict[str, dict[str, tuple[str, str]]]:
+    """Return exact verified HEAD trees while every checkout fd remains held."""
+    specs = load_catalog(
+        catalog_path,
+        allow_local_repositories=allow_local_repositories,
+    )
+    git = _find_git(git_executable)
+    handle = _open_destination(destination, repository_root)
+    try:
+        with os.scandir(handle.child_fd) as entries:
+            actual = {entry.name for entry in entries}
+        if actual != {spec.checkout for spec in specs}:
+            raise CorpusError("corpus destination contains unknown or missing checkouts")
+        trees = {}
+        for spec in specs:
+            metadata = os.stat(spec.checkout, dir_fd=handle.child_fd, follow_symlinks=False)
+            checkout_fd = os.open(spec.checkout, _directory_flags(), dir_fd=handle.child_fd)
+            checkout_identity = (metadata.st_dev, metadata.st_ino)
+            try:
+                if not _same_directory(os.fstat(checkout_fd), checkout_identity):
+                    raise CorpusError(f"{spec.id} checkout changed while opening")
+                cwd = _fd_path(checkout_fd)
+                _verify_checkout(
+                    spec,
+                    handle.path / spec.checkout,
+                    git,
+                    allow_local=allow_local_repositories,
+                    checkout_fd=checkout_fd,
+                )
+                trees[spec.id] = _head_tree(git, cwd, allow_local=allow_local_repositories)
+                named_after = os.stat(spec.checkout, dir_fd=handle.child_fd, follow_symlinks=False)
+                if not _same_directory(named_after, checkout_identity):
+                    raise CorpusError(f"{spec.id} checkout changed during tree capture")
+            finally:
+                os.close(checkout_fd)
+        _verify_destination_handle(handle)
+        return trees
+    except Exception as error:
+        if isinstance(error, CorpusError):
+            raise
+        raise CorpusError("verified HEAD tree capture failed") from error
     finally:
         _close_destination(handle)
 
