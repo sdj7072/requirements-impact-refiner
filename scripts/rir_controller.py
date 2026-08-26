@@ -9,7 +9,6 @@ import os
 import re
 import secrets
 import selectors
-import shutil
 import signal
 import stat
 import subprocess
@@ -1493,6 +1492,11 @@ _DELTA_WORKER_MAX_OUTPUT = (
     + 27
 )
 _DELTA_WORKER_MAX_ERROR = 64 * 1024
+_DELTA_WORKER_MIN_SECONDS = 1.0
+_DELTA_WORKER_CLEANUP_GRACE_SECONDS = 0.1
+_DELTA_WORKER_CLEANUP_SCAN_SECONDS = 0.025
+_DELTA_WORKER_MAX_CLEANUP_ENTRIES = 4096
+_DELTA_WORKER_MAX_PRIVATE_TEMP_ENTRIES = 128
 _DELTA_HINT_PATH = re.compile(r"^(?!/)(?!.*(?:^|/)\.{1,2}(?:/|$))(?!.*\\).+$")
 
 
@@ -1707,7 +1711,7 @@ def _generic_delta_preflight_fallback(request: ScanRequest, elapsed_ms: int, rea
     )
 
 
-def _terminate_delta_worker(process: subprocess.Popen[bytes]) -> None:
+def _terminate_delta_worker(process: subprocess.Popen[bytes]) -> bool:
     if hasattr(os, "killpg"):
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -1719,7 +1723,7 @@ def _terminate_delta_worker(process: subprocess.Popen[bytes]) -> None:
         except OSError:
             pass
     try:
-        process.wait(timeout=0.025)
+        process.wait(timeout=_DELTA_WORKER_CLEANUP_GRACE_SECONDS / 4)
     except (OSError, subprocess.TimeoutExpired):
         pass
     if hasattr(os, "killpg"):
@@ -1733,12 +1737,13 @@ def _terminate_delta_worker(process: subprocess.Popen[bytes]) -> None:
         except OSError:
             pass
     try:
-        process.wait(timeout=0.05)
+        process.wait(timeout=_DELTA_WORKER_CLEANUP_GRACE_SECONDS / 2)
     except (OSError, subprocess.TimeoutExpired):
         pass
+    return process.poll() is not None
 
 
-def _cleanup_delta_worker_temps(root: Path, token: str) -> None:
+def _cleanup_delta_worker_temps(root: Path, token: str, deadline: float | None = None) -> bool:
     directories = (
         (".requirements-impact-refiner", "scans"),
         (".requirements-impact-refiner", "graph"),
@@ -1746,7 +1751,10 @@ def _cleanup_delta_worker_temps(root: Path, token: str) -> None:
     )
     marker = f".{token}."
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    complete = True
     for parts in directories:
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
         opened = []
         try:
             parent = os.open(root, directory_flags)
@@ -1754,31 +1762,137 @@ def _cleanup_delta_worker_temps(root: Path, token: str) -> None:
             for part in parts:
                 parent = os.open(part, directory_flags, dir_fd=parent)
                 opened.append(parent)
-        except OSError:
+        except (FileNotFoundError, NotADirectoryError):
             for descriptor in reversed(opened):
                 os.close(descriptor)
             continue
+        except OSError:
+            complete = False
+            for descriptor in reversed(opened):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    complete = False
+            continue
         try:
             with os.scandir(parent) as entries:
-                for index, entry in enumerate(entries):
-                    if index >= 4096:
+                for index, entry in enumerate(entries, start=1):
+                    if index > _DELTA_WORKER_MAX_CLEANUP_ENTRIES:
+                        complete = False
+                        break
+                    if deadline is not None and time.monotonic() >= deadline:
+                        complete = False
                         break
                     if marker not in entry.name or not entry.name.endswith(".tmp"):
                         continue
-                    if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+                    try:
+                        removable = not entry.is_symlink() and entry.is_file(follow_symlinks=False)
+                    except OSError:
+                        complete = False
+                        continue
+                    if not removable:
+                        complete = False
                         continue
                     try:
                         os.unlink(entry.name, dir_fd=parent)
                     except OSError:
-                        continue
+                        complete = False
         except OSError:
-            pass
+            complete = False
         finally:
             for descriptor in reversed(opened):
                 try:
                     os.close(descriptor)
                 except OSError:
-                    continue
+                    complete = False
+    return complete
+
+
+def _cleanup_delta_worker_directory(
+    worker_temp: Path,
+    input_path: Path,
+    deadline: float,
+) -> bool:
+    if input_path.parent != worker_temp or input_path.name != "input.json":
+        return False
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    parent_descriptor = -1
+    directory_descriptor = -1
+    complete = True
+    removed = False
+    try:
+        parent_descriptor = os.open(worker_temp.parent, directory_flags)
+        directory_descriptor = os.open(
+            worker_temp.name,
+            directory_flags,
+            dir_fd=parent_descriptor,
+        )
+    except FileNotFoundError:
+        for descriptor in (directory_descriptor, parent_descriptor):
+            if descriptor >= 0:
+                os.close(descriptor)
+        return False
+    except OSError:
+        for descriptor in (directory_descriptor, parent_descriptor):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        return False
+    try:
+        try:
+            os.unlink(input_path.name, dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            complete = False
+        if time.monotonic() >= deadline:
+            complete = False
+        else:
+            try:
+                with os.scandir(directory_descriptor) as entries:
+                    for index, entry in enumerate(entries, start=1):
+                        if index > _DELTA_WORKER_MAX_PRIVATE_TEMP_ENTRIES:
+                            complete = False
+                            break
+                        if time.monotonic() >= deadline:
+                            complete = False
+                            break
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                os.rmdir(entry.name, dir_fd=directory_descriptor)
+                            else:
+                                os.unlink(entry.name, dir_fd=directory_descriptor)
+                        except OSError:
+                            complete = False
+            except OSError:
+                complete = False
+        try:
+            opened = os.fstat(directory_descriptor)
+            current = os.stat(
+                worker_temp.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or opened.st_dev != current.st_dev
+                or opened.st_ino != current.st_ino
+            ):
+                complete = False
+            else:
+                os.rmdir(worker_temp.name, dir_fd=parent_descriptor)
+                removed = True
+        except OSError:
+            complete = False
+    finally:
+        for descriptor in (directory_descriptor, parent_descriptor):
+            try:
+                os.close(descriptor)
+            except OSError:
+                complete = False
+    return complete and removed
 
 
 def _delta_worker_body(payload: bytes, token: str) -> tuple[str, Mapping[str, object]]:
@@ -1854,8 +1968,10 @@ class _DeltaWorkerFrameParser:
                 raise ValueError("delta worker control frame is invalid")
             self.effective_max_seconds = effective
             return
-        parsed = _scan_result_from_mapping(payload, 0)
+        if self.effective_max_seconds is None:
+            raise ValueError("delta worker control frame must be first")
         if kind == "trusted_fallback":
+            parsed = _scan_result_from_mapping(payload, 0)
             if (
                 self.trusted_fallback is not None
                 or self.result is not None
@@ -1871,6 +1987,7 @@ class _DeltaWorkerFrameParser:
             return
         if kind != "result" or self.trusted_fallback is None or self.result is not None:
             raise ValueError("delta worker result frame order is invalid")
+        parsed = _scan_result_from_mapping(payload, 0)
         fallback = _scan_result_from_mapping(self.trusted_fallback, 0)
         if (
             parsed.previous_report_id != fallback.previous_report_id
@@ -1914,7 +2031,14 @@ class _DeltaWorkerFrameParser:
             return False
 
     def complete(self) -> bool:
-        return not self.invalid and self.expected is None and not self.buffer
+        return (
+            not self.invalid
+            and self.expected is None
+            and not self.buffer
+            and self.effective_max_seconds is not None
+            and self.trusted_fallback is not None
+            and self.result is not None
+        )
 
 
 def _read_delta_worker_output(
@@ -1923,9 +2047,9 @@ def _read_delta_worker_output(
     hard_max_seconds: float,
     token: str,
     request: ScanRequest,
-) -> tuple[Mapping[str, object] | None, Mapping[str, object] | None]:
+) -> tuple[Mapping[str, object] | None, Mapping[str, object] | None, bool]:
     if process.stdout is None or process.stderr is None:
-        return None, None
+        return None, None, False
     parser = _DeltaWorkerFrameParser(token, request)
     selector = selectors.DefaultSelector()
     stderr = bytearray()
@@ -1933,18 +2057,12 @@ def _read_delta_worker_output(
         selector.register(stream, selectors.EVENT_READ)
     failed = False
     timed_out = False
-    hard_reserve = min(0.075, hard_max_seconds / 4)
-    hard_deadline = operation_started + hard_max_seconds - hard_reserve
+    absolute_deadline = operation_started + hard_max_seconds
+    provisional_deadline = operation_started + _DELTA_WORKER_MIN_SECONDS
+    effective_deadline = provisional_deadline
+    worker_clean = False
     try:
         while selector.get_map():
-            effective = parser.effective_max_seconds
-            effective_deadline = hard_deadline
-            if effective is not None:
-                effective_reserve = min(0.075, effective / 4)
-                effective_deadline = min(
-                    effective_deadline,
-                    operation_started + effective - effective_reserve,
-                )
             now = time.monotonic()
             if now >= effective_deadline:
                 timed_out = True
@@ -1964,41 +2082,51 @@ def _read_delta_worker_output(
                     selector.unregister(stream)
                     continue
                 if stream is process.stdout:
+                    awaiting_control = parser.effective_max_seconds is None
+                    if awaiting_control and time.monotonic() >= provisional_deadline:
+                        timed_out = True
+                        break
                     if not parser.feed(chunk):
                         failed = True
                         break
+                    if awaiting_control and parser.effective_max_seconds is not None:
+                        if time.monotonic() >= provisional_deadline:
+                            parser.invalid = True
+                            parser.trusted_fallback = None
+                            parser.result = None
+                            timed_out = True
+                            break
+                        effective_deadline = min(
+                            absolute_deadline,
+                            operation_started + parser.effective_max_seconds,
+                        )
                 elif len(stderr) + len(chunk) > _DELTA_WORKER_MAX_ERROR:
                     failed = True
                     break
                 else:
                     stderr.extend(chunk)
+                    failed = True
+                    break
             if failed:
                 break
         if timed_out or failed:
-            _terminate_delta_worker(process)
+            worker_clean = _terminate_delta_worker(process)
         else:
-            wait_deadline = hard_deadline
-            if parser.effective_max_seconds is not None:
-                effective = parser.effective_max_seconds
-                wait_deadline = min(
-                    wait_deadline,
-                    operation_started + effective - min(0.075, effective / 4),
-                )
             try:
-                process.wait(timeout=max(0.001, wait_deadline - time.monotonic()))
+                process.wait(timeout=max(0.001, effective_deadline - time.monotonic()))
+                worker_clean = process.poll() is not None
             except (OSError, subprocess.TimeoutExpired):
                 timed_out = True
-                _terminate_delta_worker(process)
+                worker_clean = _terminate_delta_worker(process)
         clean = (
             not timed_out
             and not failed
             and not stderr
             and process.returncode == 0
             and parser.complete()
-            and parser.trusted_fallback is not None
-            and parser.result is not None
+            and worker_clean
         )
-        return parser.trusted_fallback, parser.result if clean else None
+        return parser.trusted_fallback, parser.result if clean else None, worker_clean
     finally:
         selector.close()
         process.stdout.close()
@@ -2014,7 +2142,7 @@ def _run_delta_worker(
     operation_started: float,
     hard_max_seconds: float,
     request: ScanRequest,
-) -> tuple[Mapping[str, object] | None, Mapping[str, object] | None]:
+) -> tuple[Mapping[str, object] | None, Mapping[str, object] | None, bool]:
     try:
         process = subprocess.Popen(
             (
@@ -2038,26 +2166,33 @@ def _run_delta_worker(
             close_fds=True,
         )
     except OSError:
-        return None, None
+        return None, None, True
+    fallback = None
+    result = None
+    worker_clean = False
     try:
-        fallback, result = _read_delta_worker_output(
-            process,
-            operation_started,
-            hard_max_seconds,
-            token,
-            request,
-        )
+        try:
+            fallback, result, worker_clean = _read_delta_worker_output(
+                process,
+                operation_started,
+                hard_max_seconds,
+                token,
+                request,
+            )
+        except (OSError, TypeError, ValueError):
+            fallback = None
+            result = None
         if process.poll() is not None and hasattr(os, "killpg"):
             try:
                 os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
+            except ProcessLookupError:
                 pass
-        return fallback, result
-    except (OSError, TypeError, ValueError):
-        return None, None
+            except OSError:
+                worker_clean = False
     finally:
         if process.poll() is None:
-            _terminate_delta_worker(process)
+            worker_clean = _terminate_delta_worker(process)
+    return fallback, result, worker_clean
 
 
 def _execute_delta_worker(
@@ -2071,10 +2206,10 @@ def _execute_delta_worker(
     if (
         not isinstance(max_seconds, (int, float))
         or isinstance(max_seconds, bool)
-        or max_seconds <= 0
+        or max_seconds < _DELTA_WORKER_MIN_SECONDS
         or max_seconds > 3
     ):
-        raise ValueError("delta worker deadline must be between zero and three seconds")
+        raise ValueError("delta worker deadline must be between one and three seconds")
     _validate_delta_request_syntax(request)
     root_hint = Path(os.path.abspath(os.fspath(request.repo_root)))
     selected_worker = (
@@ -2084,8 +2219,7 @@ def _execute_delta_worker(
         raise ImportError("delta worker sibling is unsafe")
     if not selected_worker.is_file() or selected_worker.is_symlink():
         raise ValueError("delta worker path is unsafe")
-    cleanup_reserve = min(0.075, max_seconds / 4)
-    work_deadline = operation_started + max_seconds - cleanup_reserve
+    work_deadline = operation_started + _DELTA_WORKER_MIN_SECONDS
     request_value = {
         "schema_version": 1,
         "repo_root": str(root_hint),
@@ -2109,6 +2243,13 @@ def _execute_delta_worker(
     worker_temp.chmod(0o700)
     input_path = worker_temp / "input.json"
     descriptor = -1
+    fallback_mapping = None
+    result_mapping = None
+    worker_clean = True
+    cleanup_complete = True
+    generic_reason = (
+        "delta worker preflight timed out or failed before trusted previous report binding"
+    )
     try:
         descriptor = os.open(input_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.fchmod(descriptor, 0o600)
@@ -2138,41 +2279,41 @@ def _execute_delta_worker(
                     raise ValueError("delta worker test environment is invalid")
                 environment[name] = value
         if time.monotonic() >= work_deadline:
-            elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
-            return _generic_delta_preflight_fallback(
+            generic_reason = "delta worker preflight timed out before process start"
+        else:
+            request_sha256 = hashlib.sha256(request_payload).hexdigest()
+            fallback_mapping, result_mapping, worker_clean = _run_delta_worker(
+                selected_worker,
+                input_path,
+                request_sha256,
+                token,
+                environment,
+                operation_started,
+                max_seconds,
                 request,
-                elapsed_ms,
-                "delta worker preflight timed out before process start",
             )
-        request_sha256 = hashlib.sha256(request_payload).hexdigest()
-        fallback_mapping, result_mapping = _run_delta_worker(
-            selected_worker,
-            input_path,
-            request_sha256,
-            token,
-            environment,
-            operation_started,
-            max_seconds,
-            request,
-        )
-        elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
-        selected_mapping = result_mapping if result_mapping is not None else fallback_mapping
-        if selected_mapping is not None:
-            return _scan_result_from_mapping(selected_mapping, elapsed_ms)
-        return _generic_delta_preflight_fallback(
-            request,
-            elapsed_ms,
-            "delta worker preflight timed out or failed before trusted previous report binding",
-        )
     finally:
         if descriptor >= 0:
-            os.close(descriptor)
-        try:
-            input_path.unlink()
-        except OSError:
-            pass
-        _cleanup_delta_worker_temps(root_hint, token)
-        shutil.rmtree(worker_temp, ignore_errors=True)
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_complete = False
+        cleanup_deadline = time.monotonic() + _DELTA_WORKER_CLEANUP_SCAN_SECONDS
+        cleanup_complete = (
+            _cleanup_delta_worker_directory(worker_temp, input_path, cleanup_deadline)
+            and cleanup_complete
+        )
+        cleanup_complete = (
+            _cleanup_delta_worker_temps(root_hint, token, cleanup_deadline) and cleanup_complete
+        )
+    elapsed_ms = round((time.monotonic() - operation_started) * 1000)
+    if not worker_clean or not cleanup_complete:
+        result_mapping = None
+        generic_reason = "delta worker cleanup failed before a safe result could be returned"
+    selected_mapping = result_mapping if result_mapping is not None else fallback_mapping
+    if selected_mapping is not None:
+        return _scan_result_from_mapping(selected_mapping, elapsed_ms)
+    return _generic_delta_preflight_fallback(request, elapsed_ms, generic_reason)
 
 
 def _scan_impact_in_process(

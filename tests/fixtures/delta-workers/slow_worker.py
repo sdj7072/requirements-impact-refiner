@@ -39,12 +39,30 @@ if request.get("worker_token") != args.token or request.get("parent_pid") != arg
     raise SystemExit(2)
 scenario = os.environ.get("RIR_DELTA_TEST_SCENARIO", "after-fallback")
 
+if scenario in {"settings", "late-control"}:
+    if scenario == "late-control":
+        time.sleep(1.1)
+    else:
+        time.sleep(10)
+
 if scenario == "settings":
-    time.sleep(10)
     raise SystemExit(0)
 
-effective_seconds = 1 if scenario == "configured-one" else 3
-write(frame("control", {"effective_max_seconds": effective_seconds}, args.token))
+effective_seconds = {
+    "configured-one": 1,
+    "configured-two-success": 2,
+    "configured-three-success": 3,
+    "invalid-control": 0,
+}.get(scenario, 3)
+control_frame = frame(
+    "control",
+    {"effective_max_seconds": effective_seconds},
+    "f" * 32 if scenario == "forged-control" else args.token,
+)
+if scenario not in {"fallback-before-control", "result-before-control"}:
+    write(control_frame)
+if scenario == "duplicate-control":
+    write(control_frame)
 
 if scenario in {"lookup", "artifact"}:
     time.sleep(10)
@@ -78,9 +96,24 @@ fallback = {
     "previous_display_text": "trusted previous",
 }
 fallback_token = "f" * 32 if scenario == "forged-frame" else args.token
+final = dict(fallback)
+final["status"] = "complete"
+final["can_promote"] = True
+final["receipt_sha256"] = hashlib.sha256(b"complete").hexdigest()
+if scenario in {"result-before-control", "result-without-fallback"}:
+    write(frame("result", final, args.token))
+    time.sleep(10)
 write(frame("trusted_fallback", fallback, fallback_token))
+if scenario == "fallback-before-control":
+    write(control_frame)
+    time.sleep(10)
+if scenario == "control-after-fallback":
+    write(control_frame)
+    time.sleep(10)
 if scenario == "forged-frame":
     time.sleep(10)
+if scenario in {"configured-two-success", "configured-three-success"}:
+    time.sleep(1.1)
 
 root = Path(request["repo_root"])
 token = request["worker_token"]
@@ -133,8 +166,4 @@ if scenario in {
 }:
     time.sleep(10)
 
-final = dict(fallback)
-final["status"] = "complete"
-final["can_promote"] = True
-final["receipt_sha256"] = hashlib.sha256(b"complete").hexdigest()
 write(frame("result", final, args.token))

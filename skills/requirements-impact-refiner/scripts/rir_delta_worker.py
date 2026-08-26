@@ -152,7 +152,7 @@ def main(argv=None) -> int:
         or isinstance(operation_started, bool)
         or not isinstance(max_seconds, (int, float))
         or isinstance(max_seconds, bool)
-        or max_seconds <= 0
+        or max_seconds < 1
         or max_seconds > 3
         or value["worker_token"] != args.token
         or value["parent_pid"] != args.parent_pid

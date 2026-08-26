@@ -689,13 +689,13 @@ class DeltaScanTest(unittest.TestCase):
         ):
             result = CONTROLLER._execute_delta_worker(
                 request,
-                0.25,
+                1,
                 started,
                 worker_path=SLOW_WORKER,
                 worker_environment={"RIR_DELTA_TEST_SCENARIO": "lookup"},
             )
 
-        self.assertLessEqual(round((time.monotonic() - started) * 1000), 350)
+        self.assertLessEqual(round((time.monotonic() - started) * 1000), 1_125)
         self.assertIsNone(result.previous_report_id)
         self.assertIsNone(result.previous_revision)
         self.assertEqual(result.changed_paths, ())
@@ -717,7 +717,7 @@ class DeltaScanTest(unittest.TestCase):
             ("a.py",),
         )
 
-        result = CONTROLLER._execute_delta_worker(request, 0.5, time.monotonic())
+        result = CONTROLLER._execute_delta_worker(request, 1, time.monotonic())
 
         self.assertEqual(result.status, "partial")
         self.assertFalse(result.can_promote)
@@ -739,6 +739,22 @@ class DeltaScanTest(unittest.TestCase):
             with self.subTest(request=request):
                 with self.assertRaisesRegex(ValueError, "all-or-none"):
                     CONTROLLER._execute_delta_worker(request, 1, time.monotonic())
+
+    def test_parent_accepts_only_supported_one_to_three_second_hard_budgets(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change a.py",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+
+        for invalid in (0.5, 0, 4, True):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "between one and three"):
+                    CONTROLLER._execute_delta_worker(request, invalid, time.monotonic())
 
     def test_mcp_scan_accepts_delta_hints_and_returns_previous_summary(self):
         arguments = {
@@ -1020,7 +1036,7 @@ class DeltaScanTest(unittest.TestCase):
         )
         timed_out = CONTROLLER._execute_delta_worker(
             request,
-            0.25,
+            1,
             started,
             worker_path=SLOW_WORKER,
             worker_environment={"RIR_DELTA_TEST_SCENARIO": "after-fallback"},
@@ -1384,15 +1400,15 @@ class DeltaScanTest(unittest.TestCase):
                 started = time.monotonic()
                 result = CONTROLLER._execute_delta_worker(
                     request,
-                    0.25,
+                    1,
                     started,
                     worker_path=SLOW_WORKER,
                     worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
                 )
                 actual_ms = round((time.monotonic() - started) * 1000)
-                self.assertLessEqual(actual_ms, 350)
-                self.assertGreaterEqual(result.elapsed_ms, 150)
-                self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 100)
+                self.assertLessEqual(actual_ms, 1_125)
+                self.assertGreaterEqual(result.elapsed_ms, 900)
+                self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 25)
                 self.assertEqual(result.status, "partial")
                 self.assertFalse(result.can_promote)
                 if scenario in {"settings", "lookup", "artifact"}:
@@ -1420,13 +1436,13 @@ class DeltaScanTest(unittest.TestCase):
                 started = time.monotonic()
                 result = CONTROLLER._execute_delta_worker(
                     request,
-                    0.35,
+                    1,
                     started,
                     worker_path=SLOW_WORKER,
                     worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
                 )
                 actual_ms = round((time.monotonic() - started) * 1000)
-                self.assertLessEqual(actual_ms, 450)
+                self.assertLessEqual(actual_ms, 1_125)
                 self.assertEqual(result.status, "partial")
                 self.assertFalse(result.can_promote)
                 self.assertEqual(result.previous_report_id, "RPT-001")
@@ -1457,6 +1473,344 @@ class DeltaScanTest(unittest.TestCase):
         self.assertEqual(result.previous_report_id, "RPT-001")
         self.assertEqual(result.changed_paths, ("a.py",))
 
+    def test_precontrol_worker_is_bounded_by_one_second_and_late_control_is_rejected(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+
+        for scenario in ("settings", "late-control"):
+            with self.subTest(scenario=scenario):
+                started = time.monotonic()
+                result = CONTROLLER._execute_delta_worker(
+                    request,
+                    3,
+                    started,
+                    worker_path=SLOW_WORKER,
+                    worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
+                )
+                actual_ms = round((time.monotonic() - started) * 1000)
+
+                self.assertGreaterEqual(actual_ms, 900)
+                self.assertLessEqual(actual_ms, 1_125)
+                self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 25)
+                self.assertEqual(result.status, "partial")
+                self.assertFalse(result.can_promote)
+                self.assertIsNone(result.previous_report_id)
+                self.assertEqual(result.changed_paths, ())
+                self.assertIn("preflight", result.display_text)
+
+    def test_prompt_two_and_three_second_control_frames_extend_the_deadline(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+
+        for scenario in ("configured-two-success", "configured-three-success"):
+            with self.subTest(scenario=scenario):
+                started = time.monotonic()
+                result = CONTROLLER._execute_delta_worker(
+                    request,
+                    3,
+                    started,
+                    worker_path=SLOW_WORKER,
+                    worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
+                )
+                actual_ms = round((time.monotonic() - started) * 1000)
+
+                self.assertGreaterEqual(actual_ms, 1_000)
+                self.assertLessEqual(actual_ms, 1_500)
+                self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 25)
+                self.assertEqual(result.status, "complete")
+                self.assertTrue(result.can_promote)
+
+    def test_worker_parser_requires_exact_control_fallback_result_order(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        token = "a" * 32
+        fallback = {
+            "status": "partial",
+            "scan_id": "1" * 32,
+            "receipt_id": "2" * 32,
+            "receipt_sha256": "3" * 64,
+            "display_text": "trusted previous then fallback",
+            "risk_level": "unknown",
+            "paths": [],
+            "frontier": [],
+            "candidates": [],
+            "elapsed_ms": 0,
+            "cache_status": "bypassed",
+            "can_promote": False,
+            "previous_report_id": "RPT-001",
+            "previous_revision": 2,
+            "changed_paths": ["a.py"],
+            "changed_count": 1,
+            "previous_display_text": "trusted previous",
+        }
+        result = dict(fallback)
+        result["status"] = "complete"
+        result["can_promote"] = True
+
+        def framed(kind, payload):
+            body = json.dumps(
+                {"kind": kind, "payload": payload, "token": token},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            return f"{len(body):08x}\n".encode() + body
+
+        control = framed("control", {"effective_max_seconds": 3})
+        fallback_frame = framed("trusted_fallback", fallback)
+        result_frame = framed("result", result)
+        valid = CONTROLLER._DeltaWorkerFrameParser(token, request)
+        self.assertTrue(valid.feed(control + fallback_frame + result_frame))
+        self.assertTrue(valid.complete())
+        self.assertIsNotNone(valid.result)
+
+        invalid_streams = (
+            fallback_frame,
+            result_frame + control + fallback_frame,
+            control + result_frame,
+            control + control + fallback_frame + result_frame,
+            framed("control", {"effective_max_seconds": 0}) + fallback_frame + result_frame,
+            framed("control", {"effective_max_seconds": 4}) + fallback_frame + result_frame,
+            framed("control", {"effective_max_seconds": True}) + fallback_frame + result_frame,
+        )
+        for stream in invalid_streams:
+            with self.subTest(prefix=stream[:32]):
+                parser = CONTROLLER._DeltaWorkerFrameParser(token, request)
+                self.assertFalse(parser.feed(stream))
+                self.assertFalse(parser.complete())
+
+        for incomplete in (control, control + fallback_frame):
+            with self.subTest(incomplete=incomplete[:32]):
+                parser = CONTROLLER._DeltaWorkerFrameParser(token, request)
+                self.assertTrue(parser.feed(incomplete))
+                self.assertFalse(parser.complete())
+
+    def test_process_rejects_invalid_first_control_and_out_of_order_frames(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        pretrust_scenarios = (
+            "fallback-before-control",
+            "result-before-control",
+            "result-without-fallback",
+            "duplicate-control",
+            "invalid-control",
+            "forged-control",
+        )
+
+        for scenario in pretrust_scenarios:
+            with self.subTest(scenario=scenario):
+                started = time.monotonic()
+                result = CONTROLLER._execute_delta_worker(
+                    request,
+                    3,
+                    started,
+                    worker_path=SLOW_WORKER,
+                    worker_environment={"RIR_DELTA_TEST_SCENARIO": scenario},
+                )
+
+                self.assertLessEqual(round((time.monotonic() - started) * 1000), 500)
+                self.assertEqual(result.status, "partial")
+                self.assertFalse(result.can_promote)
+                self.assertIsNone(result.previous_report_id)
+                self.assertEqual(result.changed_paths, ())
+
+        trusted = CONTROLLER._execute_delta_worker(
+            request,
+            3,
+            time.monotonic(),
+            worker_path=SLOW_WORKER,
+            worker_environment={"RIR_DELTA_TEST_SCENARIO": "control-after-fallback"},
+        )
+        self.assertEqual(trusted.status, "partial")
+        self.assertFalse(trusted.can_promote)
+        self.assertEqual(trusted.previous_report_id, "RPT-001")
+        self.assertEqual(trusted.changed_paths, ("a.py",))
+
+    def test_elapsed_includes_cleanup_without_clamping_to_worker_budget(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        real_cleanup = CONTROLLER._cleanup_delta_worker_temps
+
+        def delayed_cleanup(root, token, *args, **kwargs):
+            cleaned = real_cleanup(root, token, *args, **kwargs)
+            time.sleep(0.125)
+            return cleaned
+
+        started = time.monotonic()
+        with mock.patch.object(
+            CONTROLLER,
+            "_cleanup_delta_worker_temps",
+            side_effect=delayed_cleanup,
+        ):
+            result = CONTROLLER._execute_delta_worker(
+                request,
+                3,
+                started,
+                worker_path=SLOW_WORKER,
+                worker_environment={"RIR_DELTA_TEST_SCENARIO": "configured-one"},
+            )
+        actual_ms = round((time.monotonic() - started) * 1000)
+
+        self.assertLessEqual(abs(result.elapsed_ms - actual_ms), 25)
+        self.assertGreater(result.elapsed_ms, 1_000)
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
+        self.assertEqual(result.previous_report_id, "RPT-001")
+
+    def test_cleanup_failure_downgrades_complete_result_to_trusted_fallback(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        real_cleanup = CONTROLLER._cleanup_delta_worker_temps
+
+        def failed_cleanup(root, token, *args, **kwargs):
+            real_cleanup(root, token, *args, **kwargs)
+            return False
+
+        with mock.patch.object(
+            CONTROLLER,
+            "_cleanup_delta_worker_temps",
+            side_effect=failed_cleanup,
+        ):
+            result = CONTROLLER._execute_delta_worker(
+                request,
+                1,
+                time.monotonic(),
+                worker_path=SLOW_WORKER,
+                worker_environment={"RIR_DELTA_TEST_SCENARIO": "success"},
+            )
+
+        self.assertEqual(result.status, "partial")
+        self.assertFalse(result.can_promote)
+        self.assertEqual(result.previous_report_id, "RPT-001")
+        self.assertEqual(result.changed_paths, ("a.py",))
+
+    def test_worker_temp_cleanup_is_nonrecursive_and_reports_unexpected_directory(self):
+        worker_temp = Path(self.temporary.name) / "worker-temp"
+        worker_temp.mkdir()
+        input_path = worker_temp / "input.json"
+        input_path.write_text("{}", encoding="ascii")
+        nested = worker_temp / "unexpected"
+        nested.mkdir()
+        (nested / "untrusted").write_text("data", encoding="ascii")
+
+        cleaned = CONTROLLER._cleanup_delta_worker_directory(
+            worker_temp,
+            input_path,
+            time.monotonic() + 0.1,
+        )
+
+        self.assertFalse(cleaned)
+        self.assertFalse(input_path.exists())
+        self.assertTrue(nested.is_dir())
+
+    def test_cleanup_helpers_bound_entries_deadlines_and_private_temp_shapes(self):
+        missing = Path(self.temporary.name) / "missing-worker-temp"
+        self.assertFalse(
+            CONTROLLER._cleanup_delta_worker_directory(
+                missing,
+                missing / "wrong-name",
+                time.monotonic() + 0.1,
+            )
+        )
+        self.assertFalse(
+            CONTROLLER._cleanup_delta_worker_directory(
+                missing,
+                missing / "input.json",
+                time.monotonic() + 0.1,
+            )
+        )
+
+        expired = Path(self.temporary.name) / "expired-worker-temp"
+        expired.mkdir()
+        expired_input = expired / "input.json"
+        expired_input.write_text("{}", encoding="ascii")
+        self.assertFalse(
+            CONTROLLER._cleanup_delta_worker_directory(
+                expired,
+                expired_input,
+                time.monotonic() - 1,
+            )
+        )
+        self.assertFalse(expired.exists())
+
+        direct = Path(self.temporary.name) / "direct-worker-temp"
+        direct.mkdir()
+        (direct / "direct-file").write_text("temporary", encoding="ascii")
+        (direct / "empty-directory").mkdir()
+        self.assertTrue(
+            CONTROLLER._cleanup_delta_worker_directory(
+                direct,
+                direct / "input.json",
+                time.monotonic() + 0.1,
+            )
+        )
+        self.assertFalse(direct.exists())
+
+        token = "b" * 32
+        scans = self.root / ".requirements-impact-refiner" / "scans"
+        scans.mkdir(parents=True)
+        removable = scans / f".scan.{token}.payload.tmp"
+        removable.write_text("partial", encoding="ascii")
+        unexpected = scans / f".scan.{token}.directory.tmp"
+        unexpected.mkdir()
+        self.assertFalse(
+            CONTROLLER._cleanup_delta_worker_temps(
+                self.root,
+                token,
+                time.monotonic() + 0.1,
+            )
+        )
+        self.assertFalse(removable.exists())
+        self.assertTrue(unexpected.is_dir())
+        self.assertFalse(
+            CONTROLLER._cleanup_delta_worker_temps(
+                self.root,
+                token,
+                time.monotonic() - 1,
+            )
+        )
+
     def test_forged_fallback_frame_is_not_retained_as_trusted(self):
         request = CONTROLLER.ScanRequest(
             self.root,
@@ -1470,7 +1824,7 @@ class DeltaScanTest(unittest.TestCase):
 
         result = CONTROLLER._execute_delta_worker(
             request,
-            0.25,
+            1,
             time.monotonic(),
             worker_path=SLOW_WORKER,
             worker_environment={"RIR_DELTA_TEST_SCENARIO": "forged-frame"},
@@ -1496,7 +1850,7 @@ class DeltaScanTest(unittest.TestCase):
         started = time.monotonic()
         result = CONTROLLER._execute_delta_worker(
             request,
-            0.35,
+            1,
             started,
             worker_path=SLOW_WORKER,
             worker_environment={
@@ -1508,7 +1862,7 @@ class DeltaScanTest(unittest.TestCase):
         actual_ms = round((time.monotonic() - started) * 1000)
 
         self.assertEqual(result.status, "partial")
-        self.assertLessEqual(actual_ms, 450)
+        self.assertLessEqual(actual_ms, 1_125)
         self.assertTrue(child_pid_path.is_file())
         child_pid = int(child_pid_path.read_text(encoding="ascii"))
         deadline = time.monotonic() + 1.0
