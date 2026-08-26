@@ -708,6 +708,37 @@ class DeltaScanTest(unittest.TestCase):
         self.assertIsNotNone(result.performance_metrics.operation_elapsed_ms)
         self.assertIsNone(result.performance_metrics.accounted_new_evidence_bytes)
 
+    def test_worker_performance_mapping_rejects_metric_bound_mutations(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change OriginSignal negotiation",
+            (),
+            "technical",
+            "RPT-001",
+            2,
+            ("a.py",),
+        )
+        result = CONTROLLER._generic_delta_preflight_fallback(request, 1, "preflight")
+        valid = CONTROLLER._scan_result_mapping(result)
+        CONTROLLER._scan_result_from_mapping(valid, 1)
+
+        mutations = (
+            ("model_calls", None),
+            ("model_calls", True),
+            ("model_calls", -1),
+            ("accounting_exclusions", [f"row-{index}" for index in range(17)]),
+            ("accounting_exclusions", ["한" * 85 + "é"]),
+            ("accounting_exclusions", ["same", "same"]),
+        )
+        for field, malformed in mutations:
+            with self.subTest(field=field, malformed=malformed):
+                mapping = json.loads(json.dumps(valid))
+                mapping["performance_metrics"][field] = malformed
+                with self.assertRaisesRegex(
+                    ValueError, "delta worker performance metrics are invalid"
+                ):
+                    CONTROLLER._scan_result_from_mapping(mapping, 1)
+
     def test_worker_filesystem_trust_failure_returns_identity_free_partial(self):
         missing_root = Path(self.temporary.name) / "missing-repository"
         request = CONTROLLER.ScanRequest(

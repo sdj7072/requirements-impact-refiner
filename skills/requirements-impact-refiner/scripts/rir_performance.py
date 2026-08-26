@@ -173,18 +173,24 @@ class PerformanceMetrics:
         )
         if (
             not isinstance(self.accounting_exclusions, tuple)
-            or any(
-                not isinstance(row, str) or not row.strip() for row in self.accounting_exclusions
-            )
-            or tuple(sorted(set(self.accounting_exclusions))) != self.accounting_exclusions
+            or len(self.accounting_exclusions) > 16
         ):
-            raise ValueError("accounting_exclusions must be unique sorted nonblank text")
+            raise ValueError("accounting_exclusions violates its collection bound")
+        try:
+            exclusions_valid = all(
+                isinstance(row, str) and row != "" and len(row.encode("utf-8")) <= 256
+                for row in self.accounting_exclusions
+            ) and len(set(self.accounting_exclusions)) == len(self.accounting_exclusions)
+        except (TypeError, UnicodeEncodeError):
+            exclusions_valid = False
+        if not exclusions_valid:
+            raise ValueError("accounting_exclusions contains invalid UTF-8 text")
         for name in (
             "estimated_serialized_input_tokens",
             "estimated_serialized_output_tokens",
-            "model_calls",
         ):
             _optional_int(getattr(self, name), MAX_INTEGER, name)
+        _bounded_int(self.model_calls, MAX_INTEGER, "model_calls")
         model_values = (
             self.estimated_model_input_tokens,
             self.estimated_model_output_tokens,

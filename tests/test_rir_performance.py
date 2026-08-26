@@ -164,6 +164,74 @@ class RirPerformanceTest(unittest.TestCase):
                 model_calls=0,
             )
 
+    def test_model_call_count_rejects_null_bool_negative_and_usage_bypass(self):
+        performance = load_performance()
+        base = performance.PerformanceMetrics().to_mapping()
+        cases = (
+            (None, None, None),
+            (True, None, None),
+            (-1, None, None),
+            (None, 10, 2),
+        )
+
+        for model_calls, actual_input, actual_output in cases:
+            with self.subTest(
+                model_calls=model_calls,
+                actual_input=actual_input,
+                actual_output=actual_output,
+            ):
+                malformed = dict(base)
+                malformed["model_calls"] = model_calls
+                malformed["actual_input_tokens"] = actual_input
+                malformed["actual_output_tokens"] = actual_output
+                with self.assertRaisesRegex(ValueError, "model_calls"):
+                    performance.PerformanceMetrics.from_mapping(malformed)
+
+        for model_calls in (None, True, -1):
+            with self.subTest(constructor=model_calls):
+                with self.assertRaisesRegex(ValueError, "model_calls"):
+                    performance.PerformanceMetrics(model_calls=model_calls)
+
+    def test_exclusions_match_schema_cardinality_utf8_and_unique_contract(self):
+        performance = load_performance()
+        base = performance.PerformanceMetrics().to_mapping()
+        too_many = [f"exclusion-{index:02d}" for index in range(17)]
+        unicode_257_bytes = "한" * 85 + "é"
+        self.assertEqual(len(unicode_257_bytes.encode()), 257)
+        invalid = (
+            too_many,
+            [unicode_257_bytes],
+            ["duplicate", "duplicate"],
+            [""],
+        )
+
+        for exclusions in invalid:
+            with self.subTest(exclusions=exclusions):
+                malformed = dict(base)
+                malformed["accounting_exclusions"] = exclusions
+                with self.assertRaisesRegex(ValueError, "accounting_exclusions"):
+                    performance.PerformanceMetrics.from_mapping(malformed)
+
+        unsorted = ("z-last", "a-first")
+        valid = performance.PerformanceMetrics(accounting_exclusions=unsorted)
+        self.assertEqual(valid.accounting_exclusions, unsorted)
+
+    def test_trusted_actual_usage_accepts_bounded_complete_pairs(self):
+        performance = load_performance()
+
+        result = performance.with_actual_usage(
+            performance.PerformanceMetrics(),
+            input_tokens=10,
+            output_tokens=2,
+            model_calls=1,
+            estimated_model_input_tokens=9,
+            estimated_model_output_tokens=2,
+        )
+
+        self.assertEqual(result.model_calls, 1)
+        self.assertEqual(result.actual_input_tokens, 10)
+        self.assertEqual(result.estimated_model_input_tokens, 9)
+
     def test_root_and_installed_skill_implementations_are_byte_identical(self):
         self.assertEqual(MODULE_PATH.read_bytes(), MIRROR_PATH.read_bytes())
 

@@ -286,6 +286,35 @@ class FastScanTest(unittest.TestCase):
         complete["cache_status"] = "miss"
         self.assertEqual(fast_scan.validate_fast_scan_receipt(complete), ())
 
+    def test_stored_performance_metrics_reject_schema_bound_mutations(self):
+        fast_scan = load_fast_scan()
+        valid = self.receipt()
+        valid["performance_metrics"] = fast_scan.rir_performance.PerformanceMetrics().to_mapping()
+        self.assertEqual(fast_scan.validate_fast_scan_receipt(valid), ())
+
+        mutations = (
+            ("model_calls", None),
+            ("model_calls", True),
+            ("model_calls", -1),
+            ("accounting_exclusions", [f"row-{index}" for index in range(17)]),
+            ("accounting_exclusions", ["한" * 85 + "é"]),
+            ("accounting_exclusions", ["same", "same"]),
+        )
+        for field, malformed in mutations:
+            with self.subTest(field=field, malformed=malformed):
+                value = copy.deepcopy(valid)
+                value["performance_metrics"][field] = malformed
+                if field == "model_calls" and malformed is None:
+                    value["performance_metrics"]["actual_input_tokens"] = 1
+                    value["performance_metrics"]["actual_output_tokens"] = 1
+
+                self.assertIn(
+                    "performance_metrics is invalid",
+                    fast_scan.validate_fast_scan_receipt(value),
+                )
+                with self.assertRaisesRegex(ValueError, "invalid fast scan receipt"):
+                    fast_scan.canonical_fast_scan_bytes(value)
+
     def test_unhashable_status_risk_cache_inventory_and_seed_identity_fail_closed(self):
         fast_scan = load_fast_scan()
         cases = (
