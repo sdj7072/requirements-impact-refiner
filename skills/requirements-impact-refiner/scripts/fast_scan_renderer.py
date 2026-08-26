@@ -138,10 +138,7 @@ def _frontier_reason(reason, locale):
 
 
 def _bounded_lines(lines, footer, protected=""):
-    """Assemble whole body lines under the word cap. The footer always
-    survives; protected safety text is word-trimmed only if it alone would
-    overflow; body lines are dropped whole, never cut mid-line, so technical
-    provenance stays intact."""
+    """Assemble complete Markdown blocks without flattening their layout."""
     footer_words = footer.split()
     protected_words = protected.split()
     safety_budget = max(0, WORD_LIMIT - len(footer_words))
@@ -155,16 +152,23 @@ def _bounded_lines(lines, footer, protected=""):
         if used + len(line_words) > available:
             if available > 0:
                 if used < available:
-                    kept_lines.append(["…"])
+                    kept_lines.append("…")
                 elif kept_lines:
                     # Replacing the last complete line preserves the
                     # no-mid-line provenance guarantee and budgets the marker.
-                    kept_lines[-1] = ["…"]
+                    kept_lines[-1] = "…"
             break
-        kept_lines.append(line_words)
+        kept_lines.append(line)
         used += len(line_words)
-    kept = [word for line in kept_lines for word in line]
-    return " ".join(kept + protected_words + footer_words)
+    blocks = list(kept_lines)
+    if protected_words:
+        blocks.append(
+            protected
+            if len(protected.split()) == len(protected_words)
+            else " ".join(protected_words)
+        )
+    blocks.append(footer)
+    return "\n\n".join(block for block in blocks if block)
 
 
 def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str = "en") -> str:
@@ -177,24 +181,36 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
     cache = str(receipt.get("cache_status", "bypassed"))
     if locale == "ko":
         cache_label = {"hit": "적중", "miss": "미적중", "bypassed": "사용 안 함"}.get(cache, cache)
-        footer = f"검사 범위: {status_label}; {receipt.get('elapsed_ms', 0)}ms; 캐시 {cache_label}."
+        info_heading = "### 검사 정보"
+        info = (
+            f"- 검사 범위: {status_label}\n"
+            f"- 시간: {receipt.get('elapsed_ms', 0)}ms\n"
+            f"- 캐시: {cache_label}"
+        )
     elif locale == "ja":
         cache_label = {"hit": "ヒット", "miss": "ミス", "bypassed": "未使用"}.get(cache, cache)
-        footer = (
-            f"確認範囲: {status_label}; {receipt.get('elapsed_ms', 0)}ms; キャッシュ {cache_label}."
+        info_heading = "### 検査情報"
+        info = (
+            f"- 確認範囲: {status_label}\n"
+            f"- 時間: {receipt.get('elapsed_ms', 0)}ms\n"
+            f"- キャッシュ: {cache_label}"
         )
     else:
-        footer = f"Coverage: {status}; {receipt.get('elapsed_ms', 0)} ms; cache {cache}."
+        info_heading = "### Scan information"
+        info = f"- Coverage: {status}\n- Time: {receipt.get('elapsed_ms', 0)} ms\n- Cache: {cache}"
     if status != "needs_input":
-        footer += {
+        question = {
             "ko": " 상세 영향도 정제를 진행할까요?",
             "ja": " 詳細な影響分析を続けますか?",
-        }.get(locale, " Do you want detailed refinement?")
+        }.get(locale, " Do you want detailed refinement?").strip()
     else:
-        footer += {
+        question = {
             "ko": " 변경 범위가 되는 구체적인 파일, 심볼 또는 API는 무엇인가요?",
             "ja": " 変更境界となる具体的なファイル、シンボル、または API は何ですか?",
-        }.get(locale, " Which file, symbol, or API is the concrete boundary of this change?")
+        }.get(
+            locale, " Which file, symbol, or API is the concrete boundary of this change?"
+        ).strip()
+    footer = f"{info_heading}\n\n{info}\n\n{question}"
     if status == "needs_input":
         candidate_value = receipt.get("candidates", [])
         candidates = candidate_value if _rows(candidate_value) else ()
@@ -213,7 +229,15 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
             "ko": "빠른 영향도 검사에 추가 입력이 필요합니다. 후보 범위: ",
             "ja": "高速影響スキャンには追加情報が必要です。候補範囲: ",
         }.get(locale, "Fast impact scan needs more input. Candidate boundaries: ")
-        return _bounded_lines([intro + listed + "."], footer)
+        title = {
+            "ko": "## 빠른 영향도 검사",
+            "ja": "## 高速影響スキャン",
+        }.get(locale, "## Fast impact scan")
+        candidate_heading = {
+            "ko": "### 후보 범위",
+            "ja": "### 候補範囲",
+        }.get(locale, "### Candidate boundaries")
+        return _bounded_lines([title, candidate_heading, "- " + intro + listed + "."], footer)
     graph_value = receipt.get("graph_receipt", {})
     graph = graph_value if _mapping(graph_value) else {}
     node_value = graph.get("nodes", [])
@@ -225,14 +249,14 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
     edges = {row.get("id"): row for row in edge_rows}
     risk = _localized(receipt.get("risk_level", "unknown"), locale, RISK_LABELS)
     if locale == "ko":
-        lines = [f"빠른 영향도 검사: 위험도 {risk}.", "발생 가능한 영향 경로:"]
+        lines = ["## 빠른 영향도 검사", f"**위험도:** {risk}", "### 발생 가능한 영향 경로"]
     elif locale == "ja":
-        lines = [f"高速影響スキャン: リスク {risk}。", "発生する可能性のある影響経路:"]
+        lines = ["## 高速影響スキャン", f"**リスク:** {risk}", "### 発生する可能性のある影響経路"]
     else:
-        lines = ["Fast impact scan: " + str(risk) + " risk.", "Possible issue paths:"]
+        lines = ["## Fast impact scan", "**Risk:** " + str(risk), "### Possible issue paths"]
     path_value = graph.get("paths", [])
     path_rows = path_value if _rows(path_value) else ()
-    for path in path_rows[:8]:
+    for path_number, path in enumerate(path_rows[:8], 1):
         path_node_value = path.get("nodes", [])
         path_node_ids = path_node_value if _strings(path_node_value) else ()
         path_nodes = [nodes.get(key, {}) for key in path_node_ids]
@@ -244,7 +268,8 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
         labels = " → ".join(_text(value) for value in display_labels)
         domain_value = path.get("risk_domains", [])
         domains = domain_value if _values(domain_value) else ()
-        line = "- " + labels + ": " + _text(_domains(domains, locale)) + "."
+        risk_key = {"ko": "위험", "ja": "リスク"}.get(locale, "Risk")
+        line = f"{path_number}. {labels}\n   - {risk_key}: " + _text(_domains(domains, locale))
         if audience == "technical":
             path_edge_value = path.get("edges", [])
             path_edge_ids = path_edge_value if _strings(path_edge_value) else ()
@@ -264,25 +289,25 @@ def render_fast_scan(receipt: Mapping[str, object], audience: str, locale: str =
                 "ko": (" 제공자 ", "; 신뢰도 ", "; 위치 ", "사용 불가", "미확인"),
                 "ja": (" provider ", "; 信頼度 ", "; 場所 ", "利用不可", "未確認"),
             }.get(locale, (" provider ", "; confidence ", "; location ", "unavailable", "unknown"))
-            line += keys[0] + _text("+".join(providers) or keys[3])
+            line += "\n   -" + keys[0] + _text("+".join(providers) or keys[3])
             line += keys[1] + _text("+".join(confidences) or keys[4])
-            line += keys[2] + _text(" + ".join(locations) or keys[3]) + "."
+            line += keys[2] + _text(" + ".join(locations) or keys[3])
         lines.append(line)
     frontier_value = receipt.get("frontier", [])
     frontier = frontier_value if _rows(frontier_value) else ()
     protected = []
     if status == "partial":
-        protected.append(
-            {
-                "ko": "부분 결과: 아직 확인되지 않은 영향이 남아 있을 수 있습니다.",
-                "ja": "部分的な結果: 未確認の影響が残っている可能性があります。",
-            }.get(locale, "Partial result: unknown impact may remain.")
-        )
+        partial_text = {
+            "ko": "부분 결과: 아직 확인되지 않은 영향이 남아 있을 수 있습니다.",
+            "ja": "部分的な結果: 未確認の影響が残っている可能性があります。",
+        }.get(locale, "Partial result: unknown impact may remain.")
+        protected.append(partial_text)
     if frontier:
-        heading = {"ko": "미확인 범위: ", "ja": "未確認の範囲: "}.get(locale, "Unknown frontier: ")
-        protected.append(
-            heading
-            + "; ".join(_text(_frontier_reason(row.get("reason"), locale)) for row in frontier[:3])
-            + "."
+        heading = {"ko": "### 미확인 범위", "ja": "### 未確認の範囲"}.get(
+            locale, "### Unknown frontier"
         )
-    return _bounded_lines(lines, footer, " ".join(protected))
+        reasons = "\n".join(
+            "- " + _text(_frontier_reason(row.get("reason"), locale)) for row in frontier[:3]
+        )
+        protected.append(f"{heading}\n\n{reasons}")
+    return _bounded_lines(lines, footer, "\n\n".join(protected))

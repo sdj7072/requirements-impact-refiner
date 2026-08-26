@@ -274,7 +274,7 @@ class PackagingTest(unittest.TestCase):
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.5.0")
+        self.assertEqual(manifest["version"], "0.6.0")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertEqual(manifest["mcpServers"], "./.mcp.json")
         self.assertTrue((FORBIDDEN_COMPONENTS - {"mcpServers"}).isdisjoint(manifest))
@@ -289,7 +289,7 @@ class PackagingTest(unittest.TestCase):
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.5.0")
+        self.assertEqual(manifest["version"], "0.6.0")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_mcp_config_uses_local_relative_launcher_without_credentials(self):
@@ -312,7 +312,7 @@ class PackagingTest(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("name: using-requirements-impact-refiner", text)
         self.assertIn("Use when starting any software-development conversation", text)
-        self.assertIn('version: "0.5.0"', text)
+        self.assertIn('version: "0.6.0"', text)
 
     def test_compact_delivery_demo_svg_is_safe_and_accessible(self):
         path = ROOT / "assets/compact-delivery-demo.svg"

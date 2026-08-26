@@ -231,7 +231,7 @@ class RirControllerCliTest(unittest.TestCase):
         self.enable_graph_sources()
         text_result = self.run_cli("scan", "--repo-root", self.root, "--input", self.scan_path)
         self.assertEqual(text_result.returncode, 0, text_result.stderr)
-        self.assertIn("Fast impact scan:", text_result.stdout)
+        self.assertIn("## Fast impact scan", text_result.stdout)
 
         json_result = self.run_cli(
             "scan",
@@ -243,7 +243,7 @@ class RirControllerCliTest(unittest.TestCase):
         )
         payload = json.loads(json_result.stdout)
         self.assertRegex(payload["scan_id"], r"^[0-9a-f]{32}$")
-        self.assertTrue(payload["display_text"].startswith("Fast impact scan:"))
+        self.assertTrue(payload["display_text"].startswith("## Fast impact scan"))
         self.assertIn("Coverage:", payload["display_text"])
         self.assertEqual(payload["cache_status"], "hit")
 

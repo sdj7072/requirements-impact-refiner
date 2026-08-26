@@ -38,7 +38,10 @@ class FastScanRendererTest(unittest.TestCase):
     def test_balanced_output_has_paths_frontier_footer_and_word_limit(self):
         text = load_renderer().render_fast_scan(receipt(), "balanced")
         self.assertIn("→", text)
-        self.assertIn("Possible issue", text)
+        self.assertIn("## Fast impact scan", text)
+        self.assertIn("\n### Possible issue paths\n", text)
+        self.assertIn("\n1. ", text)
+        self.assertIn("\n### Scan information\n", text)
         self.assertEqual(text.count("Coverage:"), 1)
         self.assertEqual(text.count("Do you want detailed refinement?"), 1)
         self.assertLessEqual(len(text.split()), 180)
@@ -106,10 +109,13 @@ class FastScanRendererTest(unittest.TestCase):
         japanese = renderer.render_fast_scan(partial, "balanced", "ja")
 
         self.assertIn("빠른 영향도 검사", korean)
+        self.assertIn("\n### 발생 가능한 영향 경로\n", korean)
+        self.assertIn("\n### 검사 정보\n", korean)
         self.assertIn("부분 결과", korean)
         self.assertIn("상세 영향도 정제를 진행할까요?", korean)
         self.assertNotIn("Do you want detailed refinement?", korean)
         self.assertIn("高速影響スキャン", japanese)
+        self.assertIn("\n### 発生する可能性のある影響経路\n", japanese)
         self.assertIn("部分的な結果", japanese)
         self.assertIn("詳細な影響分析を続けますか?", japanese)
 

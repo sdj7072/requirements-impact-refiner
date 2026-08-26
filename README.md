@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.5.0` is a **Public Preview** repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.6.0` is a **Public Preview** repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
