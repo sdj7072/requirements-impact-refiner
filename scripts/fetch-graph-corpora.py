@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import ModuleType
@@ -102,6 +102,18 @@ class CorpusSpec:
     license_sha256: str
     preserved_license: Path
     license_bytes: bytes
+
+
+@dataclass
+class DestinationHandle:
+    path: Path
+    parent_path: Path
+    name: str
+    parent_fd: int
+    child_fd: int
+    parent_identity: tuple[int, int]
+    child_identity: tuple[int, int]
+    closed: bool = False
 
 
 def _contains(parent: Path, candidate: Path) -> bool:
@@ -355,6 +367,205 @@ def validate_destination(
     )
 
 
+def _directory_flags() -> int:
+    directory = getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not directory or not nofollow:
+        raise CorpusError("descriptor-owned corpus directories are unsupported")
+    return os.O_RDONLY | directory | nofollow | getattr(os, "O_CLOEXEC", 0)
+
+
+def _same_directory(metadata: os.stat_result, identity: tuple[int, int]) -> bool:
+    return stat.S_ISDIR(metadata.st_mode) and (metadata.st_dev, metadata.st_ino) == identity
+
+
+def _fd_path(descriptor: int) -> Path:
+    for root in (Path(os.sep) / "dev" / "fd", Path(os.sep) / "proc" / "self" / "fd"):
+        if root.is_dir():
+            return root / str(descriptor)
+    raise CorpusError("descriptor filesystem paths are unavailable")
+
+
+def _open_destination_handle(
+    destination: Path,
+    repository_root: Path,
+    *,
+    create: bool,
+) -> DestinationHandle:
+    selected = (
+        validate_destination(destination, repository_root)
+        if create
+        else _validate_destination_boundary(destination, repository_root, must_exist=True)
+    )
+    parent_path = selected.parent
+    try:
+        parent_metadata = parent_path.lstat()
+        parent_fd = os.open(str(parent_path), _directory_flags())
+    except OSError as error:
+        raise CorpusError("corpus destination parent cannot be opened safely") from error
+    child_fd = None
+    created = False
+    try:
+        opened_parent = os.fstat(parent_fd)
+        parent_identity = (opened_parent.st_dev, opened_parent.st_ino)
+        if not _same_directory(parent_metadata, parent_identity):
+            raise CorpusError("corpus destination parent identity changed while opening")
+        if create:
+            os.mkdir(selected.name, mode=0o700, dir_fd=parent_fd)
+            created = True
+        child_metadata = os.stat(selected.name, dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(child_metadata.st_mode) or stat.S_ISLNK(child_metadata.st_mode):
+            raise CorpusError("corpus destination must be a real directory")
+        child_fd = os.open(selected.name, _directory_flags(), dir_fd=parent_fd)
+        if create:
+            os.fchmod(child_fd, 0o700)
+        opened_child = os.fstat(child_fd)
+        child_identity = (opened_child.st_dev, opened_child.st_ino)
+        named_child = os.stat(selected.name, dir_fd=parent_fd, follow_symlinks=False)
+        if not (
+            _same_directory(child_metadata, child_identity)
+            and _same_directory(named_child, child_identity)
+            and stat.S_IMODE(opened_child.st_mode) == 0o700
+        ):
+            raise CorpusError("corpus destination identity changed while opening")
+        return DestinationHandle(
+            selected,
+            parent_path,
+            selected.name,
+            parent_fd,
+            child_fd,
+            parent_identity,
+            child_identity,
+        )
+    except Exception as error:
+        if child_fd is not None:
+            os.close(child_fd)
+        if created:
+            try:
+                os.rmdir(selected.name, dir_fd=parent_fd)
+            except OSError:
+                os.close(parent_fd)
+                raise CorpusError("failed corpus destination cannot be removed safely") from error
+        os.close(parent_fd)
+        if isinstance(error, CorpusError):
+            raise
+        raise CorpusError("corpus destination cannot be opened safely") from error
+
+
+def _create_destination(destination: Path, repository_root: Path = ROOT) -> DestinationHandle:
+    return _open_destination_handle(destination, repository_root, create=True)
+
+
+def _open_destination(destination: Path, repository_root: Path = ROOT) -> DestinationHandle:
+    return _open_destination_handle(destination, repository_root, create=False)
+
+
+def _verify_destination_handle(handle: DestinationHandle) -> None:
+    if handle.closed:
+        raise CorpusError("corpus destination descriptor is closed")
+    try:
+        opened_parent = os.fstat(handle.parent_fd)
+        opened_child = os.fstat(handle.child_fd)
+        named_parent = handle.parent_path.lstat()
+        named_child = os.stat(handle.name, dir_fd=handle.parent_fd, follow_symlinks=False)
+    except OSError as error:
+        raise CorpusError("corpus destination identity cannot be verified") from error
+    if not (
+        _same_directory(opened_parent, handle.parent_identity)
+        and _same_directory(named_parent, handle.parent_identity)
+        and _same_directory(opened_child, handle.child_identity)
+        and _same_directory(named_child, handle.child_identity)
+    ):
+        raise CorpusError("corpus destination identity changed")
+
+
+def _close_destination(handle: DestinationHandle) -> None:
+    if handle.closed:
+        return
+    handle.closed = True
+    os.close(handle.child_fd)
+    os.close(handle.parent_fd)
+
+
+def _remove_tree_fd(directory_fd: int) -> None:
+    opened_directory = os.fstat(directory_fd)
+    if not stat.S_ISDIR(opened_directory.st_mode):
+        raise CorpusError("cleanup descriptor is not a directory")
+    os.fchmod(directory_fd, 0o700)
+    try:
+        with os.scandir(directory_fd) as entries:
+            names = sorted(entry.name for entry in entries)
+    except OSError as error:
+        raise CorpusError("corpus cleanup cannot enumerate held directory") from error
+    for name in names:
+        if not isinstance(name, str) or not name or name in {".", ".."} or "/" in name:
+            raise CorpusError("corpus cleanup entry name is unsafe")
+        metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            child_fd = os.open(name, _directory_flags(), dir_fd=directory_fd)
+            try:
+                child_identity = (metadata.st_dev, metadata.st_ino)
+                if not _same_directory(os.fstat(child_fd), child_identity):
+                    raise CorpusError("corpus cleanup child changed while opening")
+                _remove_tree_fd(child_fd)
+                named_after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if not _same_directory(named_after, child_identity):
+                    raise CorpusError("corpus cleanup child changed during removal")
+                os.rmdir(name, dir_fd=directory_fd)
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            os.unlink(name, dir_fd=directory_fd)
+        else:
+            raise CorpusError("corpus cleanup encountered an unsupported entry")
+
+
+def _locate_held_child(handle: DestinationHandle) -> str:
+    try:
+        with os.scandir(handle.parent_fd) as entries:
+            names = sorted(entry.name for entry in entries)
+    except OSError as error:
+        raise CorpusError("corpus cleanup cannot enumerate held parent") from error
+    matches = []
+    for name in names:
+        metadata = os.stat(name, dir_fd=handle.parent_fd, follow_symlinks=False)
+        if _same_directory(metadata, handle.child_identity):
+            matches.append(name)
+    if len(matches) != 1:
+        raise CorpusError("corpus cleanup cannot locate the held destination inode")
+    return matches[0]
+
+
+def _cleanup_destination(
+    handle: DestinationHandle,
+    *,
+    before_root_remove: Callable[[DestinationHandle, str], object] | None = None,
+) -> None:
+    if handle.closed:
+        raise CorpusError("corpus destination descriptor is closed")
+    cleanup_error = None
+    try:
+        if not _same_directory(os.fstat(handle.child_fd), handle.child_identity):
+            raise CorpusError("corpus cleanup destination identity changed")
+        _remove_tree_fd(handle.child_fd)
+        retained_name = _locate_held_child(handle)
+        if before_root_remove is not None:
+            before_root_remove(handle, retained_name)
+        retained_name = _locate_held_child(handle)
+        named = os.stat(retained_name, dir_fd=handle.parent_fd, follow_symlinks=False)
+        if not _same_directory(named, handle.child_identity):
+            raise CorpusError("corpus cleanup destination changed before rmdir")
+        os.rmdir(retained_name, dir_fd=handle.parent_fd)
+    except Exception as error:
+        cleanup_error = error
+    finally:
+        _close_destination(handle)
+    if cleanup_error is not None:
+        if isinstance(cleanup_error, CorpusError):
+            raise cleanup_error
+        raise CorpusError("corpus destination cleanup failed") from cleanup_error
+
+
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
     try:
         os.killpg(process.pid, signal.SIGKILL)
@@ -375,6 +586,7 @@ def run_bounded(
     stdout_limit: int,
     stderr_limit: int,
     environment: Mapping[str, str] | None = None,
+    pass_fds: Sequence[int] = (),
 ) -> tuple[bytes, bytes]:
     """Run one no-shell subprocess with time and byte bounds."""
     if (
@@ -386,7 +598,14 @@ def run_bounded(
     if timeout <= 0 or stdout_limit < 0 or stderr_limit < 0:
         raise CorpusError("bounded command limits are invalid")
     selected_cwd = Path(cwd)
-    if selected_cwd.is_symlink() or not selected_cwd.is_dir():
+    cwd_descriptor = None
+    if pass_fds and selected_cwd.name.isdigit() and int(selected_cwd.name) in pass_fds:
+        candidate_fd = int(selected_cwd.name)
+        if stat.S_ISDIR(os.fstat(candidate_fd).st_mode):
+            cwd_descriptor = candidate_fd
+    if cwd_descriptor is None and (
+        not selected_cwd.is_dir() or (selected_cwd.is_symlink() and not pass_fds)
+    ):
         raise CorpusError("bounded command working directory is unsafe")
     process_environment = (
         dict(environment)
@@ -394,15 +613,22 @@ def run_bounded(
         else {"LC_ALL": "C", "PATH": os.defpath, "TMPDIR": tempfile.gettempdir()}
     )
     try:
+
+        def enter_held_directory() -> None:
+            assert cwd_descriptor is not None
+            os.fchdir(cwd_descriptor)
+
         process = subprocess.Popen(
             tuple(command),
-            cwd=str(selected_cwd),
+            cwd=None if cwd_descriptor is not None else str(selected_cwd),
             env=process_environment,
             shell=False,
             start_new_session=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             close_fds=True,
+            pass_fds=tuple(pass_fds),
+            preexec_fn=enter_held_directory if cwd_descriptor is not None else None,
         )
     except OSError as error:
         raise CorpusError("bounded command could not start") from error
@@ -481,7 +707,20 @@ def _git(
     *,
     allow_local: bool,
     timeout: float = GIT_LOCAL_TIMEOUT_SECONDS,
+    pass_fds: Sequence[int] = (),
 ) -> bytes:
+    retained_fds = tuple(pass_fds)
+    cwd_path = Path(cwd)
+    if (
+        not retained_fds
+        and cwd_path.name.isdigit()
+        and cwd_path.parent
+        in {
+            Path(os.sep) / "dev" / "fd",
+            Path(os.sep) / "proc" / "self" / "fd",
+        }
+    ):
+        retained_fds = (int(cwd_path.name),)
     stdout, _ = run_bounded(
         (str(git), *_SAFE_GIT_OPTIONS, *tuple(arguments)),
         cwd,
@@ -489,6 +728,7 @@ def _git(
         stdout_limit=MAX_GIT_STDOUT_BYTES,
         stderr_limit=MAX_GIT_STDERR_BYTES,
         environment=_git_environment(git, allow_local=allow_local),
+        pass_fds=retained_fds,
     )
     return stdout
 
@@ -673,6 +913,8 @@ def _read_worktree_file(
 def _walk_worktree(
     root: Path,
     tree: Mapping[str, tuple[str, str]],
+    *,
+    root_fd: int | None = None,
 ) -> dict[str, tuple[str, bytes]]:
     expected_files = set(tree)
     expected_directories = {
@@ -681,13 +923,18 @@ def _walk_worktree(
         for parent in PurePosixPath(path).parents
         if parent.as_posix() != "."
     }
-    root_metadata = root.lstat()
-    if root.is_symlink() or not stat.S_ISDIR(root_metadata.st_mode):
-        raise CorpusError("corpus checkout root is unsafe")
-    root_fd = os.open(
-        str(root),
-        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-    )
+    if root_fd is None:
+        root_metadata = root.lstat()
+        if root.is_symlink() or not stat.S_ISDIR(root_metadata.st_mode):
+            raise CorpusError("corpus checkout root is unsafe")
+        owned_root_fd = os.open(str(root), _directory_flags())
+        named_root = True
+    else:
+        root_metadata = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_metadata.st_mode):
+            raise CorpusError("corpus checkout root descriptor is unsafe")
+        owned_root_fd = os.dup(root_fd)
+        named_root = False
     files: dict[str, tuple[str, bytes]] = {}
     total_bytes = 0
 
@@ -741,13 +988,18 @@ def _walk_worktree(
             files[relative] = (expected_mode, payload)
 
     try:
-        if _identity(os.fstat(root_fd)) != _identity(root_metadata):
+        if _identity(os.fstat(owned_root_fd)) != _identity(root_metadata):
             raise CorpusError("corpus checkout root changed while opening")
-        visit(root_fd, "")
-        if _identity(root.lstat()) != _identity(root_metadata):
+        visit(owned_root_fd, "")
+        if named_root:
+            root_after = root.lstat()
+        else:
+            assert root_fd is not None
+            root_after = os.fstat(root_fd)
+        if _identity(root_after) != _identity(root_metadata):
             raise CorpusError("corpus checkout root changed during traversal")
     finally:
-        os.close(root_fd)
+        os.close(owned_root_fd)
     if set(files) != expected_files:
         raise CorpusError("worktree path set differs from HEAD tree")
     return files
@@ -803,20 +1055,37 @@ def _verify_checkout(
     git: Path,
     *,
     allow_local: bool,
+    checkout_fd: int | None = None,
 ) -> dict[str, object]:
-    if checkout.is_symlink() or not checkout.is_dir():
-        raise CorpusError(f"{spec.id} checkout is not a regular directory")
-    if checkout.resolve(strict=True).parent != checkout.parent.resolve(strict=True):
-        raise CorpusError(f"{spec.id} checkout escapes the corpus destination")
-    _assert_symlink_free(checkout)
-    top = _git(git, ("rev-parse", "--show-toplevel"), checkout, allow_local=allow_local)
-    if Path(os.fsdecode(top).strip()).resolve(strict=True) != checkout.resolve(strict=True):
-        raise CorpusError(f"{spec.id} checkout has an unexpected Git root")
+    if checkout_fd is None:
+        if checkout.is_symlink() or not checkout.is_dir():
+            raise CorpusError(f"{spec.id} checkout is not a regular directory")
+        cwd = checkout
+    else:
+        if not stat.S_ISDIR(os.fstat(checkout_fd).st_mode):
+            raise CorpusError(f"{spec.id} checkout descriptor is not a directory")
+        cwd = _fd_path(checkout_fd)
+    top = _git(git, ("rev-parse", "--show-toplevel"), cwd, allow_local=allow_local)
+    top_path = Path(os.fsdecode(top).strip())
+    if checkout_fd is None:
+        if top_path.resolve(strict=True) != checkout.resolve(strict=True):
+            raise CorpusError(f"{spec.id} checkout has an unexpected Git root")
+    else:
+        try:
+            top_fd = os.open(str(top_path), _directory_flags())
+        except OSError as error:
+            raise CorpusError(f"{spec.id} Git root cannot be opened safely") from error
+        try:
+            expected_identity = (os.fstat(checkout_fd).st_dev, os.fstat(checkout_fd).st_ino)
+            if not _same_directory(os.fstat(top_fd), expected_identity):
+                raise CorpusError(f"{spec.id} checkout has an unexpected Git root")
+        finally:
+            os.close(top_fd)
     remote_output = os.fsdecode(
         _git(
             git,
             ("config", "--local", "--get-all", "remote.origin.url"),
-            checkout,
+            cwd,
             allow_local=allow_local,
         )
     )
@@ -827,26 +1096,26 @@ def _verify_checkout(
         _git(
             git,
             ("rev-parse", "--verify", "HEAD^{commit}"),
-            checkout,
+            cwd,
             allow_local=allow_local,
         )
     ).strip()
     if head != spec.commit:
         raise CorpusError(f"{spec.id} HEAD does not match the pinned commit")
     branch = os.fsdecode(
-        _git(git, ("branch", "--show-current"), checkout, allow_local=allow_local)
+        _git(git, ("branch", "--show-current"), cwd, allow_local=allow_local)
     ).strip()
     if branch:
         raise CorpusError(f"{spec.id} checkout must have a detached HEAD")
     commit_count = os.fsdecode(
-        _git(git, ("rev-list", "--count", "HEAD"), checkout, allow_local=allow_local)
+        _git(git, ("rev-list", "--count", "HEAD"), cwd, allow_local=allow_local)
     ).strip()
     if commit_count != "1":
         raise CorpusError(f"{spec.id} checkout must contain only the pinned shallow commit")
-    tree = _head_tree(git, checkout, allow_local=allow_local)
-    _verify_index(git, checkout, tree, allow_local=allow_local)
-    files = _walk_worktree(checkout, tree)
-    _verify_blob_bytes(git, checkout, tree, files, allow_local=allow_local)
+    tree = _head_tree(git, cwd, allow_local=allow_local)
+    _verify_index(git, cwd, tree, allow_local=allow_local)
+    files = _walk_worktree(cwd, tree, root_fd=checkout_fd)
+    _verify_blob_bytes(git, cwd, tree, files, allow_local=allow_local)
     license_row = files.get(spec.license_path)
     if license_row is None:
         raise CorpusError(f"{spec.id} license is absent from HEAD tree")
@@ -869,23 +1138,6 @@ def _verify_checkout(
     }
 
 
-def _remove_owned_destination(path: Path, identity: tuple[int, int]) -> None:
-    try:
-        current = path.lstat()
-    except FileNotFoundError:
-        return
-    except OSError as error:
-        raise CorpusError("partial corpus destination cannot be inspected") from error
-    if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != identity:
-        raise CorpusError("partial corpus destination identity changed; refusing cleanup")
-    if not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
-        raise CorpusError("safe partial corpus cleanup is unavailable")
-    try:
-        shutil.rmtree(path)
-    except OSError as error:
-        raise CorpusError("partial corpus destination cannot be removed safely") from error
-
-
 def fetch_corpora(
     catalog_path: Path,
     destination: Path,
@@ -893,71 +1145,99 @@ def fetch_corpora(
     repository_root: Path = ROOT,
     allow_local_repositories: bool = False,
     git_executable: Path | None = None,
+    after_destination_open: Callable[[DestinationHandle], object] | None = None,
 ) -> dict[str, object]:
     """Fetch every catalog row as one shallow detached verified checkout."""
     specs = load_catalog(
         catalog_path,
         allow_local_repositories=allow_local_repositories,
     )
-    selected = validate_destination(
-        destination,
-        repository_root,
-    )
     git = _find_git(git_executable)
-    os.mkdir(selected, mode=0o700)
-    os.chmod(selected, 0o700)
-    created = selected.lstat()
-    owned_identity = (created.st_dev, created.st_ino)
+    handle = _create_destination(destination, repository_root)
+    operation_error = None
     try:
+        if after_destination_open is not None:
+            after_destination_open(handle)
         rows = []
         for spec in specs:
-            checkout = selected / spec.checkout
-            os.mkdir(checkout, mode=0o700)
-            _git(git, ("init", "--quiet"), checkout, allow_local=allow_local_repositories)
-            _git(
-                git,
-                ("remote", "add", "origin", spec.repository),
-                checkout,
-                allow_local=allow_local_repositories,
-            )
-            configured = os.fsdecode(
+            os.mkdir(spec.checkout, mode=0o700, dir_fd=handle.child_fd)
+            checkout_fd = os.open(spec.checkout, _directory_flags(), dir_fd=handle.child_fd)
+            checkout_identity = (os.fstat(checkout_fd).st_dev, os.fstat(checkout_fd).st_ino)
+            checkout_cwd = _fd_path(checkout_fd)
+            try:
                 _git(
                     git,
-                    ("remote", "get-url", "origin"),
-                    checkout,
+                    ("init", "--quiet"),
+                    checkout_cwd,
                     allow_local=allow_local_repositories,
                 )
-            ).strip()
-            if configured != spec.repository:
-                raise CorpusError(f"{spec.id} remote URL changed before fetch")
-            _git(
-                git,
-                ("fetch", "--quiet", "--depth=1", "--no-tags", "origin", spec.commit),
-                checkout,
-                allow_local=allow_local_repositories,
-                timeout=GIT_FETCH_TIMEOUT_SECONDS,
-            )
-            _git(
-                git,
-                ("checkout", "--quiet", "--detach", spec.commit),
-                checkout,
-                allow_local=allow_local_repositories,
-            )
-            rows.append(
-                _verify_checkout(
-                    spec,
-                    checkout,
+                _git(
                     git,
+                    ("remote", "add", "origin", spec.repository),
+                    checkout_cwd,
                     allow_local=allow_local_repositories,
                 )
-            )
-        return _summary(selected, rows)
+                configured = os.fsdecode(
+                    _git(
+                        git,
+                        ("config", "--local", "--get", "remote.origin.url"),
+                        checkout_cwd,
+                        allow_local=allow_local_repositories,
+                    )
+                ).strip()
+                if configured != spec.repository:
+                    raise CorpusError(f"{spec.id} remote URL changed before fetch")
+                _git(
+                    git,
+                    ("fetch", "--quiet", "--depth=1", "--no-tags", "origin", spec.commit),
+                    checkout_cwd,
+                    allow_local=allow_local_repositories,
+                    timeout=GIT_FETCH_TIMEOUT_SECONDS,
+                )
+                _git(
+                    git,
+                    ("checkout", "--quiet", "--detach", spec.commit),
+                    checkout_cwd,
+                    allow_local=allow_local_repositories,
+                )
+                rows.append(
+                    _verify_checkout(
+                        spec,
+                        handle.path / spec.checkout,
+                        git,
+                        allow_local=allow_local_repositories,
+                        checkout_fd=checkout_fd,
+                    )
+                )
+                named_checkout = os.stat(
+                    spec.checkout, dir_fd=handle.child_fd, follow_symlinks=False
+                )
+                if not _same_directory(named_checkout, checkout_identity):
+                    raise CorpusError(f"{spec.id} checkout destination identity changed")
+            finally:
+                os.close(checkout_fd)
+        actual = set()
+        with os.scandir(handle.child_fd) as entries:
+            for entry in entries:
+                actual.add(entry.name)
+        if actual != {spec.checkout for spec in specs}:
+            raise CorpusError("corpus destination contains unknown or missing checkouts")
+        _verify_destination_handle(handle)
+        summary = _summary(handle.path, rows)
     except Exception as error:
+        operation_error = error
+        summary = None
+    if operation_error is not None:
         try:
-            _remove_owned_destination(selected, owned_identity)
+            _cleanup_destination(handle)
         except CorpusError as cleanup_error:
-            raise cleanup_error from error
-        raise
+            raise cleanup_error from operation_error
+        if isinstance(operation_error, CorpusError):
+            raise operation_error
+        raise CorpusError("corpus fetch failed") from operation_error
+    _close_destination(handle)
+    assert summary is not None
+    return summary
 
 
 def verify_corpora(
@@ -973,26 +1253,50 @@ def verify_corpora(
         catalog_path,
         allow_local_repositories=allow_local_repositories,
     )
-    selected = _validate_destination_boundary(
-        destination,
-        repository_root,
-        must_exist=True,
-    )
     git = _find_git(git_executable)
-    actual = {path.name for path in selected.iterdir()}
-    expected = {spec.checkout for spec in specs}
-    if actual != expected:
-        raise CorpusError("corpus destination contains unknown or missing checkouts")
-    rows = [
-        _verify_checkout(
-            spec,
-            selected / spec.checkout,
-            git,
-            allow_local=allow_local_repositories,
-        )
-        for spec in specs
-    ]
-    return _summary(selected, rows)
+    handle = _open_destination(destination, repository_root)
+    try:
+        actual = set()
+        with os.scandir(handle.child_fd) as entries:
+            for entry in entries:
+                actual.add(entry.name)
+        expected = {spec.checkout for spec in specs}
+        if actual != expected:
+            raise CorpusError("corpus destination contains unknown or missing checkouts")
+        rows = []
+        for spec in specs:
+            checkout_metadata = os.stat(
+                spec.checkout, dir_fd=handle.child_fd, follow_symlinks=False
+            )
+            if not stat.S_ISDIR(checkout_metadata.st_mode):
+                raise CorpusError(f"{spec.id} checkout is not a real directory")
+            checkout_fd = os.open(spec.checkout, _directory_flags(), dir_fd=handle.child_fd)
+            checkout_identity = (checkout_metadata.st_dev, checkout_metadata.st_ino)
+            try:
+                if not _same_directory(os.fstat(checkout_fd), checkout_identity):
+                    raise CorpusError(f"{spec.id} checkout changed while opening")
+                rows.append(
+                    _verify_checkout(
+                        spec,
+                        handle.path / spec.checkout,
+                        git,
+                        allow_local=allow_local_repositories,
+                        checkout_fd=checkout_fd,
+                    )
+                )
+                named_after = os.stat(spec.checkout, dir_fd=handle.child_fd, follow_symlinks=False)
+                if not _same_directory(named_after, checkout_identity):
+                    raise CorpusError(f"{spec.id} checkout changed during verification")
+            finally:
+                os.close(checkout_fd)
+        _verify_destination_handle(handle)
+        return _summary(handle.path, rows)
+    except Exception as error:
+        if isinstance(error, CorpusError):
+            raise
+        raise CorpusError("corpus verification failed") from error
+    finally:
+        _close_destination(handle)
 
 
 def _load_working_state_guard() -> ModuleType:

@@ -214,7 +214,7 @@ class GraphCorpusFetchTests(unittest.TestCase):
             root = Path(temporary).resolve()
             _, _, catalog_path = self.make_repository(root, symlink=True)
             destination = root / "destination"
-            with self.assertRaisesRegex(self.fetcher.CorpusError, "symlink"):
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "tree mode"):
                 self.fetcher.fetch_corpora(
                     catalog_path,
                     destination,
@@ -364,6 +364,195 @@ class GraphCorpusFetchTests(unittest.TestCase):
                         self.fetcher.validate_destination(candidate, ROOT),
                         candidate.resolve(strict=False),
                     )
+
+    def test_descriptor_cleanup_survives_parent_child_and_cleanup_rename_swaps(self):
+        def make_paths(root: Path):
+            parent = root / "parent"
+            parent.mkdir()
+            attacker = root / "attacker"
+            attacker.mkdir()
+            return parent, attacker, parent / "corpora"
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            parent, attacker, destination = make_paths(root)
+            handle = self.fetcher._create_destination(destination, ROOT)
+            moved_parent = root / "moved-parent"
+            parent.rename(moved_parent)
+            parent.symlink_to(attacker, target_is_directory=True)
+
+            self.fetcher._cleanup_destination(handle)
+
+            self.assertFalse((moved_parent / "corpora").exists())
+            self.assertTrue(parent.is_symlink())
+            self.assertEqual(tuple(attacker.iterdir()), ())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            parent, attacker, destination = make_paths(root)
+            handle = self.fetcher._create_destination(destination, ROOT)
+            moved_child = parent / "moved-corpora"
+            destination.rename(moved_child)
+            destination.symlink_to(attacker, target_is_directory=True)
+
+            self.fetcher._cleanup_destination(handle)
+
+            self.assertFalse(moved_child.exists())
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(tuple(attacker.iterdir()), ())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            parent, attacker, destination = make_paths(root)
+            handle = self.fetcher._create_destination(destination, ROOT)
+
+            def race(_handle, retained_name):
+                retained = parent / retained_name
+                moved = parent / "cleanup-race-moved"
+                retained.rename(moved)
+                retained.symlink_to(attacker, target_is_directory=True)
+
+            self.fetcher._cleanup_destination(handle, before_root_remove=race)
+
+            self.assertFalse((parent / "cleanup-race-moved").exists())
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(tuple(attacker.iterdir()), ())
+
+    def test_fetch_uses_held_child_descriptor_when_destination_name_is_swapped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, catalog_path = self.make_repository(root)
+            destination = root / "destination"
+            moved = root / "moved-destination"
+            attacker = root / "attacker"
+            attacker.mkdir()
+
+            def swap(_handle):
+                destination.rename(moved)
+                destination.symlink_to(attacker, target_is_directory=True)
+
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "destination identity"):
+                self.fetcher.fetch_corpora(
+                    catalog_path,
+                    destination,
+                    repository_root=ROOT,
+                    allow_local_repositories=True,
+                    after_destination_open=swap,
+                )
+
+            self.assertFalse(moved.exists())
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(tuple(attacker.iterdir()), ())
+
+    def test_descriptor_and_process_failure_paths_fail_closed(self):
+        with mock.patch.object(self.fetcher.os, "O_DIRECTORY", 0):
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "unsupported"):
+                self.fetcher._directory_flags()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            destination = root / "corpora"
+            handle = self.fetcher._create_destination(destination, ROOT)
+            self.fetcher._verify_destination_handle(handle)
+            self.fetcher._close_destination(handle)
+            self.fetcher._close_destination(handle)
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "closed"):
+                self.fetcher._verify_destination_handle(handle)
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "closed"):
+                self.fetcher._cleanup_destination(handle)
+            destination.rmdir()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            destination = root / "corpora"
+            handle = self.fetcher._create_destination(destination, ROOT)
+            self.fetcher._close_destination(handle)
+            destination.chmod(0o755)
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "identity changed"):
+                self.fetcher._open_destination(destination, ROOT)
+            destination.rmdir()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            destination = root / "corpora"
+            handle = self.fetcher._create_destination(destination, ROOT)
+            os.mkfifo(destination / "unsupported-pipe")
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "unsupported entry"):
+                self.fetcher._cleanup_destination(handle)
+            (destination / "unsupported-pipe").unlink()
+            destination.rmdir()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            parent = root / "parent"
+            parent.mkdir()
+            destination = parent / "corpora"
+            moved_parent = root / "other-parent"
+            moved_parent.mkdir()
+            moved = moved_parent / "moved-corpora"
+            handle = self.fetcher._create_destination(destination, ROOT)
+            destination.rename(moved)
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "locate"):
+                self.fetcher._cleanup_destination(handle)
+            moved.rmdir()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            destination = root / "corpora"
+            handle = self.fetcher._create_destination(destination, ROOT)
+
+            def fail_cleanup(_handle, _name):
+                raise RuntimeError("injected cleanup failure")
+
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "cleanup failed"):
+                self.fetcher._cleanup_destination(
+                    handle,
+                    before_root_remove=fail_cleanup,
+                )
+            destination.rmdir()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            cwd_file = root / "not-a-directory"
+            cwd_file.write_text("x", encoding="utf-8")
+            invalid_calls = (
+                ((), root, 1),
+                (("missing",), root, 0),
+                (("missing",), cwd_file, 1),
+            )
+            for command, cwd, timeout in invalid_calls:
+                with self.subTest(command=command, timeout=timeout):
+                    with self.assertRaises(self.fetcher.CorpusError):
+                        self.fetcher.run_bounded(
+                            command,
+                            cwd,
+                            timeout=timeout,
+                            stdout_limit=1,
+                            stderr_limit=1,
+                        )
+
+            non_executable = root / "git"
+            non_executable.write_text("not executable", encoding="utf-8")
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "unavailable"):
+                self.fetcher._find_git(root / "missing-git")
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "not executable"):
+                self.fetcher._find_git(non_executable)
+            linked = root / "linked-git"
+            linked.symlink_to(non_executable)
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "non-symlink"):
+                self.fetcher._find_git(linked)
+
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "not a regular directory"):
+                self.fetcher._verify_checkout(
+                    SimpleNamespace(id="fixture"),
+                    root / "missing-checkout",
+                    Path("/usr/bin/git"),
+                    allow_local=True,
+                )
+
+        with mock.patch.object(Path, "is_dir", return_value=False):
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "unavailable"):
+                self.fetcher._fd_path(999)
 
     def test_bounded_command_rejects_output_overflow_and_timeout(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -586,6 +775,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 9000,
                 "builtin-v1",
                 None,
+                scope_inventory_complete=True,
             ),
             scorer.EngineObservation(
                 "fixture",
@@ -595,6 +785,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 10_000,
                 "ast-grep 0.45.0",
                 "a" * 64,
+                scope_inventory_complete=True,
             ),
         )
 
@@ -639,6 +830,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 10,
                 "builtin-v1",
                 None,
+                scope_inventory_complete=True,
             ),
             scorer.EngineObservation(
                 "fixture",
@@ -648,6 +840,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 20,
                 "ast-grep 0.45.0",
                 "a" * 64,
+                scope_inventory_complete=True,
             ),
         )
 
@@ -675,7 +868,14 @@ class GraphCorpusScoreTests(unittest.TestCase):
         all_predictions = tuple((key[1], key[2]) for key in sorted(expected))
         observations = (
             scorer.EngineObservation(
-                "fixture", "builtin", all_predictions, 0, 10, "builtin-v1", None
+                "fixture",
+                "builtin",
+                all_predictions,
+                0,
+                10,
+                "builtin-v1",
+                None,
+                scope_inventory_complete=True,
             ),
             scorer.EngineObservation(
                 "fixture",
@@ -685,6 +885,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 20,
                 "ast-grep 0.45.0",
                 "a" * 64,
+                scope_inventory_complete=True,
             ),
         )
 
@@ -773,6 +974,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                     scorer.EngineObservation(*arguments)
 
         observation = scorer.EngineObservation(*valid)
+        self.assertFalse(observation.scope_inventory_complete)
         expected = {("fixture", "a.py", "b.py"): False}
         with self.assertRaisesRegex(scorer.CorpusScoreError, "cover"):
             scorer.score_observations(
@@ -790,7 +992,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
             "d" * 64,
             scope_inventory_complete=False,
         )
-        complete = scorer.EngineObservation(*valid)
+        complete = scorer.EngineObservation(*valid, scope_inventory_complete=True)
         report, _ = scorer.score_observations(
             expected,
             (complete, incomplete),
@@ -888,9 +1090,6 @@ class GraphCorpusScoreTests(unittest.TestCase):
         nodes = (
             SimpleNamespace(id="N1", location="source.py"),
             SimpleNamespace(id="N2", location="target.py"),
-            SimpleNamespace(id="N3", location="negative.py"),
-            SimpleNamespace(id="N4", location="unknown.py"),
-            SimpleNamespace(id="N5", location="unscoped.py"),
         )
         builtin = SimpleNamespace(
             nodes=nodes,
@@ -901,35 +1100,46 @@ class GraphCorpusScoreTests(unittest.TestCase):
                     kind="imports",
                     confidence="structural-inferred",
                 ),
-                SimpleNamespace(source="N1", target="N3", kind="references", confidence="lexical"),
-                SimpleNamespace(
-                    source="N1",
-                    target="N3",
-                    kind="references",
-                    confidence="structural-inferred",
-                ),
-                SimpleNamespace(
-                    source="N1",
-                    target="N4",
-                    kind="imports",
-                    confidence="structural-inferred",
-                ),
-                SimpleNamespace(
-                    source="N5",
-                    target="N2",
-                    kind="imports",
-                    confidence="structural-inferred",
-                ),
             ),
-            frontier=(SimpleNamespace(id="F1"),),
+            frontier=(),
             budget_status="closed",
+            source_digests={"source.py": "a" * 64, "target.py": "b" * 64},
+            skipped={},
         )
-        built_observation = scorer.project_builtin_result("fixture", ("source.py",), builtin, 123)
+        shadow_manifest = (("source.py", "a" * 64), ("target.py", "b" * 64))
+        built_observation = scorer.project_builtin_result(
+            "fixture",
+            ("source.py",),
+            builtin,
+            123,
+            shadow_manifest,
+        )
         self.assertEqual(
             built_observation.predictions,
-            (("source.py", "target.py"), ("source.py", "unknown.py")),
+            (("source.py", "target.py"),),
         )
-        self.assertEqual(built_observation.frontier_count, 4)
+        self.assertEqual(built_observation.frontier_count, 0)
+        self.assertTrue(built_observation.scope_inventory_complete)
+        self.assertEqual(built_observation.scope_manifest, shadow_manifest)
+
+        closure_mutations = {
+            "budget": {"budget_status": "budget_exhausted"},
+            "digest": {"source_digests": {"target.py": "b" * 64}},
+            "skip": {"skipped": {"source.py": "oversized"}},
+            "frontier": {"frontier": (SimpleNamespace(node="N1", reason="omitted"),)},
+        }
+        for name, mutation in closure_mutations.items():
+            with self.subTest(closure=name):
+                result = SimpleNamespace(**{**vars(builtin), **mutation})
+                observation = scorer.project_builtin_result(
+                    "fixture",
+                    ("source.py",),
+                    result,
+                    123,
+                    shadow_manifest,
+                )
+                self.assertEqual(observation.predictions, built_observation.predictions)
+                self.assertFalse(observation.scope_inventory_complete)
 
         repository_files = frozenset(
             {"source.js", "target.js", "other.js", "pkg/core.py", "pkg/source.py"}
@@ -987,6 +1197,15 @@ class GraphCorpusScoreTests(unittest.TestCase):
 
             builtin = scorer.run_builtin(corpus, root)
             self.assertEqual(builtin.predictions, (("source.js", "target.js"),))
+            self.assertTrue(builtin.scope_inventory_complete)
+            self.assertEqual(
+                dict(builtin.scope_manifest),
+                {
+                    "source.js": hashlib.sha256(original_source.encode()).hexdigest(),
+                    "target.js": hashlib.sha256(b"export default 1;\n").hexdigest(),
+                },
+            )
+            self.assertIsNone(builtin.detail)
             self.assertLessEqual(builtin.duration_ms, 30_000)
 
             executable = ROOT / ".quality-venv/bin/ast-grep"
@@ -1010,6 +1229,58 @@ class GraphCorpusScoreTests(unittest.TestCase):
             self.assertEqual(ast_grep.version, "ast-grep 0.45.0")
             self.assertRegex(ast_grep.executable_sha256, r"^[0-9a-f]{64}$")
             self.assertLessEqual(ast_grep.duration_ms, 30_000)
+
+            package = root / "pkg"
+            package.mkdir()
+            python_source_text = "from __future__ import annotations\nfrom .target import Target\n"
+            (package / "source.py").write_text(python_source_text, encoding="utf-8")
+            (package / "target.py").write_text("class Target:\n    pass\n", encoding="utf-8")
+            python_scope = scorer.SourceScope(
+                "pkg/source.py",
+                "python",
+                hashlib.sha256(python_source_text.encode()).hexdigest(),
+                (
+                    scorer.ImportLabel(
+                        ".target",
+                        "pkg/target.py",
+                        False,
+                        ("functionality",),
+                    ),
+                ),
+                ("__future__",),
+            )
+            python_observation = scorer.run_ast_grep(
+                scorer.CorpusCase("python-fixture", "e" * 40, (python_scope,)),
+                root,
+                executable,
+            )
+            self.assertEqual(
+                python_observation.discovered_modules,
+                (("pkg/source.py", ".target"), ("pkg/source.py", "__future__")),
+            )
+            self.assertTrue(python_observation.scope_inventory_complete)
+
+            external_dropped = original_source.replace(
+                "import externalValue from 'external-package';\n", ""
+            )
+            source.write_text(external_dropped, encoding="utf-8")
+            dropped_scope = scorer.SourceScope(
+                "source.js",
+                "javascript",
+                hashlib.sha256(external_dropped.encode()).hexdigest(),
+                scope.internal_imports,
+                scope.external_imports,
+            )
+            dropped_observation = scorer.run_ast_grep(
+                scorer.CorpusCase("fixture", "f" * 40, (dropped_scope,)),
+                root,
+                executable,
+            )
+            self.assertEqual(
+                dropped_observation.predictions,
+                (("source.js", "target.js"),),
+            )
+            self.assertFalse(dropped_observation.scope_inventory_complete)
 
             mutated_source = original_source.replace("./target.js", "./other.js")
             source.write_text(mutated_source, encoding="utf-8")
@@ -1114,6 +1385,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                     100,
                     "builtin-v1",
                     None,
+                    scope_inventory_complete=True,
                 )
 
             def ast_grep(case, _checkout, _executable):
@@ -1125,6 +1397,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                     200,
                     "ast-grep 0.45.0",
                     "c" * 64,
+                    scope_inventory_complete=True,
                 )
 
             report, report_bytes = scorer.run_evaluation(

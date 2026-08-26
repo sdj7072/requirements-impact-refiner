@@ -4,16 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import importlib.util
 import json
 import os
 import posixpath
 import re
+import stat
 import statistics
 import sys
+import tempfile
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType, ModuleType
@@ -99,8 +102,9 @@ class EngineObservation:
     version: str
     executable_sha256: str | None
     discovered_modules: tuple[ModuleKey, ...] = ()
-    scope_inventory_complete: bool = True
+    scope_inventory_complete: bool = False
     detail: str | None = None
+    scope_manifest: tuple[ModuleKey, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.corpus, str) or not self.corpus:
@@ -138,11 +142,26 @@ class EngineObservation:
             raise ValueError("observation scope inventory status is invalid")
         if self.detail is not None and not isinstance(self.detail, str):
             raise ValueError("observation detail is invalid")
+        if not isinstance(self.scope_manifest, (tuple, list)) or any(
+            not isinstance(pair, (tuple, list))
+            or len(pair) != 2
+            or not isinstance(pair[0], str)
+            or not pair[0]
+            or not isinstance(pair[1], str)
+            or re.fullmatch(r"[0-9a-f]{64}", pair[1]) is None
+            for pair in self.scope_manifest
+        ):
+            raise ValueError("observation scope manifest is invalid")
         object.__setattr__(self, "predictions", tuple(sorted(set(map(tuple, self.predictions)))))
         object.__setattr__(
             self,
             "discovered_modules",
             tuple(sorted(set(map(tuple, self.discovered_modules)))),
+        )
+        object.__setattr__(
+            self,
+            "scope_manifest",
+            tuple(sorted(set(map(tuple, self.scope_manifest)))),
         )
 
 
@@ -468,6 +487,9 @@ def score_observations(
                 "discovered_modules": [
                     f"{source}:{module}" for source, module in observation.discovered_modules
                 ],
+                "scope_manifest": [
+                    {"path": path, "sha256": digest} for path, digest in observation.scope_manifest
+                ],
                 "version": observation.version,
                 "executable_sha256": observation.executable_sha256,
                 "detail": observation.detail,
@@ -607,10 +629,108 @@ def _field(value: object, name: str) -> object:
     return value.get(name) if isinstance(value, Mapping) else getattr(value, name, None)
 
 
+def _descriptor_read(root: Path, relative: str) -> bytes:
+    safe = _safe_path(relative, "scoped shadow path")
+    root_metadata = root.lstat()
+    if root.is_symlink() or not stat.S_ISDIR(root_metadata.st_mode):
+        raise CorpusScoreError("scoped shadow source root is unsafe")
+    descriptors = []
+    try:
+        root_fd = os.open(
+            str(root),
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        descriptors.append(root_fd)
+        if FETCHER._identity(os.fstat(root_fd)) != FETCHER._identity(root_metadata):
+            raise CorpusScoreError("scoped shadow source root changed while opening")
+        current = root_fd
+        parts = PurePosixPath(safe).parts
+        for part in parts[:-1]:
+            metadata = os.stat(part, dir_fd=current, follow_symlinks=False)
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+                raise CorpusScoreError("scoped shadow source parent is unsafe")
+            child = os.open(
+                part,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=current,
+            )
+            descriptors.append(child)
+            if FETCHER._identity(os.fstat(child)) != FETCHER._identity(metadata):
+                raise CorpusScoreError("scoped shadow source parent changed while opening")
+            current = child
+        metadata = os.stat(parts[-1], dir_fd=current, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_SOURCE_BYTES:
+            raise CorpusScoreError("scoped shadow source file is unsafe or oversized")
+        payload = FETCHER._read_worktree_file(current, parts[-1], metadata, safe)
+        if FETCHER._identity(root.lstat()) != FETCHER._identity(root_metadata):
+            raise CorpusScoreError("scoped shadow source root changed during read")
+        return payload
+    except CorpusScoreError:
+        raise
+    except (OSError, ValueError) as error:
+        raise CorpusScoreError("scoped shadow source cannot be read safely") from error
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _write_shadow_file(root: Path, relative: str, payload: bytes) -> None:
+    path = root.joinpath(*PurePosixPath(relative).parts)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(
+        str(path),
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o400,
+    )
+    try:
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise CorpusScoreError("scoped shadow write made no progress")
+            offset += written
+        os.fchmod(descriptor, 0o400)
+    finally:
+        os.close(descriptor)
+
+
+@dataclass(frozen=True)
+class ScopedShadow:
+    root: Path
+    manifest: tuple[ModuleKey, ...]
+
+
+@contextlib.contextmanager
+def _scoped_shadow(corpus: CorpusCase, checkout: Path) -> Iterator[ScopedShadow]:
+    candidates = {source.path for source in corpus.sources} | {
+        imported.target for source in corpus.sources for imported in source.internal_imports
+    }
+    source_digests = {source.path: source.sha256 for source in corpus.sources}
+    with tempfile.TemporaryDirectory(prefix="rir-builtin-scope-") as temporary:
+        root = Path(temporary).resolve()
+        root.chmod(0o700)
+        manifest = []
+        payloads = {}
+        for relative in sorted(candidates):
+            payload = _descriptor_read(checkout, relative)
+            digest = hashlib.sha256(payload).hexdigest()
+            if relative in source_digests and digest != source_digests[relative]:
+                raise CorpusScoreError(
+                    f"{corpus.id} source digest differs from curation: {relative}"
+                )
+            payloads[relative] = payload
+            manifest.append((relative, digest))
+            _write_shadow_file(root, relative, payload)
+        for relative, digest in manifest:
+            copied = _descriptor_read(root, relative)
+            if copied != payloads[relative] or hashlib.sha256(copied).hexdigest() != digest:
+                raise CorpusScoreError("scoped shadow manifest differs from pinned bytes")
+        yield ScopedShadow(root, tuple(manifest))
+
+
 def _verify_scoped_sources(corpus: CorpusCase, checkout: Path) -> None:
     for source in corpus.sources:
-        path = checkout.joinpath(*PurePosixPath(source.path).parts)
-        payload = FETCHER._read_regular(path, MAX_SOURCE_BYTES, "labelled source")
+        payload = _descriptor_read(checkout, source.path)
         if hashlib.sha256(payload).hexdigest() != source.sha256:
             raise CorpusScoreError(
                 f"{corpus.id} source digest differs from curation: {source.path}"
@@ -622,6 +742,7 @@ def project_builtin_result(
     labelled_sources: Sequence[str],
     result: object,
     duration_ms: int,
+    shadow_manifest: Sequence[ModuleKey],
 ) -> EngineObservation:
     node_locations = {
         _field(node, "id"): _field(node, "location")
@@ -630,7 +751,8 @@ def project_builtin_result(
     }
     scope = set(labelled_sources)
     predictions = set()
-    frontier_count = len(tuple(getattr(result, "frontier", ())))
+    frontier = tuple(getattr(result, "frontier", ()))
+    frontier_count = len(frontier)
     for edge in tuple(getattr(result, "edges", ())):
         source = node_locations.get(_field(edge, "source"))
         target = node_locations.get(_field(edge, "target"))
@@ -645,8 +767,29 @@ def project_builtin_result(
             predictions.add((source, target))
         else:
             frontier_count += 1
-    if getattr(result, "budget_status", "closed") != "closed":
+    manifest = dict(shadow_manifest)
+    source_digests = getattr(result, "source_digests", {})
+    skipped = getattr(result, "skipped", {})
+    complete = (
+        getattr(result, "budget_status", None) == "closed"
+        and not frontier
+        and isinstance(source_digests, Mapping)
+        and all(source_digests.get(path) == digest for path, digest in manifest.items())
+        and isinstance(skipped, Mapping)
+        and not any(path in skipped for path in manifest)
+    )
+    details = []
+    if getattr(result, "budget_status", None) != "closed":
+        details.append("built-in scoped scan did not close")
         frontier_count += 1
+    if frontier:
+        details.append("built-in scoped scan reported frontier")
+    if not isinstance(source_digests, Mapping) or not all(
+        source_digests.get(path) == digest for path, digest in manifest.items()
+    ):
+        details.append("built-in scoped source digests differ from shadow manifest")
+    if not isinstance(skipped, Mapping) or any(path in skipped for path in manifest):
+        details.append("built-in scoped scan skipped manifest paths")
     return EngineObservation(
         corpus,
         "builtin",
@@ -655,6 +798,9 @@ def project_builtin_result(
         duration_ms,
         "builtin-v1",
         None,
+        scope_inventory_complete=complete,
+        detail="; ".join(details) or None,
+        scope_manifest=tuple(shadow_manifest),
     )
 
 
@@ -673,16 +819,20 @@ def _runtime() -> tuple[ModuleType, ModuleType]:
 def run_builtin(corpus: CorpusCase, checkout: Path) -> EngineObservation:
     _verify_scoped_sources(corpus, checkout)
     builtin, _ = _runtime()
-    seeds = tuple(builtin.ScanSeed(source.path, source.path) for source in corpus.sources)
-    started = time.monotonic()
-    result = builtin.scan_repository(checkout, seeds, builtin.ScanLimits(max_seconds=30), time)
-    duration_ms = max(0, round((time.monotonic() - started) * 1000))
-    return project_builtin_result(
-        corpus.id,
-        tuple(source.path for source in corpus.sources),
-        result,
-        duration_ms,
-    )
+    with _scoped_shadow(corpus, checkout) as shadow:
+        seeds = tuple(builtin.ScanSeed(source.path, source.path) for source in corpus.sources)
+        started = time.monotonic()
+        result = builtin.scan_repository(
+            shadow.root, seeds, builtin.ScanLimits(max_seconds=30), time
+        )
+        duration_ms = max(0, round((time.monotonic() - started) * 1000))
+        return project_builtin_result(
+            corpus.id,
+            tuple(source.path for source in corpus.sources),
+            result,
+            duration_ms,
+            shadow.manifest,
+        )
 
 
 def _repository_files(root: Path) -> frozenset[str]:
@@ -706,6 +856,7 @@ _AST_RULES = {
     "python": (
         ("from $MODULE import $$$NAMES", "MODULE", "python-from"),
         ("import $MODULE", "MODULE", "python-import"),
+        ("from __future__ import $$$NAMES", None, "python-future"),
     ),
     "javascript": (("import $CLAUSE from $SOURCE", "SOURCE", "javascript-from"),),
 }
@@ -732,7 +883,7 @@ def _parse_ast_grep_modules(
     source: SourceScope,
     checkout: Path,
     output: str,
-    capture: str,
+    capture: str | None,
     rule: str,
 ) -> tuple[str, ...]:
     modules = []
@@ -762,6 +913,15 @@ def _parse_ast_grep_modules(
             or row["lines"] != proof["lines"]
         ):
             raise CorpusScoreError("ast-grep import match is not bound to source bytes")
+        if capture is None:
+            import_match = re.match(
+                r"^\s*from\s+(?P<module>[.A-Za-z_][A-Za-z0-9_.]*)\s+import\b",
+                row["text"],
+            )
+            if import_match is None:
+                raise CorpusScoreError("ast-grep special import source is invalid")
+            modules.append(import_match.group("module"))
+            continue
         metadata = row["metaVariables"]
         if not isinstance(metadata, dict) or not isinstance(metadata.get("single"), dict):
             raise CorpusScoreError("ast-grep import metavariables are invalid")
@@ -842,6 +1002,17 @@ def run_ast_grep(
                 deadline,
                 runner=None,
             )
+            exact_no_match = (
+                result.status == "failed"
+                and result.returncode == 1
+                and not result.stdout
+                and not result.stderr
+                and not result.stdout_truncated
+                and not result.stderr_truncated
+                and result.executable_sha256 == executable_sha256
+            )
+            if exact_no_match:
+                continue
             if result.status != "ready" or result.executable_sha256 != executable_sha256:
                 complete = False
                 details.append(result.detail or f"{rule} query failed")
@@ -854,10 +1025,9 @@ def run_ast_grep(
             target = resolve_import_target(source.path, module, source.language, repository_files)
             if target is not None:
                 predictions.add((source.path, target))
-        required_internal = {item.module for item in source.internal_imports}
-        if not required_internal <= source_modules or not source_modules <= source.labelled_modules:
+        if frozenset(source_modules) != source.labelled_modules:
             complete = False
-            details.append(f"module inventory is incomplete or unlabelled for {source.path}")
+            details.append(f"module inventory differs from complete labels for {source.path}")
     duration_ms = max(0, round((time.monotonic() - started) * 1000))
     return EngineObservation(
         corpus.id,
