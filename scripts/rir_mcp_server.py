@@ -1122,16 +1122,16 @@ def _validate_schema(value, schema, label):
 
 
 def _validated_previous_root(value: str) -> Path:
-    if not _bounded_utf8(value, 4096, nonblank=True):
+    if not _bounded_utf8(value, 4096, nonblank=True) or "\x00" in value:
         raise ValueError("rir_previous arguments.repo_root is invalid")
     path = Path(value)
     try:
         metadata = path.lstat()
         resolved = path.resolve(strict=True)
-    except (OSError, RuntimeError) as error:
-        raise ValueError("rir_previous repository root is unavailable") from error
+    except (OSError, RuntimeError, ValueError) as error:
+        raise _ControllerContractError("previous repository root operation failed") from error
     if path.is_symlink() or not stat.S_ISDIR(metadata.st_mode) or not resolved.is_dir():
-        raise ValueError("rir_previous repository root must be a real directory")
+        raise _ControllerContractError("previous repository root operation failed")
     return resolved
 
 

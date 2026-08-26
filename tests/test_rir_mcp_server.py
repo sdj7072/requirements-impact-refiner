@@ -836,6 +836,60 @@ if sys.modules["payload_identity"] is not foreign_payload:
         self.assertEqual(structured["changed_paths"], [])
         self.assertIsNone(structured["changed_count"])
 
+    def test_previous_root_parameter_and_operation_failures_have_distinct_error_codes(self):
+        module = self.load_server_module("_rir_mcp_previous_root_failure_guard")
+
+        def call(identifier, repo_root):
+            return module.handle(
+                request(
+                    identifier,
+                    "tools/call",
+                    {
+                        "name": "rir_previous",
+                        "arguments": {
+                            "repo_root": repo_root,
+                            "request": "Add nickname.",
+                            "repository_evidence": [],
+                        },
+                    },
+                )
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            valid_root = base / "valid"
+            valid_root.mkdir()
+            regular_file = base / "regular-file"
+            regular_file.write_text("not a repository root\n", encoding="utf-8")
+            symlink_root = base / "symlink-root"
+            symlink_root.symlink_to(valid_root, target_is_directory=True)
+            missing_root = base / "missing-root"
+
+            valid = call(1, str(valid_root))
+            malformed_type = call(2, [str(valid_root)])
+            malformed_nul = call(7, "bad\x00root")
+            failures = (
+                call(3, str(missing_root)),
+                call(4, str(symlink_root)),
+                call(5, str(regular_file)),
+            )
+            with mock.patch.object(
+                module.Path,
+                "lstat",
+                side_effect=PermissionError("/private/secret/repository"),
+            ):
+                failures = (*failures, call(6, str(valid_root)))
+
+        self.assertEqual(valid["result"]["structuredContent"]["status"], "none")
+        self.assertEqual(malformed_type["error"]["code"], -32602)
+        self.assertEqual(malformed_nul["error"]["code"], -32602)
+        for reply in failures:
+            self.assertEqual(
+                reply["error"],
+                {"code": -32603, "message": "controller operation failed"},
+            )
+            self.assertNotIn("repository", json.dumps(reply, sort_keys=True))
+
     def test_unknown_tool_and_malformed_params_return_bounded_errors_then_continue(self):
         replies = self.exchange(
             [
