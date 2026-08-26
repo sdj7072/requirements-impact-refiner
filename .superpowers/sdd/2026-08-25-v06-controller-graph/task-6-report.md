@@ -160,3 +160,43 @@ the brief.
   380 bytes before and after the real canary and compared byte-identical.
   Root/installed provider copies also compared byte-identical, and
   `git diff --check` passed.
+
+## Fix round 2 — context-aware provider option parsing
+
+### Open finding addressed
+
+- Replaced the provider's token-level option checks with a left-to-right state
+  machine. A literal-path mode is established only by the `scan` subcommand or
+  by consuming a `--pattern`/`-p` value. Top-level `--`, and `--` after an
+  unrelated provider command such as `status`, now fail closed.
+- Once scan/direct mode exists, `--` terminates option parsing and every
+  remaining token is a literal path. Exact path names such as `update`,
+  `rewrite`, and `--update-all` are accepted only in that context. A positional
+  path after a consumed direct pattern is likewise never reclassified as a
+  command.
+- Short clusters are parsed character by character. Boolean flags may precede
+  a forbidden `r`, `U`, or `i`, so `-vrreplacement` and `-vUi` are rejected.
+  A known value-taking option consumes the token remainder or next token and
+  stops cluster parsing, so `-preturn`, `-vpreturn`, and `-ljs` treat their
+  attached letters as values rather than flags. Attached `-rreplacement` and
+  `-r=value` remain unconditionally forbidden.
+- Long mutating options still reject before `--`; safe long value options
+  consume attached or following values. Missing/empty required values fail as
+  invalid provider argument shapes.
+
+### Fix-round TDD and verification
+
+- The expanded invalid table first proved that `("--", "update")`,
+  `("status", "--", "update")`, and `("scan", "-vrreplacement")` bypassed
+  the previous parser. The expanded valid table also proved that direct-pattern
+  paths named `update` or `rewrite` were falsely treated as commands.
+- Review-named invalid/valid tables now pass for top-level `--`, scan/direct
+  mode, long mutation flags, left-to-right short clusters, attached/following
+  values, literal paths, and `--` termination controls.
+- Focused provider/canary/adapter/CI/packaging verification passed 127 tests;
+  the pinned real-canary JSON output remained unchanged.
+- Pinned quality runner passed Ruff lint/format, mypy over 49 source files, 822
+  tests with 21 controlled skips, 80.08% branch coverage, and security checks.
+- Fresh Apple Python 3.9.6 compile/discovery passed 822 tests with 24 controlled
+  skips. Root/installed provider parity and the repository snapshot check are
+  rerun immediately before this fix-round commit.

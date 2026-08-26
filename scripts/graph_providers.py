@@ -374,8 +374,8 @@ def _validate_arguments(arguments: Sequence[str]) -> tuple:
     normalized = []
     total = 0
     options = True
-    expect_value = False
-    saw_positional = False
+    pending_value = None
+    mode = None
     for argument in arguments:
         if not isinstance(argument, str) or not argument or "\x00" in argument:
             raise ValueError("provider arguments must be non-empty strings without NUL")
@@ -383,34 +383,56 @@ def _validate_arguments(arguments: Sequence[str]) -> tuple:
         normalized.append(argument)
         if not options:
             continue
-        if expect_value:
-            expect_value = False
+        if pending_value is not None:
+            if argument == "--":
+                raise PermissionError("provider command is outside the read-only allowlist")
+            if pending_value == "pattern":
+                mode = "direct"
+            pending_value = None
             continue
         if argument == "--":
+            if mode not in {"scan", "direct"}:
+                raise PermissionError("provider command is outside the read-only allowlist")
             options = False
             continue
         if argument.startswith("--"):
-            option, separator, _ = argument[2:].partition("=")
+            option, separator, value = argument[2:].partition("=")
             command = option.lower()
             if command in _FORBIDDEN_COMMANDS:
                 raise PermissionError("provider command is outside the read-only allowlist")
-            if not separator and command in _LONG_VALUE_OPTIONS:
-                expect_value = True
+            if command in _LONG_VALUE_OPTIONS:
+                if separator:
+                    if not value:
+                        raise ValueError("provider option value must be non-empty")
+                    if command == "pattern":
+                        mode = "direct"
+                else:
+                    pending_value = command
             continue
         if argument.startswith("-") and argument != "-":
             body = argument[1:]
-            first = body[0]
-            if first == "r":
-                raise PermissionError("provider command is outside the read-only allowlist")
-            if first in _SHORT_VALUE_OPTIONS:
-                expect_value = len(body) == 1
-            elif "i" in body or "U" in body:
-                raise PermissionError("provider command is outside the read-only allowlist")
+            index = 0
+            while index < len(body):
+                option = body[index]
+                if option in {"r", "U", "i"}:
+                    raise PermissionError("provider command is outside the read-only allowlist")
+                if option in _SHORT_VALUE_OPTIONS:
+                    value = body[index + 1 :]
+                    if value:
+                        if option == "p":
+                            mode = "direct"
+                    else:
+                        pending_value = "pattern" if option == "p" else option
+                    break
+                index += 1
             continue
-        if not saw_positional:
-            saw_positional = True
+        if mode not in {"scan", "direct"}:
             if argument.lower() in _FORBIDDEN_COMMANDS:
                 raise PermissionError("provider command is outside the read-only allowlist")
+            if mode is None:
+                mode = "scan" if argument.lower() == "scan" else "other"
+    if pending_value is not None:
+        raise ValueError("provider option requires a value")
     if total > MAX_ARGUMENT_BYTES:
         raise ValueError("provider argv exceeds maximum size")
     return tuple(normalized)

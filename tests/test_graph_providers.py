@@ -113,6 +113,9 @@ class ProviderRunnerTest(unittest.TestCase):
 
     def test_argument_guard_rejects_mutating_attached_and_clustered_options(self):
         invalid = (
+            ("--", "update"),
+            ("--", "--update-all"),
+            ("status", "--", "update"),
             ("scan", "--rewrite", "changed"),
             ("scan", "--rewrite=changed"),
             ("scan", "--update"),
@@ -126,7 +129,10 @@ class ProviderRunnerTest(unittest.TestCase):
             ("scan", "-i"),
             ("scan", "-Ui"),
             ("scan", "-iU"),
+            ("scan", "-vrreplacement"),
             ("scan", "-vUi"),
+            ("--pattern", "ProfileService", "--update-all", "imports.py"),
+            ("-preturn", "--interactive", "imports.py"),
             ("update",),
         )
         for arguments in invalid:
@@ -152,7 +158,16 @@ class ProviderRunnerTest(unittest.TestCase):
                 "update",
                 "rewrite.py",
             ),
+            ("scan", "--", "update"),
+            ("scan", "--", "rewrite"),
             ("scan", "--", "--update-all"),
+            ("--pattern", "ProfileService", "update"),
+            ("--pattern=ProfileService", "rewrite"),
+            ("-preturn", "update"),
+            ("-p", "return", "rewrite"),
+            ("-vpreturn", "rewrite"),
+            ("-ljs", "-preturn", "--", "--update-all"),
+            ("scan", "-ljs", "--", "update"),
             ("-lpython", "-pupdate", "rewrite.py"),
             ("-l", "python", "-p", "update", "rewrite.py"),
         )
