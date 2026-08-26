@@ -26,12 +26,13 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "evals" / "corpora" / "catalog.json"
-APPROVED_DESTINATION = Path("/private/tmp/rir-v06-corpora")
 MAX_CATALOG_BYTES = 64 * 1024
 MAX_LICENSE_BYTES = 64 * 1024
-MAX_GIT_STDOUT_BYTES = 2 * 1024 * 1024
+MAX_GIT_STDOUT_BYTES = 16 * 1024 * 1024
 MAX_GIT_STDERR_BYTES = 256 * 1024
 MAX_CHECKOUT_ENTRIES = 20_000
+MAX_CHECKOUT_FILE_BYTES = 8 * 1024 * 1024
+MAX_CHECKOUT_TOTAL_BYTES = 64 * 1024 * 1024
 GIT_LOCAL_TIMEOUT_SECONDS = 10.0
 GIT_FETCH_TIMEOUT_SECONDS = 60.0
 _HEX40 = re.compile(r"[0-9a-f]{40}")
@@ -51,6 +52,25 @@ _CORPUS_KEYS = frozenset(
 )
 _PROVENANCE_KEYS = frozenset({"repository", "commit", "license_path"})
 _ALLOWED_LICENSES = frozenset({"Apache-2.0", "BSD-3-Clause", "MIT"})
+_ALLOWED_TREE_MODES = frozenset({"100644", "100755"})
+_SAFE_GIT_OPTIONS = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.attributesFile=/dev/null",
+    "-c",
+    "core.excludesFile=/dev/null",
+    "-c",
+    "core.filemode=true",
+    "-c",
+    "status.showUntrackedFiles=all",
+    "-c",
+    "submodule.recurse=false",
+    "-c",
+    "diff.ignoreSubmodules=none",
+)
 _OFFICIAL_CORPORA = (
     (
         "pallets-click",
@@ -268,22 +288,35 @@ def _lexical_ancestors(path: Path) -> tuple[Path, ...]:
 def _validate_destination_boundary(
     destination: Path,
     repository_root: Path,
-    approved_destination: Path,
     *,
     must_exist: bool,
 ) -> Path:
     raw_selected = Path(destination)
-    raw_approved = Path(approved_destination)
-    if not raw_selected.is_absolute() or not raw_approved.is_absolute():
+    if not raw_selected.is_absolute() or raw_selected.name in {"", ".", ".."}:
         raise CorpusError("corpus destination must be an absolute path")
     root = Path(repository_root).resolve(strict=True)
-    selected = raw_selected.resolve(strict=False)
-    approved = raw_approved.resolve(strict=False)
+    for ancestor in _lexical_ancestors(raw_selected.parent):
+        if not os.path.lexists(ancestor):
+            continue
+        try:
+            metadata = ancestor.lstat()
+        except OSError as error:
+            raise CorpusError("corpus destination parent is unavailable") from error
+        if stat.S_ISLNK(metadata.st_mode):
+            portable_tmp_alias = ancestor == Path(os.sep) / "tmp"
+            if portable_tmp_alias:
+                continue
+            raise CorpusError("corpus destination parent must not contain symlinks")
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise CorpusError("corpus destination parent must contain only directories")
+    try:
+        canonical_parent = raw_selected.parent.resolve(strict=True)
+    except OSError as error:
+        raise CorpusError("corpus destination parent is unavailable") from error
+    selected = canonical_parent / raw_selected.name
     if _contains(root, selected):
         raise CorpusError("corpus destination must remain outside the repository")
-    if selected != approved:
-        raise CorpusError(f"corpus destination must be exactly {approved}")
-    for ancestor in _lexical_ancestors(raw_selected.parent):
+    for ancestor in _lexical_ancestors(canonical_parent):
         if not os.path.lexists(ancestor):
             continue
         try:
@@ -313,14 +346,11 @@ def _validate_destination_boundary(
 def validate_destination(
     destination: Path,
     repository_root: Path = ROOT,
-    *,
-    approved_destination: Path = APPROVED_DESTINATION,
 ) -> Path:
     """Return a canonical absent destination outside every Git repository."""
     return _validate_destination_boundary(
         destination,
         repository_root,
-        approved_destination,
         must_exist=False,
     )
 
@@ -436,6 +466,7 @@ def _git_environment(git: Path, *, allow_local: bool) -> dict[str, str]:
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_SYSTEM": "/dev/null",
         "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_NO_REPLACE_OBJECTS": "1",
         "GIT_TERMINAL_PROMPT": "0",
         "LC_ALL": "C",
         "PATH": os.pathsep.join((str(git.parent), "/usr/bin", "/bin")),
@@ -452,7 +483,7 @@ def _git(
     timeout: float = GIT_LOCAL_TIMEOUT_SECONDS,
 ) -> bytes:
     stdout, _ = run_bounded(
-        (str(git), *tuple(arguments)),
+        (str(git), *_SAFE_GIT_OPTIONS, *tuple(arguments)),
         cwd,
         timeout=timeout,
         stdout_limit=MAX_GIT_STDOUT_BYTES,
@@ -493,6 +524,271 @@ def _assert_symlink_free(root: Path) -> None:
         raise CorpusError("corpus checkout cannot be traversed safely") from error
 
 
+def _nul_records(payload: bytes, label: str) -> tuple[bytes, ...]:
+    records = payload.split(b"\x00")
+    if not records or records[-1] != b"":
+        raise CorpusError(f"{label} output is malformed")
+    return tuple(records[:-1])
+
+
+def _decode_tree_path(payload: bytes, label: str) -> str:
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise CorpusError(f"{label} path is not UTF-8") from error
+    return _safe_relative(text, f"{label} path")
+
+
+def _head_tree(
+    git: Path,
+    checkout: Path,
+    *,
+    allow_local: bool,
+) -> dict[str, tuple[str, str]]:
+    output = _git(
+        git,
+        ("ls-tree", "-rz", "--full-tree", "HEAD"),
+        checkout,
+        allow_local=allow_local,
+    )
+    tree: dict[str, tuple[str, str]] = {}
+    for record in _nul_records(output, "HEAD tree"):
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split(b" ")
+        if not separator or len(fields) != 3:
+            raise CorpusError("HEAD tree output is malformed")
+        mode, object_type, raw_oid = fields
+        path = _decode_tree_path(raw_path, "HEAD tree")
+        try:
+            mode_text = mode.decode("ascii")
+            object_type_text = object_type.decode("ascii")
+            oid = raw_oid.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise CorpusError("HEAD tree metadata is malformed") from error
+        if mode_text not in _ALLOWED_TREE_MODES or object_type_text != "blob":
+            raise CorpusError(f"HEAD tree mode is not allowed for {path}")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+            raise CorpusError("HEAD tree object identity is invalid")
+        if path in tree:
+            raise CorpusError("HEAD tree contains duplicate paths")
+        tree[path] = (mode_text, oid)
+        if len(tree) > MAX_CHECKOUT_ENTRIES:
+            raise CorpusError("HEAD tree exceeds the entry bound")
+    if not tree:
+        raise CorpusError("HEAD tree must not be empty")
+    return tree
+
+
+def _verify_index(
+    git: Path,
+    checkout: Path,
+    tree: Mapping[str, tuple[str, str]],
+    *,
+    allow_local: bool,
+) -> None:
+    stage_output = _git(
+        git,
+        ("ls-files", "--stage", "-z"),
+        checkout,
+        allow_local=allow_local,
+    )
+    index: dict[str, tuple[str, str]] = {}
+    for record in _nul_records(stage_output, "Git index"):
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split(b" ")
+        if not separator or len(fields) != 3 or fields[2] != b"0":
+            raise CorpusError("Git index stage is not exactly HEAD")
+        path = _decode_tree_path(raw_path, "Git index")
+        try:
+            mode = fields[0].decode("ascii")
+            oid = fields[1].decode("ascii")
+        except UnicodeDecodeError as error:
+            raise CorpusError("Git index metadata is malformed") from error
+        index[path] = (mode, oid)
+    if index != dict(tree):
+        raise CorpusError("Git index does not exactly match HEAD tree")
+    flag_output = _git(
+        git,
+        ("ls-files", "-v", "-z"),
+        checkout,
+        allow_local=allow_local,
+    )
+    flagged_paths = set()
+    for record in _nul_records(flag_output, "Git index flags"):
+        if len(record) < 3 or record[1:2] != b" ":
+            raise CorpusError("Git index flags output is malformed")
+        path = _decode_tree_path(record[2:], "Git index flags")
+        flagged_paths.add(path)
+        if record[:1] != b"H":
+            raise CorpusError(f"Git index flags hide worktree state for {path}")
+    if flagged_paths != set(tree):
+        raise CorpusError("Git index flags path set does not match HEAD tree")
+
+
+def _read_worktree_file(
+    directory_fd: int,
+    name: str,
+    metadata: os.stat_result,
+    relative: str,
+) -> bytes:
+    if metadata.st_nlink != 1 or metadata.st_size > MAX_CHECKOUT_FILE_BYTES:
+        raise CorpusError(f"worktree file is unsafe or oversized: {relative}")
+    descriptor = None
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        opened = os.fstat(descriptor)
+        if _identity(opened) != _identity(metadata):
+            raise CorpusError(f"worktree file changed while opening: {relative}")
+        payload = bytearray()
+        while len(payload) <= MAX_CHECKOUT_FILE_BYTES:
+            chunk = os.read(
+                descriptor,
+                min(64 * 1024, MAX_CHECKOUT_FILE_BYTES + 1 - len(payload)),
+            )
+            if not chunk:
+                break
+            payload.extend(chunk)
+        after = os.fstat(descriptor)
+        named_after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if len(payload) > MAX_CHECKOUT_FILE_BYTES:
+            raise CorpusError(f"worktree file exceeds the byte bound: {relative}")
+        if not (
+            _identity(metadata) == _identity(opened) == _identity(after) == _identity(named_after)
+        ):
+            raise CorpusError(f"worktree file changed during read: {relative}")
+        return bytes(payload)
+    except CorpusError:
+        raise
+    except OSError as error:
+        raise CorpusError(f"worktree file cannot be read safely: {relative}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _walk_worktree(
+    root: Path,
+    tree: Mapping[str, tuple[str, str]],
+) -> dict[str, tuple[str, bytes]]:
+    expected_files = set(tree)
+    expected_directories = {
+        parent.as_posix()
+        for path in expected_files
+        for parent in PurePosixPath(path).parents
+        if parent.as_posix() != "."
+    }
+    root_metadata = root.lstat()
+    if root.is_symlink() or not stat.S_ISDIR(root_metadata.st_mode):
+        raise CorpusError("corpus checkout root is unsafe")
+    root_fd = os.open(
+        str(root),
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    files: dict[str, tuple[str, bytes]] = {}
+    total_bytes = 0
+
+    def visit(directory_fd: int, prefix: str) -> None:
+        nonlocal total_bytes
+        try:
+            with os.scandir(directory_fd) as entries:
+                names = sorted(entry.name for entry in entries)
+        except OSError as error:
+            raise CorpusError("worktree directory cannot be enumerated safely") from error
+        for name in names:
+            if not isinstance(name, str) or not name or name in {".", ".."} or "/" in name:
+                raise CorpusError("worktree entry name is unsafe")
+            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if not prefix and name == ".git":
+                if not stat.S_ISDIR(metadata.st_mode):
+                    raise CorpusError("worktree .git entry must be a real directory")
+                continue
+            relative = f"{prefix}/{name}" if prefix else name
+            if stat.S_ISDIR(metadata.st_mode):
+                if relative not in expected_directories:
+                    raise CorpusError("worktree path set differs from HEAD tree")
+                child_fd = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=directory_fd,
+                )
+                try:
+                    opened = os.fstat(child_fd)
+                    if _identity(opened) != _identity(metadata):
+                        raise CorpusError("worktree directory changed while opening")
+                    visit(child_fd, relative)
+                    after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if _identity(after) != _identity(opened):
+                        raise CorpusError("worktree directory changed during traversal")
+                finally:
+                    os.close(child_fd)
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                raise CorpusError(f"worktree mode is not allowed for {relative}")
+            if relative not in expected_files:
+                raise CorpusError("worktree path set differs from HEAD tree")
+            expected_mode = tree[relative][0]
+            executable = bool(metadata.st_mode & 0o111)
+            if executable != (expected_mode == "100755"):
+                raise CorpusError(f"worktree mode does not match HEAD tree for {relative}")
+            payload = _read_worktree_file(directory_fd, name, metadata, relative)
+            total_bytes += len(payload)
+            if total_bytes > MAX_CHECKOUT_TOTAL_BYTES:
+                raise CorpusError("worktree content exceeds the total byte bound")
+            files[relative] = (expected_mode, payload)
+
+    try:
+        if _identity(os.fstat(root_fd)) != _identity(root_metadata):
+            raise CorpusError("corpus checkout root changed while opening")
+        visit(root_fd, "")
+        if _identity(root.lstat()) != _identity(root_metadata):
+            raise CorpusError("corpus checkout root changed during traversal")
+    finally:
+        os.close(root_fd)
+    if set(files) != expected_files:
+        raise CorpusError("worktree path set differs from HEAD tree")
+    return files
+
+
+def _verify_blob_bytes(
+    git: Path,
+    checkout: Path,
+    tree: Mapping[str, tuple[str, str]],
+    files: Mapping[str, tuple[str, bytes]],
+    *,
+    allow_local: bool,
+) -> None:
+    object_format = os.fsdecode(
+        _git(
+            git,
+            ("rev-parse", "--show-object-format"),
+            checkout,
+            allow_local=allow_local,
+        )
+    ).strip()
+    if object_format not in {"sha1", "sha256"}:
+        raise CorpusError("Git object format is unsupported")
+    for path in sorted(tree):
+        _mode, expected_oid = tree[path]
+        payload = files[path][1]
+        digest = hashlib.new(object_format)
+        digest.update(f"blob {len(payload)}\0".encode("ascii"))
+        digest.update(payload)
+        if digest.hexdigest() != expected_oid:
+            raise CorpusError(f"worktree blob identity differs from HEAD for {path}")
+        blob = _git(
+            git,
+            ("cat-file", "blob", expected_oid),
+            checkout,
+            allow_local=allow_local,
+        )
+        if blob != payload:
+            raise CorpusError(f"worktree bytes differ from HEAD blob for {path}")
+
+
 def _summary(destination: Path, rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -516,13 +812,24 @@ def _verify_checkout(
     top = _git(git, ("rev-parse", "--show-toplevel"), checkout, allow_local=allow_local)
     if Path(os.fsdecode(top).strip()).resolve(strict=True) != checkout.resolve(strict=True):
         raise CorpusError(f"{spec.id} checkout has an unexpected Git root")
-    remote = os.fsdecode(
-        _git(git, ("remote", "get-url", "origin"), checkout, allow_local=allow_local)
-    ).strip()
-    if remote != spec.repository:
+    remote_output = os.fsdecode(
+        _git(
+            git,
+            ("config", "--local", "--get-all", "remote.origin.url"),
+            checkout,
+            allow_local=allow_local,
+        )
+    )
+    remotes = tuple(line for line in remote_output.splitlines() if line)
+    if remotes != (spec.repository,):
         raise CorpusError(f"{spec.id} remote URL does not match the catalog")
     head = os.fsdecode(
-        _git(git, ("rev-parse", "--verify", "HEAD"), checkout, allow_local=allow_local)
+        _git(
+            git,
+            ("rev-parse", "--verify", "HEAD^{commit}"),
+            checkout,
+            allow_local=allow_local,
+        )
     ).strip()
     if head != spec.commit:
         raise CorpusError(f"{spec.id} HEAD does not match the pinned commit")
@@ -531,21 +838,19 @@ def _verify_checkout(
     ).strip()
     if branch:
         raise CorpusError(f"{spec.id} checkout must have a detached HEAD")
-    status = _git(
-        git,
-        ("status", "--porcelain=v1", "-z", "--untracked-files=all"),
-        checkout,
-        allow_local=allow_local,
-    )
-    if status:
-        raise CorpusError(f"{spec.id} checkout must remain clean")
     commit_count = os.fsdecode(
         _git(git, ("rev-list", "--count", "HEAD"), checkout, allow_local=allow_local)
     ).strip()
     if commit_count != "1":
         raise CorpusError(f"{spec.id} checkout must contain only the pinned shallow commit")
-    license_path = checkout.joinpath(*PurePosixPath(spec.license_path).parts)
-    license_bytes = _read_regular(license_path, MAX_LICENSE_BYTES, f"{spec.id} license")
+    tree = _head_tree(git, checkout, allow_local=allow_local)
+    _verify_index(git, checkout, tree, allow_local=allow_local)
+    files = _walk_worktree(checkout, tree)
+    _verify_blob_bytes(git, checkout, tree, files, allow_local=allow_local)
+    license_row = files.get(spec.license_path)
+    if license_row is None:
+        raise CorpusError(f"{spec.id} license is absent from HEAD tree")
+    license_bytes = license_row[1]
     if license_bytes != spec.license_bytes:
         actual_digest = hashlib.sha256(license_bytes).hexdigest()
         raise CorpusError(
@@ -586,7 +891,6 @@ def fetch_corpora(
     destination: Path,
     *,
     repository_root: Path = ROOT,
-    approved_destination: Path = APPROVED_DESTINATION,
     allow_local_repositories: bool = False,
     git_executable: Path | None = None,
 ) -> dict[str, object]:
@@ -598,7 +902,6 @@ def fetch_corpora(
     selected = validate_destination(
         destination,
         repository_root,
-        approved_destination=approved_destination,
     )
     git = _find_git(git_executable)
     os.mkdir(selected, mode=0o700)
@@ -662,7 +965,6 @@ def verify_corpora(
     destination: Path,
     *,
     repository_root: Path = ROOT,
-    approved_destination: Path = APPROVED_DESTINATION,
     allow_local_repositories: bool = False,
     git_executable: Path | None = None,
 ) -> dict[str, object]:
@@ -674,7 +976,6 @@ def verify_corpora(
     selected = _validate_destination_boundary(
         destination,
         repository_root,
-        approved_destination,
         must_exist=True,
     )
     git = _find_git(git_executable)

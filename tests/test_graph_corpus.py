@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "evals" / "corpora" / "catalog.json"
@@ -63,7 +64,6 @@ class GraphCorpusCatalogTests(unittest.TestCase):
                 fetcher.validate_destination(
                     destination,
                     ROOT,
-                    approved_destination=destination,
                 )
 
 
@@ -83,7 +83,7 @@ class GraphCorpusFetchTests(unittest.TestCase):
             check=True,
         ).stdout.strip()
 
-    def make_repository(self, root: Path, *, symlink: bool = False):
+    def make_repository(self, root: Path, *, symlink: bool = False, gitlink: bool = False):
         remote = root / "remote"
         remote.mkdir()
         self.git("init", "-q", cwd=remote)
@@ -91,12 +91,29 @@ class GraphCorpusFetchTests(unittest.TestCase):
         self.git("config", "user.name", "Corpus Fixture", cwd=remote)
         license_bytes = b"fixture license\n"
         (remote / "LICENSE.txt").write_bytes(license_bytes)
-        (remote / "module.py").write_text("def public_symbol():\n    return 1\n", encoding="utf-8")
+        (remote / "module.py").write_text(
+            "from target import public_symbol\n\nvalue = public_symbol()\n",
+            encoding="utf-8",
+        )
+        (remote / "target.py").write_text(
+            "def public_symbol():\n    return 1\n",
+            encoding="utf-8",
+        )
         if symlink:
             (remote / "linked.py").symlink_to("module.py")
         self.git("add", ".", cwd=remote)
         self.git("commit", "-q", "-m", "fixture", cwd=remote)
         commit = self.git("rev-parse", "HEAD", cwd=remote)
+        if gitlink:
+            self.git(
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                f"160000,{commit},nested-repository",
+                cwd=remote,
+            )
+            self.git("commit", "-q", "-m", "add gitlink", cwd=remote)
+            commit = self.git("rev-parse", "HEAD", cwd=remote)
 
         metadata = root / "metadata"
         licenses = metadata / "LICENSES"
@@ -133,7 +150,6 @@ class GraphCorpusFetchTests(unittest.TestCase):
             catalog_path,
             destination,
             repository_root=ROOT,
-            approved_destination=destination,
             allow_local_repositories=True,
         )
         return remote, commit, catalog_path, destination, summary
@@ -165,7 +181,6 @@ class GraphCorpusFetchTests(unittest.TestCase):
                 catalog_path,
                 destination,
                 repository_root=ROOT,
-                approved_destination=destination,
                 allow_local_repositories=True,
             )
             self.assertEqual(verified, summary)
@@ -176,7 +191,7 @@ class GraphCorpusFetchTests(unittest.TestCase):
             lambda checkout: self.git("checkout", "-q", "HEAD^0", cwd=checkout),
             lambda checkout: (checkout / "module.py").write_text("changed\n", encoding="utf-8"),
         )
-        findings = ("remote URL", "detached HEAD", "clean")
+        findings = ("remote URL", "detached HEAD", "blob identity")
         for mutate, finding in zip(mutations, findings):
             with self.subTest(finding=finding), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
@@ -191,7 +206,6 @@ class GraphCorpusFetchTests(unittest.TestCase):
                         catalog_path,
                         destination,
                         repository_root=ROOT,
-                        approved_destination=destination,
                         allow_local_repositories=True,
                     )
 
@@ -205,10 +219,88 @@ class GraphCorpusFetchTests(unittest.TestCase):
                     catalog_path,
                     destination,
                     repository_root=ROOT,
-                    approved_destination=destination,
                     allow_local_repositories=True,
                 )
             self.assertFalse(os.path.lexists(destination))
+
+    def test_fetch_rejects_gitlink_tree_mode_and_removes_partial_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, catalog_path = self.make_repository(root, gitlink=True)
+            destination = root / "destination"
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "tree mode"):
+                self.fetcher.fetch_corpora(
+                    catalog_path,
+                    destination,
+                    repository_root=ROOT,
+                    allow_local_repositories=True,
+                )
+            self.assertFalse(os.path.lexists(destination))
+
+    def test_verifier_rejects_ignored_poison_and_index_visibility_flags(self):
+        mutations = ("ignored", "skip-worktree", "assume-unchanged", "hidden-mode")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                _, _, catalog_path, destination, _ = self.fetch_fixture(root)
+                checkout = destination / "fixture"
+                if mutation == "ignored":
+                    (checkout / ".git/info/exclude").write_text("ignored-poison.txt\n")
+                    (checkout / "ignored-poison.txt").write_text("poison\n", encoding="utf-8")
+                    self.assertEqual(
+                        self.git("status", "--porcelain=v1", "--untracked-files=all", cwd=checkout),
+                        "",
+                    )
+                    finding = "worktree path set"
+                elif mutation == "skip-worktree":
+                    self.git("update-index", "--skip-worktree", "module.py", cwd=checkout)
+                    finding = "index flags"
+                elif mutation == "assume-unchanged":
+                    self.git("update-index", "--assume-unchanged", "module.py", cwd=checkout)
+                    finding = "index flags"
+                else:
+                    self.git("config", "core.filemode", "false", cwd=checkout)
+                    (checkout / "module.py").chmod(0o755)
+                    self.assertEqual(
+                        self.git("status", "--porcelain=v1", "--untracked-files=all", cwd=checkout),
+                        "",
+                    )
+                    finding = "worktree mode"
+                with self.assertRaisesRegex(self.fetcher.CorpusError, finding):
+                    self.fetcher.verify_corpora(
+                        catalog_path,
+                        destination,
+                        repository_root=ROOT,
+                        allow_local_repositories=True,
+                    )
+
+    def test_verifier_disables_repository_local_fsmonitor_and_hooks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, catalog_path, destination, summary = self.fetch_fixture(root)
+            checkout = destination / "fixture"
+            marker = root / "local-helper-ran"
+            helper = root / "local-helper"
+            helper.write_text(
+                f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(marker)!r}).touch()\n",
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+            hooks = root / "hooks"
+            hooks.mkdir()
+            self.git("config", "core.fsmonitor", str(helper), cwd=checkout)
+            self.git("config", "core.hooksPath", str(hooks), cwd=checkout)
+            self.git("config", "status.showUntrackedFiles", "no", cwd=checkout)
+
+            verified = self.fetcher.verify_corpora(
+                catalog_path,
+                destination,
+                repository_root=ROOT,
+                allow_local_repositories=True,
+            )
+
+            self.assertEqual(verified, summary)
+            self.assertFalse(marker.exists())
 
     def test_license_mismatch_reports_actual_and_expected_digests(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -232,7 +324,6 @@ class GraphCorpusFetchTests(unittest.TestCase):
                     catalog_path,
                     destination,
                     repository_root=ROOT,
-                    approved_destination=destination,
                     allow_local_repositories=True,
                 )
             self.assertFalse(os.path.lexists(destination))
@@ -248,7 +339,6 @@ class GraphCorpusFetchTests(unittest.TestCase):
                 self.fetcher.validate_destination(
                     alias / "corpora",
                     ROOT,
-                    approved_destination=alias / "corpora",
                 )
 
             repository = root / "unrelated-repository"
@@ -258,8 +348,22 @@ class GraphCorpusFetchTests(unittest.TestCase):
                 self.fetcher.validate_destination(
                     repository / "corpora",
                     ROOT,
-                    approved_destination=repository / "corpora",
                 )
+
+    def test_destination_accepts_portable_absolute_temporary_roots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            private_root = Path(temporary).resolve()
+            candidates = (
+                private_root / "portable-corpora",
+                Path("/tmp/rir-v06-portable-destination-test"),
+            )
+            for candidate in candidates:
+                with self.subTest(candidate=candidate):
+                    self.assertFalse(os.path.lexists(candidate))
+                    self.assertEqual(
+                        self.fetcher.validate_destination(candidate, ROOT),
+                        candidate.resolve(strict=False),
+                    )
 
     def test_bounded_command_rejects_output_overflow_and_timeout(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -292,6 +396,59 @@ class GraphCorpusFetchTests(unittest.TestCase):
                     stdout_limit=32,
                     stderr_limit=32,
                 )
+
+    def test_git_metadata_and_blob_parsers_fail_closed_on_malformed_evidence(self):
+        git = Path("/usr/bin/git")
+        oid = "0" * 40
+        head_cases = {
+            "malformed": b"bad\0",
+            "tree mode": f"120000 blob {oid}\tlink\0".encode(),
+            "object identity": b"100644 blob invalid\tfile\0",
+            "must not be empty": b"",
+        }
+        for finding, output in head_cases.items():
+            with (
+                self.subTest(head=finding),
+                mock.patch.object(self.fetcher, "_git", return_value=output),
+            ):
+                with self.assertRaisesRegex(self.fetcher.CorpusError, finding):
+                    self.fetcher._head_tree(git, ROOT, allow_local=True)
+
+        with self.assertRaisesRegex(self.fetcher.CorpusError, "not UTF-8"):
+            self.fetcher._decode_tree_path(b"\xff", "fixture")
+        with self.assertRaisesRegex(self.fetcher.CorpusError, "malformed"):
+            self.fetcher._nul_records(b"missing terminator", "fixture")
+
+        tree = {"file": ("100644", oid)}
+        valid_stage = f"100644 {oid} 0\tfile\0".encode()
+        index_cases = {
+            "stage": (b"bad\0",),
+            "exactly match": (f"100644 {oid} 0\tother\0".encode(),),
+            "flags output": (valid_stage, b"bad\0"),
+            "flags path set": (valid_stage, b"H other\0"),
+        }
+        for finding, outputs in index_cases.items():
+            with (
+                self.subTest(index=finding),
+                mock.patch.object(self.fetcher, "_git", side_effect=outputs),
+            ):
+                with self.assertRaisesRegex(self.fetcher.CorpusError, finding):
+                    self.fetcher._verify_index(git, ROOT, tree, allow_local=True)
+
+        files = {"file": ("100644", b"payload")}
+        with mock.patch.object(self.fetcher, "_git", return_value=b"md5\n"):
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "object format"):
+                self.fetcher._verify_blob_bytes(git, ROOT, tree, files, allow_local=True)
+
+        digest = hashlib.sha1(b"blob 7\0payload").hexdigest()
+        exact_tree = {"file": ("100644", digest)}
+        with mock.patch.object(
+            self.fetcher,
+            "_git",
+            side_effect=(b"sha1\n", b"different"),
+        ):
+            with self.assertRaisesRegex(self.fetcher.CorpusError, "bytes differ"):
+                self.fetcher._verify_blob_bytes(git, ROOT, exact_tree, files, allow_local=True)
 
     def test_catalog_loader_rejects_provenance_digest_and_url_tampering(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -343,29 +500,64 @@ class GraphCorpusExpectationTests(unittest.TestCase):
                 "maximum_hard_seconds": 30,
                 "maximum_compact_bytes": 24_000,
                 "allow_undisclosed_high_risk_miss": False,
+                "require_zero_provider_disagreement": True,
             },
         )
+        self.assertEqual(payload["schema_version"], 2)
         self.assertEqual(payload["curation"]["method"], "manual-pinned-source-review")
         self.assertFalse(payload["curation"]["engine_output_used"])
         self.assertEqual(
             [(row["id"], row["commit"]) for row in payload["corpora"]],
             [(row["id"], row["commit"]) for row in catalog],
         )
-        relationships = [
-            (corpus["id"], relationship)
-            for corpus in payload["corpora"]
-            for relationship in corpus["relationships"]
+        sources = [
+            (corpus["id"], source) for corpus in payload["corpora"] for source in corpus["sources"]
         ]
-        self.assertEqual(len(relationships), 3)
-        self.assertTrue(all(row["evidence"] and row["term"] for _, row in relationships))
+        relationships = [
+            (corpus_id, source["path"], relationship)
+            for corpus_id, source in sources
+            for relationship in source["internal_imports"]
+        ]
+        self.assertEqual(len(sources), 2)
+        self.assertEqual(len(relationships), 2)
+        self.assertEqual(
+            {
+                (corpus_id, source, row["module"], row["target"])
+                for corpus_id, source, row in relationships
+            },
+            {
+                (
+                    "pallets-click",
+                    "src/click/globals.py",
+                    ".core",
+                    "src/click/core.py",
+                ),
+                (
+                    "sindresorhus-slugify",
+                    "index.js",
+                    "./overridable-replacements.js",
+                    "overridable-replacements.js",
+                ),
+            },
+        )
+        self.assertEqual(
+            {source["path"]: source["sha256"] for _, source in sources},
+            {
+                "src/click/globals.py": "80cf8d87a0383341c1fd2824685e4ce2770618c0c773f7e51d7bbdfe88781845",
+                "index.js": "300268f98ec858deb36237a7bff5adf5045191e22fcba578e2373af592fc0216",
+            },
+        )
         self.assertTrue(
             any(
                 corpus_id == "pallets-click" and row["high_risk"]
-                for corpus_id, row in relationships
+                for corpus_id, _source, row in relationships
             )
         )
         self.assertTrue(
-            all(not corpus["disclosed_high_risk_misses"] for corpus in payload["corpora"])
+            all(
+                corpus["disclosed_high_risk_misses"] == {"builtin": [], "ast-grep": []}
+                for corpus in payload["corpora"]
+            )
         )
 
 
@@ -382,18 +574,14 @@ class GraphCorpusScoreTests(unittest.TestCase):
     def test_fake_score_is_deterministic_and_reports_literal_metrics(self):
         scorer = self.require_scorer()
         expected = {
-            ("fixture", "builtin", "source.py", "target.py"): True,
-            ("fixture", "ast-grep", "source.py", "target.py"): True,
-        }
-        negatives = {
-            ("fixture", "builtin", "source.py", "negative.py"),
-            ("fixture", "ast-grep", "source.py", "negative.py"),
+            ("fixture", "source.py", "target.py"): True,
+            ("fixture", "source.py", "second.py"): False,
         }
         observations = (
             scorer.EngineObservation(
                 "fixture",
                 "builtin",
-                (("source.py", "target.py"), ("other.py", "frontier.py")),
+                (("source.py", "target.py"), ("source.py", "second.py")),
                 2,
                 9000,
                 "builtin-v1",
@@ -402,7 +590,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
             scorer.EngineObservation(
                 "fixture",
                 "ast-grep",
-                (("source.py", "target.py"),),
+                (("source.py", "target.py"), ("source.py", "second.py")),
                 4,
                 10_000,
                 "ast-grep 0.45.0",
@@ -410,51 +598,161 @@ class GraphCorpusScoreTests(unittest.TestCase):
             ),
         )
 
-        first, first_bytes = scorer.score_observations(expected, negatives, set(), observations)
-        second, second_bytes = scorer.score_observations(expected, negatives, set(), observations)
+        disclosures = {"builtin": set(), "ast-grep": set()}
+        first, first_bytes = scorer.score_observations(expected, observations, disclosures)
+        second, second_bytes = scorer.score_observations(expected, observations, disclosures)
 
         self.assertEqual(first, second)
         self.assertEqual(first_bytes, second_bytes)
         self.assertFalse(first_bytes.endswith(b"\n"))
-        self.assertEqual(first["aggregate"]["true_positive"], 2)
-        self.assertEqual(first["aggregate"]["false_positive"], 0)
-        self.assertEqual(first["aggregate"]["false_negative"], 0)
-        self.assertEqual(first["aggregate"]["precision"], 1.0)
-        self.assertEqual(first["aggregate"]["recall"], 1.0)
-        self.assertEqual(first["aggregate"]["unknown_frontier"], 7)
-        self.assertEqual(first["aggregate"]["median_duration_ms"], 9500)
-        self.assertEqual(first["aggregate"]["hard_duration_ms"], 10_000)
-        self.assertEqual(first["aggregate"]["compact_bytes"], len(first_bytes))
+        self.assertNotIn("aggregate", first)
+        for provider in ("builtin", "ast-grep"):
+            with self.subTest(provider=provider):
+                metrics = first["providers"][provider]
+                self.assertEqual(metrics["true_positive"], 2)
+                self.assertEqual(metrics["false_positive"], 0)
+                self.assertEqual(metrics["false_negative"], 0)
+                self.assertEqual(metrics["precision"], 1.0)
+                self.assertEqual(metrics["recall"], 1.0)
+                self.assertTrue(metrics["passed"])
+        self.assertEqual(first["providers"]["builtin"]["unknown_frontier"], 2)
+        self.assertEqual(first["providers"]["ast-grep"]["unknown_frontier"], 4)
+        self.assertEqual(first["disagreement"], {"count": 0, "edges": [], "passed": True})
+        self.assertEqual(first["performance"]["median_duration_ms"], 9500)
+        self.assertEqual(first["performance"]["hard_duration_ms"], 10_000)
+        self.assertEqual(first["compact_bytes"], len(first_bytes))
         self.assertLessEqual(len(first_bytes), 24_000)
         self.assertTrue(first["passed"])
 
+    def test_provider_failure_and_captured_target_mutation_cannot_be_micro_averaged_away(self):
+        scorer = self.require_scorer()
+        expected = {
+            ("fixture", "source.py", "target.py"): True,
+            ("fixture", "source.py", "second.py"): False,
+        }
+        observations = (
+            scorer.EngineObservation(
+                "fixture",
+                "builtin",
+                (("source.py", "target.py"), ("source.py", "second.py")),
+                0,
+                10,
+                "builtin-v1",
+                None,
+            ),
+            scorer.EngineObservation(
+                "fixture",
+                "ast-grep",
+                (("source.py", "second.py"), ("source.py", "mutated.py")),
+                0,
+                20,
+                "ast-grep 0.45.0",
+                "a" * 64,
+            ),
+        )
+
+        report, _ = scorer.score_observations(
+            expected,
+            observations,
+            {"builtin": set(), "ast-grep": set()},
+        )
+
+        self.assertTrue(report["providers"]["builtin"]["passed"])
+        ast_grep = report["providers"]["ast-grep"]
+        self.assertEqual(ast_grep["true_positive"], 1)
+        self.assertEqual(ast_grep["false_positive"], 1)
+        self.assertEqual(ast_grep["false_negative"], 1)
+        self.assertEqual(ast_grep["precision"], 0.5)
+        self.assertEqual(ast_grep["recall"], 0.5)
+        self.assertFalse(ast_grep["passed"])
+        self.assertEqual(report["disagreement"]["count"], 2)
+        self.assertFalse(report["disagreement"]["passed"])
+        self.assertFalse(report["passed"])
+
+    def test_zero_disagreement_is_required_for_ast_grep_support_claim(self):
+        scorer = self.require_scorer()
+        expected = {("fixture", "source.py", f"target-{index}.py"): False for index in range(10)}
+        all_predictions = tuple((key[1], key[2]) for key in sorted(expected))
+        observations = (
+            scorer.EngineObservation(
+                "fixture", "builtin", all_predictions, 0, 10, "builtin-v1", None
+            ),
+            scorer.EngineObservation(
+                "fixture",
+                "ast-grep",
+                all_predictions[:-1],
+                0,
+                20,
+                "ast-grep 0.45.0",
+                "a" * 64,
+            ),
+        )
+
+        report, _ = scorer.score_observations(
+            expected,
+            observations,
+            {"builtin": set(), "ast-grep": set()},
+        )
+
+        ast_grep = report["providers"]["ast-grep"]
+        self.assertEqual(ast_grep["precision"], 1.0)
+        self.assertEqual(ast_grep["recall"], 0.9)
+        self.assertTrue(ast_grep["gates"]["precision"])
+        self.assertTrue(ast_grep["gates"]["recall"])
+        self.assertFalse(ast_grep["gates"]["disagreement"])
+        self.assertFalse(ast_grep["passed"])
+        self.assertFalse(report["passed"])
+
     def test_literal_gate_function_rejects_every_boundary_violation(self):
         scorer = self.require_scorer()
-        cases = {
-            "precision": (0.899999, 1.0, (), (1000,), 1000, "precision"),
-            "recall": (1.0, 0.799999, (), (1000,), 1000, "recall"),
-            "high-risk": (1.0, 1.0, ("fixture:builtin:a.py->b.py",), (1000,), 1000, "high_risk"),
-            "median": (1.0, 1.0, (), (10_001,), 1000, "median_duration"),
-            "hard": (1.0, 1.0, (), (0, 0, 30_001), 1000, "hard_duration"),
-            "compact": (1.0, 1.0, (), (1000,), 24_001, "compact_bytes"),
+        provider_cases = {
+            "precision": (0.899999, 1.0, (), True, "precision"),
+            "recall": (1.0, 0.799999, (), True, "recall"),
+            "high-risk": (1.0, 1.0, ("fixture:a.py->b.py",), True, "high_risk"),
+            "inventory": (1.0, 1.0, (), False, "scope_inventory"),
         }
-        for name, (precision, recall, misses, durations, compact, failed_gate) in cases.items():
+        for name, (precision, recall, misses, inventory, failed_gate) in provider_cases.items():
             with self.subTest(name=name):
-                gates = scorer.evaluate_gates(
-                    precision,
-                    recall,
-                    misses,
-                    durations,
-                    compact,
-                )
+                gates = scorer.evaluate_provider_gates(precision, recall, misses, inventory)
                 self.assertFalse(gates[failed_gate])
                 self.assertFalse(gates["passed"])
 
-        boundary = scorer.evaluate_gates(0.9, 0.8, (), (0, 10_000, 30_000), 24_000)
+        release_cases = {
+            "provider": (False, 0, (1000,), 1000, "providers"),
+            "disagreement": (True, 1, (1000,), 1000, "disagreement"),
+            "median": (True, 0, (10_001,), 1000, "median_duration"),
+            "hard": (True, 0, (0, 0, 30_001), 1000, "hard_duration"),
+            "compact": (True, 0, (1000,), 24_001, "compact_bytes"),
+        }
+        for name, (
+            providers,
+            disagreement,
+            durations,
+            compact,
+            failed_gate,
+        ) in release_cases.items():
+            with self.subTest(name=name):
+                gates = scorer.evaluate_release_gates(providers, disagreement, durations, compact)
+                self.assertFalse(gates[failed_gate])
+                self.assertFalse(gates["passed"])
+
+        provider_boundary = scorer.evaluate_provider_gates(0.9, 0.8, (), True)
+        self.assertTrue(provider_boundary["passed"])
+        boundary = scorer.evaluate_release_gates(True, 0, (0, 10_000, 30_000), 24_000)
         self.assertTrue(boundary["passed"])
 
     def test_observation_and_score_shapes_fail_closed(self):
         scorer = self.require_scorer()
+        self.assertEqual(
+            scorer._normalize_captured_module("typing as t", "python-import"),
+            "typing",
+        )
+        with self.assertRaisesRegex(scorer.CorpusScoreError, "multi-module"):
+            scorer._normalize_captured_module("os, sys", "python-import")
+        with self.assertRaisesRegex(scorer.CorpusScoreError, "JavaScript"):
+            scorer._normalize_captured_module("not-quoted", "javascript-from")
+        with self.assertRaisesRegex(scorer.CorpusScoreError, "unknown"):
+            scorer._normalize_captured_module("value", "unsupported")
         valid = ["fixture", "builtin", (("a.py", "b.py"),), 0, 1, "builtin-v1", None]
         mutations = {
             "corpus": (0, ""),
@@ -475,27 +773,30 @@ class GraphCorpusScoreTests(unittest.TestCase):
                     scorer.EngineObservation(*arguments)
 
         observation = scorer.EngineObservation(*valid)
-        expected = {("fixture", "builtin", "a.py", "b.py"): False}
-        with self.assertRaisesRegex(scorer.CorpusScoreError, "overlap"):
+        expected = {("fixture", "a.py", "b.py"): False}
+        with self.assertRaisesRegex(scorer.CorpusScoreError, "cover"):
             scorer.score_observations(
                 expected,
-                {("fixture", "builtin", "a.py", "b.py")},
-                set(),
                 (observation,),
+                {"builtin": set(), "ast-grep": set()},
             )
-        with self.assertRaisesRegex(scorer.CorpusScoreError, "cover"):
-            scorer.score_observations(expected, set(), set(), ())
-
-        unavailable = SimpleNamespace(status="failed", nodes=(), edges=(), frontier=())
-        projected = scorer.project_ast_grep_result(
+        incomplete = scorer.EngineObservation(
             "fixture",
-            unavailable,
-            5,
+            "ast-grep",
+            (("a.py", "b.py"),),
+            0,
+            1,
             "ast-grep 0.45.0",
             "d" * 64,
+            scope_inventory_complete=False,
         )
-        self.assertEqual(projected.predictions, ())
-        self.assertEqual(projected.frontier_count, 1)
+        complete = scorer.EngineObservation(*valid)
+        report, _ = scorer.score_observations(
+            expected,
+            (complete, incomplete),
+            {"builtin": set(), "ast-grep": set()},
+        )
+        self.assertFalse(report["providers"]["ast-grep"]["gates"]["scope_inventory"])
 
     def test_score_cli_rejects_repository_destination_without_running_provider(self):
         scorer = self.require_scorer()
@@ -518,7 +819,6 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 catalog_path,
                 destination,
                 repository_root=ROOT,
-                approved_destination=destination,
                 allow_local_repositories=True,
             )
 
@@ -532,28 +832,41 @@ class GraphCorpusScoreTests(unittest.TestCase):
                     destination,
                     mutate,
                     repository_root=ROOT,
-                    approved_destination=destination,
                     allow_local_repositories=True,
                 )
 
-    def test_expectation_loader_expands_provider_pairs_and_rejects_engine_generation(self):
+    def test_expectation_loader_preserves_complete_source_labels_and_rejects_engine_generation(
+        self,
+    ):
         scorer = self.require_scorer()
         specifications = scorer.FETCHER.load_catalog(CATALOG_PATH)
         loaded = scorer.load_expectations(EXPECTED_PATH, specifications)
 
         self.assertEqual(len(loaded.corpora), 2)
-        self.assertEqual(len(loaded.expected), 6)
-        self.assertEqual(len(loaded.negatives), 6)
-        self.assertEqual(loaded.disclosed_high_risk_misses, frozenset())
+        self.assertEqual(len(loaded.expected), 2)
+        self.assertEqual(
+            loaded.disclosed_high_risk_misses,
+            {"builtin": frozenset(), "ast-grep": frozenset()},
+        )
         self.assertTrue(
             loaded.expected[
                 (
                     "pallets-click",
-                    "ast-grep",
+                    "src/click/globals.py",
                     "src/click/core.py",
-                    "src/click/parser.py",
                 )
             ]
+        )
+        self.assertEqual(
+            loaded.labelled_modules[("pallets-click", "src/click/globals.py")],
+            frozenset(
+                {
+                    ".core",
+                    "__future__",
+                    "threading",
+                    "typing",
+                }
+            ),
         )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -565,7 +878,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 scorer.load_expectations(path, specifications)
 
             payload = json.loads(EXPECTED_PATH.read_text(encoding="utf-8"))
-            payload["corpora"][0]["scope"] = None
+            payload["corpora"][0]["sources"] = None
             path.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(scorer.CorpusScoreError, "list fields"):
                 scorer.load_expectations(path, specifications)
@@ -577,6 +890,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
             SimpleNamespace(id="N2", location="target.py"),
             SimpleNamespace(id="N3", location="negative.py"),
             SimpleNamespace(id="N4", location="unknown.py"),
+            SimpleNamespace(id="N5", location="unscoped.py"),
         )
         builtin = SimpleNamespace(
             nodes=nodes,
@@ -600,64 +914,79 @@ class GraphCorpusScoreTests(unittest.TestCase):
                     kind="imports",
                     confidence="structural-inferred",
                 ),
+                SimpleNamespace(
+                    source="N5",
+                    target="N2",
+                    kind="imports",
+                    confidence="structural-inferred",
+                ),
             ),
             frontier=(SimpleNamespace(id="F1"),),
             budget_status="closed",
         )
-        built_observation = scorer.project_builtin_result("fixture", builtin, 123)
+        built_observation = scorer.project_builtin_result("fixture", ("source.py",), builtin, 123)
         self.assertEqual(
             built_observation.predictions,
             (("source.py", "target.py"), ("source.py", "unknown.py")),
         )
-        self.assertEqual(built_observation.frontier_count, 3)
+        self.assertEqual(built_observation.frontier_count, 4)
 
-        ast_grep = SimpleNamespace(
-            status="ready",
-            nodes=(
-                {"key": "seed", "location": "source.py"},
-                {"key": "target", "location": "target.py"},
-                {"key": "self", "location": "source.py"},
-            ),
-            edges=(
-                {"source": "seed", "target": "target"},
-                {"source": "seed", "target": "self"},
-            ),
-            frontier=(),
+        repository_files = frozenset(
+            {"source.js", "target.js", "other.js", "pkg/core.py", "pkg/source.py"}
         )
-        ast_observation = scorer.project_ast_grep_result(
-            "fixture",
-            ast_grep,
-            456,
-            "ast-grep 0.45.0",
-            "b" * 64,
+        self.assertEqual(
+            scorer.resolve_import_target(
+                "source.js", "./target.js", "javascript", repository_files
+            ),
+            "target.js",
         )
-        self.assertEqual(ast_observation.predictions, (("source.py", "target.py"),))
-        self.assertEqual(ast_observation.frontier_count, 1)
+        self.assertEqual(
+            scorer.resolve_import_target("pkg/source.py", ".core", "python", repository_files),
+            "pkg/core.py",
+        )
+        self.assertIsNone(
+            scorer.resolve_import_target(
+                "source.js", "external-package", "javascript", repository_files
+            )
+        )
 
-    def test_real_engines_find_a_local_two_file_relationship(self):
+    def test_real_engines_discover_scoped_imports_without_expected_targets(self):
         scorer = self.require_scorer()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            (root / "source.py").write_text(
-                "from target import Target\n\nvalue = Target()\n",
-                encoding="utf-8",
+            source = root / "source.js"
+            original_source = (
+                "import externalValue from 'external-package';\n"
+                "import targetValue from './target.js';\n"
             )
-            (root / "target.py").write_text("class Target:\n    pass\n", encoding="utf-8")
-            (root / "unrelated.py").write_text("value = 1\n", encoding="utf-8")
+            source.write_text(original_source, encoding="utf-8")
+            (root / "target.js").write_text("export default 1;\n", encoding="utf-8")
+            (root / "other.js").write_text("export default 2;\n", encoding="utf-8")
+            scope = scorer.SourceScope(
+                "source.js",
+                "javascript",
+                hashlib.sha256(original_source.encode()).hexdigest(),
+                (
+                    scorer.ImportLabel(
+                        "./target.js",
+                        "target.js",
+                        True,
+                        ("interfaces",),
+                    ),
+                ),
+                ("external-package",),
+            )
             corpus = scorer.CorpusCase(
                 "fixture",
                 "f" * 40,
-                ("source.py", "target.py", "unrelated.py"),
-                (scorer.Seed("Target", "source.py"),),
-                (),
-                (scorer.RelationshipQuery("Target", "source.py", "target.py"),),
+                (scope,),
             )
 
             with self.assertRaisesRegex(scorer.CorpusScoreError, "ast-grep executable"):
                 scorer.run_ast_grep(corpus, root, root / "missing-ast-grep")
 
             builtin = scorer.run_builtin(corpus, root)
-            self.assertIn(("source.py", "target.py"), builtin.predictions)
+            self.assertEqual(builtin.predictions, (("source.js", "target.js"),))
             self.assertLessEqual(builtin.duration_ms, 30_000)
 
             executable = ROOT / ".quality-venv/bin/ast-grep"
@@ -672,19 +1001,55 @@ class GraphCorpusScoreTests(unittest.TestCase):
             if version.stdout.strip() != "ast-grep 0.45.0":
                 self.skipTest("pinned ast-grep 0.45.0 is not installed")
             ast_grep = scorer.run_ast_grep(corpus, root, executable)
-            self.assertIn(("source.py", "target.py"), ast_grep.predictions)
+            self.assertEqual(ast_grep.predictions, (("source.js", "target.js"),))
+            self.assertEqual(
+                ast_grep.discovered_modules,
+                (("source.js", "./target.js"), ("source.js", "external-package")),
+            )
+            self.assertTrue(ast_grep.scope_inventory_complete)
             self.assertEqual(ast_grep.version, "ast-grep 0.45.0")
             self.assertRegex(ast_grep.executable_sha256, r"^[0-9a-f]{64}$")
             self.assertLessEqual(ast_grep.duration_ms, 30_000)
 
+            mutated_source = original_source.replace("./target.js", "./other.js")
+            source.write_text(mutated_source, encoding="utf-8")
+            mutated_scope = scorer.SourceScope(
+                "source.js",
+                "javascript",
+                hashlib.sha256(mutated_source.encode()).hexdigest(),
+                scope.internal_imports,
+                scope.external_imports,
+            )
+            mutated_ast_grep = scorer.run_ast_grep(
+                scorer.CorpusCase("fixture", "f" * 40, (mutated_scope,)),
+                root,
+                executable,
+            )
+            self.assertEqual(
+                mutated_ast_grep.predictions,
+                (("source.js", "other.js"),),
+            )
+            report, _ = scorer.score_observations(
+                {("fixture", "source.js", "target.js"): True},
+                (builtin, mutated_ast_grep),
+                {"builtin": set(), "ast-grep": set()},
+            )
+            self.assertEqual(report["providers"]["ast-grep"]["false_positive"], 1)
+            self.assertEqual(report["providers"]["ast-grep"]["false_negative"], 1)
+            self.assertFalse(report["passed"])
+
     def make_local_expectations(self, root: Path, commit: str) -> Path:
+        source_sha256 = hashlib.sha256(
+            b"from target import public_symbol\n\nvalue = public_symbol()\n"
+        ).hexdigest()
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "curation": {
                 "method": "manual-pinned-source-review",
                 "engine_output_used": False,
-                "source_basis": "Local fixture source was read before fake engine output.",
+                "scope_policy": "Every internal import from the listed fixture source is labelled.",
                 "reviewed_commits": [commit],
+                "reviewed_license_sha256": [hashlib.sha256(b"fixture license\n").hexdigest()],
             },
             "gates": {
                 "minimum_precision": 0.9,
@@ -693,26 +1058,29 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 "maximum_hard_seconds": 30,
                 "maximum_compact_bytes": 24_000,
                 "allow_undisclosed_high_risk_miss": False,
+                "require_zero_provider_disagreement": True,
             },
             "corpora": [
                 {
                     "id": "fixture",
                     "commit": commit,
-                    "scope": ["LICENSE.txt", "module.py"],
-                    "seeds": [{"term": "public_symbol", "location": "module.py"}],
-                    "relationships": [
+                    "sources": [
                         {
-                            "source": "module.py",
-                            "target": "LICENSE.txt",
-                            "term": "public_symbol",
-                            "providers": ["builtin", "ast-grep"],
-                            "high_risk": True,
-                            "risk_domains": ["interfaces"],
-                            "evidence": "def public_symbol():",
+                            "path": "module.py",
+                            "language": "python",
+                            "sha256": source_sha256,
+                            "internal_imports": [
+                                {
+                                    "module": "target",
+                                    "target": "target.py",
+                                    "high_risk": True,
+                                    "risk_domains": ["interfaces"],
+                                }
+                            ],
+                            "external_imports": [],
                         }
                     ],
-                    "negative_relationships": [],
-                    "disclosed_high_risk_misses": [],
+                    "disclosed_high_risk_misses": {"builtin": [], "ast-grep": []},
                 }
             ],
         }
@@ -733,7 +1101,6 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 catalog_path,
                 destination,
                 repository_root=ROOT,
-                approved_destination=destination,
                 allow_local_repositories=True,
             )
             expected_path = self.make_local_expectations(root, commit)
@@ -742,7 +1109,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 return scorer.EngineObservation(
                     case.id,
                     "builtin",
-                    (("module.py", "LICENSE.txt"),),
+                    (("module.py", "target.py"),),
                     0,
                     100,
                     "builtin-v1",
@@ -753,7 +1120,7 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 return scorer.EngineObservation(
                     case.id,
                     "ast-grep",
-                    (("module.py", "LICENSE.txt"),),
+                    (("module.py", "target.py"),),
                     1,
                     200,
                     "ast-grep 0.45.0",
@@ -766,7 +1133,6 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 destination,
                 Path("/unused/fake-ast-grep"),
                 repository_root=ROOT,
-                approved_destination=destination,
                 allow_local_repositories=True,
                 builtin_runner=builtin,
                 ast_grep_runner=ast_grep,
@@ -780,20 +1146,20 @@ class GraphCorpusScoreTests(unittest.TestCase):
                 report["provenance"]["expectations_sha256"],
                 hashlib.sha256(expected_path.read_bytes()).hexdigest(),
             )
-            self.assertEqual(report["aggregate"]["unknown_frontier"], 1)
-            self.assertEqual(len(report_bytes), report["aggregate"]["compact_bytes"])
+            self.assertEqual(report["providers"]["ast-grep"]["unknown_frontier"], 1)
+            self.assertEqual(len(report_bytes), report["compact_bytes"])
+            self.assertEqual(report["disagreement"]["count"], 0)
 
             payload = json.loads(expected_path.read_text(encoding="utf-8"))
-            payload["corpora"][0]["relationships"][0]["evidence"] = "not in pinned source"
+            payload["corpora"][0]["sources"][0]["sha256"] = "0" * 64
             expected_path.write_text(json.dumps(payload), encoding="utf-8")
-            with self.assertRaisesRegex(scorer.CorpusScoreError, "curated evidence"):
+            with self.assertRaisesRegex(scorer.CorpusScoreError, "source digest"):
                 scorer.run_evaluation(
                     catalog_path,
                     expected_path,
                     destination,
                     Path("/unused/fake-ast-grep"),
                     repository_root=ROOT,
-                    approved_destination=destination,
                     allow_local_repositories=True,
                     builtin_runner=builtin,
                     ast_grep_runner=ast_grep,

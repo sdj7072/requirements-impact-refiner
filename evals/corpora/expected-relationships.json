@@ -1,12 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "curation": {
     "method": "manual-pinned-source-review",
     "engine_output_used": false,
-    "source_basis": "Final positives and negatives come only from direct inspection of pinned source; engine output is not expected data.",
+    "scope_policy": "Every internal import from each listed source file is labelled; every other discovered module is documented as external.",
     "reviewed_commits": [
       "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
       "7c318bd1aa4b4affab29761f15a9604323fe2a3b"
+    ],
+    "reviewed_license_sha256": [
+      "9a8ad106a394e853bfe21f42f4e72d592819a22805d991b5f3275029292b658d",
+      "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
     ]
   },
   "gates": {
@@ -15,121 +19,68 @@
     "maximum_median_seconds": 10,
     "maximum_hard_seconds": 30,
     "maximum_compact_bytes": 24000,
-    "allow_undisclosed_high_risk_miss": false
+    "allow_undisclosed_high_risk_miss": false,
+    "require_zero_provider_disagreement": true
   },
   "corpora": [
     {
       "id": "pallets-click",
       "commit": "68e7ea7228ca144c52e4d1d282cc09da59f7771f",
-      "scope": [
-        "src/click/core.py",
-        "src/click/parser.py",
-        "src/click/testing.py"
-      ],
-      "seeds": [
+      "sources": [
         {
-          "term": "_OptionParser",
-          "location": "src/click/core.py"
+          "path": "src/click/globals.py",
+          "language": "python",
+          "sha256": "80cf8d87a0383341c1fd2824685e4ce2770618c0c773f7e51d7bbdfe88781845",
+          "internal_imports": [
+            {
+              "module": ".core",
+              "target": "src/click/core.py",
+              "high_risk": true,
+              "risk_domains": [
+                "interfaces"
+              ]
+            }
+          ],
+          "external_imports": [
+            "__future__",
+            "threading",
+            "typing"
+          ]
         }
       ],
-      "relationships": [
-        {
-          "source": "src/click/core.py",
-          "target": "src/click/parser.py",
-          "term": "_OptionParser",
-          "providers": [
-            "builtin",
-            "ast-grep"
-          ],
-          "high_risk": true,
-          "risk_domains": [
-            "interfaces"
-          ],
-          "evidence": "from .parser import _OptionParser"
-        }
-      ],
-      "negative_relationships": [
-        {
-          "source": "src/click/core.py",
-          "target": "src/click/testing.py",
-          "providers": [
-            "builtin",
-            "ast-grep"
-          ],
-          "rationale": "core.py has no import of testing.py; testing helpers depend on the core API in the opposite direction."
-        }
-      ],
-      "disclosed_high_risk_misses": []
+      "disclosed_high_risk_misses": {
+        "builtin": [],
+        "ast-grep": []
+      }
     },
     {
       "id": "sindresorhus-slugify",
       "commit": "7c318bd1aa4b4affab29761f15a9604323fe2a3b",
-      "scope": [
-        "index.js",
-        "overridable-replacements.js",
-        "test.js"
-      ],
-      "seeds": [
+      "sources": [
         {
-          "term": "builtinOverridableReplacements",
-          "location": "index.js"
-        },
-        {
-          "term": "slugifyWithCounter",
-          "location": "test.js"
+          "path": "index.js",
+          "language": "javascript",
+          "sha256": "300268f98ec858deb36237a7bff5adf5045191e22fcba578e2373af592fc0216",
+          "internal_imports": [
+            {
+              "module": "./overridable-replacements.js",
+              "target": "overridable-replacements.js",
+              "high_risk": false,
+              "risk_domains": [
+                "functionality"
+              ]
+            }
+          ],
+          "external_imports": [
+            "@sindresorhus/transliterate",
+            "escape-string-regexp"
+          ]
         }
       ],
-      "relationships": [
-        {
-          "source": "index.js",
-          "target": "overridable-replacements.js",
-          "term": "builtinOverridableReplacements",
-          "providers": [
-            "builtin",
-            "ast-grep"
-          ],
-          "high_risk": false,
-          "risk_domains": [
-            "functionality"
-          ],
-          "evidence": "import builtinOverridableReplacements from './overridable-replacements.js';"
-        },
-        {
-          "source": "test.js",
-          "target": "index.js",
-          "term": "slugifyWithCounter",
-          "providers": [
-            "builtin",
-            "ast-grep"
-          ],
-          "high_risk": false,
-          "risk_domains": [
-            "regression"
-          ],
-          "evidence": "import slugify, {slugifyWithCounter} from './index.js';"
-        }
-      ],
-      "negative_relationships": [
-        {
-          "source": "index.js",
-          "target": "test.js",
-          "providers": [
-            "builtin",
-            "ast-grep"
-          ],
-          "rationale": "The implementation does not depend on its test module."
-        },
-        {
-          "source": "test.js",
-          "target": "overridable-replacements.js",
-          "providers": [
-            "builtin",
-            "ast-grep"
-          ],
-          "rationale": "The test reaches replacements only through index.js and has no direct import."
-        }
-      ],
-      "disclosed_high_risk_misses": []
+      "disclosed_high_risk_misses": {
+        "builtin": [],
+        "ast-grep": []
+      }
     }
   ]
 }
