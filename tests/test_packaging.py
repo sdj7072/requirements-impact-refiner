@@ -409,8 +409,10 @@ class PackagingTest(unittest.TestCase):
                 Path("install-agent-skill.py"),
                 Path("launch-rir-mcp"),
                 Path("rir_mcp_server.py"),
+                Path("fetch-graph-corpora.py"),
                 Path("run-ast-grep-canary.py"),
                 Path("run-quality-gates.py"),
+                Path("score-graph-corpora.py"),
             },
             "schemas": set(),
         }
@@ -438,8 +440,10 @@ class PackagingTest(unittest.TestCase):
                 )
 
         self.assertFalse((ROOT / "SKILL.md").exists())
+        self.assertFalse((canonical / "scripts" / "fetch-graph-corpora.py").exists())
         self.assertFalse((canonical / "scripts" / "run-ast-grep-canary.py").exists())
         self.assertFalse((canonical / "scripts" / "run-quality-gates.py").exists())
+        self.assertFalse((canonical / "scripts" / "score-graph-corpora.py").exists())
 
     def test_codex_manifest_references_a_standard_root_logo(self):
         manifest = self.load(".codex-plugin/plugin.json")
