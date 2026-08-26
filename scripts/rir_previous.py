@@ -1603,7 +1603,17 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
             reason,
             started_ns,
         )
+    public_candidates = _public_candidates(matching) if len(matching) > 1 else ()
     if request.report_id is not None:
+        if public_candidates and request.report_id not in {
+            candidate.report_id for candidate in public_candidates
+        }:
+            return _unselected(
+                "none",
+                requirement_sha256,
+                "requested previous report is outside the disclosed candidate window",
+                started_ns,
+            )
         matching = [candidate for candidate in matching if candidate.report_id == request.report_id]
         if not matching:
             return _unselected(
@@ -1618,7 +1628,7 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
             requirement_sha256,
             "multiple previous report lineages match the normalized requirement",
             started_ns,
-            _public_candidates(matching),
+            public_candidates,
         )
     candidate = matching[0]
     baseline_commit = getattr(candidate.context, "baseline_commit", None)

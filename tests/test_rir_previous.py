@@ -345,7 +345,7 @@ class PreviousLookupTest(unittest.TestCase):
         shutil.copytree(self.root, other, ignore=shutil.ignore_patterns(".git"))
 
         result = PREVIOUS.lookup_previous(
-            PREVIOUS.PreviousLookupRequest(other, "rename profile", ())
+            PREVIOUS.PreviousLookupRequest(other, "rename profile", (), "RPT-001")
         )
 
         self.assertEqual(result.status, "none")
@@ -980,6 +980,23 @@ class PreviousLookupTest(unittest.TestCase):
                 for candidate in result.candidates
             )
         )
+
+        disclosed = PREVIOUS.lookup_previous(self.request(report_id="RPT-016"))
+        undisclosed = PREVIOUS.lookup_previous(self.request(report_id="RPT-017"))
+        changed_request = PREVIOUS.lookup_previous(
+            self.request("different request", report_id="RPT-016")
+        )
+        changed_evidence = PREVIOUS.lookup_previous(
+            self.request(evidence=("different",), report_id="RPT-016")
+        )
+
+        self.assertEqual(disclosed.status, "fresh")
+        self.assertEqual(disclosed.report_id, "RPT-016")
+        for hidden in (undisclosed, changed_request, changed_evidence):
+            self.assertEqual(hidden.status, "none")
+            self.assertIsNone(hidden.report_id)
+            self.assertIsNone(hidden.display_text)
+            self.assertEqual(hidden.candidates, ())
 
     def test_unsafe_pointer_fails_closed_without_body(self):
         report_dir, _pointer, _context = self.publish()
