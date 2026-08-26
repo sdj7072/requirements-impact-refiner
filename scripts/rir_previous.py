@@ -17,7 +17,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Callable, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, Protocol, cast
 
 if TYPE_CHECKING:
     from typing_extensions import TypeGuard
@@ -89,6 +89,7 @@ STATUS_VALUES = frozenset({"none", "fresh", "stale", "ambiguous"})
 REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 COMMIT_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+CREATED_AT_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z")
 POINTER_FIELDS = frozenset(
     {"schema_version", "report_id", "revision", "state", "markdown", "markdown_sha256"}
 )
@@ -100,6 +101,7 @@ MAX_CHANGED_PATHS = 4096
 MAX_CHANGED_PATH_BYTES = 4096
 MAX_REPORT_ENTRIES = 4096
 MAX_REPORT_LINEAGES = 1000
+MAX_AMBIGUOUS_CANDIDATES = 16
 MAX_REQUIRED_SOURCE_DIGESTS = 64
 MAX_REQUIRED_SOURCE_PATH_BYTES = 1024
 MAX_REQUIRED_SOURCE_MAP_BYTES = 64 * 1024
@@ -255,6 +257,7 @@ class PreviousLookupRequest:
     repo_root: Path
     request: str
     repository_evidence: tuple[str, ...] = ()
+    report_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.repo_root, Path):
@@ -265,6 +268,27 @@ class PreviousLookupRequest:
         ):
             raise ValueError("previous lookup repository_evidence must contain nonblank text")
         REPORT_CONTEXT.canonical_repository_evidence_sha256(self.repository_evidence)
+        if self.report_id is not None and REPORT_ID_PATTERN.fullmatch(self.report_id) is None:
+            raise ValueError("previous lookup report ID is invalid")
+
+
+@dataclass(frozen=True)
+class PreviousReportCandidate:
+    report_id: str
+    revision: int
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if REPORT_ID_PATTERN.fullmatch(self.report_id) is None:
+            raise ValueError("previous candidate report ID is invalid")
+        if type(self.revision) is not int or self.revision < 1:
+            raise ValueError("previous candidate revision is invalid")
+        if (
+            not isinstance(self.created_at, str)
+            or len(self.created_at.encode("utf-8")) > 64
+            or CREATED_AT_PATTERN.fullmatch(self.created_at) is None
+        ):
+            raise ValueError("previous candidate creation time is invalid")
 
 
 @dataclass(frozen=True)
@@ -282,6 +306,7 @@ class PreviousReportResult:
     display_text: str | None
     reason: str
     elapsed_ms: int
+    candidates: tuple[PreviousReportCandidate, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in STATUS_VALUES:
@@ -304,6 +329,17 @@ class PreviousReportResult:
             raise ValueError("previous result elapsed time is invalid")
         if not isinstance(self.reason, str) or not self.reason.strip():
             raise ValueError("previous result reason is required")
+        if (
+            not isinstance(self.candidates, tuple)
+            or len(self.candidates) > MAX_AMBIGUOUS_CANDIDATES
+            or any(
+                not isinstance(candidate, PreviousReportCandidate) for candidate in self.candidates
+            )
+            or tuple(sorted(self.candidates, key=lambda candidate: candidate.report_id))
+            != self.candidates
+            or len({candidate.report_id for candidate in self.candidates}) != len(self.candidates)
+        ):
+            raise ValueError("previous result candidates are invalid")
         if self.status in {"none", "ambiguous"}:
             if any(
                 value is not None
@@ -320,7 +356,13 @@ class PreviousReportResult:
                 raise ValueError("non-selected previous result cannot disclose report identity")
             if self.changed_paths or self.changed_count is not None:
                 raise ValueError("non-selected previous result cannot disclose changed paths")
+            if self.status == "none" and self.candidates:
+                raise ValueError("none previous result cannot disclose candidates")
+            if self.status == "ambiguous" and len(self.candidates) < 2:
+                raise ValueError("ambiguous previous result requires candidates")
             return
+        if self.candidates:
+            raise ValueError("selected previous result cannot disclose candidates")
         if self.report_id is None or REPORT_ID_PATTERN.fullmatch(self.report_id) is None:
             raise ValueError("selected previous result report ID is invalid")
         if type(self.revision) is not int or self.revision < 1:
@@ -1414,6 +1456,7 @@ def _unselected(
     requirement_sha256: str,
     reason: str,
     started_ns: int,
+    candidates: tuple[PreviousReportCandidate, ...] = (),
 ) -> PreviousReportResult:
     return PreviousReportResult(
         status=status,
@@ -1429,6 +1472,20 @@ def _unselected(
         display_text=None,
         reason=reason,
         elapsed_ms=_elapsed_ms(started_ns),
+        candidates=candidates,
+    )
+
+
+def _public_candidates(
+    candidates: Sequence[_CurrentCandidate],
+) -> tuple[PreviousReportCandidate, ...]:
+    return tuple(
+        PreviousReportCandidate(
+            report_id=candidate.report_id,
+            revision=candidate.revision,
+            created_at=cast(str, cast(Any, candidate.context).created_at),
+        )
+        for candidate in candidates[:MAX_AMBIGUOUS_CANDIDATES]
     )
 
 
@@ -1511,64 +1568,57 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
             "previous report identity is unsafe",
             started_ns,
         )
-    matching = [
+    requirement_matching = [
         candidate for candidate in candidates if candidate.requirement_sha256 == requirement_sha256
     ]
-    if any(candidate.incompatible_context for candidate in matching):
-        return _unselected(
-            "none",
-            requirement_sha256,
-            "previous report schema or payload identity is incompatible with this runtime",
-            started_ns,
-        )
-    missing_context = [candidate for candidate in matching if candidate.context is None]
-    if missing_context:
-        return _unselected(
-            "none",
-            requirement_sha256,
-            "previous report context is unavailable",
-            started_ns,
-        )
-    evidence_mismatch = [
+    context_matching = [
         candidate
-        for candidate in matching
+        for candidate in requirement_matching
+        if not candidate.incompatible_context and candidate.context is not None
+    ]
+    evidence_matching = [
+        candidate
+        for candidate in context_matching
         if getattr(candidate.context, "repository_evidence_sha256", None)
-        != repository_evidence_sha256
+        == repository_evidence_sha256
     ]
-    if evidence_mismatch:
-        return _unselected(
-            "none",
-            requirement_sha256,
-            "previous report evidence identity does not match",
-            started_ns,
-        )
-    incompatible = [
+    matching = [
         candidate
-        for candidate in matching
+        for candidate in evidence_matching
         if candidate.context is not None
-        and getattr(candidate.context, "payload_sha256", None) != payload_sha256
+        and getattr(candidate.context, "payload_sha256", None) == payload_sha256
     ]
-    if incompatible:
-        return _unselected(
-            "none",
-            requirement_sha256,
-            "previous report schema or payload identity is incompatible with this runtime",
-            started_ns,
-        )
-    matching = [candidate for candidate in matching if candidate not in incompatible]
     if not matching:
+        if requirement_matching and not context_matching:
+            reason = "previous report schema or payload identity is incompatible with this runtime"
+        elif context_matching and not evidence_matching:
+            reason = "previous report evidence identity does not match"
+        elif evidence_matching:
+            reason = "previous report schema or payload identity is incompatible with this runtime"
+        else:
+            reason = "no previous report lineage matches the normalized requirement"
         return _unselected(
             "none",
             requirement_sha256,
-            "no previous report lineage matches the normalized requirement",
+            reason,
             started_ns,
         )
+    if request.report_id is not None:
+        matching = [candidate for candidate in matching if candidate.report_id == request.report_id]
+        if not matching:
+            return _unselected(
+                "none",
+                requirement_sha256,
+                "requested previous report does not match the private candidate set",
+                started_ns,
+            )
     if len(matching) != 1:
         return _unselected(
             "ambiguous",
             requirement_sha256,
             "multiple previous report lineages match the normalized requirement",
             started_ns,
+            _public_candidates(matching),
         )
     candidate = matching[0]
     baseline_commit = getattr(candidate.context, "baseline_commit", None)

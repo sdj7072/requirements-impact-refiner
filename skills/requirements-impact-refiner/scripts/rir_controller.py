@@ -34,7 +34,7 @@ if TYPE_CHECKING:
         TraceRequest,
         TraceResult,
     )
-    from rir_previous import PreviousLookupRequest, PreviousReportResult
+    from rir_previous import PreviousLookupRequest, PreviousReportCandidate, PreviousReportResult
     from typing_extensions import TypeGuard
 
 
@@ -1860,7 +1860,10 @@ def _is_previous_shape(value: object) -> bool:
         and _module_uses_sibling(
             getattr(value, "RENDERER", None), SCRIPT_DIR / "rir_previous_renderer.py"
         )
-        and _classes(value, ("PreviousLookupRequest", "PreviousReportResult"))
+        and _classes(
+            value,
+            ("PreviousLookupRequest", "PreviousReportCandidate", "PreviousReportResult"),
+        )
         and callable(getattr(value, "lookup_previous", None))
     )
 
@@ -1892,6 +1895,7 @@ PREVIOUS = cast(
 )
 if not TYPE_CHECKING:
     PreviousLookupRequest = PREVIOUS.PreviousLookupRequest
+    PreviousReportCandidate = PREVIOUS.PreviousReportCandidate
     PreviousReportResult = PREVIOUS.PreviousReportResult
 
 

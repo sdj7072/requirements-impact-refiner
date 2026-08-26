@@ -79,8 +79,13 @@ class PreviousLookupTest(unittest.TestCase):
             },
         )
 
-    def request(self, text: str = "rename profile", evidence: tuple[str, ...] = ()):
-        return PREVIOUS.PreviousLookupRequest(self.root, text, evidence)
+    def request(
+        self,
+        text: str = "rename profile",
+        evidence: tuple[str, ...] = (),
+        report_id: str | None = None,
+    ):
+        return PREVIOUS.PreviousLookupRequest(self.root, text, evidence, report_id)
 
     def payload_sha256(self) -> str:
         return PREVIOUS.PAYLOAD_IDENTITY.payload_sha256(ROOT)
@@ -185,6 +190,17 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual((result.report_id, result.revision), ("RPT-001", 1))
         self.assertEqual(result.baseline_commit, self.baseline_commit)
         self.assertIn("**Freshness:** fresh", result.display_text or "")
+
+    def test_fresh_lookup_preserves_detailed_request_and_evidence_bounds(self):
+        request_text = "x" * 5000
+        evidence = ("e" * 5000, "duplicate", "duplicate")
+        self.publish(request=request_text, repository_evidence=evidence)
+
+        result = PREVIOUS.lookup_previous(self.request(request_text, evidence))
+
+        self.assertEqual(result.status, "fresh")
+        self.assertIsNotNone(result.display_text)
+        self.assertEqual(result.candidates, ())
 
     def test_requirement_normalization_selects_the_same_lineage(self):
         self.publish(request="프로필 Caf\u00e9 이름 변경")
@@ -915,6 +931,55 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertIsNone(result.display_text)
         self.assertIsNone(result.report_id)
         self.assertIsNone(result.revision)
+        self.assertEqual(
+            tuple(
+                (candidate.report_id, candidate.revision, candidate.created_at)
+                for candidate in result.candidates
+            ),
+            (
+                ("RPT-001", 1, "2026-08-25T12:34:56Z"),
+                ("RPT-002", 1, "2026-08-25T12:34:56Z"),
+            ),
+        )
+
+        selected = PREVIOUS.lookup_previous(self.request(report_id="RPT-002"))
+
+        self.assertEqual(selected.status, "fresh")
+        self.assertEqual((selected.report_id, selected.revision), ("RPT-002", 1))
+        self.assertEqual(selected.candidates, ())
+
+    def test_report_id_must_belong_to_exact_private_candidate_set(self):
+        self.publish(report_id="RPT-001")
+        self.publish(report_id="RPT-002", repository_evidence=("other",))
+
+        foreign = PREVIOUS.lookup_previous(self.request(report_id="RPT-999"))
+        wrong_evidence = PREVIOUS.lookup_previous(self.request(report_id="RPT-002"))
+
+        for result in (foreign, wrong_evidence):
+            self.assertEqual(result.status, "none")
+            self.assertIsNone(result.display_text)
+            self.assertIsNone(result.report_id)
+            self.assertEqual(result.candidates, ())
+
+    def test_ambiguous_candidate_disclosure_is_sorted_and_bounded_to_sixteen(self):
+        for number in range(1, 18):
+            self.publish(report_id=f"RPT-{number:03d}")
+
+        with mock.patch.object(PREVIOUS, "OPERATION_TIMEOUT_SECONDS", 2.0):
+            result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "ambiguous")
+        self.assertEqual(len(result.candidates), 16)
+        self.assertEqual(
+            tuple(candidate.report_id for candidate in result.candidates),
+            tuple(f"RPT-{number:03d}" for number in range(1, 17)),
+        )
+        self.assertTrue(
+            all(
+                set(vars(candidate)) == {"report_id", "revision", "created_at"}
+                for candidate in result.candidates
+            )
+        )
 
     def test_unsafe_pointer_fails_closed_without_body(self):
         report_dir, _pointer, _context = self.publish()
@@ -1007,7 +1072,15 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "none")
 
         self.assertEqual(RENDERER.render_previous(result, state), "")
-        ambiguous = replace(result, status="ambiguous", reason="multiple lineages")
+        ambiguous = replace(
+            result,
+            status="ambiguous",
+            reason="multiple lineages",
+            candidates=(
+                PREVIOUS.PreviousReportCandidate("RPT-001", 1, "2026-08-25T12:34:56Z"),
+                PREVIOUS.PreviousReportCandidate("RPT-002", 1, "2026-08-25T12:34:56Z"),
+            ),
+        )
         self.assertEqual(RENDERER.render_previous(ambiguous, state), "")
 
     def test_concurrent_pointer_refresh_never_mixes_revision_fields_and_body(self):
@@ -1148,6 +1221,8 @@ class PreviousDependencyAndPackagingTest(unittest.TestCase):
             with self.subTest(evidence=evidence):
                 with self.assertRaises(ValueError):
                     PREVIOUS.PreviousLookupRequest(ROOT, "request", evidence)
+        with self.assertRaises(ValueError):
+            PREVIOUS.PreviousLookupRequest(ROOT, "request", (), "foreign")
 
         invalid = (
             {"status": "unknown"},

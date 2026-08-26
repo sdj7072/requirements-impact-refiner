@@ -53,13 +53,11 @@ BEGIN_KEYS = {
     "delivery_override",
     "scan_id",
 }
-PREVIOUS_KEYS = {"request", "repository_evidence"}
+PREVIOUS_KEYS = {"request", "repository_evidence", "report_id"}
+PREVIOUS_REQUIRED_KEYS = {"request", "repository_evidence"}
 SCAN_KEYS = {"change_request", "evidence", "presentation"}
 TRACE_KEYS = {"seeds"}
 TRACE_SEED_KEYS = {"term", "location"}
-MAX_FAST_SCAN_CHANGE_BYTES = 4 * 1024
-MAX_FAST_SCAN_EVIDENCE_ROWS = 32
-MAX_FAST_SCAN_EVIDENCE_BYTES = 4 * 1024
 
 
 def build_parser():
@@ -72,6 +70,7 @@ def build_parser():
     previous = subparsers.add_parser("previous")
     previous.add_argument("--repo-root", type=Path, required=True)
     previous.add_argument("--input", type=Path, required=True)
+    previous.add_argument("--report-id")
     scan = subparsers.add_parser("scan")
     scan.add_argument("--repo-root", type=Path, required=True)
     scan.add_argument("--input", type=Path, required=True)
@@ -177,45 +176,31 @@ def _finalize(args) -> int:
     return 0
 
 
-def _validate_previous_scan_bounds(request, evidence) -> None:
-    if not isinstance(request, str) or not request.strip():
-        raise ValueError("previous request must be a nonblank string")
-    try:
-        request_bytes = len(request.encode("utf-8"))
-    except UnicodeEncodeError as error:
-        raise ValueError("previous request is not valid UTF-8") from error
-    if request_bytes > MAX_FAST_SCAN_CHANGE_BYTES:
-        raise ValueError("previous request exceeds the Fast Scan limit")
-    if len(evidence) > MAX_FAST_SCAN_EVIDENCE_ROWS:
-        raise ValueError("previous repository_evidence has too many items")
-    for row in evidence:
-        if not isinstance(row, str) or not row.strip():
-            raise ValueError("previous repository_evidence must contain nonblank strings")
-        try:
-            row_bytes = len(row.encode("utf-8"))
-        except UnicodeEncodeError as error:
-            raise ValueError("previous repository_evidence is not valid UTF-8") from error
-        if row_bytes > MAX_FAST_SCAN_EVIDENCE_BYTES:
-            raise ValueError("previous repository_evidence item exceeds the Fast Scan limit")
-
-
 def _previous(args) -> int:
     value = _read_object(args.input, rir_controller.MAX_BEGIN_BYTES, "previous input")
     unknown = sorted(set(value) - PREVIOUS_KEYS)
     if unknown:
         raise ValueError(f"unknown previous key {unknown[0]}")
-    missing = sorted(PREVIOUS_KEYS - set(value))
+    missing = sorted(PREVIOUS_REQUIRED_KEYS - set(value))
     if missing:
         raise ValueError(f"missing previous key {missing[0]}")
     evidence = value["repository_evidence"]
     if not isinstance(evidence, list):
         raise ValueError("previous repository_evidence must be an array")
-    _validate_previous_scan_bounds(value["request"], evidence)
+    input_report_id = value.get("report_id")
+    if (
+        args.report_id is not None
+        and input_report_id is not None
+        and args.report_id != input_report_id
+    ):
+        raise ValueError("previous report_id flag conflicts with input")
+    report_id = args.report_id or input_report_id
     result = rir_controller.lookup_previous(
         rir_controller.PreviousLookupRequest(
             repo_root=args.repo_root,
             request=value["request"],
             repository_evidence=tuple(evidence),
+            report_id=report_id,
         )
     )
     payload = {
@@ -232,6 +217,14 @@ def _previous(args) -> int:
         "display_text": result.display_text,
         "reason": result.reason,
         "elapsed_ms": result.elapsed_ms,
+        "candidates": [
+            {
+                "report_id": candidate.report_id,
+                "revision": candidate.revision,
+                "created_at": candidate.created_at,
+            }
+            for candidate in result.candidates
+        ],
     }
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0

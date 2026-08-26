@@ -112,8 +112,10 @@ class RirControllerCliTest(unittest.TestCase):
     def begin(self, *extra):
         return self.run_cli("begin", "--repo-root", self.root, "--input", self.begin_path, *extra)
 
-    def previous(self):
-        return self.run_cli("previous", "--repo-root", self.root, "--input", self.previous_path)
+    def previous(self, *extra):
+        return self.run_cli(
+            "previous", "--repo-root", self.root, "--input", self.previous_path, *extra
+        )
 
     def test_begin_emits_structured_draft_metadata(self):
         result = self.begin()
@@ -159,6 +161,7 @@ class RirControllerCliTest(unittest.TestCase):
                 "display_text",
                 "reason",
                 "elapsed_ms",
+                "candidates",
             },
         )
         self.assertTrue(payload["display_text"].startswith("## Previous Impact Report\n"))
@@ -185,6 +188,7 @@ class RirControllerCliTest(unittest.TestCase):
             self.assertIsNone(payload[field], field)
         self.assertEqual(payload["changed_paths"], [])
         self.assertIsNone(payload["changed_count"])
+        self.assertEqual(payload["candidates"], [])
 
         for value, expected in (
             ({"request": "x", "repository_evidence": [], "surprise": True}, "unknown"),
@@ -198,6 +202,24 @@ class RirControllerCliTest(unittest.TestCase):
                 self.assertEqual(invalid.stdout, "")
                 self.assertIn(expected, invalid.stderr)
                 self.assertNotIn("Traceback", invalid.stderr)
+
+    def test_previous_cli_keeps_wide_lookup_and_accepts_report_id_input_or_flag(self):
+        wide = {
+            "request": "x" * 5000,
+            "repository_evidence": ["e" * 5000],
+            "report_id": "RPT-002",
+        }
+        self.previous_path.write_text(json.dumps(wide), encoding="utf-8")
+
+        from_input = self.previous()
+        self.assertEqual(from_input.returncode, 0, from_input.stderr)
+        self.assertEqual(json.loads(from_input.stdout)["status"], "none")
+
+        wide.pop("report_id")
+        self.previous_path.write_text(json.dumps(wide), encoding="utf-8")
+        from_flag = self.previous("--report-id", "RPT-002")
+        self.assertEqual(from_flag.returncode, 0, from_flag.stderr)
+        self.assertEqual(json.loads(from_flag.stdout)["status"], "none")
 
     def test_scan_text_json_and_begin_promotion(self):
         self.enable_graph_sources()

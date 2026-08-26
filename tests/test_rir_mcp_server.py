@@ -212,6 +212,116 @@ class RirMcpServerTest(unittest.TestCase):
         )
         self.assertNotIn("secret", json.dumps(reply, sort_keys=True))
 
+    def test_previous_keeps_wide_lookup_bounds_and_forwards_optional_report_id(self):
+        module = self.load_server_module("_rir_mcp_previous_wide_lookup")
+        captured = []
+
+        def lookup(value):
+            captured.append(value)
+            return types.SimpleNamespace(
+                status="none",
+                report_id=None,
+                revision=None,
+                markdown_sha256=None,
+                created_at=None,
+                baseline_commit=None,
+                changed_paths=(),
+                changed_count=None,
+                requirement_sha256="1" * 64,
+                source_inventory_sha256=None,
+                display_text=None,
+                reason="no match",
+                elapsed_ms=1,
+                candidates=(),
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(module.rir_controller, "lookup_previous", side_effect=lookup):
+                reply = module.handle(
+                    request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "rir_previous",
+                            "arguments": {
+                                "repo_root": directory,
+                                "request": "x" * 5000,
+                                "repository_evidence": ["e" * 5000],
+                                "report_id": "RPT-002",
+                            },
+                        },
+                    )
+                )
+
+        self.assertEqual(reply["result"]["structuredContent"]["status"], "none")
+        self.assertEqual(captured[0].report_id, "RPT-002")
+        self.assertEqual(module.PREVIOUS_SCHEMA["properties"]["request"]["maxLength"], 262144)
+        self.assertEqual(
+            module.PREVIOUS_SCHEMA["properties"]["repository_evidence"]["maxItems"], 128
+        )
+
+    def test_previous_ambiguous_serializes_only_bounded_safe_candidates(self):
+        module = self.load_server_module("_rir_mcp_previous_candidates")
+        candidates = tuple(
+            types.SimpleNamespace(
+                report_id=f"RPT-{number:03d}",
+                revision=number,
+                created_at="2026-08-25T12:34:56Z",
+            )
+            for number in range(1, 3)
+        )
+        result = types.SimpleNamespace(
+            status="ambiguous",
+            report_id=None,
+            revision=None,
+            markdown_sha256=None,
+            created_at=None,
+            baseline_commit=None,
+            changed_paths=(),
+            changed_count=None,
+            requirement_sha256="1" * 64,
+            source_inventory_sha256=None,
+            display_text=None,
+            reason="multiple matches",
+            elapsed_ms=1,
+            candidates=candidates,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(module.rir_controller, "lookup_previous", return_value=result):
+                reply = module.handle(
+                    request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "rir_previous",
+                            "arguments": {
+                                "repo_root": directory,
+                                "request": "rename profile",
+                                "repository_evidence": [],
+                            },
+                        },
+                    )
+                )
+
+        structured = reply["result"]["structuredContent"]
+        self.assertEqual(structured["status"], "ambiguous")
+        self.assertIsNone(structured["display_text"])
+        self.assertEqual(
+            structured["candidates"],
+            [
+                {
+                    "report_id": "RPT-001",
+                    "revision": 1,
+                    "created_at": "2026-08-25T12:34:56Z",
+                },
+                {
+                    "report_id": "RPT-002",
+                    "revision": 2,
+                    "created_at": "2026-08-25T12:34:56Z",
+                },
+            ],
+        )
+
     def test_nested_begin_result_shapes_fail_closed_as_internal_errors(self):
         module = self.load_server_module("_rir_mcp_nested_begin_result_guard")
         valid_key_map = {
@@ -532,7 +642,7 @@ else:
         )
         self.assertEqual(
             set(previous_schema["properties"]),
-            {"repo_root", "request", "repository_evidence"},
+            {"repo_root", "request", "repository_evidence", "report_id"},
         )
         scan_schema = replies[1]["result"]["tools"][1]["inputSchema"]
         self.assertEqual(scan_schema["required"], ["repo_root", "change_request"])
@@ -605,6 +715,7 @@ for name in (
     "BeginRequest",
     "FinalizeRequest",
     "PreviousLookupRequest",
+    "PreviousReportCandidate",
     "PreviousReportResult",
     "ScanRequest",
     "TraceRequest",

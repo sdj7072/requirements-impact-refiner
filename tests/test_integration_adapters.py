@@ -54,16 +54,28 @@ SUPERPOWERS_HANDOFF_MARKER = (
 class McpBootstrapHarness:
     """Exercise the documented host route through the real MCP handle."""
 
-    def __init__(self, root, *, status="none", can_promote=True, enabled=True, available=True):
+    def __init__(
+        self,
+        root,
+        *,
+        status="none",
+        scan_status="complete",
+        can_promote=True,
+        enabled=True,
+        available=True,
+        request_text="Yes, rename profile.displayName",
+        evidence=("path:b.py", "symbol:B", "symbol:B", "path:a.py"),
+    ):
         self.root = Path(root)
         self.status = status
+        self.scan_status = scan_status
         self.can_promote = can_promote
         self.enabled = enabled
         self.available = available
         self.calls = []
         self.outputs = []
-        self.request = "Yes, rename profile.displayName"
-        self.evidence = ("path:b.py", "symbol:B", "symbol:B", "path:a.py")
+        self.request = request_text
+        self.evidence = tuple(evidence)
         self._identifier = 0
         specification = importlib.util.spec_from_file_location(
             f"_task4_mcp_{id(self)}", ROOT / "scripts" / "rir_mcp_server.py"
@@ -92,24 +104,53 @@ class McpBootstrapHarness:
                         "repo_root": str(request.repo_root),
                         "request": request.request,
                         "repository_evidence": request.repository_evidence,
+                        "report_id": request.report_id,
                     },
                 )
             )
-            selected = self.status in {"fresh", "stale"}
+            selected_from_ambiguity = self.status == "ambiguous" and request.report_id in {
+                "RPT-001",
+                "RPT-002",
+            }
+            invalid_selection = self.status == "ambiguous" and request.report_id not in {
+                None,
+                "RPT-001",
+                "RPT-002",
+            }
+            effective_status = (
+                "fresh"
+                if selected_from_ambiguity
+                else ("none" if invalid_selection else self.status)
+            )
+            selected = effective_status in {"fresh", "stale"}
             return types.SimpleNamespace(
-                status=self.status,
-                report_id="RPT-001" if selected else None,
+                status=effective_status,
+                report_id=(request.report_id or "RPT-001") if selected else None,
                 revision=2 if selected else None,
                 markdown_sha256="a" * 64 if selected else None,
                 created_at="2026-08-27T00:00:00Z" if selected else None,
                 baseline_commit="b" * 40 if selected else None,
-                changed_paths=("api/profile.py",) if self.status == "stale" else (),
-                changed_count=1 if self.status == "stale" else (0 if selected else None),
+                changed_paths=("api/profile.py",) if effective_status == "stale" else (),
+                changed_count=1 if effective_status == "stale" else (0 if selected else None),
                 requirement_sha256="c" * 64,
                 source_inventory_sha256="d" * 64 if selected else None,
-                display_text=(f"previous-{self.status}" if selected else None),
-                reason=("multiple safe matches" if self.status == "ambiguous" else self.status),
+                display_text=(f"previous-{effective_status}" if selected else None),
+                reason=(
+                    "multiple safe matches" if effective_status == "ambiguous" else effective_status
+                ),
                 elapsed_ms=1,
+                candidates=(
+                    tuple(
+                        types.SimpleNamespace(
+                            report_id=f"RPT-{number:03d}",
+                            revision=number,
+                            created_at="2026-08-25T12:34:56Z",
+                        )
+                        for number in (1, 2)
+                    )
+                    if effective_status == "ambiguous"
+                    else ()
+                ),
             )
 
         def scan(request):
@@ -125,11 +166,15 @@ class McpBootstrapHarness:
                 )
             )
             return types.SimpleNamespace(
-                status="complete" if self.can_promote else "partial",
+                status=self.scan_status,
                 scan_id="1" * 32,
                 receipt_id="2" * 32,
                 receipt_sha256="3" * 64,
-                display_text="scan-result",
+                display_text=(
+                    "scan-needs-input-question"
+                    if self.scan_status == "needs_input"
+                    else "scan-result"
+                ),
                 risk_level="medium",
                 paths=(),
                 frontier=(),
@@ -229,7 +274,25 @@ class McpBootstrapHarness:
             raise AssertionError(response["error"])
         return response["result"]["structuredContent"]
 
-    def run(self, *, confirm_ambiguous_scan=False, confirm_detail=False):
+    def _scan_forwardable(self):
+        return (
+            len(self.request.encode("utf-8")) <= 4096
+            and len(self.evidence) <= 32
+            and all(len(row.encode("utf-8")) <= 4096 for row in self.evidence)
+        )
+
+    def _shorten_instruction(self):
+        if any("\uac00" <= character <= "\ud7a3" for character in self.request):
+            return (
+                "요청은 4 KiB 이하, 근거는 행당 4 KiB 이하로 32개까지 줄인 뒤 다시 시도해 주세요."
+            )
+        if any("\u3040" <= character <= "\u30ff" for character in self.request):
+            return (
+                "リクエストを4 KiB以下、根拠を1行4 KiB以下で32件までに短縮して再試行してください。"
+            )
+        return "Shorten the request to 4 KiB and evidence to 32 rows of 4 KiB, then retry."
+
+    def run(self, *, selected_report_id=None, confirm_detail=False):
         try:
             if not self.enabled:
                 return self
@@ -248,8 +311,28 @@ class McpBootstrapHarness:
                 self.outputs.append(previous["display_text"])
             if self.status == "fresh":
                 return self
-            if self.status == "ambiguous" and not confirm_ambiguous_scan:
-                self.outputs.append(f"{previous['reason']}; start a new Fast Scan?")
+            if self.status == "ambiguous":
+                self.outputs.append(
+                    f"{previous['reason']}; choose "
+                    + ", ".join(candidate["report_id"] for candidate in previous["candidates"])
+                )
+                if selected_report_id is None:
+                    return self
+                previous = self._call(
+                    "rir_previous",
+                    {
+                        "repo_root": str(self.root),
+                        "request": self.request,
+                        "repository_evidence": list(self.evidence),
+                        "report_id": selected_report_id,
+                    },
+                )
+                if previous["display_text"] is not None:
+                    self.outputs.append(previous["display_text"])
+                if previous["status"] in {"fresh", "none"}:
+                    return self
+            if not self._scan_forwardable():
+                self.outputs.append(self._shorten_instruction())
                 return self
             scan = self._call(
                 "rir_scan",
@@ -261,6 +344,8 @@ class McpBootstrapHarness:
                 },
             )
             self.outputs.append(scan["display_text"])
+            if scan["status"] == "needs_input":
+                return self
             if not confirm_detail:
                 return self
             begin_arguments = {
@@ -324,6 +409,7 @@ class PreviousLookupRequest:
     repo_root: object
     request: str
     repository_evidence: tuple[str, ...]
+    report_id: str | None = None
 
 @dataclass(frozen=True)
 class ScanRequest:
@@ -345,7 +431,7 @@ def lookup_previous(request):
         status="none", report_id=None, revision=None, markdown_sha256=None,
         created_at=None, baseline_commit=None, changed_paths=(), changed_count=None,
         requirement_sha256="a" * 64, source_inventory_sha256=None,
-        display_text=None, reason="none", elapsed_ms=1,
+        display_text=None, reason="none", elapsed_ms=1, candidates=(),
     )
 
 def scan_impact(request):
@@ -458,19 +544,29 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertEqual(outcome.calls[1][1]["evidence"], outcome.evidence)
         self.assertEqual(outcome.calls[1][1]["change_request"], outcome.request)
 
-    def test_ambiguous_returns_safe_reason_and_offers_only_a_new_scan(self):
+    def test_ambiguous_exposes_safe_candidates_and_resolves_with_second_lookup(self):
         with tempfile.TemporaryDirectory() as directory:
             stopped = McpBootstrapHarness(directory, status="ambiguous").run()
         with tempfile.TemporaryDirectory() as directory:
-            scanned = McpBootstrapHarness(directory, status="ambiguous").run(
-                confirm_ambiguous_scan=True
+            selected = McpBootstrapHarness(directory, status="ambiguous").run(
+                selected_report_id="RPT-002"
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            invalid = McpBootstrapHarness(directory, status="ambiguous").run(
+                selected_report_id="RPT-999"
             )
 
         self.assertEqual([name for name, _ in stopped.calls], ["rir_previous"])
-        self.assertEqual(stopped.outputs, ["multiple safe matches; start a new Fast Scan?"])
-        self.assertNotIn("RPT-", stopped.outputs[0])
-        self.assertEqual([name for name, _ in scanned.calls], ["rir_previous", "rir_scan"])
-        self.assertNotIn("rir_begin", [name for name, _ in scanned.calls])
+        self.assertEqual(
+            stopped.outputs,
+            ["multiple safe matches; choose RPT-001, RPT-002"],
+        )
+        self.assertEqual([name for name, _ in selected.calls], ["rir_previous", "rir_previous"])
+        self.assertEqual(selected.calls[1][1]["report_id"], "RPT-002")
+        self.assertEqual(selected.outputs[-1], "previous-fresh")
+        self.assertEqual([name for name, _ in invalid.calls], ["rir_previous", "rir_previous"])
+        self.assertIsNone(invalid.calls[0][1]["report_id"])
+        self.assertNotIn("previous-fresh", invalid.outputs)
 
     def test_promoted_scan_confirmation_skips_trace_and_uses_begin_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -504,6 +600,75 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertIsNone(outcome.calls[2][1]["scan_id"])
         self.assertEqual(outcome.calls[4][1]["graph_receipt_id"], "5" * 32)
 
+    def test_wide_fresh_lookup_returns_but_stale_and_none_stop_before_invalid_scan(self):
+        request_text = "x" * 5000
+        for status, expected_outputs in (
+            ("fresh", ["previous-fresh"]),
+            (
+                "stale",
+                [
+                    "previous-stale",
+                    "Shorten the request to 4 KiB and evidence to 32 rows of 4 KiB, then retry.",
+                ],
+            ),
+            (
+                "none",
+                ["Shorten the request to 4 KiB and evidence to 32 rows of 4 KiB, then retry."],
+            ),
+        ):
+            with self.subTest(status=status):
+                with tempfile.TemporaryDirectory() as directory:
+                    outcome = McpBootstrapHarness(
+                        directory, status=status, request_text=request_text
+                    ).run()
+
+                self.assertEqual([name for name, _ in outcome.calls], ["rir_previous"])
+                self.assertEqual(outcome.outputs, expected_outputs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            korean = McpBootstrapHarness(
+                directory,
+                status="none",
+                request_text="가" * 1500,
+            ).run()
+        self.assertEqual(
+            korean.outputs,
+            ["요청은 4 KiB 이하, 근거는 행당 4 KiB 이하로 32개까지 줄인 뒤 다시 시도해 주세요."],
+        )
+        self.assertLessEqual(len(korean.outputs[0].encode("utf-8")), 256)
+
+    def test_needs_input_stops_then_corrected_boundary_restarts_previous_and_scan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first_turn = McpBootstrapHarness(
+                directory,
+                status="none",
+                scan_status="needs_input",
+                can_promote=False,
+            ).run(confirm_detail=True)
+        with tempfile.TemporaryDirectory() as directory:
+            corrected = McpBootstrapHarness(
+                directory,
+                status="none",
+                request_text="Rename api/profile.py displayName",
+                evidence=("api/profile.py",),
+            ).run()
+
+        self.assertEqual(
+            [name for name, _ in first_turn.calls],
+            ["rir_previous", "rir_scan"],
+        )
+        self.assertEqual(first_turn.outputs, ["scan-needs-input-question"])
+        self.assertEqual(
+            [name for name, _ in corrected.calls],
+            ["rir_previous", "rir_scan"],
+        )
+        self.assertEqual(corrected.calls[0][1]["request"], "Rename api/profile.py displayName")
+        self.assertNotIn("rir_begin", [name for name, _ in corrected.calls])
+
+        reference = PREVIOUS_REFERENCE_PATH.read_text(encoding="utf-8")
+        self.assertIn("needs_input", reference)
+        self.assertIn("restart", reference.lower())
+
     def test_non_change_conversations_invoke_neither_lookup_nor_scan(self):
         bootstrap = BOOTSTRAP_SKILL_PATH.read_text(encoding="utf-8")
         for conversation in ("ideation", "explanation", "debugging", "code review", "status"):
@@ -521,46 +686,17 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertEqual(unavailable.calls, [])
         self.assertEqual(unavailable.outputs, ["previous-report bootstrap unavailable"])
 
-    def test_mcp_previous_rejects_inputs_that_scan_cannot_forward(self):
-        cases = (
-            ("x" * 4097, []),
-            ("界" * 1366, []),
-            ("valid", ["x"] * 33),
-            ("valid", ["界" * 1366]),
-        )
-        for request_text, evidence in cases:
-            with self.subTest(request_bytes=len(request_text.encode()), rows=len(evidence)):
-                with tempfile.TemporaryDirectory() as directory:
-                    harness = McpBootstrapHarness(directory)
-                    response = harness.module.handle(
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 99,
-                            "method": "tools/call",
-                            "params": {
-                                "name": "rir_previous",
-                                "arguments": {
-                                    "repo_root": directory,
-                                    "request": request_text,
-                                    "repository_evidence": evidence,
-                                },
-                            },
-                        },
-                    )
-                    harness._restore_controller()
-
-                self.assertEqual(response["error"]["code"], -32602)
-                self.assertEqual(harness.calls, [])
-
-    def test_mcp_previous_and_scan_publish_identical_forwardable_bounds(self):
+    def test_mcp_previous_keeps_wider_lookup_bounds_than_scan(self):
         with tempfile.TemporaryDirectory() as directory:
             harness = McpBootstrapHarness(directory)
             harness._restore_controller()
             previous = harness.module.PREVIOUS_SCHEMA["properties"]
             scan = harness.module.SCAN_SCHEMA["properties"]
 
-        self.assertEqual(previous["request"], scan["change_request"])
-        self.assertEqual(previous["repository_evidence"], scan["evidence"])
+        self.assertEqual(previous["request"]["maxLength"], 262144)
+        self.assertEqual(previous["repository_evidence"]["maxItems"], 128)
+        self.assertEqual(scan["change_request"]["maxLength"], 4096)
+        self.assertEqual(scan["evidence"]["maxItems"], 32)
 
     def test_cli_previous_then_scan_preserves_exact_forwardable_payload(self):
         evidence = ("path:b.py", "symbol:B", "symbol:B", "path:a.py")
@@ -588,48 +724,6 @@ class IntegrationAdapterContractTest(unittest.TestCase):
                 },
             ],
         )
-
-    def test_cli_previous_rejects_unforwardable_input_before_lookup(self):
-        cases = (
-            ("x" * 4097, ()),
-            ("界" * 1366, ()),
-            ("valid", ("x",) * 33),
-            ("valid", ("界" * 1366,)),
-        )
-        for request_text, evidence in cases:
-            with self.subTest(request_bytes=len(request_text.encode()), rows=len(evidence)):
-                with tempfile.TemporaryDirectory() as directory:
-                    previous, scan, calls = run_cli_previous_then_scan(
-                        directory, request_text, evidence
-                    )
-
-                self.assertEqual(previous.returncode, 1)
-                self.assertIsNone(scan)
-                self.assertEqual(calls, [])
-
-    def test_cli_forwardable_bound_validator_covers_every_rejection_branch(self):
-        specification = importlib.util.spec_from_file_location(
-            "_task4_cli_bounds", ROOT / "scripts/rir-controller.py"
-        )
-        cli = importlib.util.module_from_spec(specification)
-        specification.loader.exec_module(cli)
-
-        cli._validate_previous_scan_bounds("x" * 4096, ["y" * 4096] * 32)
-        rejected = (
-            ("", []),
-            (object(), []),
-            ("\ud800", []),
-            ("x" * 4097, []),
-            ("valid", ["x"] * 33),
-            ("valid", [""]),
-            ("valid", [object()]),
-            ("valid", ["\ud800"]),
-            ("valid", ["x" * 4097]),
-        )
-        for request_text, evidence in rejected:
-            with self.subTest(request=request_text, rows=len(evidence)):
-                with self.assertRaises(ValueError):
-                    cli._validate_previous_scan_bounds(request_text, evidence)
 
     def test_core_reads_previous_reference_before_invoking_lookup(self):
         text = SKILL_PATH.read_text(encoding="utf-8")

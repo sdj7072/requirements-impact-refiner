@@ -28,6 +28,7 @@ class _PreviousLookupRequestFactory(Protocol):
         repo_root: Path,
         request: str,
         repository_evidence: tuple[str, ...],
+        report_id: str | None,
     ) -> object: ...
 
 
@@ -79,6 +80,7 @@ class _ControllerContract(Protocol):
     BeginRequest: _BeginRequestFactory
     FinalizeRequest: _FinalizeRequestFactory
     PreviousLookupRequest: _PreviousLookupRequestFactory
+    PreviousReportCandidate: type
     PreviousReportResult: type
     ScanRequest: _ScanRequestFactory
     TraceRequest: _TraceRequestFactory
@@ -178,6 +180,13 @@ class _PreviousResult(Protocol):
     display_text: str | None
     reason: str
     elapsed_ms: int
+    candidates: Sequence[_PreviousCandidateResult]
+
+
+class _PreviousCandidateResult(Protocol):
+    report_id: str
+    revision: int
+    created_at: str
 
 
 class _ScanResult(Protocol):
@@ -260,6 +269,7 @@ def _is_controller_contract(value: object) -> bool:
                 "BeginRequest",
                 "FinalizeRequest",
                 "PreviousLookupRequest",
+                "PreviousReportCandidate",
                 "PreviousReportResult",
                 "ScanRequest",
                 "TraceRequest",
@@ -289,7 +299,7 @@ def _is_controller_contract(value: object) -> bool:
         )
         and _has_parameters(
             getattr(value, "PreviousLookupRequest", None),
-            ("repo_root", "request", "repository_evidence"),
+            ("repo_root", "request", "repository_evidence", "report_id"),
         )
         and _has_parameters(
             getattr(value, "ScanRequest", None),
@@ -451,7 +461,11 @@ class ScanArguments(_OptionalScanArguments):
     change_request: str
 
 
-class PreviousArguments(TypedDict):
+class _OptionalPreviousArguments(TypedDict, total=False):
+    report_id: str
+
+
+class PreviousArguments(_OptionalPreviousArguments):
     repo_root: str
     request: str
     repository_evidence: list[str]
@@ -520,12 +534,14 @@ def _is_scan_arguments(value: object) -> TypeGuard[ScanArguments]:
 
 def _is_previous_arguments(value: object) -> TypeGuard[PreviousArguments]:
     required = frozenset({"repo_root", "request", "repository_evidence"})
+    optional = frozenset({"report_id"})
     return (
-        _exact_keys(value, required)
+        _exact_keys(value, required, optional)
         and isinstance(value, dict)
         and isinstance(value.get("repo_root"), str)
         and isinstance(value.get("request"), str)
         and _is_string_list(value.get("repository_evidence"))
+        and _is_optional_string(value.get("report_id"))
     )
 
 
@@ -728,6 +744,7 @@ MAX_PREVIOUS_CHANGED_TOTAL_BYTES = 256 * 1024
 MAX_PREVIOUS_DISPLAY_BYTES = 256 * 1024
 MAX_PREVIOUS_REASON_BYTES = 4096
 MAX_PREVIOUS_ELAPSED_MS = 60_000
+MAX_PREVIOUS_CANDIDATES = 16
 
 
 def _bounded_utf8(value: object, maximum: int, *, nonblank: bool = False) -> bool:
@@ -754,6 +771,21 @@ def _safe_previous_changed_path(value: object) -> bool:
     )
 
 
+def _is_previous_candidate(value: object) -> TypeGuard[_PreviousCandidateResult]:
+    report_id = getattr(value, "report_id", None)
+    revision = getattr(value, "revision", None)
+    created_at = getattr(value, "created_at", None)
+    return (
+        isinstance(report_id, str)
+        and _PREVIOUS_REPORT_ID.fullmatch(report_id) is not None
+        and type(revision) is int
+        and 1 <= revision <= 2_147_483_647
+        and isinstance(created_at, str)
+        and len(created_at) <= 64
+        and _PREVIOUS_TIMESTAMP.fullmatch(created_at) is not None
+    )
+
+
 def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
     status = getattr(value, "status", None)
     report_id = getattr(value, "report_id", None)
@@ -768,6 +800,7 @@ def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
     display_text = getattr(value, "display_text", None)
     reason = getattr(value, "reason", None)
     elapsed_ms = getattr(value, "elapsed_ms", None)
+    candidates = getattr(value, "candidates", ())
     if (
         status not in {"none", "fresh", "stale", "ambiguous"}
         or not isinstance(requirement_sha256, str)
@@ -780,6 +813,11 @@ def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
         or not all(isinstance(path, str) for path in changed_paths)
         or tuple(sorted(set(changed_paths))) != changed_paths
         or not all(_safe_previous_changed_path(path) for path in changed_paths)
+        or not isinstance(candidates, tuple)
+        or len(candidates) > MAX_PREVIOUS_CANDIDATES
+        or not all(_is_previous_candidate(candidate) for candidate in candidates)
+        or tuple(sorted(candidates, key=lambda candidate: candidate.report_id)) != candidates
+        or len({candidate.report_id for candidate in candidates}) != len(candidates)
     ):
         return False
     try:
@@ -804,6 +842,10 @@ def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
             )
             and changed_paths == ()
             and changed_count is None
+            and (
+                (status == "none" and not candidates)
+                or (status == "ambiguous" and len(candidates) >= 2)
+            )
         )
     return (
         isinstance(report_id, str)
@@ -837,6 +879,7 @@ def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
                 and len(changed_paths) <= changed_count <= MAX_PREVIOUS_CHANGED_PATHS
             )
         )
+        and not candidates
     )
 
 
@@ -933,17 +976,18 @@ PREVIOUS_SCHEMA = {
         "request": {
             "type": "string",
             "minLength": 1,
-            "maxLength": MAX_FAST_SCAN_CHANGE_BYTES,
+            "maxLength": 262144,
         },
         "repository_evidence": {
             "type": "array",
-            "maxItems": MAX_FAST_SCAN_EVIDENCE_ROWS,
+            "maxItems": 128,
             "items": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": MAX_FAST_SCAN_EVIDENCE_BYTES,
+                "maxLength": 65536,
             },
         },
+        "report_id": {"type": "string", "pattern": "^RPT-\\d{3}$"},
     },
 }
 
@@ -1155,27 +1199,16 @@ def _validated_previous_root(value: str) -> Path:
     return resolved
 
 
-def _validate_previous_scan_bounds(request: str, evidence: list[str]) -> None:
-    if not _bounded_utf8(request, MAX_FAST_SCAN_CHANGE_BYTES, nonblank=True):
-        raise ValueError("rir_previous arguments.request exceeds the Fast Scan limit")
-    if len(evidence) > MAX_FAST_SCAN_EVIDENCE_ROWS:
-        raise ValueError("rir_previous arguments.repository_evidence has too many items")
-    if any(not _bounded_utf8(row, MAX_FAST_SCAN_EVIDENCE_BYTES, nonblank=True) for row in evidence):
-        raise ValueError(
-            "rir_previous arguments.repository_evidence item exceeds the Fast Scan limit"
-        )
-
-
 def _previous(arguments: object) -> dict[str, object]:
     _validate_arguments(arguments, PREVIOUS_SCHEMA, "rir_previous")
     if not _is_previous_arguments(arguments):
         raise ValueError("rir_previous arguments have the wrong type")
-    _validate_previous_scan_bounds(arguments["request"], arguments["repository_evidence"])
     root = _validated_previous_root(arguments["repo_root"])
     previous_request = rir_controller.PreviousLookupRequest(
         root,
         arguments["request"],
         tuple(arguments["repository_evidence"]),
+        arguments.get("report_id"),
     )
     try:
         result = rir_controller.lookup_previous(previous_request)
@@ -1197,6 +1230,14 @@ def _previous(arguments: object) -> dict[str, object]:
         "display_text": result.display_text,
         "reason": result.reason,
         "elapsed_ms": result.elapsed_ms,
+        "candidates": [
+            {
+                "report_id": candidate.report_id,
+                "revision": candidate.revision,
+                "created_at": candidate.created_at,
+            }
+            for candidate in result.candidates
+        ],
     }
     if not _is_json_value(structured):
         raise _ControllerContractError("controller previous result is not JSON-safe")
