@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import selectors
 import signal
 import stat
@@ -29,7 +28,6 @@ MAX_CONTEXT_BYTES = 8 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
 GIT_TIMEOUT_SECONDS = 0.25
-MAX_RECOVERY_CANDIDATES = 256
 _CONTEXT_FIELDS = frozenset(
     {
         "schema_version",
@@ -329,13 +327,14 @@ def _load_context_artifact(
     report_id: str,
     revision: int,
     *,
+    name: str | None = None,
     allowed_links: frozenset[int] = frozenset({1}),
 ) -> tuple[ReportContext, bytes, os.stat_result]:
-    name = f"revision-{revision:04d}.context.json"
+    selected_name = name or f"revision-{revision:04d}.context.json"
     expected_owner = os.fstat(directory_fd).st_uid
     payload, metadata = _read_bounded_artifact(
         directory_fd,
-        name,
+        selected_name,
         MAX_CONTEXT_BYTES,
         private=True,
         allowed_links=allowed_links,
@@ -352,8 +351,8 @@ def _load_from_directory(directory_fd: int, report_id: str, revision: int) -> Re
     return context
 
 
-def _context_temporary_pattern(name: str) -> re.Pattern[str]:
-    return re.compile(rf"{re.escape('.' + name + '.')}[0-9a-f]{{16}}\.tmp")
+def _context_pending_name(name: str) -> str:
+    return f".{name}.pending"
 
 
 def _fsync_context_directory(directory_fd: int) -> None:
@@ -363,66 +362,146 @@ def _fsync_context_directory(directory_fd: int) -> None:
         raise ValueError("cannot fsync report context directory") from error
 
 
-def _unlink_context_temporary(directory_fd: int, temporary: str) -> None:
+def _unlink_context_pending(directory_fd: int, pending: str) -> None:
     try:
-        os.unlink(temporary, dir_fd=directory_fd)
+        os.unlink(pending, dir_fd=directory_fd)
     except OSError as error:
-        raise ValueError("cannot cleanup report context temporary") from error
+        raise ValueError("cannot cleanup report context pending artifact") from error
+
+
+def _context_artifact_exists(directory_fd: int, name: str) -> bool:
+    try:
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise ValueError("report context pending state is unsafe") from error
+    return True
+
+
+def _validate_context_state_identity(
+    context: ReportContext,
+    *,
+    expected: ReportContext | None,
+    repo_root_sha256: str,
+    markdown_sha256: str,
+) -> None:
+    if context.repo_root_sha256 != repo_root_sha256 or context.markdown_sha256 != markdown_sha256:
+        raise ValueError("report context pending identity is invalid")
+    if expected is not None and context != expected:
+        raise FileExistsError(f"revision-{context.revision:04d}.context.json")
 
 
 def _load_or_recover_context(
     directory_fd: int,
     report_id: str,
     revision: int,
-) -> ReportContext:
+    *,
+    expected: ReportContext | None,
+    repo_root_sha256: str,
+    markdown_sha256: str,
+) -> ReportContext | None:
     name = f"revision-{revision:04d}.context.json"
-    context, payload, target = _load_context_artifact(
-        directory_fd,
-        report_id,
-        revision,
-        allowed_links=frozenset({1, 2}),
-    )
-    if target.st_nlink == 1:
-        return context
-    expected_owner = os.fstat(directory_fd).st_uid
-    pattern = _context_temporary_pattern(name)
-    verified_aliases: list[str] = []
-    candidate_count = 0
-    try:
-        with os.scandir(directory_fd) as entries:
-            for entry in entries:
-                if pattern.fullmatch(entry.name) is None:
-                    continue
-                candidate_count += 1
-                if candidate_count > MAX_RECOVERY_CANDIDATES:
-                    raise ValueError("report context recovery exceeds its candidate limit")
-                try:
-                    alias_payload, alias = _read_bounded_artifact(
-                        directory_fd,
-                        entry.name,
-                        MAX_CONTEXT_BYTES,
-                        private=True,
-                        allowed_links=frozenset({2}),
-                        expected_owner=expected_owner,
-                    )
-                except ValueError:
-                    continue
-                if (
-                    alias.st_dev == target.st_dev
-                    and alias.st_ino == target.st_ino
-                    and alias_payload == payload
-                ):
-                    verified_aliases.append(entry.name)
-    except OSError as error:
-        raise ValueError("cannot inspect report context recovery aliases") from error
-    if len(verified_aliases) != 1:
-        raise ValueError("report context recovery alias is invalid")
-    _unlink_context_temporary(directory_fd, verified_aliases[0])
+    pending = _context_pending_name(name)
+    target_exists = _context_artifact_exists(directory_fd, name)
+    pending_exists = _context_artifact_exists(directory_fd, pending)
+    if not target_exists and not pending_exists:
+        return None
+    target_value = target_payload = target_metadata = None
+    pending_value = pending_payload = pending_metadata = None
+    if target_exists:
+        target_value, target_payload, target_metadata = _load_context_artifact(
+            directory_fd,
+            report_id,
+            revision,
+            allowed_links=frozenset({1, 2}),
+        )
+        _validate_context_state_identity(
+            target_value,
+            expected=expected,
+            repo_root_sha256=repo_root_sha256,
+            markdown_sha256=markdown_sha256,
+        )
+    if pending_exists:
+        pending_value, pending_payload, pending_metadata = _load_context_artifact(
+            directory_fd,
+            report_id,
+            revision,
+            name=pending,
+            allowed_links=frozenset({1, 2}),
+        )
+        _validate_context_state_identity(
+            pending_value,
+            expected=expected,
+            repo_root_sha256=repo_root_sha256,
+            markdown_sha256=markdown_sha256,
+        )
+    if not target_exists:
+        if pending_metadata is None or pending_metadata.st_nlink != 1:
+            raise ValueError("report context pending state is invalid")
+        try:
+            os.link(
+                pending,
+                name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except OSError as error:
+            raise ValueError("cannot publish report context pending artifact") from error
+        target_value, target_payload, target_metadata = _load_context_artifact(
+            directory_fd,
+            report_id,
+            revision,
+            allowed_links=frozenset({2}),
+        )
+        linked_pending, linked_payload, linked_metadata = _load_context_artifact(
+            directory_fd,
+            report_id,
+            revision,
+            name=pending,
+            allowed_links=frozenset({2}),
+        )
+        if (
+            linked_metadata.st_dev != target_metadata.st_dev
+            or linked_metadata.st_ino != target_metadata.st_ino
+            or linked_payload != target_payload
+            or linked_pending != target_value
+        ):
+            raise ValueError("report context pending state is invalid")
+    elif pending_exists:
+        if target_metadata is None or pending_metadata is None:
+            raise ValueError("report context pending state is invalid")
+        same_inode = (
+            target_metadata.st_dev == pending_metadata.st_dev
+            and target_metadata.st_ino == pending_metadata.st_ino
+        )
+        linked_state = (
+            same_inode and target_metadata.st_nlink == 2 and pending_metadata.st_nlink == 2
+        )
+        leftover_state = (
+            not same_inode
+            and target_metadata.st_nlink == 1
+            and pending_metadata.st_nlink == 1
+            and target_value == pending_value
+            and target_payload == pending_payload
+        )
+        if not linked_state and not leftover_state:
+            raise ValueError("report context pending state is invalid")
+    elif target_metadata is None or target_metadata.st_nlink != 1:
+        raise ValueError("report context pending state is invalid")
+    if not pending_exists:
+        return target_value
+    _unlink_context_pending(directory_fd, pending)
     _fsync_context_directory(directory_fd)
     recovered, recovered_payload, recovered_metadata = _load_context_artifact(
         directory_fd, report_id, revision
     )
-    if recovered != context or recovered_payload != payload or recovered_metadata.st_nlink != 1:
+    if (
+        recovered != target_value
+        or recovered_payload != target_payload
+        or recovered_metadata.st_nlink != 1
+    ):
         raise ValueError("report context recovery verification failed")
     return recovered
 
@@ -438,28 +517,30 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
     if directory_fd is None:  # pragma: no cover - missing_ok=False is exhaustive
         raise ValueError("published report directory is unavailable")
     name = f"revision-{context.revision:04d}.context.json"
-    temporary = f".{name}.{secrets.token_hex(8)}.tmp"
-    temporary_created = False
+    pending = _context_pending_name(name)
+    pending_created = False
+    pending_durable = False
     descriptor: int | None = None
     payload = _canonical_bytes(context)
     try:
-        if _markdown_sha256(directory_fd, context.revision) != context.markdown_sha256:
+        markdown_sha256 = _markdown_sha256(directory_fd, context.revision)
+        repo_sha256 = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
+        if markdown_sha256 != context.markdown_sha256:
             raise ValueError("report context Markdown digest is invalid")
-        try:
-            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            raise ValueError("report context is unsafe") from error
-        else:
-            existing = _load_or_recover_context(directory_fd, context.report_id, context.revision)
-            if existing != context:
-                raise FileExistsError(name)
+        existing = _load_or_recover_context(
+            directory_fd,
+            context.report_id,
+            context.revision,
+            expected=context,
+            repo_root_sha256=repo_sha256,
+            markdown_sha256=markdown_sha256,
+        )
+        if existing is not None:
             _fsync_context_directory(directory_fd)
             return resolved / ".requirements-impact-refiner" / "reports" / context.report_id / name
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
-        temporary_created = True
+        descriptor = os.open(pending, flags, 0o600, dir_fd=directory_fd)
+        pending_created = True
         os.fchmod(descriptor, 0o600)
         offset = 0
         while offset < len(payload):
@@ -467,39 +548,26 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = None
-        try:
-            os.link(
-                temporary,
-                name,
-                src_dir_fd=directory_fd,
-                dst_dir_fd=directory_fd,
-                follow_symlinks=False,
-            )
-        except FileExistsError:
-            if descriptor is not None:
-                os.close(descriptor)
-            descriptor = None
-            _unlink_context_temporary(directory_fd, temporary)
-            temporary_created = False
-            _fsync_context_directory(directory_fd)
-            existing = _load_or_recover_context(directory_fd, context.report_id, context.revision)
-            if existing != context:
-                raise FileExistsError(name) from None
-        else:
-            _unlink_context_temporary(directory_fd, temporary)
-            temporary_created = False
-            _fsync_context_directory(directory_fd)
-            if _load_from_directory(directory_fd, context.report_id, context.revision) != context:
-                raise ValueError("published report context could not be verified")
+        pending_durable = True
+        recovered = _load_or_recover_context(
+            directory_fd,
+            context.report_id,
+            context.revision,
+            expected=context,
+            repo_root_sha256=repo_sha256,
+            markdown_sha256=markdown_sha256,
+        )
+        if recovered != context:
+            raise ValueError("published report context could not be verified")
     except FileExistsError:
         raise
     except (OSError, ValueError) as error:
         if descriptor is not None:
             os.close(descriptor)
             descriptor = None
-        if temporary_created:
-            _unlink_context_temporary(directory_fd, temporary)
-            temporary_created = False
+        if pending_created and not pending_durable:
+            _unlink_context_pending(directory_fd, pending)
+            pending_created = False
             _fsync_context_directory(directory_fd)
         if isinstance(error, ValueError):
             raise
@@ -517,21 +585,17 @@ def load_report_context(root: Path, report_id: str, revision: int) -> ReportCont
     directory_fd = _open_report_directory(resolved, report_id, missing_ok=True)
     if directory_fd is None:
         return None
-    name = f"revision-{revision:04d}.context.json"
     try:
-        try:
-            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            return None
-        except OSError as error:
-            raise ValueError("report context is unsafe") from error
-        context = _load_or_recover_context(directory_fd, report_id, revision)
         expected_root = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
-        if context.repo_root_sha256 != expected_root:
-            raise ValueError("report context repository identity is invalid")
-        if _markdown_sha256(directory_fd, revision) != context.markdown_sha256:
-            raise ValueError("report context Markdown digest is invalid")
-        return context
+        markdown_sha256 = _markdown_sha256(directory_fd, revision)
+        return _load_or_recover_context(
+            directory_fd,
+            report_id,
+            revision,
+            expected=None,
+            repo_root_sha256=expected_root,
+            markdown_sha256=markdown_sha256,
+        )
     finally:
         os.close(directory_fd)
 

@@ -534,6 +534,8 @@ class RirStorageTest(unittest.TestCase):
             / "revision-0001.controller.json"
         )
         self.assertEqual(metadata_path.stat().st_nlink, 2)
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        self.assertTrue(pending.is_file())
         STORAGE.write_controller_metadata(
             self.root,
             draft,
@@ -544,7 +546,69 @@ class RirStorageTest(unittest.TestCase):
             context_identity,
         )
         self.assertEqual(metadata_path.stat().st_nlink, 1)
-        self.assertEqual(tuple(metadata_path.parent.glob(f".{metadata_path.name}.*.tmp")), ())
+        self.assertFalse(pending.exists())
+
+    def test_completion_metadata_pre_link_pending_recovers_without_scan(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        with mock.patch.object(
+            STORAGE.os,
+            "link",
+            side_effect=SimulatedCrash("pending durable before metadata link"),
+        ):
+            with self.assertRaises(SimulatedCrash):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    {},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        self.assertFalse(metadata_path.exists())
+        self.assertTrue(pending.is_file())
+        self.assertEqual(pending.stat().st_nlink, 1)
+
+        with mock.patch.object(
+            STORAGE.os,
+            "scandir",
+            side_effect=AssertionError("metadata recovery must not scan"),
+        ):
+            STORAGE.write_controller_metadata(
+                self.root,
+                draft,
+                state_bytes,
+                {},
+                None,
+                "9" * 64,
+                context_identity,
+            )
+
+        self.assertTrue(metadata_path.is_file())
+        self.assertFalse(pending.exists())
+        self.assertEqual(metadata_path.stat().st_nlink, 1)
 
     def test_completion_metadata_crash_recovers_across_long_lineage(self):
         draft, _path = self.write_draft()
@@ -565,7 +629,7 @@ class RirStorageTest(unittest.TestCase):
             pass
 
         def crashing_metadata_unlink(name, *args, **kwargs):
-            if "revision-0001.controller.json" in str(name):
+            if str(name).endswith(".controller.json.pending"):
                 raise SimulatedCrash("metadata linked before cleanup")
             return real_unlink(name, *args, **kwargs)
 
@@ -587,21 +651,81 @@ class RirStorageTest(unittest.TestCase):
             / "RPT-001"
             / "revision-0001.controller.json"
         )
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        self.assertEqual(metadata_path.stat().st_nlink, 2)
+        self.assertEqual(pending.stat().st_ino, metadata_path.stat().st_ino)
         for revision in range(2, 132):
             for suffix in ("json", "md", "controller.json", "context.json"):
                 (metadata_path.parent / f"revision-{revision:04d}.{suffix}").write_bytes(b"x")
         self.assertGreater(len(tuple(metadata_path.parent.iterdir())), 500)
 
+        with mock.patch.object(
+            STORAGE.os,
+            "scandir",
+            side_effect=AssertionError("metadata recovery must not scan"),
+        ):
+            STORAGE.write_controller_metadata(
+                self.root,
+                draft,
+                state_bytes,
+                key_map,
+                None,
+                "9" * 64,
+                context_identity,
+            )
+
+        self.assertEqual(metadata_path.stat().st_nlink, 1)
+        self.assertFalse(pending.exists())
+
+    def test_completion_metadata_exact_target_removes_separate_pending(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
         STORAGE.write_controller_metadata(
             self.root,
             draft,
             state_bytes,
-            key_map,
+            {},
             None,
             "9" * 64,
             context_identity,
         )
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        pending.write_bytes(metadata_path.read_bytes())
+        pending.chmod(0o600)
+        self.assertNotEqual(pending.stat().st_ino, metadata_path.stat().st_ino)
 
+        with mock.patch.object(
+            STORAGE.os,
+            "scandir",
+            side_effect=AssertionError("metadata recovery must not scan"),
+        ):
+            STORAGE.write_controller_metadata(
+                self.root,
+                draft,
+                state_bytes,
+                {},
+                None,
+                "9" * 64,
+                context_identity,
+            )
+
+        self.assertFalse(pending.exists())
         self.assertEqual(metadata_path.stat().st_nlink, 1)
 
     def test_completion_metadata_fsync_failure_retries_single_link(self):
@@ -706,7 +830,7 @@ class RirStorageTest(unittest.TestCase):
             state_path=state_path,
         )
 
-        with self.assertRaisesRegex(ValueError, "recovery alias"):
+        with self.assertRaisesRegex(ValueError, "pending state"):
             STORAGE.load_controller_completion_metadata(current)
 
         self.assertTrue(arbitrary.exists())

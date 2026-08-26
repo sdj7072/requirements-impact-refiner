@@ -303,7 +303,7 @@ class RirReportContextTest(unittest.TestCase):
         real_unlink = CONTEXT.os.unlink
 
         def failing_context_unlink(name, *args, **kwargs):
-            if str(name).endswith(".tmp"):
+            if str(name).endswith(".pending"):
                 raise OSError("injected context cleanup failure")
             return real_unlink(name, *args, **kwargs)
 
@@ -312,13 +312,56 @@ class RirReportContextTest(unittest.TestCase):
                 CONTEXT.publish_report_context(self.root, context)
 
         self.assertEqual(path.stat().st_nlink, 2)
-        self.assertEqual(len(tuple(path.parent.glob(f".{path.name}.*.tmp"))), 1)
+        pending = path.parent / f".{path.name}.pending"
+        self.assertTrue(pending.is_file())
 
         self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
         self.assertEqual(path.stat().st_nlink, 1)
-        self.assertEqual(tuple(path.parent.glob(f".{path.name}.*.tmp")), ())
+        self.assertFalse(pending.exists())
 
-    def test_context_retry_recovers_a_verified_crash_alias_only(self):
+    def test_context_pre_link_pending_recovers_without_directory_scan(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crashing_before_link(*_args, **_kwargs):
+            raise SimulatedCrash("pending durable before link")
+
+        with mock.patch.object(CONTEXT.os, "link", side_effect=crashing_before_link):
+            with self.assertRaises(SimulatedCrash):
+                CONTEXT.publish_report_context(self.root, context)
+
+        pending = path.parent / f".{path.name}.pending"
+        self.assertFalse(path.exists())
+        self.assertTrue(pending.is_file())
+        self.assertEqual(pending.stat().st_nlink, 1)
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for index in range(40_000):
+                descriptor = os.open(
+                    f"unrelated-{index:05d}",
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                    dir_fd=directory_fd,
+                )
+                os.close(descriptor)
+        finally:
+            os.close(directory_fd)
+
+        with mock.patch.object(
+            CONTEXT.os,
+            "scandir",
+            side_effect=AssertionError("recovery must not scan"),
+        ):
+            self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+
+        self.assertFalse(pending.exists())
+        self.assertEqual(path.stat().st_nlink, 1)
+
+    def test_context_post_link_pending_recovers_without_directory_scan(self):
         published = self.publish_report()
         context = self.sample_context(markdown_sha256=published.markdown_sha256)
         path = self.context_path()
@@ -328,7 +371,7 @@ class RirReportContextTest(unittest.TestCase):
             pass
 
         def crashing_context_unlink(name, *args, **kwargs):
-            if str(name).endswith(".tmp"):
+            if str(name).endswith(".pending"):
                 raise SimulatedCrash("link completed before process crash")
             return real_unlink(name, *args, **kwargs)
 
@@ -336,49 +379,54 @@ class RirReportContextTest(unittest.TestCase):
             with self.assertRaises(SimulatedCrash):
                 CONTEXT.publish_report_context(self.root, context)
 
-        verified_alias = tuple(path.parent.glob(f".{path.name}.*.tmp"))
-        self.assertEqual(len(verified_alias), 1)
+        pending = path.parent / f".{path.name}.pending"
         self.assertEqual(path.stat().st_nlink, 2)
-        foreign_alias = path.parent / f".{path.name}.{'f' * 16}.tmp"
-        foreign_alias.write_bytes(path.read_bytes())
-        foreign_alias.chmod(0o600)
+        self.assertEqual(pending.stat().st_ino, path.stat().st_ino)
 
-        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
-        self.assertFalse(verified_alias[0].exists())
-        self.assertTrue(foreign_alias.exists())
+        with mock.patch.object(
+            CONTEXT.os,
+            "scandir",
+            side_effect=AssertionError("recovery must not scan"),
+        ):
+            self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+
+        self.assertFalse(pending.exists())
         self.assertEqual(path.stat().st_nlink, 1)
 
-    def test_context_crash_recovery_ignores_long_lineage_entries(self):
+    def test_context_exact_target_removes_separate_exact_pending_leftover(self):
         published = self.publish_report()
         context = self.sample_context(markdown_sha256=published.markdown_sha256)
         path = CONTEXT.publish_report_context(self.root, context)
-        verified_alias = path.parent / f".{path.name}.{'a' * 16}.tmp"
-        os.link(path, verified_alias)
-        for revision in range(2, 132):
-            for suffix in ("json", "md", "controller.json", "context.json"):
-                (path.parent / f"revision-{revision:04d}.{suffix}").write_bytes(b"x")
+        pending = path.parent / f".{path.name}.pending"
+        pending.write_bytes(path.read_bytes())
+        pending.chmod(0o600)
+        target_inode = path.stat().st_ino
+        self.assertNotEqual(pending.stat().st_ino, target_inode)
 
-        self.assertGreater(len(tuple(path.parent.iterdir())), 500)
-        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
-        self.assertFalse(verified_alias.exists())
+        with mock.patch.object(
+            CONTEXT.os,
+            "scandir",
+            side_effect=AssertionError("recovery must not scan"),
+        ):
+            self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+
+        self.assertFalse(pending.exists())
+        self.assertEqual(path.stat().st_ino, target_inode)
         self.assertEqual(path.stat().st_nlink, 1)
 
-    def test_context_crash_recovery_bounds_only_exact_temp_candidates(self):
+    def test_context_wrong_pending_leftover_fails_closed(self):
         published = self.publish_report()
         context = self.sample_context(markdown_sha256=published.markdown_sha256)
         path = CONTEXT.publish_report_context(self.root, context)
-        verified_alias = path.parent / f".{path.name}.{'f' * 16}.tmp"
-        os.link(path, verified_alias)
-        for index in range(CONTEXT.MAX_RECOVERY_CANDIDATES + 1):
-            candidate = path.parent / f".{path.name}.{index:016x}.tmp"
-            candidate.write_bytes(path.read_bytes())
-            candidate.chmod(0o600)
+        pending = path.parent / f".{path.name}.pending"
+        pending.write_bytes(b"wrong")
+        pending.chmod(0o600)
 
-        with self.assertRaisesRegex(ValueError, "candidate limit"):
+        with self.assertRaises(ValueError):
             CONTEXT.load_report_context(self.root, "RPT-001", 1)
 
-        self.assertTrue(verified_alias.exists())
-        self.assertEqual(path.stat().st_nlink, 2)
+        self.assertTrue(pending.exists())
+        self.assertEqual(path.stat().st_nlink, 1)
 
     def test_context_directory_fsync_failure_leaves_a_single_link_for_retry(self):
         published = self.publish_report()
@@ -995,7 +1043,7 @@ class RirReportContextTest(unittest.TestCase):
         real_unlink = FINALIZE.REPORT_CONTEXT.os.unlink
 
         def failing_context_unlink(name, *args, **kwargs):
-            if ".context.json." in str(name) and str(name).endswith(".tmp"):
+            if str(name).endswith(".context.json.pending"):
                 raise OSError("injected context cleanup failure")
             return real_unlink(name, *args, **kwargs)
 
@@ -1084,7 +1132,7 @@ class RirReportContextTest(unittest.TestCase):
         arbitrary = metadata_path.with_name("arbitrary-metadata-hardlink")
         os.link(metadata_path, arbitrary)
 
-        with self.assertRaisesRegex(ValueError, "recovery alias"):
+        with self.assertRaisesRegex(ValueError, "pending state"):
             FINALIZE.finalize_refinement(request)
 
         self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])

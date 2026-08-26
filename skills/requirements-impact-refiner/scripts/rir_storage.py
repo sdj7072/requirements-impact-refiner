@@ -560,11 +560,25 @@ def _fsync_controller_metadata_directory(directory_fd: int) -> None:
         raise ValueError("cannot fsync controller lineage metadata directory") from error
 
 
-def _unlink_controller_metadata_temporary(directory_fd: int, temporary: str) -> None:
+def _unlink_controller_metadata_pending(directory_fd: int, pending: str) -> None:
     try:
-        os.unlink(temporary, dir_fd=directory_fd)
+        os.unlink(pending, dir_fd=directory_fd)
     except OSError as error:
-        raise ValueError("cannot cleanup controller lineage metadata temporary") from error
+        raise ValueError("cannot cleanup controller lineage metadata pending artifact") from error
+
+
+def _controller_metadata_pending_name(name: str) -> str:
+    return f".{name}.pending"
+
+
+def _controller_metadata_artifact_exists(directory_fd: int, name: str) -> bool:
+    try:
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise ValueError("controller lineage metadata pending state is unsafe") from error
+    return True
 
 
 def _load_or_recover_controller_metadata(
@@ -574,34 +588,99 @@ def _load_or_recover_controller_metadata(
     report_id: str,
     revision: int,
     state_sha256: str | None,
-) -> tuple[dict[str, object], bytes]:
-    value, raw, target = _read_controller_metadata_artifact(
-        directory_fd,
-        name,
-        report_id=report_id,
-        revision=revision,
-        state_sha256=state_sha256,
-        allowed_links=frozenset({1, 2}),
-    )
-    if target.st_nlink == 1:
-        return value, raw
-    temporary = f".{name}.{value['draft_id']}.tmp"
-    alias_value, alias_raw, alias = _read_controller_metadata_artifact(
-        directory_fd,
-        temporary,
-        report_id=report_id,
-        revision=revision,
-        state_sha256=state_sha256,
-        allowed_links=frozenset({2}),
-    )
-    if (
-        alias.st_dev != target.st_dev
-        or alias.st_ino != target.st_ino
-        or alias_raw != raw
-        or alias_value != value
-    ):
-        raise ValueError("controller lineage metadata recovery alias is invalid")
-    _unlink_controller_metadata_temporary(directory_fd, temporary)
+    expected_raw: bytes | None,
+) -> tuple[dict[str, object], bytes] | None:
+    pending = _controller_metadata_pending_name(name)
+    target_exists = _controller_metadata_artifact_exists(directory_fd, name)
+    pending_exists = _controller_metadata_artifact_exists(directory_fd, pending)
+    if not target_exists and not pending_exists:
+        return None
+    target_value = target_raw = target_metadata = None
+    pending_value = pending_raw = pending_metadata = None
+    if target_exists:
+        target_value, target_raw, target_metadata = _read_controller_metadata_artifact(
+            directory_fd,
+            name,
+            report_id=report_id,
+            revision=revision,
+            state_sha256=state_sha256,
+            allowed_links=frozenset({1, 2}),
+        )
+    if pending_exists:
+        pending_value, pending_raw, pending_metadata = _read_controller_metadata_artifact(
+            directory_fd,
+            pending,
+            report_id=report_id,
+            revision=revision,
+            state_sha256=state_sha256,
+            allowed_links=frozenset({1, 2}),
+        )
+        if expected_raw is not None and pending_raw != expected_raw:
+            raise ValueError("controller lineage metadata pending identity is invalid")
+    if not target_exists:
+        if pending_metadata is None or pending_metadata.st_nlink != 1:
+            raise ValueError("controller lineage metadata pending state is invalid")
+        try:
+            os.link(
+                pending,
+                name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except OSError as error:
+            raise ValueError(
+                "cannot write controller lineage: pending publication failed"
+            ) from error
+        target_value, target_raw, target_metadata = _read_controller_metadata_artifact(
+            directory_fd,
+            name,
+            report_id=report_id,
+            revision=revision,
+            state_sha256=state_sha256,
+            allowed_links=frozenset({2}),
+        )
+        linked_value, linked_raw, linked_metadata = _read_controller_metadata_artifact(
+            directory_fd,
+            pending,
+            report_id=report_id,
+            revision=revision,
+            state_sha256=state_sha256,
+            allowed_links=frozenset({2}),
+        )
+        if (
+            linked_metadata.st_dev != target_metadata.st_dev
+            or linked_metadata.st_ino != target_metadata.st_ino
+            or linked_raw != target_raw
+            or linked_value != target_value
+        ):
+            raise ValueError("controller lineage metadata pending state is invalid")
+    elif pending_exists:
+        if target_metadata is None or pending_metadata is None:
+            raise ValueError("controller lineage metadata pending state is invalid")
+        same_inode = (
+            target_metadata.st_dev == pending_metadata.st_dev
+            and target_metadata.st_ino == pending_metadata.st_ino
+        )
+        linked_state = (
+            same_inode and target_metadata.st_nlink == 2 and pending_metadata.st_nlink == 2
+        )
+        leftover_state = (
+            not same_inode
+            and target_metadata.st_nlink == 1
+            and pending_metadata.st_nlink == 1
+            and target_value == pending_value
+            and target_raw == pending_raw
+        )
+        if not linked_state and not leftover_state:
+            raise ValueError("controller lineage metadata pending state is invalid")
+    elif target_metadata is None or target_metadata.st_nlink != 1:
+        raise ValueError("controller lineage metadata pending state is invalid")
+    if not pending_exists:
+        if target_value is None or target_raw is None:
+            raise ValueError("controller lineage metadata pending state is invalid")
+        return target_value, target_raw
+    _unlink_controller_metadata_pending(directory_fd, pending)
     _fsync_controller_metadata_directory(directory_fd)
     recovered, recovered_raw, recovered_metadata = _read_controller_metadata_artifact(
         directory_fd,
@@ -611,14 +690,15 @@ def _load_or_recover_controller_metadata(
         state_sha256=state_sha256,
         allowed_links=frozenset({1}),
     )
-    if recovered != value or recovered_raw != raw or recovered_metadata.st_nlink != 1:
+    if recovered != target_value or recovered_raw != target_raw or recovered_metadata.st_nlink != 1:
         raise ValueError("controller lineage metadata recovery verification failed")
     return recovered, recovered_raw
 
 
 def _load_controller_completion_metadata(current) -> dict[str, object] | None:
     path = current.state_path.with_name(f"revision-{current.revision:04d}.controller.json")
-    if not path.exists():
+    pending_path = path.with_name(_controller_metadata_pending_name(path.name))
+    if not path.exists() and not pending_path.exists():
         return None
     try:
         current_state_sha256 = hashlib.sha256(current.state_path.read_bytes()).hexdigest()
@@ -626,16 +706,19 @@ def _load_controller_completion_metadata(current) -> dict[str, object] | None:
         raise ValueError(f"controller lineage metadata is invalid: {error}") from error
     directory_fd = _controller_metadata_directory_fd(path)
     try:
-        value, _raw = _load_or_recover_controller_metadata(
+        recovered = _load_or_recover_controller_metadata(
             directory_fd,
             path.name,
             report_id=current.report_id,
             revision=current.revision,
             state_sha256=current_state_sha256,
+            expected_raw=None,
         )
     finally:
         os.close(directory_fd)
-    return value
+    if recovered is None:
+        return None
+    return recovered[0]
 
 
 def _load_controller_metadata(current) -> dict[str, object] | None:
@@ -2017,25 +2100,24 @@ def _write_controller_metadata(
     path = _controller_metadata_path(report_id, revision_value, root)
     directory_fd = _controller_metadata_directory_fd(path)
     name = path.name
-    temporary = f".{name}.{draft['draft_id']}.tmp"
-    temporary_created = False
+    pending = _controller_metadata_pending_name(name)
+    pending_created = False
+    pending_durable = False
     descriptor = None
     try:
-        try:
-            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        except FileNotFoundError:
+        recovered = _load_or_recover_controller_metadata(
+            directory_fd,
+            name,
+            report_id=report_id,
+            revision=revision_value,
+            state_sha256=None,
+            expected_raw=payload,
+        )
+        if recovered is None:
             existing = None
             existing_bytes = None
-        except OSError as error:
-            raise ValueError("controller lineage metadata is unsafe") from error
         else:
-            existing, existing_bytes = _load_or_recover_controller_metadata(
-                directory_fd,
-                name,
-                report_id=report_id,
-                revision=revision_value,
-                state_sha256=None,
-            )
+            existing, existing_bytes = recovered
             if existing_bytes == payload:
                 _fsync_controller_metadata_directory(directory_fd)
                 return
@@ -2052,8 +2134,8 @@ def _write_controller_metadata(
             ):
                 raise ValueError("controller revision belongs to another draft")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
-        temporary_created = True
+        descriptor = os.open(pending, flags, 0o600, dir_fd=directory_fd)
+        pending_created = True
         os.fchmod(descriptor, 0o600)
         offset = 0
         while offset < len(payload):
@@ -2061,57 +2143,48 @@ def _write_controller_metadata(
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = None
+        pending_durable = True
         if existing is not None:
             os.replace(
-                temporary,
+                pending,
                 name,
                 src_dir_fd=directory_fd,
                 dst_dir_fd=directory_fd,
             )
-            temporary_created = False
+            pending_created = False
             _fsync_controller_metadata_directory(directory_fd)
         else:
-            try:
-                os.link(
-                    temporary,
-                    name,
-                    src_dir_fd=directory_fd,
-                    dst_dir_fd=directory_fd,
-                    follow_symlinks=False,
-                )
-            except FileExistsError:
-                _unlink_controller_metadata_temporary(directory_fd, temporary)
-                temporary_created = False
-                _fsync_controller_metadata_directory(directory_fd)
-                raced, raced_bytes = _load_or_recover_controller_metadata(
-                    directory_fd,
-                    name,
-                    report_id=report_id,
-                    revision=revision_value,
-                    state_sha256=state_sha256,
-                )
-                if raced_bytes != payload or raced.get("draft_id") != draft["draft_id"]:
-                    raise ValueError("controller revision belongs to another draft") from None
-            else:
-                _unlink_controller_metadata_temporary(directory_fd, temporary)
-                temporary_created = False
-                _fsync_controller_metadata_directory(directory_fd)
-        verified, verified_bytes = _load_or_recover_controller_metadata(
+            completed = _load_or_recover_controller_metadata(
+                directory_fd,
+                name,
+                report_id=report_id,
+                revision=revision_value,
+                state_sha256=state_sha256,
+                expected_raw=payload,
+            )
+            if completed is None:
+                raise ValueError("controller lineage metadata publication could not be verified")
+            pending_created = False
+        verified_result = _load_or_recover_controller_metadata(
             directory_fd,
             name,
             report_id=report_id,
             revision=revision_value,
             state_sha256=state_sha256,
+            expected_raw=payload,
         )
+        if verified_result is None:
+            raise ValueError("controller lineage metadata publication could not be verified")
+        verified, verified_bytes = verified_result
         if verified_bytes != payload or verified.get("draft_id") != draft["draft_id"]:
             raise ValueError("controller lineage metadata publication could not be verified")
     except (OSError, ValueError) as error:
         if descriptor is not None:
             os.close(descriptor)
             descriptor = None
-        if temporary_created:
-            _unlink_controller_metadata_temporary(directory_fd, temporary)
-            temporary_created = False
+        if pending_created and not pending_durable:
+            _unlink_controller_metadata_pending(directory_fd, pending)
+            pending_created = False
             _fsync_controller_metadata_directory(directory_fd)
         if isinstance(error, ValueError):
             raise
