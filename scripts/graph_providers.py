@@ -77,6 +77,7 @@ _FORBIDDEN_COMMANDS = frozenset(
         "fix",
         "index",
         "install",
+        "interactive",
         "joern-parse",
         "login",
         "logout",
@@ -86,11 +87,39 @@ _FORBIDDEN_COMMANDS = frozenset(
         "server",
         "setup",
         "update",
+        "update-all",
         "upload",
         "watch",
         "watcher",
     }
 )
+_LONG_VALUE_OPTIONS = frozenset(
+    {
+        "after",
+        "before",
+        "color",
+        "config",
+        "context",
+        "filter",
+        "format",
+        "globs",
+        "graph",
+        "inline-rules",
+        "inspect",
+        "kind",
+        "lang",
+        "max-results",
+        "no-ignore",
+        "pattern",
+        "report-style",
+        "rule",
+        "seed",
+        "selector",
+        "strictness",
+        "threads",
+    }
+)
+_SHORT_VALUE_OPTIONS = frozenset({"A", "B", "C", "c", "j", "k", "l", "p"})
 _CREDENTIAL_VALUE = re.compile(
     r"(?i)\b[a-z0-9_-]*(?:api[_-]?key|token|password|secret)"
     r"\b\s*[:=]\s*[^\s,;]+"
@@ -344,14 +373,44 @@ def _validate_arguments(arguments: Sequence[str]) -> tuple:
         raise ValueError("provider argv must be a bounded sequence")
     normalized = []
     total = 0
+    options = True
+    expect_value = False
+    saw_positional = False
     for argument in arguments:
         if not isinstance(argument, str) or not argument or "\x00" in argument:
             raise ValueError("provider arguments must be non-empty strings without NUL")
         total += len(argument.encode("utf-8"))
-        command = argument.lower().lstrip("-").split("=", 1)[0]
-        if command in _FORBIDDEN_COMMANDS:
-            raise PermissionError("provider command is outside the read-only allowlist")
         normalized.append(argument)
+        if not options:
+            continue
+        if expect_value:
+            expect_value = False
+            continue
+        if argument == "--":
+            options = False
+            continue
+        if argument.startswith("--"):
+            option, separator, _ = argument[2:].partition("=")
+            command = option.lower()
+            if command in _FORBIDDEN_COMMANDS:
+                raise PermissionError("provider command is outside the read-only allowlist")
+            if not separator and command in _LONG_VALUE_OPTIONS:
+                expect_value = True
+            continue
+        if argument.startswith("-") and argument != "-":
+            body = argument[1:]
+            first = body[0]
+            if first == "r":
+                raise PermissionError("provider command is outside the read-only allowlist")
+            if first in _SHORT_VALUE_OPTIONS:
+                expect_value = len(body) == 1
+            elif "i" in body or "U" in body:
+                raise PermissionError("provider command is outside the read-only allowlist")
+            continue
+        if not saw_positional:
+            saw_positional = True
+            if argument.lower() in _FORBIDDEN_COMMANDS:
+                raise PermissionError("provider command is outside the read-only allowlist")
     if total > MAX_ARGUMENT_BYTES:
         raise ValueError("provider argv exceeds maximum size")
     return tuple(normalized)

@@ -88,3 +88,75 @@ The pre-existing changes to
 `.requirements-impact-refiner/reports/RPT-001/current.json` were preserved and
 remain outside the Task 6 staged scope. No subagents were used, as required by
 the brief.
+
+## Fix round 1 — complete read-only and source identity boundaries
+
+### Review findings addressed
+
+- Replaced the five-file manifest check with a bounded, byte-exact working-state
+  guard around the complete canary. It runs exactly `git status
+  --porcelain=v1 -z --untracked-files=all` before and after, with optional Git
+  locks disabled, a five-second deadline, 2 MiB stdout and 64 KiB stderr bounds,
+  a minimal environment, and temporary state directed to the system temporary
+  directory outside the repository. Missing Git, non-repositories, nonzero
+  status, stderr, timeout, or oversized output fail closed.
+- The porcelain bytes include every tracked modification and every non-ignored
+  untracked path, so changed, deleted, renamed, and newly created paths anywhere
+  in the repository change the snapshot. Each reported existing path is also
+  bound to bounded mode/link/size/mtime and content identity, so edits to a path
+  that was already dirty or already untracked cannot hide behind unchanged
+  porcelain text. Pre-existing dirty paths are preserved because only
+  before/after equality is required.
+- Git-ignored paths are intentionally outside this exact contract: the required
+  command does not pass `--ignored`, and a regression records that behavior.
+  The real provider commands remain a fixed read-only allowlist, executable
+  snapshots use the provider runner's private system-temporary directory, and
+  the Git subprocess also uses the system temporary directory, so expected
+  canary/provider temporary outputs do not target the repository.
+- Replaced the source `lstat`/`resolve`/`read_bytes` sequence with
+  descriptor-anchored traversal. The runner opens the exact fixture root, every
+  parent, and the source using `O_NOFOLLOW`; holds the full descriptor chain
+  through the read; requires a single-link bounded regular file; and compares
+  device, inode, mode, link count, size, and nanosecond mtime across pathname,
+  opened descriptor, post-read descriptor, every parent, and the root.
+- Source reads are bounded to 128 KiB and all platform `OSError` details are
+  normalized. Regressions cover the valid control, symlink parent/file, hard
+  link, file replacement, file symlink swap, parent symlink swap, mode change,
+  and injected read error.
+- Replaced heuristic canary flag scanning with exact accepted command shapes:
+  version, the printable full scan command, its executable-free scan arguments,
+  and the fixed direct-pattern shape with a bounded pattern and safe relative
+  path. Every other shape, including separated/attached long mutation flags,
+  attached rewrites, mutating clusters, and `--` variants, fails closed.
+- Strengthened both canonical provider runners with option-aware parsing.
+  `-rreplacement`, `-r=value`, standalone `-r`, `-U`/`-i`, and supported
+  clusters containing them are rejected. Known long/short value options consume
+  their values, preventing false rejection of safe values such as a pattern
+  named `update`; arguments after `--` are treated as literal paths.
+
+### Fix-round TDD and verification
+
+- Complete-state tests first failed because the runner exposed neither an exact
+  Git snapshot nor a guard. Fake provider actions now prove detection of
+  unrelated tracked changes, deletion, rename, and new untracked output, while
+  changes to already-dirty and already-untracked contents are also detected;
+  unchanged pre-existing graph/report pointers do not false-fail. Separate fake
+  subprocesses prove output-bound and timeout rejection.
+- Descriptor tests first failed on hard links and missing controlled race/read
+  hooks. They now pass for every valid, symlink, replacement, parent-swap,
+  mode-identity, and deterministic read-error case above.
+- Argument tables first demonstrated acceptance of attached rewrites and
+  mutating clusters plus false rejection of safe option values. Canary and
+  provider valid/invalid tables now pass, including explicit `--` semantics.
+- Focused fake/real canary, provider, adapter, CI/documentation, and packaging
+  suite: 127 tests passed. The real 0.45.0 output remained byte-for-byte the
+  same JSON result recorded above.
+- Pinned quality runner: Ruff lint/format passed; mypy passed over 49 source
+  files; 822 tests passed with 21 controlled skips; branch coverage was 80.07%;
+  security checks passed.
+- Fresh Apple Python 3.9.6 compile/discovery: 822 tests passed with 24 controlled
+  skips.
+- External `git status --porcelain=v1 -z --untracked-files=all` snapshots were
+  380 bytes before and after the real canary and compared byte-identical.
+  Root/installed provider copies also compared byte-identical, and
+  `git diff --check` passed.

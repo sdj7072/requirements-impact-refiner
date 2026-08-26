@@ -111,6 +111,55 @@ class ProviderRunnerTest(unittest.TestCase):
             )
         )
 
+    def test_argument_guard_rejects_mutating_attached_and_clustered_options(self):
+        invalid = (
+            ("scan", "--rewrite", "changed"),
+            ("scan", "--rewrite=changed"),
+            ("scan", "--update"),
+            ("scan", "--update-all"),
+            ("scan", "--interactive"),
+            ("scan", "--interactive=true"),
+            ("scan", "-r", "changed"),
+            ("scan", "-rreplacement"),
+            ("scan", "-r=value"),
+            ("scan", "-U"),
+            ("scan", "-i"),
+            ("scan", "-Ui"),
+            ("scan", "-iU"),
+            ("scan", "-vUi"),
+            ("update",),
+        )
+        for arguments in invalid:
+            with self.subTest(arguments=arguments):
+                with self.assertRaisesRegex(PermissionError, "read-only"):
+                    PROVIDERS._validate_arguments(arguments)
+
+    def test_argument_guard_accepts_safe_values_attached_options_and_double_dash_paths(self):
+        valid = (
+            ("--version",),
+            (
+                "scan",
+                "--json=stream",
+                "--config",
+                "sgconfig.yml",
+                "fixture",
+            ),
+            (
+                "--json=stream",
+                "--lang",
+                "python",
+                "--pattern",
+                "update",
+                "rewrite.py",
+            ),
+            ("scan", "--", "--update-all"),
+            ("-lpython", "-pupdate", "rewrite.py"),
+            ("-l", "python", "-p", "update", "rewrite.py"),
+        )
+        for arguments in valid:
+            with self.subTest(arguments=arguments):
+                self.assertEqual(PROVIDERS._validate_arguments(arguments), arguments)
+
     def test_deadline_is_shared_and_expired_work_is_not_started(self):
         deadline = PROVIDERS.Deadline(self.clock, 30)
         self.clock.advance(12.5)
