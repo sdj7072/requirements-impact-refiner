@@ -168,6 +168,8 @@ class PackagingTest(unittest.TestCase):
             "scripts/rir_controller.py",
             "scripts/rir_contracts.py",
             "scripts/rir_finalize.py",
+            "scripts/rir_previous.py",
+            "scripts/rir_previous_renderer.py",
             "scripts/rir_report_context.py",
             "scripts/rir_lineage.py",
             "scripts/rir_storage.py",

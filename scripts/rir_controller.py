@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         TraceRequest,
         TraceResult,
     )
+    from rir_previous import PreviousLookupRequest, PreviousReportResult
     from typing_extensions import TypeGuard
 
 
@@ -948,6 +949,8 @@ def _is_payload_identity_contract(value: object) -> bool:
             "scripts/fast_scan.py",
             "scripts/fast_scan_renderer.py",
             "scripts/fast_scan_store.py",
+            "scripts/rir_previous.py",
+            "scripts/rir_previous_renderer.py",
             "scripts/rir_controller.py",
         }
         <= set(root_files)
@@ -1806,6 +1809,94 @@ FINALIZE = cast(Any, _load_finalize())
 compact_state = FINALIZE.COMPACT_STATE
 impact_renderer = FINALIZE.IMPACT_RENDERER
 report_store = FINALIZE.REPORT_STORE
+
+
+def _is_previous_renderer_shape(value: object) -> bool:
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_previous_renderer.py")
+        and _module_uses_sibling(
+            getattr(value, "COMPACT_STATE", None), SCRIPT_DIR / "compact_state.py"
+        )
+        and _module_uses_sibling(
+            getattr(value, "IMPACT_RENDERER", None), SCRIPT_DIR / "impact_renderer.py"
+        )
+        and callable(getattr(value, "render_previous", None))
+    )
+
+
+def _is_previous_renderer_contract(value: object) -> bool:
+    return (
+        _is_previous_renderer_shape(value)
+        and getattr(value, "COMPACT_STATE", None) is compact_state
+        and getattr(value, "IMPACT_RENDERER", None) is impact_renderer
+    )
+
+
+PREVIOUS_RENDERER = _load_controller_sibling(
+    "rir_previous_renderer.py",
+    "rir_previous_renderer",
+    "_rir_controller_previous_renderer_",
+    _is_previous_renderer_contract,
+    "previous renderer",
+    aliases={
+        "compact_state": cast(ModuleType, compact_state),
+        "impact_report": cast(ModuleType, impact_renderer.impact_report),
+        "impact_renderer": cast(ModuleType, impact_renderer),
+    },
+    rewire_validator=_is_previous_renderer_shape,
+)
+
+
+def _is_previous_shape(value: object) -> bool:
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_previous.py")
+        and _module_uses_sibling(
+            getattr(value, "REPORT_CONTEXT", None), SCRIPT_DIR / "rir_report_context.py"
+        )
+        and _module_uses_sibling(
+            getattr(value, "PAYLOAD_IDENTITY", None), SCRIPT_DIR / "payload_identity.py"
+        )
+        and _module_uses_sibling(
+            getattr(value, "RENDERER", None), SCRIPT_DIR / "rir_previous_renderer.py"
+        )
+        and _classes(value, ("PreviousLookupRequest", "PreviousReportResult"))
+        and callable(getattr(value, "lookup_previous", None))
+    )
+
+
+def _is_previous_contract(value: object) -> bool:
+    return (
+        _is_previous_shape(value)
+        and getattr(value, "REPORT_CONTEXT", None) is FINALIZE.REPORT_CONTEXT
+        and getattr(value, "PAYLOAD_IDENTITY", None) is PAYLOAD_IDENTITY
+        and getattr(value, "RENDERER", None) is PREVIOUS_RENDERER
+    )
+
+
+PREVIOUS = cast(
+    Any,
+    _load_controller_sibling(
+        "rir_previous.py",
+        "rir_previous",
+        "_rir_controller_previous_",
+        _is_previous_contract,
+        "previous lookup",
+        aliases={
+            "rir_report_context": cast(ModuleType, FINALIZE.REPORT_CONTEXT),
+            "payload_identity": cast(ModuleType, PAYLOAD_IDENTITY),
+            "rir_previous_renderer": cast(ModuleType, PREVIOUS_RENDERER),
+        },
+        rewire_validator=_is_previous_shape,
+    ),
+)
+if not TYPE_CHECKING:
+    PreviousLookupRequest = PREVIOUS.PreviousLookupRequest
+    PreviousReportResult = PREVIOUS.PreviousReportResult
+
+
+def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
+    return PREVIOUS.lookup_previous(request)
+
 
 _FACADE_BUILD_STATE = _build_state
 _FACADE_LOAD_GRAPH_CONTEXT = _load_graph_context
