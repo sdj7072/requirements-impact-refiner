@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import selectors
 import signal
 import stat
@@ -28,6 +29,7 @@ MAX_CONTEXT_BYTES = 8 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
 GIT_TIMEOUT_SECONDS = 0.25
+MAX_CONTEXT_STAGE_CANDIDATES = 8
 _CONTEXT_FIELDS = frozenset(
     {
         "schema_version",
@@ -355,6 +357,10 @@ def _context_pending_name(name: str) -> str:
     return f".{name}.pending"
 
 
+def _context_stage_prefix(name: str) -> str:
+    return f".{name}.stage-"
+
+
 def _fsync_context_directory(directory_fd: int) -> None:
     try:
         os.fsync(directory_fd)
@@ -367,6 +373,127 @@ def _unlink_context_pending(directory_fd: int, pending: str) -> None:
         os.unlink(pending, dir_fd=directory_fd)
     except OSError as error:
         raise ValueError("cannot cleanup report context pending artifact") from error
+
+
+def _open_context_stage(directory_fd: int, name: str) -> tuple[str, int, os.stat_result]:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    prefix = _context_stage_prefix(name)
+    for _candidate in range(MAX_CONTEXT_STAGE_CANDIDATES):
+        stage = f"{prefix}{secrets.token_hex(8)}"
+        try:
+            descriptor = os.open(stage, flags, 0o600, dir_fd=directory_fd)
+        except FileExistsError:
+            continue
+        except OSError as error:
+            raise ValueError("cannot create report context stage") from error
+        try:
+            os.fchmod(descriptor, 0o600)
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_uid != os.fstat(directory_fd).st_uid
+                or metadata.st_nlink != 1
+                or metadata.st_size != 0
+            ):
+                raise ValueError("report context stage is unsafe")
+            return stage, descriptor, metadata
+        except BaseException:
+            _cleanup_context_stage(directory_fd, stage, descriptor)
+            os.close(descriptor)
+            raise
+    raise ValueError("report context stage candidate limit exhausted")
+
+
+def _cleanup_context_stage(
+    directory_fd: int,
+    stage: str,
+    descriptor: int,
+) -> None:
+    try:
+        descriptor_metadata = os.fstat(descriptor)
+        path_metadata = os.stat(stage, dir_fd=directory_fd, follow_symlinks=False)
+    except (FileNotFoundError, OSError):
+        return
+    if (
+        descriptor_metadata.st_dev != path_metadata.st_dev
+        or descriptor_metadata.st_ino != path_metadata.st_ino
+        or not stat.S_ISREG(path_metadata.st_mode)
+        or stat.S_IMODE(path_metadata.st_mode) != 0o600
+        or path_metadata.st_uid != os.fstat(directory_fd).st_uid
+        or path_metadata.st_nlink != 1
+    ):
+        return
+    try:
+        os.unlink(stage, dir_fd=directory_fd)
+    except OSError:
+        return
+
+
+def _verify_context_stage(
+    directory_fd: int,
+    stage: str,
+    descriptor: int,
+    initial_metadata: os.stat_result,
+    context: ReportContext,
+    payload: bytes,
+) -> os.stat_result:
+    metadata = os.fstat(descriptor)
+    if (
+        metadata.st_dev != initial_metadata.st_dev
+        or metadata.st_ino != initial_metadata.st_ino
+        or not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid != os.fstat(directory_fd).st_uid
+        or metadata.st_nlink != 1
+        or metadata.st_size != len(payload)
+    ):
+        raise ValueError("report context stage identity is invalid")
+    staged_context, staged_payload, staged_metadata = _load_context_artifact(
+        directory_fd,
+        context.report_id,
+        context.revision,
+        name=stage,
+    )
+    if (
+        staged_context != context
+        or staged_payload != payload
+        or staged_metadata.st_dev != metadata.st_dev
+        or staged_metadata.st_ino != metadata.st_ino
+    ):
+        raise ValueError("report context stage verification failed")
+    return metadata
+
+
+def _replace_context_stage_with_pending(
+    directory_fd: int,
+    stage: str,
+    pending: str,
+    stage_metadata: os.stat_result,
+    context: ReportContext,
+    payload: bytes,
+) -> None:
+    os.replace(
+        stage,
+        pending,
+        src_dir_fd=directory_fd,
+        dst_dir_fd=directory_fd,
+    )
+    pending_context, pending_payload, pending_metadata = _load_context_artifact(
+        directory_fd,
+        context.report_id,
+        context.revision,
+        name=pending,
+    )
+    if (
+        pending_context != context
+        or pending_payload != payload
+        or pending_metadata.st_dev != stage_metadata.st_dev
+        or pending_metadata.st_ino != stage_metadata.st_ino
+        or pending_metadata.st_nlink != 1
+    ):
+        raise ValueError("report context pending publication verification failed")
+    _fsync_context_directory(directory_fd)
 
 
 def _context_artifact_exists(directory_fd: int, name: str) -> bool:
@@ -518,8 +645,9 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
         raise ValueError("published report directory is unavailable")
     name = f"revision-{context.revision:04d}.context.json"
     pending = _context_pending_name(name)
-    pending_created = False
-    pending_durable = False
+    stage: str | None = None
+    stage_created = False
+    stage_metadata: os.stat_result | None = None
     descriptor: int | None = None
     payload = _canonical_bytes(context)
     try:
@@ -538,17 +666,32 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
         if existing is not None:
             _fsync_context_directory(directory_fd)
             return resolved / ".requirements-impact-refiner" / "reports" / context.report_id / name
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(pending, flags, 0o600, dir_fd=directory_fd)
-        pending_created = True
-        os.fchmod(descriptor, 0o600)
+        stage, descriptor, initial_metadata = _open_context_stage(directory_fd, name)
+        stage_created = True
         offset = 0
         while offset < len(payload):
-            offset += os.write(descriptor, payload[offset:])
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise OSError("report context stage write made no progress")
+            offset += written
         os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = None
-        pending_durable = True
+        stage_metadata = _verify_context_stage(
+            directory_fd,
+            stage,
+            descriptor,
+            initial_metadata,
+            context,
+            payload,
+        )
+        _replace_context_stage_with_pending(
+            directory_fd,
+            stage,
+            pending,
+            stage_metadata,
+            context,
+            payload,
+        )
+        stage_created = False
         recovered = _load_or_recover_context(
             directory_fd,
             context.report_id,
@@ -562,13 +705,8 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
     except FileExistsError:
         raise
     except (OSError, ValueError) as error:
-        if descriptor is not None:
-            os.close(descriptor)
-            descriptor = None
-        if pending_created and not pending_durable:
-            _unlink_context_pending(directory_fd, pending)
-            pending_created = False
-            _fsync_context_directory(directory_fd)
+        if descriptor is not None and stage is not None and stage_created:
+            _cleanup_context_stage(directory_fd, stage, descriptor)
         if isinstance(error, ValueError):
             raise
         raise ValueError(f"cannot publish report context: {error}") from error

@@ -291,6 +291,7 @@ report_store = REPORT_STORE
 MAX_DRAFT_BYTES = 4 * 1024 * 1024
 MAX_CONTROLLER_METADATA_BYTES = 256 * 1024
 MAX_CONTROLLER_METADATA_DEPTH = 64
+MAX_CONTROLLER_METADATA_STAGE_CANDIDATES = 8
 DRAFT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _RECEIPT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
@@ -571,6 +572,142 @@ def _controller_metadata_pending_name(name: str) -> str:
     return f".{name}.pending"
 
 
+def _controller_metadata_stage_prefix(name: str) -> str:
+    return f".{name}.stage-"
+
+
+def _cleanup_controller_metadata_stage(
+    directory_fd: int,
+    stage: str,
+    descriptor: int,
+) -> None:
+    try:
+        descriptor_metadata = os.fstat(descriptor)
+        path_metadata = os.stat(stage, dir_fd=directory_fd, follow_symlinks=False)
+        expected_owner = os.fstat(directory_fd).st_uid
+    except (FileNotFoundError, OSError):
+        return
+    if (
+        descriptor_metadata.st_dev != path_metadata.st_dev
+        or descriptor_metadata.st_ino != path_metadata.st_ino
+        or not stat.S_ISREG(path_metadata.st_mode)
+        or stat.S_IMODE(path_metadata.st_mode) != 0o600
+        or path_metadata.st_uid != expected_owner
+        or path_metadata.st_nlink != 1
+    ):
+        return
+    try:
+        os.unlink(stage, dir_fd=directory_fd)
+    except OSError:
+        return
+
+
+def _open_controller_metadata_stage(
+    directory_fd: int,
+    name: str,
+) -> tuple[str, int, os.stat_result]:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    prefix = _controller_metadata_stage_prefix(name)
+    for _candidate in range(MAX_CONTROLLER_METADATA_STAGE_CANDIDATES):
+        stage = f"{prefix}{secrets.token_hex(8)}"
+        try:
+            descriptor = os.open(stage, flags, 0o600, dir_fd=directory_fd)
+        except FileExistsError:
+            continue
+        except OSError as error:
+            raise ValueError("cannot create controller lineage metadata stage") from error
+        try:
+            os.fchmod(descriptor, 0o600)
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_uid != os.fstat(directory_fd).st_uid
+                or metadata.st_nlink != 1
+                or metadata.st_size != 0
+            ):
+                raise ValueError("controller lineage metadata stage is unsafe")
+            return stage, descriptor, metadata
+        except BaseException:
+            _cleanup_controller_metadata_stage(directory_fd, stage, descriptor)
+            os.close(descriptor)
+            raise
+    raise ValueError("controller lineage metadata stage candidate limit exhausted")
+
+
+def _verify_controller_metadata_stage(
+    directory_fd: int,
+    stage: str,
+    descriptor: int,
+    initial_metadata: os.stat_result,
+    payload: bytes,
+    *,
+    report_id: str,
+    revision: int,
+    state_sha256: str,
+) -> os.stat_result:
+    metadata = os.fstat(descriptor)
+    if (
+        metadata.st_dev != initial_metadata.st_dev
+        or metadata.st_ino != initial_metadata.st_ino
+        or not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid != os.fstat(directory_fd).st_uid
+        or metadata.st_nlink != 1
+        or metadata.st_size != len(payload)
+    ):
+        raise ValueError("controller lineage metadata stage identity is invalid")
+    _value, staged_raw, staged_metadata = _read_controller_metadata_artifact(
+        directory_fd,
+        stage,
+        report_id=report_id,
+        revision=revision,
+        state_sha256=state_sha256,
+        allowed_links=frozenset({1}),
+    )
+    if (
+        staged_raw != payload
+        or staged_metadata.st_dev != metadata.st_dev
+        or staged_metadata.st_ino != metadata.st_ino
+    ):
+        raise ValueError("controller lineage metadata stage verification failed")
+    return metadata
+
+
+def _replace_controller_metadata_stage_with_pending(
+    directory_fd: int,
+    stage: str,
+    pending: str,
+    stage_metadata: os.stat_result,
+    payload: bytes,
+    *,
+    report_id: str,
+    revision: int,
+    state_sha256: str,
+) -> None:
+    os.replace(
+        stage,
+        pending,
+        src_dir_fd=directory_fd,
+        dst_dir_fd=directory_fd,
+    )
+    _value, pending_raw, pending_metadata = _read_controller_metadata_artifact(
+        directory_fd,
+        pending,
+        report_id=report_id,
+        revision=revision,
+        state_sha256=state_sha256,
+        allowed_links=frozenset({1}),
+    )
+    if (
+        pending_raw != payload
+        or pending_metadata.st_dev != stage_metadata.st_dev
+        or pending_metadata.st_ino != stage_metadata.st_ino
+    ):
+        raise ValueError("controller lineage metadata pending publication verification failed")
+    _fsync_controller_metadata_directory(directory_fd)
+
+
 def _controller_metadata_artifact_exists(directory_fd: int, name: str) -> bool:
     try:
         os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
@@ -589,6 +726,7 @@ def _load_or_recover_controller_metadata(
     revision: int,
     state_sha256: str | None,
     expected_raw: bytes | None,
+    replace_pending: Callable[[dict[str, object], dict[str, object]], bool] | None = None,
 ) -> tuple[dict[str, object], bytes] | None:
     pending = _controller_metadata_pending_name(name)
     target_exists = _controller_metadata_artifact_exists(directory_fd, name)
@@ -672,6 +810,50 @@ def _load_or_recover_controller_metadata(
             and target_value == pending_value
             and target_raw == pending_raw
         )
+        replacement_state = (
+            not same_inode
+            and target_metadata.st_nlink == 1
+            and pending_metadata.st_nlink == 1
+            and target_raw != pending_raw
+            and expected_raw is not None
+            and pending_raw == expected_raw
+            and replace_pending is not None
+        )
+        if replacement_state:
+            if (
+                target_value is None
+                or pending_value is None
+                or replace_pending is None
+                or not replace_pending(target_value, pending_value)
+            ):
+                raise ValueError("controller revision belongs to another draft")
+            try:
+                os.replace(
+                    pending,
+                    name,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                )
+            except OSError as error:
+                raise ValueError("controller lineage metadata replacement failed") from error
+            _fsync_controller_metadata_directory(directory_fd)
+            recovered, recovered_raw, recovered_metadata = _read_controller_metadata_artifact(
+                directory_fd,
+                name,
+                report_id=report_id,
+                revision=revision,
+                state_sha256=state_sha256,
+                allowed_links=frozenset({1}),
+            )
+            if (
+                recovered != pending_value
+                or recovered_raw != pending_raw
+                or recovered_metadata.st_dev != pending_metadata.st_dev
+                or recovered_metadata.st_ino != pending_metadata.st_ino
+                or recovered_metadata.st_nlink != 1
+            ):
+                raise ValueError("controller lineage metadata replacement verification failed")
+            return recovered, recovered_raw
         if not linked_state and not leftover_state:
             raise ValueError("controller lineage metadata pending state is invalid")
     elif target_metadata is None or target_metadata.st_nlink != 1:
@@ -2054,6 +2236,23 @@ def _report_lock(root: Path, report_id: str, deadline=None):
         os.close(descriptor)
 
 
+def _controller_metadata_replacement_allowed(
+    root: Path,
+    path: Path,
+    draft: Mapping[str, object],
+    revision: int,
+    existing: Mapping[str, object],
+) -> bool:
+    same_draft = existing.get("draft_id") == draft["draft_id"]
+    artifacts_exist = any(
+        (path.parent / f"revision-{revision:04d}.{suffix}").exists() for suffix in ("json", "md")
+    )
+    current = report_store.load_current(root, str(draft["report_id"]))
+    return bool(
+        same_draft and not artifacts_exist and (current is None or current.revision < revision)
+    )
+
+
 def _write_controller_metadata(
     root: Path,
     draft: Mapping[str, object],
@@ -2101,9 +2300,22 @@ def _write_controller_metadata(
     directory_fd = _controller_metadata_directory_fd(path)
     name = path.name
     pending = _controller_metadata_pending_name(name)
-    pending_created = False
-    pending_durable = False
+    stage: str | None = None
+    stage_created = False
     descriptor = None
+
+    def replacement_allowed(
+        existing_value: dict[str, object],
+        _pending_value: dict[str, object],
+    ) -> bool:
+        return _controller_metadata_replacement_allowed(
+            root,
+            path,
+            draft,
+            revision_value,
+            existing_value,
+        )
+
     try:
         recovered = _load_or_recover_controller_metadata(
             directory_fd,
@@ -2112,6 +2324,7 @@ def _write_controller_metadata(
             revision=revision_value,
             state_sha256=None,
             expected_raw=payload,
+            replace_pending=replacement_allowed,
         )
         if recovered is None:
             existing = None
@@ -2121,50 +2334,52 @@ def _write_controller_metadata(
             if existing_bytes == payload:
                 _fsync_controller_metadata_directory(directory_fd)
                 return
-            same_draft = existing.get("draft_id") == draft["draft_id"]
-            artifacts_exist = any(
-                (path.parent / f"revision-{revision_value:04d}.{suffix}").exists()
-                for suffix in ("json", "md")
-            )
-            current = report_store.load_current(root, report_id)
-            if (
-                not same_draft
-                or artifacts_exist
-                or (current is not None and current.revision >= revision_value)
-            ):
+            if not replacement_allowed(existing, metadata):
                 raise ValueError("controller revision belongs to another draft")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(pending, flags, 0o600, dir_fd=directory_fd)
-        pending_created = True
-        os.fchmod(descriptor, 0o600)
+        stage, descriptor, initial_metadata = _open_controller_metadata_stage(
+            directory_fd,
+            name,
+        )
+        stage_created = True
         offset = 0
         while offset < len(payload):
-            offset += os.write(descriptor, payload[offset:])
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise OSError("controller lineage metadata stage write made no progress")
+            offset += written
         os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = None
-        pending_durable = True
-        if existing is not None:
-            os.replace(
-                pending,
-                name,
-                src_dir_fd=directory_fd,
-                dst_dir_fd=directory_fd,
-            )
-            pending_created = False
-            _fsync_controller_metadata_directory(directory_fd)
-        else:
-            completed = _load_or_recover_controller_metadata(
-                directory_fd,
-                name,
-                report_id=report_id,
-                revision=revision_value,
-                state_sha256=state_sha256,
-                expected_raw=payload,
-            )
-            if completed is None:
-                raise ValueError("controller lineage metadata publication could not be verified")
-            pending_created = False
+        stage_metadata = _verify_controller_metadata_stage(
+            directory_fd,
+            stage,
+            descriptor,
+            initial_metadata,
+            payload,
+            report_id=report_id,
+            revision=revision_value,
+            state_sha256=state_sha256,
+        )
+        _replace_controller_metadata_stage_with_pending(
+            directory_fd,
+            stage,
+            pending,
+            stage_metadata,
+            payload,
+            report_id=report_id,
+            revision=revision_value,
+            state_sha256=state_sha256,
+        )
+        stage_created = False
+        completed = _load_or_recover_controller_metadata(
+            directory_fd,
+            name,
+            report_id=report_id,
+            revision=revision_value,
+            state_sha256=None,
+            expected_raw=payload,
+            replace_pending=replacement_allowed,
+        )
+        if completed is None:
+            raise ValueError("controller lineage metadata publication could not be verified")
         verified_result = _load_or_recover_controller_metadata(
             directory_fd,
             name,
@@ -2172,6 +2387,7 @@ def _write_controller_metadata(
             revision=revision_value,
             state_sha256=state_sha256,
             expected_raw=payload,
+            replace_pending=replacement_allowed,
         )
         if verified_result is None:
             raise ValueError("controller lineage metadata publication could not be verified")
@@ -2179,13 +2395,8 @@ def _write_controller_metadata(
         if verified_bytes != payload or verified.get("draft_id") != draft["draft_id"]:
             raise ValueError("controller lineage metadata publication could not be verified")
     except (OSError, ValueError) as error:
-        if descriptor is not None:
-            os.close(descriptor)
-            descriptor = None
-        if pending_created and not pending_durable:
-            _unlink_controller_metadata_pending(directory_fd, pending)
-            pending_created = False
-            _fsync_controller_metadata_directory(directory_fd)
+        if descriptor is not None and stage is not None and stage_created:
+            _cleanup_controller_metadata_stage(directory_fd, stage, descriptor)
         if isinstance(error, ValueError):
             raise
         raise ValueError(f"cannot write controller lineage: {error}") from error

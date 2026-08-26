@@ -319,6 +319,273 @@ class RirReportContextTest(unittest.TestCase):
         self.assertEqual(path.stat().st_nlink, 1)
         self.assertFalse(pending.exists())
 
+    def test_partial_context_stage_is_reader_invisible_and_does_not_block_retry(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        pending = path.parent / f".{path.name}.pending"
+        real_write = CONTEXT.os.write
+        interrupted = False
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crashing_write(descriptor, payload):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                real_write(descriptor, payload[:7])
+                raise SimulatedCrash("context stage write interrupted")
+            return real_write(descriptor, payload)
+
+        with mock.patch.object(CONTEXT.os, "write", side_effect=crashing_write):
+            with self.assertRaises(SimulatedCrash):
+                CONTEXT.publish_report_context(self.root, context)
+
+        stages = tuple(path.parent.glob(f".{path.name}.stage-*"))
+        self.assertEqual(len(stages), 1)
+        self.assertEqual(stages[0].read_bytes(), b'{"basel')
+        self.assertFalse(path.exists())
+        self.assertFalse(pending.exists())
+        self.assertIsNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
+
+        with mock.patch.object(
+            CONTEXT.os,
+            "scandir",
+            side_effect=AssertionError("stage retry must not scan the report lineage"),
+        ):
+            self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
+
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+        self.assertTrue(stages[0].exists())
+
+    def test_context_stage_collision_preserves_foreign_file_and_uses_another_candidate(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        real_open = CONTEXT.os.open
+        foreign_names = []
+
+        def collide_once(name, flags, *args, **kwargs):
+            if str(name).startswith(f".{path.name}.stage-") and not foreign_names:
+                descriptor = real_open(name, flags, *args, **kwargs)
+                real_write = os.write
+                real_write(descriptor, b"foreign-stage")
+                os.close(descriptor)
+                foreign_names.append(str(name))
+                raise FileExistsError(str(name))
+            return real_open(name, flags, *args, **kwargs)
+
+        with (
+            mock.patch.object(CONTEXT.os, "open", side_effect=collide_once),
+            mock.patch.object(
+                CONTEXT.os,
+                "scandir",
+                side_effect=AssertionError("stage creation must not scan the report lineage"),
+            ),
+        ):
+            self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
+
+        self.assertEqual(len(foreign_names), 1)
+        foreign = path.parent / foreign_names[0]
+        self.assertEqual(foreign.read_bytes(), b"foreign-stage")
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+
+    def test_context_stage_candidate_collisions_are_bounded(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        real_open = CONTEXT.os.open
+        attempts = 0
+
+        def colliding_open(name, flags, *args, **kwargs):
+            nonlocal attempts
+            if str(name).startswith(f".{path.name}.stage-"):
+                attempts += 1
+                if attempts > 16:
+                    raise AssertionError("context stage candidate loop is unbounded")
+                raise FileExistsError(str(name))
+            return real_open(name, flags, *args, **kwargs)
+
+        with mock.patch.object(CONTEXT.os, "open", side_effect=colliding_open):
+            with self.assertRaisesRegex(ValueError, "candidate limit"):
+                CONTEXT.publish_report_context(self.root, context)
+
+        self.assertGreater(attempts, 0)
+        self.assertLessEqual(attempts, 16)
+        self.assertFalse(path.exists())
+        self.assertFalse((path.parent / f".{path.name}.pending").exists())
+
+    def test_context_stage_cleanup_never_deletes_a_foreign_replacement(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        real_open = CONTEXT.os.open
+        real_write = CONTEXT.os.write
+        stage_name = None
+        stage_directory_fd = None
+
+        def recording_open(name, flags, *args, **kwargs):
+            nonlocal stage_name, stage_directory_fd
+            descriptor = real_open(name, flags, *args, **kwargs)
+            if str(name).startswith(f".{path.name}.stage-"):
+                stage_name = str(name)
+                stage_directory_fd = kwargs["dir_fd"]
+            return descriptor
+
+        def replace_stage_then_fail(descriptor, payload):
+            self.assertIsNotNone(stage_name)
+            self.assertIsNotNone(stage_directory_fd)
+            real_write(descriptor, payload[:5])
+            os.unlink(stage_name, dir_fd=stage_directory_fd)
+            foreign_fd = real_open(
+                stage_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=stage_directory_fd,
+            )
+            try:
+                real_write(foreign_fd, b"foreign-replacement")
+            finally:
+                os.close(foreign_fd)
+            raise OSError("injected context stage failure after foreign replacement")
+
+        with (
+            mock.patch.object(CONTEXT.os, "open", side_effect=recording_open),
+            mock.patch.object(CONTEXT.os, "write", side_effect=replace_stage_then_fail),
+        ):
+            with self.assertRaisesRegex(ValueError, "stage"):
+                CONTEXT.publish_report_context(self.root, context)
+
+        foreign = path.parent / str(stage_name)
+        self.assertEqual(foreign.read_bytes(), b"foreign-replacement")
+        self.assertFalse(path.exists())
+        self.assertFalse((path.parent / f".{path.name}.pending").exists())
+        self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
+
+    def test_context_stage_cleanup_failure_leaves_no_authority_and_retry_succeeds(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        pending = path.parent / f".{path.name}.pending"
+        real_write = CONTEXT.os.write
+        real_unlink = CONTEXT.os.unlink
+        failed_write = False
+
+        def failing_write(descriptor, payload):
+            nonlocal failed_write
+            if not failed_write:
+                failed_write = True
+                real_write(descriptor, payload[:9])
+                raise OSError("injected context stage write failure")
+            return real_write(descriptor, payload)
+
+        def failing_stage_unlink(name, *args, **kwargs):
+            if str(name).startswith(f".{path.name}.stage-"):
+                raise OSError("injected context stage cleanup failure")
+            return real_unlink(name, *args, **kwargs)
+
+        with (
+            mock.patch.object(CONTEXT.os, "write", side_effect=failing_write),
+            mock.patch.object(CONTEXT.os, "unlink", side_effect=failing_stage_unlink),
+        ):
+            with self.assertRaisesRegex(ValueError, "stage"):
+                CONTEXT.publish_report_context(self.root, context)
+
+        stages = tuple(path.parent.glob(f".{path.name}.stage-*"))
+        self.assertEqual(len(stages), 1)
+        self.assertFalse(path.exists())
+        self.assertFalse(pending.exists())
+        self.assertEqual(CONTEXT.publish_report_context(self.root, context), path)
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+
+    def test_context_crash_before_and_after_stage_rename_is_retryable(self):
+        for phase in ("before", "after"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                published = STORE.publish_revision(
+                    root,
+                    canonical_bytes(copy.deepcopy(self.base_state)),
+                )
+                context = replace(
+                    self.sample_context(markdown_sha256=published.markdown_sha256),
+                    repo_root_sha256=hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
+                )
+                path = (
+                    root
+                    / ".requirements-impact-refiner"
+                    / "reports"
+                    / "RPT-001"
+                    / "revision-0001.context.json"
+                )
+                pending = path.parent / f".{path.name}.pending"
+                real_replace = CONTEXT.os.replace
+
+                class SimulatedCrash(BaseException):
+                    pass
+
+                def crashing_replace(
+                    source,
+                    destination,
+                    *args,
+                    pending_name=pending.name,
+                    current_phase=phase,
+                    current_replace=real_replace,
+                    **kwargs,
+                ):
+                    if str(destination) == pending_name:
+                        if current_phase == "after":
+                            current_replace(source, destination, *args, **kwargs)
+                        raise SimulatedCrash(f"{current_phase} context stage rename")
+                    return current_replace(source, destination, *args, **kwargs)
+
+                with mock.patch.object(CONTEXT.os, "replace", side_effect=crashing_replace):
+                    with self.assertRaises(SimulatedCrash):
+                        CONTEXT.publish_report_context(root, context)
+
+                self.assertFalse(path.exists())
+                self.assertEqual(pending.exists(), phase == "after")
+                self.assertEqual(
+                    CONTEXT.load_report_context(root, "RPT-001", 1),
+                    context if phase == "after" else None,
+                )
+                if phase == "before":
+                    self.assertEqual(CONTEXT.publish_report_context(root, context), path)
+                self.assertEqual(CONTEXT.load_report_context(root, "RPT-001", 1), context)
+
+    def test_context_crash_after_stage_rename_fsync_recovers_complete_pending(self):
+        published = self.publish_report()
+        context = self.sample_context(markdown_sha256=published.markdown_sha256)
+        path = self.context_path()
+        pending = path.parent / f".{path.name}.pending"
+        real_fsync = CONTEXT.os.fsync
+        interrupted = False
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crash_after_pending_fsync(descriptor):
+            nonlocal interrupted
+            result = real_fsync(descriptor)
+            if (
+                not interrupted
+                and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+                and pending.exists()
+                and not path.exists()
+            ):
+                interrupted = True
+                raise SimulatedCrash("context pending directory entry is durable")
+            return result
+
+        with mock.patch.object(CONTEXT.os, "fsync", side_effect=crash_after_pending_fsync):
+            with self.assertRaises(SimulatedCrash):
+                CONTEXT.publish_report_context(self.root, context)
+
+        self.assertTrue(interrupted)
+        self.assertFalse(path.exists())
+        self.assertTrue(pending.is_file())
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+
     def test_context_pre_link_pending_recovers_without_directory_scan(self):
         published = self.publish_report()
         context = self.sample_context(markdown_sha256=published.markdown_sha256)

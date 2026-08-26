@@ -380,6 +380,774 @@ class RirStorageTest(unittest.TestCase):
         self.assertEqual(metadata["key_map"], key_map)
         self.assertEqual(STORAGE.load_controller_metadata(current), key_map)
 
+    def test_partial_metadata_stage_is_reader_invisible_and_does_not_block_replacement(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        old_key_map = {"version": "old"}
+        new_key_map = {"version": "new"}
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            old_key_map,
+            None,
+            "8" * 64,
+            context_identity,
+        )
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        old_payload = metadata_path.read_bytes()
+        real_write = STORAGE.os.write
+        interrupted = False
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crashing_write(descriptor, payload):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                real_write(descriptor, payload[:11])
+                raise SimulatedCrash("metadata stage write interrupted")
+            return real_write(descriptor, payload)
+
+        with mock.patch.object(STORAGE.os, "write", side_effect=crashing_write):
+            with self.assertRaises(SimulatedCrash):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    new_key_map,
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        stages = tuple(metadata_path.parent.glob(f".{metadata_path.name}.stage-*"))
+        self.assertEqual(len(stages), 1)
+        self.assertFalse(pending.exists())
+        self.assertEqual(metadata_path.read_bytes(), old_payload)
+        state_path = metadata_path.with_name(".reader-state")
+        state_path.write_bytes(state_bytes)
+        current = SimpleNamespace(report_id="RPT-001", revision=1, state_path=state_path)
+        self.assertEqual(
+            STORAGE.load_controller_completion_metadata(current)["key_map"], old_key_map
+        )
+
+        with mock.patch.object(
+            STORAGE.os,
+            "scandir",
+            side_effect=AssertionError("metadata stage retry must not scan the report lineage"),
+        ):
+            STORAGE.write_controller_metadata(
+                self.root,
+                draft,
+                state_bytes,
+                new_key_map,
+                None,
+                "9" * 64,
+                context_identity,
+            )
+
+        loaded = STORAGE.load_controller_completion_metadata(current)
+        self.assertEqual(loaded["analysis_sha256"], "9" * 64)
+        self.assertEqual(loaded["key_map"], new_key_map)
+        self.assertTrue(stages[0].exists())
+
+    def test_metadata_stage_collision_preserves_foreign_file_and_retries_candidate(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        real_open = STORAGE.os.open
+        foreign_names = []
+
+        def collide_once(name, flags, *args, **kwargs):
+            if str(name).startswith(f".{metadata_path.name}.stage-") and not foreign_names:
+                descriptor = real_open(name, flags, *args, **kwargs)
+                os.write(descriptor, b"foreign-metadata-stage")
+                os.close(descriptor)
+                foreign_names.append(str(name))
+                raise FileExistsError(str(name))
+            return real_open(name, flags, *args, **kwargs)
+
+        with (
+            mock.patch.object(STORAGE.os, "open", side_effect=collide_once),
+            mock.patch.object(
+                STORAGE.os,
+                "scandir",
+                side_effect=AssertionError("metadata stage creation must not scan"),
+            ),
+        ):
+            STORAGE.write_controller_metadata(
+                self.root,
+                draft,
+                state_bytes,
+                {},
+                None,
+                "9" * 64,
+                context_identity,
+            )
+
+        self.assertEqual(len(foreign_names), 1)
+        foreign = metadata_path.parent / foreign_names[0]
+        self.assertEqual(foreign.read_bytes(), b"foreign-metadata-stage")
+        self.assertTrue(metadata_path.is_file())
+
+    def test_metadata_stage_candidate_collisions_are_bounded(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        real_open = STORAGE.os.open
+        attempts = 0
+
+        def colliding_open(name, flags, *args, **kwargs):
+            nonlocal attempts
+            if str(name).startswith(f".{metadata_path.name}.stage-"):
+                attempts += 1
+                if attempts > 16:
+                    raise AssertionError("metadata stage candidate loop is unbounded")
+                raise FileExistsError(str(name))
+            return real_open(name, flags, *args, **kwargs)
+
+        with mock.patch.object(STORAGE.os, "open", side_effect=colliding_open):
+            with self.assertRaisesRegex(ValueError, "candidate limit"):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    {},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        self.assertGreater(attempts, 0)
+        self.assertLessEqual(attempts, 16)
+        self.assertFalse(metadata_path.exists())
+        self.assertFalse((metadata_path.parent / f".{metadata_path.name}.pending").exists())
+
+    def test_metadata_stage_cleanup_never_deletes_a_foreign_replacement(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        real_open = STORAGE.os.open
+        real_write = STORAGE.os.write
+        stage_name = None
+        stage_directory_fd = None
+
+        def recording_open(name, flags, *args, **kwargs):
+            nonlocal stage_name, stage_directory_fd
+            descriptor = real_open(name, flags, *args, **kwargs)
+            if str(name).startswith(f".{metadata_path.name}.stage-"):
+                stage_name = str(name)
+                stage_directory_fd = kwargs["dir_fd"]
+            return descriptor
+
+        def replace_stage_then_fail(descriptor, payload):
+            self.assertIsNotNone(stage_name)
+            self.assertIsNotNone(stage_directory_fd)
+            real_write(descriptor, payload[:5])
+            os.unlink(stage_name, dir_fd=stage_directory_fd)
+            foreign_fd = real_open(
+                stage_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=stage_directory_fd,
+            )
+            try:
+                real_write(foreign_fd, b"foreign-replacement")
+            finally:
+                os.close(foreign_fd)
+            raise OSError("injected metadata stage failure after foreign replacement")
+
+        with (
+            mock.patch.object(STORAGE.os, "open", side_effect=recording_open),
+            mock.patch.object(STORAGE.os, "write", side_effect=replace_stage_then_fail),
+        ):
+            with self.assertRaisesRegex(ValueError, "stage"):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    {},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        foreign = metadata_path.parent / str(stage_name)
+        self.assertEqual(foreign.read_bytes(), b"foreign-replacement")
+        self.assertFalse(metadata_path.exists())
+        self.assertFalse((metadata_path.parent / f".{metadata_path.name}.pending").exists())
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            {},
+            None,
+            "9" * 64,
+            context_identity,
+        )
+
+    def test_metadata_stage_cleanup_failure_leaves_no_authority_and_retry_succeeds(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        real_write = STORAGE.os.write
+        real_unlink = STORAGE.os.unlink
+        failed_write = False
+
+        def failing_write(descriptor, payload):
+            nonlocal failed_write
+            if not failed_write:
+                failed_write = True
+                real_write(descriptor, payload[:13])
+                raise OSError("injected metadata stage write failure")
+            return real_write(descriptor, payload)
+
+        def failing_stage_unlink(name, *args, **kwargs):
+            if str(name).startswith(f".{metadata_path.name}.stage-"):
+                raise OSError("injected metadata stage cleanup failure")
+            return real_unlink(name, *args, **kwargs)
+
+        with (
+            mock.patch.object(STORAGE.os, "write", side_effect=failing_write),
+            mock.patch.object(STORAGE.os, "unlink", side_effect=failing_stage_unlink),
+        ):
+            with self.assertRaisesRegex(ValueError, "stage"):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    {},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        stages = tuple(metadata_path.parent.glob(f".{metadata_path.name}.stage-*"))
+        self.assertEqual(len(stages), 1)
+        self.assertFalse(metadata_path.exists())
+        self.assertFalse(pending.exists())
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            {},
+            None,
+            "9" * 64,
+            context_identity,
+        )
+        self.assertTrue(metadata_path.is_file())
+
+    def test_metadata_crash_before_and_after_stage_rename_is_retryable(self):
+        for phase in ("before", "after"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                draft = {
+                    "consumed": False,
+                    "draft_id": DRAFT_ID,
+                    "repo_root": str(root),
+                    "report_id": "RPT-001",
+                    "revision": 1,
+                }
+                state_bytes = b'{"schema_version":1}\n'
+                context_identity = {
+                    "payload_sha256": "5" * 64,
+                    "repo_root_sha256": "6" * 64,
+                    "requirement_sha256": "7" * 64,
+                    "source_inventory_available": False,
+                    "source_inventory_complete": False,
+                    "source_inventory_sha256": None,
+                }
+                metadata_path = (
+                    root
+                    / ".requirements-impact-refiner"
+                    / "reports"
+                    / "RPT-001"
+                    / "revision-0001.controller.json"
+                )
+                pending = metadata_path.parent / f".{metadata_path.name}.pending"
+                real_replace = STORAGE.os.replace
+
+                class SimulatedCrash(BaseException):
+                    pass
+
+                def crashing_replace(
+                    source,
+                    destination,
+                    *args,
+                    pending_name=pending.name,
+                    current_phase=phase,
+                    current_replace=real_replace,
+                    **kwargs,
+                ):
+                    if str(destination) == pending_name:
+                        if current_phase == "after":
+                            current_replace(source, destination, *args, **kwargs)
+                        raise SimulatedCrash(f"{current_phase} metadata stage rename")
+                    return current_replace(source, destination, *args, **kwargs)
+
+                with mock.patch.object(STORAGE.os, "replace", side_effect=crashing_replace):
+                    with self.assertRaises(SimulatedCrash):
+                        STORAGE.write_controller_metadata(
+                            root,
+                            draft,
+                            state_bytes,
+                            {},
+                            None,
+                            "9" * 64,
+                            context_identity,
+                        )
+
+                self.assertFalse(metadata_path.exists())
+                self.assertEqual(pending.exists(), phase == "after")
+                STORAGE.write_controller_metadata(
+                    root,
+                    draft,
+                    state_bytes,
+                    {},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+                self.assertTrue(metadata_path.is_file())
+                self.assertFalse(pending.exists())
+
+    def test_metadata_crash_after_stage_rename_fsync_recovers_complete_pending(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        real_fsync = STORAGE.os.fsync
+        interrupted = False
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crash_after_pending_fsync(descriptor):
+            nonlocal interrupted
+            result = real_fsync(descriptor)
+            if (
+                not interrupted
+                and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+                and pending.exists()
+                and not metadata_path.exists()
+            ):
+                interrupted = True
+                raise SimulatedCrash("metadata pending directory entry is durable")
+            return result
+
+        with mock.patch.object(STORAGE.os, "fsync", side_effect=crash_after_pending_fsync):
+            with self.assertRaises(SimulatedCrash):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    {},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        self.assertTrue(interrupted)
+        self.assertFalse(metadata_path.exists())
+        self.assertTrue(pending.is_file())
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            {},
+            None,
+            "9" * 64,
+            context_identity,
+        )
+        self.assertTrue(metadata_path.is_file())
+        self.assertFalse(pending.exists())
+
+    def test_new_complete_pending_replaces_valid_old_same_draft_metadata_after_crash(self):
+        draft, _path = self.write_draft()
+        draft.update({"report_id": "RPT-001", "revision": 1})
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        old_key_map = {"version": "old"}
+        new_key_map = {"version": "new"}
+        STORAGE.write_controller_metadata(
+            self.root,
+            draft,
+            state_bytes,
+            old_key_map,
+            None,
+            "8" * 64,
+            context_identity,
+        )
+        metadata_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / "revision-0001.controller.json"
+        )
+        pending = metadata_path.parent / f".{metadata_path.name}.pending"
+        old_payload = metadata_path.read_bytes()
+        real_replace = STORAGE.os.replace
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        def crash_before_target_replace(source, destination, *args, **kwargs):
+            if str(source) == pending.name and str(destination) == metadata_path.name:
+                raise SimulatedCrash("new pending durable before target replacement")
+            return real_replace(source, destination, *args, **kwargs)
+
+        with mock.patch.object(STORAGE.os, "replace", side_effect=crash_before_target_replace):
+            with self.assertRaises(SimulatedCrash):
+                STORAGE.write_controller_metadata(
+                    self.root,
+                    draft,
+                    state_bytes,
+                    new_key_map,
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+
+        self.assertEqual(metadata_path.read_bytes(), old_payload)
+        pending_payload = pending.read_bytes()
+        self.assertNotEqual(pending_payload, old_payload)
+        state_path = metadata_path.with_name(".reader-state")
+        state_path.write_bytes(state_bytes)
+        current = SimpleNamespace(report_id="RPT-001", revision=1, state_path=state_path)
+        with self.assertRaisesRegex(ValueError, "pending state"):
+            STORAGE.load_controller_completion_metadata(current)
+
+        with mock.patch.object(
+            STORAGE.os,
+            "scandir",
+            side_effect=AssertionError("metadata replacement recovery must not scan"),
+        ):
+            STORAGE.write_controller_metadata(
+                self.root,
+                draft,
+                state_bytes,
+                new_key_map,
+                None,
+                "9" * 64,
+                context_identity,
+            )
+
+        self.assertFalse(pending.exists())
+        loaded = STORAGE.load_controller_completion_metadata(current)
+        self.assertEqual(loaded["analysis_sha256"], "9" * 64)
+        self.assertEqual(loaded["key_map"], new_key_map)
+
+    def test_metadata_retry_after_target_replace_and_directory_fsync_crashes(self):
+        state_bytes = b'{"schema_version":1}\n'
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        for phase in ("after-replace", "after-fsync"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                draft = {
+                    "consumed": False,
+                    "draft_id": DRAFT_ID,
+                    "repo_root": str(root),
+                    "report_id": "RPT-001",
+                    "revision": 1,
+                }
+                STORAGE.write_controller_metadata(
+                    root,
+                    draft,
+                    state_bytes,
+                    {"version": "old"},
+                    None,
+                    "8" * 64,
+                    context_identity,
+                )
+                metadata_path = (
+                    root
+                    / ".requirements-impact-refiner"
+                    / "reports"
+                    / "RPT-001"
+                    / "revision-0001.controller.json"
+                )
+                pending = metadata_path.parent / f".{metadata_path.name}.pending"
+                real_replace = STORAGE.os.replace
+                real_fsync = STORAGE.os.fsync
+                fault_state = {"replacement_completed": False, "interrupted": False}
+
+                class SimulatedCrash(BaseException):
+                    pass
+
+                def crashing_replace(
+                    source,
+                    destination,
+                    *args,
+                    pending_name=pending.name,
+                    target_name=metadata_path.name,
+                    current_phase=phase,
+                    current_replace=real_replace,
+                    state=fault_state,
+                    **kwargs,
+                ):
+                    result = current_replace(source, destination, *args, **kwargs)
+                    if str(source) == pending_name and str(destination) == target_name:
+                        state["replacement_completed"] = True
+                        if current_phase == "after-replace":
+                            state["interrupted"] = True
+                            raise SimulatedCrash("metadata target replaced before fsync")
+                    return result
+
+                def crashing_fsync(
+                    descriptor,
+                    current_phase=phase,
+                    current_fsync=real_fsync,
+                    state=fault_state,
+                ):
+                    result = current_fsync(descriptor)
+                    if (
+                        current_phase == "after-fsync"
+                        and state["replacement_completed"]
+                        and not state["interrupted"]
+                        and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+                    ):
+                        state["interrupted"] = True
+                        raise SimulatedCrash("metadata replacement directory entry is durable")
+                    return result
+
+                with (
+                    mock.patch.object(STORAGE.os, "replace", side_effect=crashing_replace),
+                    mock.patch.object(STORAGE.os, "fsync", side_effect=crashing_fsync),
+                ):
+                    with self.assertRaises(SimulatedCrash):
+                        STORAGE.write_controller_metadata(
+                            root,
+                            draft,
+                            state_bytes,
+                            {"version": "new"},
+                            None,
+                            "9" * 64,
+                            context_identity,
+                        )
+
+                self.assertTrue(fault_state["interrupted"])
+                self.assertFalse(pending.exists())
+                STORAGE.write_controller_metadata(
+                    root,
+                    draft,
+                    state_bytes,
+                    {"version": "new"},
+                    None,
+                    "9" * 64,
+                    context_identity,
+                )
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                self.assertEqual(metadata["analysis_sha256"], "9" * 64)
+                self.assertEqual(metadata["key_map"], {"version": "new"})
+
+    def test_pending_metadata_replacement_rechecks_draft_analysis_artifacts_and_bytes(self):
+        context_identity = {
+            "payload_sha256": "5" * 64,
+            "repo_root_sha256": "6" * 64,
+            "requirement_sha256": "7" * 64,
+            "source_inventory_available": False,
+            "source_inventory_complete": False,
+            "source_inventory_sha256": None,
+        }
+        state_bytes = b'{"schema_version":1}\n'
+        for rejection in ("draft", "analysis", "artifacts", "tamper"):
+            with self.subTest(rejection=rejection), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                draft = {
+                    "consumed": False,
+                    "draft_id": DRAFT_ID,
+                    "repo_root": str(root),
+                    "report_id": "RPT-001",
+                    "revision": 1,
+                }
+                STORAGE.write_controller_metadata(
+                    root,
+                    draft,
+                    state_bytes,
+                    {"version": "old"},
+                    None,
+                    "8" * 64,
+                    context_identity,
+                )
+                metadata_path = (
+                    root
+                    / ".requirements-impact-refiner"
+                    / "reports"
+                    / "RPT-001"
+                    / "revision-0001.controller.json"
+                )
+                pending = metadata_path.parent / f".{metadata_path.name}.pending"
+                real_replace = STORAGE.os.replace
+
+                class SimulatedCrash(BaseException):
+                    pass
+
+                def crash_before_target_replace(
+                    source,
+                    destination,
+                    *args,
+                    pending_name=pending.name,
+                    target_name=metadata_path.name,
+                    current_replace=real_replace,
+                    **kwargs,
+                ):
+                    if str(source) == pending_name and str(destination) == target_name:
+                        raise SimulatedCrash("pending preserved")
+                    return current_replace(source, destination, *args, **kwargs)
+
+                with mock.patch.object(
+                    STORAGE.os,
+                    "replace",
+                    side_effect=crash_before_target_replace,
+                ):
+                    with self.assertRaises(SimulatedCrash):
+                        STORAGE.write_controller_metadata(
+                            root,
+                            draft,
+                            state_bytes,
+                            {"version": "new"},
+                            None,
+                            "9" * 64,
+                            context_identity,
+                        )
+
+                retry_draft = draft
+                retry_analysis = "9" * 64
+                if rejection == "draft":
+                    retry_draft = dict(draft, draft_id="2" * 32)
+                elif rejection == "analysis":
+                    retry_analysis = "a" * 64
+                elif rejection == "artifacts":
+                    metadata_path.with_name("revision-0001.md").write_text(
+                        "published",
+                        encoding="utf-8",
+                    )
+                else:
+                    pending.write_bytes(b"tampered")
+
+                with self.assertRaises(ValueError):
+                    STORAGE.write_controller_metadata(
+                        root,
+                        retry_draft,
+                        state_bytes,
+                        {"version": "new"},
+                        None,
+                        retry_analysis,
+                        context_identity,
+                    )
+
+                self.assertTrue(metadata_path.is_file())
+                self.assertTrue(pending.is_file())
+
     def test_completion_metadata_size_contract_is_symmetric_at_the_boundary(self):
         context_identity = {
             "payload_sha256": "5" * 64,
