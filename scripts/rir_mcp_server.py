@@ -64,6 +64,9 @@ class _ScanRequestFactory(Protocol):
         change_request: str,
         evidence: tuple[str, ...],
         audience_override: str | None,
+        previous_report_id: str | None,
+        previous_revision: int | None,
+        changed_paths: tuple[str, ...],
     ) -> object: ...
 
 
@@ -202,6 +205,11 @@ class _ScanResult(Protocol):
     elapsed_ms: int
     cache_status: str
     can_promote: bool
+    previous_report_id: str | None
+    previous_revision: int | None
+    changed_paths: tuple[str, ...]
+    changed_count: int | None
+    previous_display_text: str | None
 
 
 class _TraceSeedResult(Protocol):
@@ -303,7 +311,15 @@ def _is_controller_contract(value: object) -> bool:
         )
         and _has_parameters(
             getattr(value, "ScanRequest", None),
-            ("repo_root", "change_request", "evidence", "audience_override"),
+            (
+                "repo_root",
+                "change_request",
+                "evidence",
+                "audience_override",
+                "previous_report_id",
+                "previous_revision",
+                "changed_paths",
+            ),
         )
         and _has_parameters(
             getattr(value, "TraceRequest", None), ("repo_root", "draft_id", "seeds")
@@ -454,6 +470,9 @@ INSTALLED_PAYLOAD_SHA256 = _installed_payload_sha256
 class _OptionalScanArguments(TypedDict, total=False):
     evidence: list[str]
     presentation: str
+    previous_report_id: str
+    previous_revision: int
+    changed_paths: list[str]
 
 
 class ScanArguments(_OptionalScanArguments):
@@ -521,7 +540,18 @@ def _exact_keys(
 
 def _is_scan_arguments(value: object) -> TypeGuard[ScanArguments]:
     required = frozenset({"repo_root", "change_request"})
-    optional = frozenset({"evidence", "presentation"})
+    optional = frozenset(
+        {
+            "evidence",
+            "presentation",
+            "previous_report_id",
+            "previous_revision",
+            "changed_paths",
+        }
+    )
+    delta_keys = {"previous_report_id", "previous_revision", "changed_paths"}
+    present_delta = set(value) & delta_keys if isinstance(value, dict) else set()
+    changed_paths = value.get("changed_paths", []) if isinstance(value, dict) else None
     return (
         _exact_keys(value, required, optional)
         and isinstance(value, dict)
@@ -529,6 +559,20 @@ def _is_scan_arguments(value: object) -> TypeGuard[ScanArguments]:
         and isinstance(value.get("change_request"), str)
         and _is_string_list(value.get("evidence", []))
         and _is_optional_string(value.get("presentation"))
+        and (not present_delta or present_delta == delta_keys)
+        and (
+            not present_delta
+            or (
+                isinstance(value.get("previous_report_id"), str)
+                and _PREVIOUS_REPORT_ID.fullmatch(value["previous_report_id"]) is not None
+                and type(value.get("previous_revision")) is int
+                and value["previous_revision"] >= 1
+                and _is_string_list(changed_paths)
+                and len(changed_paths) <= MAX_PREVIOUS_CHANGED_PATHS
+                and all(_safe_previous_changed_path(path) for path in changed_paths)
+                and sorted(set(changed_paths)) == changed_paths
+            )
+        )
     )
 
 
@@ -897,6 +941,40 @@ def _mapping_sequence(value: object) -> bool:
 
 def _is_scan_result(value: object) -> TypeGuard[_ScanResult]:
     elapsed_ms = getattr(value, "elapsed_ms", None)
+    previous_report_id = getattr(value, "previous_report_id", None)
+    previous_revision = getattr(value, "previous_revision", None)
+    changed_paths = getattr(value, "changed_paths", ())
+    changed_count = getattr(value, "changed_count", None)
+    previous_display_text = getattr(value, "previous_display_text", None)
+    delta_present = (
+        previous_report_id is not None
+        or previous_revision is not None
+        or bool(changed_paths)
+        or changed_count is not None
+        or previous_display_text is not None
+    )
+    delta_valid = (
+        not delta_present
+        and previous_report_id is None
+        and previous_revision is None
+        and changed_paths == ()
+        and changed_count is None
+        and previous_display_text is None
+    ) or (
+        isinstance(previous_report_id, str)
+        and _PREVIOUS_REPORT_ID.fullmatch(previous_report_id) is not None
+        and type(previous_revision) is int
+        and previous_revision >= 1
+        and isinstance(changed_paths, tuple)
+        and len(changed_paths) <= MAX_PREVIOUS_CHANGED_PATHS
+        and tuple(sorted(set(changed_paths))) == changed_paths
+        and all(_safe_previous_changed_path(path) for path in changed_paths)
+        and (
+            changed_count is None
+            or (type(changed_count) is int and changed_count >= len(changed_paths))
+        )
+        and _bounded_utf8(previous_display_text, MAX_PREVIOUS_DISPLAY_BYTES, nonblank=True)
+    )
     return (
         all(
             isinstance(getattr(value, name, None), str)
@@ -916,6 +994,7 @@ def _is_scan_result(value: object) -> TypeGuard[_ScanResult]:
         and isinstance(elapsed_ms, int)
         and not isinstance(elapsed_ms, bool)
         and isinstance(getattr(value, "can_promote", None), bool)
+        and delta_valid
     )
 
 
@@ -1012,6 +1091,24 @@ SCAN_SCHEMA = {
             },
         },
         "presentation": {"enum": ["simple", "balanced", "technical"]},
+        "previous_report_id": {"type": "string", "pattern": "^RPT-\\d{3}$"},
+        "previous_revision": {"type": "integer", "minimum": 1},
+        "changed_paths": {
+            "type": "array",
+            "maxItems": 4096,
+            "uniqueItems": True,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+$",
+            },
+        },
+    },
+    "dependentRequired": {
+        "previous_report_id": ["previous_revision", "changed_paths"],
+        "previous_revision": ["previous_report_id", "changed_paths"],
+        "changed_paths": ["previous_report_id", "previous_revision"],
     },
 }
 
@@ -1433,6 +1530,9 @@ def _scan(arguments: object) -> dict[str, object]:
             arguments["change_request"],
             tuple(arguments.get("evidence", [])),
             arguments.get("presentation"),
+            arguments.get("previous_report_id"),
+            arguments.get("previous_revision"),
+            tuple(arguments.get("changed_paths", [])),
         )
     )
     if not _is_scan_result(result):
@@ -1451,6 +1551,17 @@ def _scan(arguments: object) -> dict[str, object]:
         "cache_status": result.cache_status,
         "can_promote": result.can_promote,
     }
+    previous_report_id = getattr(result, "previous_report_id", None)
+    if previous_report_id is not None:
+        structured.update(
+            {
+                "previous_report_id": previous_report_id,
+                "previous_revision": getattr(result, "previous_revision", None),
+                "changed_paths": list(getattr(result, "changed_paths", ())),
+                "changed_count": getattr(result, "changed_count", None),
+                "previous_display_text": getattr(result, "previous_display_text", None),
+            }
+        )
     return {
         "content": [{"type": "text", "text": result.display_text}],
         "structuredContent": structured,

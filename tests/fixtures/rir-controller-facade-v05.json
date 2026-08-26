@@ -342,7 +342,10 @@
         ["repo_root", "<missing>", "<missing>"],
         ["change_request", "<missing>", "<missing>"],
         ["evidence", "<missing>", "<missing>"],
-        ["audience_override", null, "<missing>"]
+        ["audience_override", null, "<missing>"],
+        ["previous_report_id", null, "<missing>"],
+        ["previous_revision", null, "<missing>"],
+        ["changed_paths", "<missing>", "<factory:tuple>"]
       ],
       "frozen": true
     },

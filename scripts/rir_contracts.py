@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -87,6 +87,9 @@ class ScanRequest:
     change_request: str
     evidence: tuple[str, ...]
     audience_override: str | None = None
+    previous_report_id: str | None = None
+    previous_revision: int | None = None
+    changed_paths: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

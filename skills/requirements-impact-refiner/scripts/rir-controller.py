@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 
 
 def _json_depth(text: str) -> int:
@@ -37,7 +38,7 @@ _MAX_JSON_DEPTH = 64
 import os
 import stat
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -55,7 +56,14 @@ BEGIN_KEYS = {
 }
 PREVIOUS_KEYS = {"request", "repository_evidence", "report_id"}
 PREVIOUS_REQUIRED_KEYS = {"request", "repository_evidence"}
-SCAN_KEYS = {"change_request", "evidence", "presentation"}
+SCAN_KEYS = {
+    "change_request",
+    "evidence",
+    "presentation",
+    "previous_report_id",
+    "previous_revision",
+    "changed_paths",
+}
 TRACE_KEYS = {"seeds"}
 TRACE_SEED_KEYS = {"term", "location"}
 
@@ -240,12 +248,44 @@ def _scan(args) -> int:
     evidence = value.get("evidence", [])
     if not isinstance(evidence, list):
         raise ValueError("scan evidence must be an array")
+    delta_keys = {"previous_report_id", "previous_revision", "changed_paths"}
+    present_delta = set(value) & delta_keys
+    if present_delta and present_delta != delta_keys:
+        raise ValueError("scan delta fields must be provided together")
+    changed_paths = value.get("changed_paths", [])
+    if present_delta:
+        report_id = value["previous_report_id"]
+        revision = value["previous_revision"]
+        if not isinstance(report_id, str) or re.fullmatch(r"RPT-\d{3}", report_id) is None:
+            raise ValueError("scan previous_report_id is invalid")
+        if type(revision) is not int or revision < 1:
+            raise ValueError("scan previous_revision is invalid")
+        if not isinstance(changed_paths, list) or len(changed_paths) > 4096:
+            raise ValueError("scan changed_paths must be a bounded array")
+        for path in changed_paths:
+            if not isinstance(path, str) or len(path.encode("utf-8")) > 4096:
+                raise ValueError("scan changed path is invalid")
+            pure = PurePosixPath(path)
+            if (
+                not path
+                or "\\" in path
+                or "\x00" in path
+                or pure.is_absolute()
+                or pure.as_posix() != path
+                or any(part in {"", ".", ".."} for part in pure.parts)
+            ):
+                raise ValueError("scan changed path is invalid")
+        if sorted(set(changed_paths)) != changed_paths:
+            raise ValueError("scan changed_paths must be unique and sorted")
     result = rir_controller.scan_impact(
         rir_controller.ScanRequest(
             args.repo_root,
             value["change_request"],
             tuple(evidence),
             value.get("presentation"),
+            value.get("previous_report_id"),
+            value.get("previous_revision"),
+            tuple(changed_paths),
         )
     )
     if args.json:
@@ -263,6 +303,17 @@ def _scan(args) -> int:
             "cache_status": result.cache_status,
             "can_promote": result.can_promote,
         }
+        previous_report_id = getattr(result, "previous_report_id", None)
+        if previous_report_id is not None:
+            payload.update(
+                {
+                    "previous_report_id": previous_report_id,
+                    "previous_revision": getattr(result, "previous_revision", None),
+                    "changed_paths": list(getattr(result, "changed_paths", ())),
+                    "changed_count": getattr(result, "changed_count", None),
+                    "previous_display_text": getattr(result, "previous_display_text", None),
+                }
+            )
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     else:
         print(result.display_text, end="" if result.display_text.endswith("\n") else "\n")

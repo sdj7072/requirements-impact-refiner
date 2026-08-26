@@ -1887,11 +1887,35 @@ class RirReportContextTest(unittest.TestCase):
         previous = CONTROLLER.lookup_previous(
             CONTROLLER.PreviousLookupRequest(self.root, change, evidence)
         )
+        delta = CONTROLLER.scan_impact(
+            CONTROLLER.ScanRequest(
+                self.root,
+                change,
+                evidence,
+                "balanced",
+                previous_report_id=previous.report_id,
+                previous_revision=previous.revision,
+                changed_paths=previous.changed_paths,
+            )
+        )
 
         self.assertIsNotNone(context)
         self.assertIsNone(context.required_source_digests)
         self.assertFalse(context.source_recheck_complete)
         self.assertEqual(previous.status, "stale")
+        self.assertIn(delta.status, {"complete", "partial"})
+        self.assertEqual(delta.previous_report_id, previous.report_id)
+        self.assertEqual(delta.previous_revision, previous.revision)
+        self.assertEqual(delta.changed_paths, previous.changed_paths)
+        self.assertTrue(delta.display_text.startswith(previous.display_text))
+        self.assertLessEqual(delta.elapsed_ms, 3_000)
+        delta_receipt = json.loads(
+            (
+                self.root / ".requirements-impact-refiner" / "scans" / f"{delta.scan_id}.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(delta_receipt["settings"]["max_seconds"], 3)
+        self.assertEqual(delta_receipt["delta_context"]["previous_revision"], previous.revision)
 
     def test_complete_recheck_map_unions_inventory_with_readable_explicit_seed(self):
         self.configure_graph(True)

@@ -31,18 +31,20 @@ MCP-capable Codex and Claude clients use the same semantic route. CLI fallback r
 | Status | Display | Next action | Scan fields | Ask question | Previous body |
 | --- | --- | --- | --- | --- | --- |
 | `fresh` | `display_text` | `stop` | `none` | `no` | `yes` |
-| `stale` | `display_text-before-scan` | `rir_scan-if-forwardable` | `repo_root,change_request,evidence,presentation` | `no` | `yes` |
+| `stale` | `display_text-before-scan` | `rir_scan-if-forwardable` | `repo_root,change_request,evidence,presentation,previous_report_id,previous_revision,changed_paths` | `no` | `yes` |
 | `none` | `none` | `rir_scan-if-forwardable` | `repo_root,change_request,evidence,presentation` | `no` | `no` |
 | `ambiguous` | `candidate-question` | `rir_previous(report_id)` | `none` | `yes` | `no` |
 
 - `fresh`: return `display_text` and stop. Do no scan, provider, graph, or model work.
-- `stale`: return `display_text` first. If scan-forwardable, run one ordinary scan; otherwise stop after the shortening instruction.
+- `stale`: return `display_text` first. If scan-forwardable, run one delta scan with the selected identity and changed paths; otherwise stop after the shortening instruction.
 - `none`: if scan-forwardable, run one ordinary scan; otherwise stop after the shortening instruction.
 - `ambiguous`: show only the returned candidates—at most 16 rows of `report_id`, `revision`, and `created_at`—and ask which report ID to use. Stop. A reply restarts lookup with the exact same root, request, ordered evidence, payload, and a `report_id` from that displayed window. Never display a body from the initial ambiguous response. A missing, malformed, foreign, guessed, or undisclosed ID returns no body and does not scan. No pagination is available or implied.
 
 Before `rir_scan`, separately require request UTF-8 at most 4 KiB, at most 32 evidence rows, and at most 4 KiB UTF-8 per row. A wider fresh lookup still returns and stops. A wider stale/none result never calls an invalid scan: keep any stale display, emit one bounded sentence in the request language asking for shorter input and naming those limits, then stop. English: “Shorten the request to 4 KiB and evidence to 32 rows of 4 KiB, then retry.” Korean: “요청은 4 KiB 이하, 근거는 행당 4 KiB 이하로 32개까지 줄인 뒤 다시 시도해 주세요.” Japanese: “リクエストを4 KiB以下、根拠を1行4 KiB以下で32件までに短縮して再試行してください。”
 
-For every ordinary scan, map `repo_root` unchanged, `request` to `change_request`, and `repository_evidence` to `evidence` without sorting or deduplicating; optional `presentation` is the selected audience. The current `rir_scan` schema has no report ID, revision, or changed-path input.
+For `none`, map `repo_root` unchanged, `request` to `change_request`, and `repository_evidence` to `evidence` without sorting or deduplicating; optional `presentation` is the selected audience. For `stale`, add the exact tool-owned `report_id` as `previous_report_id`, `revision` as `previous_revision`, and `changed_paths` unchanged. These three fields are an all-or-none hint set: the backend repeats the exact same-repository/request/ordered-evidence lookup with that disclosed report ID and accepts prior state only when the result is still `stale` and its revision and changed paths match. A fresh, forged, mismatched, foreign, or concurrently changed hint set fails closed and performs no scan.
+
+Only a validated stale delta uses the configured `delta_max_seconds`, hard-capped at 3 seconds. Ordinary `none` scans keep their existing graph budget. A delta deadline returns `partial`, `can_promote=false`, the prior revision identity and display, changed-path summary, and all surviving unknown frontiers; it never substitutes an invented path or drops the valid previous result.
 
 ## Scan result contract
 

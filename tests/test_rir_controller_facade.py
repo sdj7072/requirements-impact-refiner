@@ -99,6 +99,8 @@ def default_contract(value):
         return "<missing>"
     if callable(value):
         return f"<factory:{value.__qualname__}>"
+    if isinstance(value, tuple):
+        return list(value)
     return value
 
 

@@ -280,6 +280,7 @@ for name in (
     "graph_builtin",
     "graph_coordinator",
     "payload_identity",
+    "rir_delta",
 ):
     module = types.ModuleType(name)
     module.__file__ = f"/tmp/foreign-{name}.py"
@@ -343,6 +344,7 @@ with tempfile.TemporaryDirectory() as temporary:
         assert Path(controller.FAST_SCAN_STORE.__file__).resolve() == (directory / "fast_scan_store.py").resolve()
         assert Path(controller.FAST_SCAN_RENDERER.__file__).resolve() == (directory / "fast_scan_renderer.py").resolve()
         assert Path(controller.PAYLOAD_IDENTITY.__file__).resolve() == (directory / "payload_identity.py").resolve()
+        assert Path(controller.DELTA.__file__).resolve() == (directory / "rir_delta.py").resolve()
         assert controller.FAST_SCAN.fast_scan_renderer is controller.FAST_SCAN_RENDERER
         assert controller.FAST_SCAN.fast_scan_store is controller.FAST_SCAN_STORE
         assert controller.FAST_SCAN.graph_builtin is controller.GRAPH_COORDINATOR.BUILTIN
@@ -370,6 +372,7 @@ with tempfile.TemporaryDirectory() as temporary:
 assert controllers[0].FAST_SCAN is not controllers[1].FAST_SCAN
 assert controllers[0].FAST_SCAN_STORE is not controllers[1].FAST_SCAN_STORE
 assert controllers[0].GRAPH_COORDINATOR is not controllers[1].GRAPH_COORDINATOR
+assert controllers[0].DELTA is not controllers[1].DELTA
 assert calls == [], calls
 """
         result = subprocess.run(

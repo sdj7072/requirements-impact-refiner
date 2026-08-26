@@ -10,6 +10,8 @@ from pathlib import Path
 AUDIENCES = ("simple", "balanced", "technical")
 DELIVERIES = ("compact", "full")
 CONFIG_NAME = ".requirements-impact-refiner.json"
+DELTA_MAX_SECONDS_DEFAULT = 3
+DELTA_MAX_SECONDS_LIMIT = 30
 GRAPH_DEFAULTS = {
     "enabled": True,
     "max_seconds": 30,
@@ -51,7 +53,7 @@ def load_repository_config(project_root: Path) -> dict[str, object]:
         raise ValueError(f"cannot read {CONFIG_NAME}: {error}") from error
     if not isinstance(value, dict):
         raise ValueError(f"{CONFIG_NAME} must contain a JSON object")
-    unknown = sorted(set(value) - {"audience", "delivery", "impact_graph"})
+    unknown = sorted(set(value) - {"audience", "delivery", "impact_graph", "delta_max_seconds"})
     if unknown:
         raise ValueError(f"unsupported setting(s): {', '.join(unknown)}")
     return value
@@ -121,6 +123,26 @@ def resolve_graph_settings(config: dict[str, object]) -> tuple[dict[str, object]
     }, None
 
 
+def _resolve_delta_max_seconds(config: dict[str, object]) -> tuple[int, str | None]:
+    configured = config.get("delta_max_seconds", DELTA_MAX_SECONDS_DEFAULT)
+    if (
+        not isinstance(configured, int)
+        or isinstance(configured, bool)
+        or configured < 1
+        or configured > DELTA_MAX_SECONDS_LIMIT
+    ):
+        return (
+            DELTA_MAX_SECONDS_DEFAULT,
+            "delta_max_seconds must be a positive integer at most 30",
+        )
+    return configured, None
+
+
+def resolve_delta_max_seconds(project_root: Path) -> int:
+    value, _warning = _resolve_delta_max_seconds(load_repository_config(project_root))
+    return value
+
+
 def resolve(
     project_root: Path,
     audience_override: str | None,
@@ -134,6 +156,7 @@ def resolve(
         "delivery", delivery_override, config, DELIVERIES, "compact"
     )
     impact_graph, warning = resolve_graph_settings(config)
+    _delta_max_seconds, delta_warning = _resolve_delta_max_seconds(config)
     resolved: dict[str, object] = {
         "audience": audience,
         "audience_source": audience_source,
@@ -141,8 +164,13 @@ def resolve(
         "delivery_source": delivery_source,
         "impact_graph": impact_graph,
     }
+    warnings = []
     if warning is not None:
-        resolved["warnings"] = ["invalid impact_graph configuration: " + warning]
+        warnings.append("invalid impact_graph configuration: " + warning)
+    if delta_warning is not None:
+        warnings.append("invalid delta_max_seconds configuration: " + delta_warning)
+    if warnings:
+        resolved["warnings"] = warnings
     return resolved
 
 

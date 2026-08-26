@@ -32,12 +32,14 @@ MAX_CHANGE_BYTES = 4 * 1024
 MAX_EVIDENCE_ROWS = 32
 MAX_EVIDENCE_BYTES = 4 * 1024
 MAX_SEEDS = 16
+MAX_DELTA_SEEDS = 512
 MAX_SOURCE_BYTES = 1024 * 1024
-MAX_FRONTIER = 128
+MAX_FRONTIER = 1024
 MAX_CANDIDATES = 3
 
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_REPORT_ID = re.compile(r"^RPT-\d{3}$")
 _TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 _PATH = re.compile(
     r"(?<![A-Za-z0-9_.-])"
@@ -98,6 +100,8 @@ _SOURCE_SUFFIXES = {
 # dependency files are never read or hashed.
 _CONTROL_PARTS = {
     ".git",
+    ".mypy_cache",
+    ".quality-venv",
     ".requirements-impact-refiner",
     "__pycache__",
     ".pytest_cache",
@@ -122,6 +126,7 @@ _REQUIRED_KEYS = {
     "can_promote",
     "created_at",
 }
+_OPTIONAL_KEYS = {"delta_context"}
 _STATUSES = {"complete", "partial", "needs_input"}
 _RISKS = {"low", "medium", "high", "critical", "unknown"}
 _CACHE = {"hit", "miss", "bypassed"}
@@ -167,10 +172,15 @@ class FastScanRequest:
     change_request: str
     evidence: tuple[str, ...]
     audience: str
+    previous_report_id: str | None = None
+    previous_revision: int | None = None
+    changed_paths: tuple[str, ...] = ()
+    delta_max_seconds: int = 3
 
     def __post_init__(self):
         object.__setattr__(self, "repo_root", Path(self.repo_root))
         object.__setattr__(self, "evidence", tuple(self.evidence))
+        object.__setattr__(self, "changed_paths", tuple(self.changed_paths))
 
 
 @dataclass(frozen=True)
@@ -193,6 +203,7 @@ class FastScanReceipt:
     cache_status: str
     can_promote: bool
     created_at: str
+    delta_context: Mapping[str, object] | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "settings", _freeze(self.settings))
@@ -201,9 +212,11 @@ class FastScanReceipt:
         object.__setattr__(self, "graph_receipt", _freeze(self.graph_receipt))
         object.__setattr__(self, "frontier", tuple(_freeze(row) for row in self.frontier))
         object.__setattr__(self, "candidates", tuple(_freeze(row) for row in self.candidates))
+        if self.delta_context is not None:
+            object.__setattr__(self, "delta_context", _freeze(self.delta_context))
 
     def to_mapping(self) -> dict[str, object]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "status": self.status,
             "scan_id": self.scan_id,
@@ -223,6 +236,9 @@ class FastScanReceipt:
             "can_promote": self.can_promote,
             "created_at": self.created_at,
         }
+        if self.delta_context is not None:
+            value["delta_context"] = _thaw(self.delta_context)
+        return value
 
 
 @dataclass(frozen=True)
@@ -239,6 +255,11 @@ class FastScanResult:
     elapsed_ms: int
     cache_status: str
     can_promote: bool
+    previous_report_id: str | None = None
+    previous_revision: int | None = None
+    changed_paths: tuple[str, ...] = ()
+    changed_count: int | None = None
+    previous_display_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -252,6 +273,7 @@ class PreparedFastScan:
     request_sha256: str
     scan_id: str
     repo_root_sha256: str
+    delta_context: Mapping[str, object] | None = None
 
 
 def _root(value: Path) -> Path:
@@ -307,6 +329,29 @@ class _Coordinator(Protocol):
         deadline: graph_coordinator.Deadline,
         source_inventory: graph_coordinator.SourceInventory,
     ) -> object: ...
+
+
+class _DeltaSeedContract(Protocol):
+    term: str
+    location: str | None
+    derivation: str
+    source_sha256: str | None
+
+
+class _DeltaContext(Protocol):
+    previous_report_id: str
+    previous_revision: int
+    changed_paths: tuple[str, ...]
+    max_seconds: int
+    previous_display_text: str
+
+    def derive_seeds(
+        self, request_seeds: Sequence[DerivedSeed] = ()
+    ) -> tuple[_DeltaSeedContract, ...]: ...
+
+    def to_mapping(self, seeds: Sequence[_DeltaSeedContract]) -> dict[str, object]: ...
+
+    def merge_frontier(self, graph: Mapping[str, object]) -> tuple[Mapping[str, object], ...]: ...
 
 
 def _safe_relative(value: object) -> TypeGuard[str]:
@@ -436,7 +481,8 @@ def _read_source_detailed(root: Path, relative: str) -> tuple[tuple[str, str] | 
             os.close(root_fd)
 
 
-def _source_files(root: Path, deadline: object):
+def _source_files(root: Path, deadline: object, explicit_paths: Sequence[str] = ()):
+    seen: set[str] = set()
     for directory, names, files in os.walk(root, followlinks=False):
         if _expired(deadline):
             return
@@ -466,7 +512,16 @@ def _source_files(root: Path, deadline: object):
                     continue
             except OSError:
                 continue
+            seen.add(relative)
             yield relative
+    for relative in explicit_paths:
+        if _expired(deadline):
+            return
+        if relative in seen or not _safe_relative(relative):
+            continue
+        if Path(relative).suffix.lower() not in _SOURCE_SUFFIXES:
+            continue
+        yield relative
 
 
 def _validate_inputs(
@@ -602,6 +657,89 @@ def _row_tuple(value: object) -> tuple[Mapping[str, object], ...]:
     return tuple(value) if _rows(value) else ()
 
 
+_DELTA_CONTEXT_KEYS = {
+    "previous_report_id",
+    "previous_revision",
+    "previous_markdown_sha256",
+    "previous_state_sha256",
+    "previous_display_text",
+    "changed_paths",
+    "changed_count",
+    "max_seconds",
+    "seed_provenance",
+    "previous_frontier",
+}
+
+
+def _validate_delta_mapping(value: object, seeds: object) -> tuple[str, ...]:
+    errors: list[str] = []
+    if not _mapping(value) or set(value) != _DELTA_CONTEXT_KEYS:
+        return ("delta_context must have exact fields",)
+    report_id = value["previous_report_id"]
+    if not isinstance(report_id, str) or _REPORT_ID.fullmatch(report_id) is None:
+        errors.append("delta_context previous_report_id is invalid")
+    revision = value["previous_revision"]
+    if type(revision) is not int or revision < 1:
+        errors.append("delta_context previous_revision is invalid")
+    for key in ("previous_markdown_sha256", "previous_state_sha256"):
+        digest = value[key]
+        if not isinstance(digest, str) or _HEX64.fullmatch(digest) is None:
+            errors.append(f"delta_context {key} is invalid")
+    display = value["previous_display_text"]
+    try:
+        display_valid = (
+            isinstance(display, str)
+            and bool(display.strip())
+            and len(display.encode("utf-8")) <= 256 * 1024
+        )
+    except UnicodeEncodeError:
+        display_valid = False
+    if not display_valid:
+        errors.append("delta_context previous_display_text is invalid")
+    paths = value["changed_paths"]
+    if (
+        not isinstance(paths, list)
+        or any(not _safe_relative(path) for path in paths)
+        or sorted(set(paths)) != paths
+    ):
+        errors.append("delta_context changed_paths are invalid")
+    count = value["changed_count"]
+    if count is not None and (
+        type(count) is not int or not isinstance(paths, list) or count < len(paths)
+    ):
+        errors.append("delta_context changed_count is invalid")
+    maximum = value["max_seconds"]
+    if type(maximum) is not int or not 1 <= maximum <= 3:
+        errors.append("delta_context max_seconds must be an integer from 1 to 3")
+    provenance = value["seed_provenance"]
+    if (
+        not isinstance(provenance, list)
+        or not isinstance(seeds, list)
+        or len(provenance) != len(seeds)
+    ):
+        errors.append("delta_context seed_provenance must match seeds")
+    else:
+        for row in provenance:
+            if (
+                not _mapping(row)
+                or set(row) != {"term", "location", "derivation", "provenance"}
+                or not _string(row["term"])
+                or (row["location"] is not None and not _safe_relative(row["location"]))
+                or not _string(row["derivation"])
+                or not _mapping(row["provenance"])
+            ):
+                errors.append("delta_context seed_provenance is invalid")
+                break
+    previous_frontier = value["previous_frontier"]
+    if (
+        not isinstance(previous_frontier, list)
+        or len(previous_frontier) > 512
+        or any(not _mapping(row) for row in previous_frontier)
+    ):
+        errors.append("delta_context previous_frontier is invalid")
+    return tuple(errors)
+
+
 def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
     errors: list[str] = []
     if not _mapping(value):
@@ -609,7 +747,7 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
     keys = set(value)
     for key in sorted(_REQUIRED_KEYS - keys):
         errors.append(f"missing top-level key {key}")
-    for key in sorted(keys - _REQUIRED_KEYS):
+    for key in sorted(keys - _REQUIRED_KEYS - _OPTIONAL_KEYS):
         errors.append(f"unknown top-level key {key}")
     if _REQUIRED_KEYS - keys:
         return tuple(errors)
@@ -664,8 +802,12 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
             if inventory_complete is False and inventory_reason is None:
                 errors.append("incomplete source_inventory requires a reason")
 
+    delta_value = value.get("delta_context")
+    if delta_value is not None:
+        errors.extend(_validate_delta_mapping(delta_value, value["seeds"]))
     seeds = value["seeds"]
-    if not isinstance(seeds, list) or len(seeds) > MAX_SEEDS:
+    seed_maximum = MAX_DELTA_SEEDS if delta_value is not None else MAX_SEEDS
+    if not isinstance(seeds, list) or len(seeds) > seed_maximum:
         errors.append("seeds exceeds maximum collection size")
     else:
         identities = set()
@@ -743,6 +885,8 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
             errors.append("needs_input scan cannot contain graph evidence")
         if isinstance(risk_level, str) and risk_level in _RISKS and risk_level != "unknown":
             errors.append("needs_input risk_level must be unknown")
+        if delta_value is not None:
+            errors.append("delta scan cannot require input")
     elif status_valid and status == "partial":
         if can_promote_valid and can_promote:
             errors.append("partial scan cannot be promoted")
@@ -836,11 +980,13 @@ def _only_expected_provider_gap(graph: Mapping[str, object]) -> bool:
 
 
 def _inventory(
-    root: Path, deadline: graph_coordinator.Deadline
+    root: Path,
+    deadline: graph_coordinator.Deadline,
+    explicit_paths: Sequence[str] = (),
 ) -> graph_coordinator.SourceInventory:
     digests: dict[str, str] = {}
     unreadable = False
-    for relative in _source_files(root, deadline):
+    for relative in _source_files(root, deadline, explicit_paths):
         source, reason = _read_source_detailed(root, relative)
         if source is not None:
             digests[relative] = source[1]
@@ -851,6 +997,74 @@ def _inventory(
     if unreadable:
         return graph_coordinator.SourceInventory(digests, False, "unreadable-source")
     return graph_coordinator.SourceInventory(digests, True, None)
+
+
+def _delta_hints_present(request: FastScanRequest) -> bool:
+    return (
+        request.previous_report_id is not None
+        or request.previous_revision is not None
+        or bool(request.changed_paths)
+    )
+
+
+def _validated_delta_context(request: FastScanRequest, value: object) -> _DeltaContext | None:
+    if value is None:
+        if _delta_hints_present(request):
+            raise ValueError("delta hints require a trusted delta context")
+        return None
+    required = (
+        "previous_report_id",
+        "previous_revision",
+        "changed_paths",
+        "max_seconds",
+        "previous_display_text",
+        "derive_seeds",
+        "to_mapping",
+        "merge_frontier",
+    )
+    if any(not hasattr(value, name) for name in required):
+        raise TypeError("delta_context has an incomplete trusted contract")
+    trusted = cast(_DeltaContext, value)
+    if (
+        request.previous_report_id is None
+        or request.previous_revision is None
+        or request.previous_report_id != trusted.previous_report_id
+        or request.previous_revision != trusted.previous_revision
+        or request.changed_paths != trusted.changed_paths
+    ):
+        raise ValueError("scan delta hints do not match trusted delta context")
+    if (
+        type(request.delta_max_seconds) is not int
+        or request.delta_max_seconds < 1
+        or trusted.max_seconds != min(request.delta_max_seconds, 3)
+    ):
+        raise ValueError("scan delta_max_seconds does not match trusted delta context")
+    return trusted
+
+
+def _delta_result_fields(
+    delta_mapping: object,
+) -> tuple[str | None, int | None, tuple[str, ...], int | None, str | None]:
+    if not _mapping(delta_mapping):
+        return None, None, (), None, None
+    report_id = delta_mapping.get("previous_report_id")
+    revision = delta_mapping.get("previous_revision")
+    changed = delta_mapping.get("changed_paths")
+    count = delta_mapping.get("changed_count")
+    display = delta_mapping.get("previous_display_text")
+    return (
+        report_id if isinstance(report_id, str) else None,
+        revision if type(revision) is int else None,
+        tuple(changed) if isinstance(changed, list) else (),
+        count if type(count) is int else None,
+        display if isinstance(display, str) else None,
+    )
+
+
+def _display_with_previous(previous: str | None, current: str) -> str:
+    if previous is None:
+        return current
+    return previous.rstrip() + "\n\n" + current.lstrip()
 
 
 def _risk(graph: Mapping[str, object]) -> str:
@@ -879,8 +1093,10 @@ def execute_fast_scan(
     payload_sha256: str,
     *,
     coordinator: _Coordinator = graph_coordinator.trace_impact,
+    delta_context: object | None = None,
 ) -> FastScanResult:
-    prepared = prepare_fast_scan_identity(request, graph_settings, payload_sha256)
+    delta_context = _validated_delta_context(request, delta_context)
+    prepared = prepare_fast_scan_identity(request, graph_settings, payload_sha256, delta_context)
     locale = _request_locale(request)
     root = prepared.root
     settings = prepared.settings
@@ -891,6 +1107,7 @@ def execute_fast_scan(
     request_sha = prepared.request_sha256
     scan_id = prepared.scan_id
     root_sha = prepared.repo_root_sha256
+    delta_mapping = prepared.delta_context
 
     try:
         existing_payload = fast_scan_store.load_scan_receipt_bytes(root, scan_id)
@@ -910,12 +1127,19 @@ def execute_fast_scan(
         rendered["cache_status"] = "hit"
         display = fast_scan_renderer.render_fast_scan(rendered, request.audience, locale)
         graph = existing["graph_receipt"]
+        (
+            previous_report_id,
+            previous_revision,
+            changed_paths,
+            changed_count,
+            previous_display,
+        ) = _delta_result_fields(existing.get("delta_context"))
         return FastScanResult(
             existing["status"],
             scan_id,
             existing["receipt_id"],
             hashlib.sha256(existing_payload).hexdigest(),
-            display,
+            _display_with_previous(previous_display, display),
             existing["risk_level"],
             _row_tuple(graph.get("paths", [])),
             tuple(existing["frontier"]),
@@ -923,12 +1147,24 @@ def execute_fast_scan(
             min(30_000, deadline.elapsed_ms()),
             "hit",
             existing["can_promote"],
+            previous_report_id,
+            previous_revision,
+            changed_paths,
+            changed_count,
+            previous_display,
         )
     candidates: list[Mapping[str, object]] = []
-    if not seeds:
+    merged_frontier: tuple[Mapping[str, object], ...] = ()
+    if not seeds and delta_context is None:
         graph = {}
         status = "needs_input"
         receipt_id = hashlib.sha256((scan_id + ":needs-input").encode()).hexdigest()[:32]
+        risk_level = "unknown"
+        cache_status = "bypassed"
+    elif not seeds:
+        graph = {}
+        status = "partial"
+        receipt_id = hashlib.sha256((scan_id + ":delta-no-seed").encode()).hexdigest()[:32]
         risk_level = "unknown"
         cache_status = "bypassed"
     else:
@@ -965,7 +1201,23 @@ def execute_fast_scan(
         cache_value = graph.get("cache", {})
         cache_mapping = cache_value if _mapping(cache_value) else {}
         cache_status = str(cache_mapping.get("status", "bypassed"))
-    elapsed = min(30_000, deadline.elapsed_ms())
+    if delta_context is not None:
+        merged_value = delta_context.merge_frontier(graph)
+        if not isinstance(merged_value, tuple) or any(
+            not isinstance(row, Mapping) for row in merged_value
+        ):
+            raise TypeError("trusted delta frontier contract is invalid")
+        merged_frontier = merged_value
+        if status != "needs_input" and (
+            graph.get("budget_status") != "closed"
+            or not source_inventory.complete
+            or merged_frontier
+        ):
+            status = "partial"
+    else:
+        merged_frontier = _row_tuple(graph.get("frontier", []))
+    elapsed_limit = int(delta_context.max_seconds) * 1_000 if delta_context is not None else 30_000
+    elapsed = min(elapsed_limit, deadline.elapsed_ms())
     receipt = FastScanReceipt(
         1,
         status,
@@ -979,31 +1231,44 @@ def execute_fast_scan(
         seeds,
         graph,
         risk_level,
-        _row_tuple(graph.get("frontier", [])),
+        merged_frontier,
         tuple(candidates),
         elapsed,
         cache_status,
         status == "complete",
         datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        delta_mapping,
     )
     payload = canonical_fast_scan_bytes(receipt)
     fast_scan_store.publish_scan_receipt(root, scan_id, payload)
     mapping = receipt.to_mapping()
     display = fast_scan_renderer.render_fast_scan(mapping, request.audience, locale)
     digest = hashlib.sha256(payload).hexdigest()
+    (
+        previous_report_id,
+        previous_revision,
+        changed_paths,
+        changed_count,
+        previous_display,
+    ) = _delta_result_fields(delta_mapping)
     return FastScanResult(
         status,
         scan_id,
         receipt_id,
         digest,
-        display,
+        _display_with_previous(previous_display, display),
         risk_level,
         _row_tuple(graph.get("paths", [])),
-        _row_tuple(graph.get("frontier", [])),
+        merged_frontier,
         tuple(candidates),
         elapsed,
         cache_status,
         status == "complete",
+        previous_report_id,
+        previous_revision,
+        changed_paths,
+        changed_count,
+        previous_display,
     )
 
 
@@ -1011,8 +1276,10 @@ def prepare_fast_scan_identity(
     request: FastScanRequest,
     graph_settings: Mapping[str, object],
     payload_sha256: str,
+    delta_context: object | None = None,
 ) -> PreparedFastScan:
     root = _root(request.repo_root)
+    delta_context = _validated_delta_context(request, delta_context)
     if not isinstance(payload_sha256, str) or _HEX64.fullmatch(payload_sha256) is None:
         raise ValueError("payload_sha256 must be 64 lowercase hex characters")
     settings_mapping = dict(graph_settings)
@@ -1020,27 +1287,59 @@ def prepare_fast_scan_identity(
     graph_coordinator.GRAPH._validate_settings(settings_mapping, settings_errors)
     if settings_errors:
         raise ValueError("invalid graph settings: " + "; ".join(settings_errors))
+    if delta_context is not None:
+        effective_maximum = min(
+            cast(int, settings_mapping["max_seconds"]),
+            delta_context.max_seconds,
+        )
+        settings_mapping["max_seconds"] = effective_maximum
+        settings_mapping["target_seconds"] = min(
+            cast(int, settings_mapping["target_seconds"]), effective_maximum
+        )
     constructor_mapping = dict(settings_mapping)
     constructor_mapping["providers"] = tuple(cast(list[str], settings_mapping["providers"]))
     settings = graph_coordinator.GraphSettings(**cast(_GraphSettingsArgs, constructor_mapping))
     deadline = graph_coordinator.Deadline(time, settings.max_seconds)
-    seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
+    request_seeds = derive_seeds(root, request.change_request, request.evidence, deadline)
+    if delta_context is None:
+        seeds = request_seeds
+        delta_mapping = None
+    else:
+        derived = delta_context.derive_seeds(request_seeds)
+        if not isinstance(derived, tuple):
+            raise TypeError("trusted delta seed contract is invalid")
+        seeds = tuple(
+            DerivedSeed(
+                row.term,
+                row.location,
+                row.derivation,
+                row.source_sha256,
+            )
+            for row in derived
+        )
+        delta_mapping_value = delta_context.to_mapping(derived)
+        if not _mapping(delta_mapping_value):
+            raise TypeError("trusted delta context mapping is invalid")
+        delta_mapping = dict(delta_mapping_value)
     source_inventory = _inventory(root, deadline)
     inventory_mapping = {
         "digests": dict(source_inventory.digests),
         "complete": source_inventory.complete,
         "reason": source_inventory.reason,
     }
+    identity_value = {
+        "root": str(root),
+        "change_request": request.change_request,
+        "evidence": list(request.evidence),
+        "settings": settings.to_mapping(),
+        "payload_sha256": payload_sha256,
+        "source_inventory": inventory_mapping,
+        "seeds": [row.to_mapping() for row in seeds],
+    }
+    if delta_mapping is not None:
+        identity_value["delta_context"] = delta_mapping
     identity = json.dumps(
-        {
-            "root": str(root),
-            "change_request": request.change_request,
-            "evidence": list(request.evidence),
-            "settings": settings.to_mapping(),
-            "payload_sha256": payload_sha256,
-            "source_inventory": inventory_mapping,
-            "seeds": [row.to_mapping() for row in seeds],
-        },
+        identity_value,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -1058,6 +1357,7 @@ def prepare_fast_scan_identity(
         request_sha,
         scan_id,
         root_sha,
+        delta_mapping,
     )
 
 

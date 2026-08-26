@@ -15,7 +15,7 @@ Use for concrete pre-planning changes; not ideation, debugging, code review, or 
 
 1. Read [Previous-report bootstrap](references/previous-report.md).
 2. Call `rir_previous` once with the change and ordered evidence.
-3. Scan forwardable `stale`/`none`; resolve `ambiguous` with `report_id`. Stop.
+3. Scan `stale` with exact delta hints; scan `none`; resolve `ambiguous` by `report_id`. Stop.
 
 Never invent confirmation. Resolve links from this `SKILL.md` directory; ordered evidence means supplied evidence. Read [Fast Scan](references/fast-scan.md) only for fallback.
 

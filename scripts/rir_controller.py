@@ -607,6 +607,8 @@ class _SettingsContract(Protocol):
         delivery_override: str | None,
     ) -> SettingsPayload: ...
 
+    def resolve_delta_max_seconds(self, repo_root: Path) -> int: ...
+
 
 class _GraphContract(Protocol):
     ProviderStatus: type[ProviderStatusType]
@@ -941,6 +943,24 @@ def _is_fast_scan_shape(value: object) -> bool:
     )
 
 
+def _is_delta_contract(value: object) -> bool:
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_delta.py")
+        and _classes(value, ("DeltaScanContext", "DeltaSeed", "DeltaSourceInventory"))
+        and type(getattr(value, "MAX_DELTA_SECONDS", None)) is int
+        and _callables(
+            value,
+            (
+                "bind_delta_context",
+                "collect_sources",
+                "derive_delta_seeds",
+                "load_trusted_previous_artifacts",
+                "validate_delta_hints",
+            ),
+        )
+    )
+
+
 def _is_payload_identity_contract(value: object) -> bool:
     root_files = getattr(value, "ROOT_FILES", None)
     return (
@@ -953,6 +973,7 @@ def _is_payload_identity_contract(value: object) -> bool:
             "scripts/rir_previous.py",
             "scripts/rir_previous_renderer.py",
             "scripts/rir_controller.py",
+            "scripts/rir_delta.py",
         }
         <= set(root_files)
         and _callables(value, ("functional_paths", "payload_sha256"))
@@ -960,7 +981,7 @@ def _is_payload_identity_contract(value: object) -> bool:
 
 
 def _is_settings_contract(value: object) -> TypeGuard[_SettingsContract]:
-    return _callables(value, ("resolve",))
+    return _callables(value, ("resolve", "resolve_delta_max_seconds"))
 
 
 def _is_graph_contract(value: object) -> TypeGuard[_GraphContract]:
@@ -1169,6 +1190,13 @@ def _load_controller_fast_scan_graph():
         _is_fast_scan_store_contract,
         "Fast Scan store",
     )
+    delta = _load_controller_sibling(
+        "rir_delta.py",
+        "rir_delta",
+        "_rir_controller_delta_",
+        _is_delta_contract,
+        "delta scan",
+    )
 
     def valid(value: object) -> bool:
         return (
@@ -1200,7 +1228,7 @@ def _load_controller_fast_scan_graph():
         _is_payload_identity_contract,
         "payload identity",
     )
-    return renderer, store, fast_scan_module, payload_identity_module
+    return renderer, store, fast_scan_module, payload_identity_module, delta
 
 
 (
@@ -1208,11 +1236,13 @@ def _load_controller_fast_scan_graph():
     FAST_SCAN_STORE,
     FAST_SCAN,
     PAYLOAD_IDENTITY,
+    DELTA,
 ) = _load_controller_fast_scan_graph()
 fast_scan_renderer = FAST_SCAN_RENDERER
 fast_scan_store = FAST_SCAN_STORE
 fast_scan = FAST_SCAN
 payload_identity = PAYLOAD_IDENTITY
+rir_delta = DELTA
 
 
 def _is_receipt_payload(value: object) -> TypeGuard[ReceiptPayload]:
@@ -1349,17 +1379,102 @@ def _payload_sha256() -> str:
     return PAYLOAD_IDENTITY.payload_sha256(candidate)
 
 
+def _previous_delta_identity(value: object) -> tuple[object, ...]:
+    return tuple(
+        getattr(value, name, None)
+        for name in (
+            "status",
+            "report_id",
+            "revision",
+            "markdown_sha256",
+            "changed_paths",
+            "changed_count",
+            "requirement_sha256",
+            "source_inventory_sha256",
+            "display_text",
+        )
+    )
+
+
+def _configured_delta_max_seconds(root: Path, settings: Mapping[str, object]) -> int:
+    configured = settings.get("delta_max_seconds")
+    if configured is None:
+        configured = SETTINGS.resolve_delta_max_seconds(root)
+    if type(configured) is not int or configured < 1:
+        raise ValueError("delta_max_seconds must be a positive integer")
+    return configured
+
+
+def _trusted_delta_context(root: Path, request: ScanRequest, settings: Mapping[str, object]):
+    changed_paths = tuple(request.changed_paths)
+    hints_present = (
+        request.previous_report_id is not None
+        or request.previous_revision is not None
+        or bool(changed_paths)
+    )
+    if not hints_present:
+        return None
+    if request.previous_report_id is None or request.previous_revision is None:
+        raise ValueError("delta hints require previous_report_id and previous_revision")
+    lookup_request = PreviousLookupRequest(
+        root,
+        request.change_request,
+        request.evidence,
+        request.previous_report_id,
+    )
+    trusted = lookup_previous(lookup_request)
+    DELTA.validate_delta_hints(
+        trusted,
+        request.previous_report_id,
+        request.previous_revision,
+        changed_paths,
+    )
+    state, graph = DELTA.load_trusted_previous_artifacts(
+        root,
+        trusted,
+        state_loader=cast(Any, STORAGE.COMPACT_STATE).load_state_bytes,
+        receipt_loader=GRAPH.load_receipt_bytes,
+        canonical_receipt_bytes=GRAPH.canonical_receipt_bytes,
+        max_receipt_bytes=GRAPH.MAX_RECEIPT_BYTES,
+    )
+    verified = lookup_previous(lookup_request)
+    if _previous_delta_identity(verified) != _previous_delta_identity(trusted):
+        raise ValueError("trusted stale previous identity changed during delta binding")
+    configured = _configured_delta_max_seconds(root, settings)
+    return DELTA.bind_delta_context(
+        root,
+        verified,
+        state,
+        graph,
+        previous_report_id=request.previous_report_id,
+        previous_revision=request.previous_revision,
+        changed_paths=changed_paths,
+        configured_max_seconds=configured,
+    )
+
+
 def scan_impact(request: ScanRequest) -> ScanResult:
     root = _root(request.repo_root)
     if not isinstance(request.evidence, tuple):
         raise ValueError("scan evidence must be a tuple")
     settings = SETTINGS.resolve(root, request.audience_override, None)
+    delta_context = _trusted_delta_context(root, request, settings)
     return FAST_SCAN.execute_fast_scan(
         FAST_SCAN.FastScanRequest(
-            root, request.change_request, request.evidence, settings["audience"]
+            root,
+            request.change_request,
+            request.evidence,
+            settings["audience"],
+            previous_report_id=request.previous_report_id,
+            previous_revision=request.previous_revision,
+            changed_paths=tuple(request.changed_paths),
+            delta_max_seconds=(
+                _configured_delta_max_seconds(root, settings) if delta_context is not None else 3
+            ),
         ),
         settings["impact_graph"],
         _payload_sha256(),
+        delta_context=delta_context,
     )
 
 
@@ -1368,15 +1483,55 @@ def _promoted_scan(root, request, settings):
         return None
     if DRAFT_ID_PATTERN.fullmatch(request.scan_id) is None:
         raise ValueError("invalid Fast Scan ID")
-    prepared = FAST_SCAN.prepare_fast_scan_identity(
-        FAST_SCAN.FastScanRequest(
+    payload = FAST_SCAN_STORE.load_scan_receipt_bytes(root, request.scan_id)
+    value = json.loads(payload)
+    errors = FAST_SCAN.validate_fast_scan_receipt(value)
+    if errors or FAST_SCAN.canonical_fast_scan_bytes(value) != payload:
+        raise ValueError("Fast Scan receipt is invalid")
+    delta_value = value.get("delta_context")
+    delta_context = None
+    if isinstance(delta_value, Mapping):
+        report_id = delta_value.get("previous_report_id")
+        revision = delta_value.get("previous_revision")
+        changed_paths = delta_value.get("changed_paths")
+        if (
+            not isinstance(report_id, str)
+            or type(revision) is not int
+            or not isinstance(changed_paths, list)
+        ):
+            raise ValueError("Fast Scan delta context is invalid")
+        scan_request = ScanRequest(
             root,
             request.request,
             request.repository_evidence,
             settings["audience"],
-        ),
+            report_id,
+            revision,
+            tuple(changed_paths),
+        )
+        delta_context = _trusted_delta_context(root, scan_request, settings)
+        fast_request = FAST_SCAN.FastScanRequest(
+            root,
+            request.request,
+            request.repository_evidence,
+            settings["audience"],
+            previous_report_id=report_id,
+            previous_revision=revision,
+            changed_paths=tuple(changed_paths),
+            delta_max_seconds=_configured_delta_max_seconds(root, settings),
+        )
+    else:
+        fast_request = FAST_SCAN.FastScanRequest(
+            root,
+            request.request,
+            request.repository_evidence,
+            settings["audience"],
+        )
+    prepared = FAST_SCAN.prepare_fast_scan_identity(
+        fast_request,
         settings["impact_graph"],
         _payload_sha256(),
+        delta_context,
     )
     if prepared.scan_id != request.scan_id:
         raise ValueError(
@@ -1384,11 +1539,6 @@ def _promoted_scan(root, request, settings):
             "text, repository evidence rows, audience, graph settings, and "
             "repository contents must all equal the original rir_scan call"
         )
-    payload = FAST_SCAN_STORE.load_scan_receipt_bytes(root, request.scan_id)
-    value = json.loads(payload)
-    errors = FAST_SCAN.validate_fast_scan_receipt(value)
-    if errors or FAST_SCAN.canonical_fast_scan_bytes(value) != payload:
-        raise ValueError("Fast Scan receipt is invalid")
     if value["status"] != "complete" or value["can_promote"] is not True:
         raise ValueError("Fast Scan receipt is not promotable")
     if (
@@ -1398,6 +1548,8 @@ def _promoted_scan(root, request, settings):
         or value["settings"] != prepared.settings.to_mapping()
         or value["source_inventory"] != dict(prepared.inventory_mapping)
         or value["seeds"] != [row.to_mapping() for row in prepared.seeds]
+        or value.get("delta_context")
+        != (None if prepared.delta_context is None else dict(prepared.delta_context))
     ):
         raise ValueError("Fast Scan source or identity is stale")
     graph = value["graph_receipt"]

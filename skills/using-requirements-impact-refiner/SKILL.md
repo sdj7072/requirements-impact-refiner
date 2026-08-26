@@ -13,7 +13,7 @@ Before any response or action, check whether the current request proposes adding
 
 If it does, require **requirements-impact-refiner** before planning or implementation. With Superpowers, run it after approved brainstorming and before `writing-plans`; other adapter boundaries stay unchanged.
 
-For a selected change, read [Previous-report bootstrap](../requirements-impact-refiner/references/previous-report.md), call `rir_previous` before any `rir_scan`, and follow its route. Return renderer text; never substitute searches, graph JSON, or an invented report. Only a later explicit yes to a non-`needs_input` scan's refinement question enters detailed refinement; original request wording is not confirmation.
+For a selected change, read [Previous-report bootstrap](../requirements-impact-refiner/references/previous-report.md), call `rir_previous` before any `rir_scan`, and follow its route. Forward stale identity only as the exact delta hint set the tool returned. Return renderer text; never substitute searches, graph JSON, or an invented report. Only a later explicit yes to a non-`needs_input` scan's refinement question enters detailed refinement; original request wording is not confirmation.
 
 For pure ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan, call neither `rir_previous` nor `rir_scan`.
 

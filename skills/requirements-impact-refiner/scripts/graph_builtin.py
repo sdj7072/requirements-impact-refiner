@@ -87,7 +87,11 @@ IGNORED_DIRECTORIES = frozenset(
         ".git",
         ".hg",
         ".svn",
+        ".mypy_cache",
+        ".quality-venv",
         ".requirements-impact-refiner",
+        ".pytest_cache",
+        "__pycache__",
         "vendor",
         "build",
         "dist",
@@ -766,7 +770,7 @@ def _walk_files(root: Path, expired, skipped: dict[str, str], traversal_errors: 
                 continue
             try:
                 if entry.is_dir(follow_symlinks=False):
-                    if entry.name not in IGNORED_DIRECTORIES:
+                    if entry.name not in IGNORED_DIRECTORIES and relative != "evals/results":
                         directories.append(Path(entry.path))
                 elif entry.is_file(follow_symlinks=False):
                     yield Path(entry.path), relative

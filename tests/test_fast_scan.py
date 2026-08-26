@@ -388,7 +388,7 @@ class FastScanTest(unittest.TestCase):
             "created_at",
         }
         self.assertEqual(set(schema["required"]), expected)
-        self.assertEqual(set(schema["properties"]), expected)
+        self.assertEqual(set(schema["properties"]), expected | {"delta_context"})
         self.assertFalse(schema["additionalProperties"])
 
     def test_execute_calls_graph_once_persists_and_renders(self):

@@ -154,6 +154,7 @@ class McpBootstrapHarness:
             )
 
         def scan(request):
+            delta = request.previous_report_id is not None
             self.calls.append(
                 (
                     "rir_scan",
@@ -162,6 +163,15 @@ class McpBootstrapHarness:
                         "change_request": request.change_request,
                         "evidence": request.evidence,
                         "presentation": request.audience_override,
+                        **(
+                            {
+                                "previous_report_id": request.previous_report_id,
+                                "previous_revision": request.previous_revision,
+                                "changed_paths": request.changed_paths,
+                            }
+                            if delta
+                            else {}
+                        ),
                     },
                 )
             )
@@ -182,6 +192,11 @@ class McpBootstrapHarness:
                 elapsed_ms=2,
                 cache_status="miss",
                 can_promote=self.can_promote,
+                previous_report_id=request.previous_report_id,
+                previous_revision=request.previous_revision,
+                changed_paths=request.changed_paths,
+                changed_count=1 if delta else None,
+                previous_display_text="previous-stale" if delta else None,
             )
 
         def begin(request):
@@ -334,15 +349,21 @@ class McpBootstrapHarness:
             if not self._scan_forwardable():
                 self.outputs.append(self._shorten_instruction())
                 return self
-            scan = self._call(
-                "rir_scan",
-                {
-                    "repo_root": str(self.root),
-                    "change_request": self.request,
-                    "evidence": list(self.evidence),
-                    "presentation": "balanced",
-                },
-            )
+            scan_arguments = {
+                "repo_root": str(self.root),
+                "change_request": self.request,
+                "evidence": list(self.evidence),
+                "presentation": "balanced",
+            }
+            if previous["status"] == "stale":
+                scan_arguments.update(
+                    {
+                        "previous_report_id": previous["report_id"],
+                        "previous_revision": previous["revision"],
+                        "changed_paths": previous["changed_paths"],
+                    }
+                )
+            scan = self._call("rir_scan", scan_arguments)
             self.outputs.append(scan["display_text"])
             if scan["status"] == "needs_input":
                 return self
@@ -417,6 +438,9 @@ class ScanRequest:
     change_request: str
     evidence: tuple[str, ...]
     audience_override: str | None
+    previous_report_id: str | None = None
+    previous_revision: int | None = None
+    changed_paths: tuple[str, ...] = ()
 
 def _log(tool, payload):
     with open(os.environ["RIR_TEST_LOG"], "a", encoding="utf-8") as stream:
@@ -521,7 +545,7 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertEqual([name for name, _ in outcome.calls], ["rir_previous"])
         self.assertEqual(outcome.outputs, ["previous-fresh"])
 
-    def test_stale_previous_displays_first_then_runs_valid_ordinary_scan(self):
+    def test_stale_previous_displays_first_then_runs_valid_delta_scan(self):
         with tempfile.TemporaryDirectory() as directory:
             outcome = McpBootstrapHarness(directory, status="stale").run()
 
@@ -529,11 +553,19 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertEqual(outcome.outputs, ["previous-stale", "scan-result"])
         self.assertEqual(
             set(outcome.calls[1][1]),
-            {"repo_root", "change_request", "evidence", "presentation"},
+            {
+                "repo_root",
+                "change_request",
+                "evidence",
+                "presentation",
+                "previous_report_id",
+                "previous_revision",
+                "changed_paths",
+            },
         )
-        self.assertNotIn("report_id", outcome.calls[1][1])
-        self.assertNotIn("revision", outcome.calls[1][1])
-        self.assertNotIn("changed_paths", outcome.calls[1][1])
+        self.assertEqual(outcome.calls[1][1]["previous_report_id"], "RPT-001")
+        self.assertEqual(outcome.calls[1][1]["previous_revision"], 2)
+        self.assertEqual(outcome.calls[1][1]["changed_paths"], ("api/profile.py",))
 
     def test_none_runs_ordinary_scan_after_exactly_one_previous_lookup(self):
         with tempfile.TemporaryDirectory() as directory:
