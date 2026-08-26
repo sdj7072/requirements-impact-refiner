@@ -36,6 +36,7 @@ ROOT_FILES = (
     "scripts/rir_finalize.py",
     "scripts/rir_graph_delivery.py",
     "scripts/rir_lineage.py",
+    "scripts/rir_report_context.py",
     "scripts/rir_storage.py",
     "scripts/rir_controller.py",
     "scripts/rir_mcp_server.py",

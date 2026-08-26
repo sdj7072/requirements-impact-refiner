@@ -124,6 +124,24 @@ class _ReportStoreContract(Protocol):
     ) -> Path: ...
 
 
+class _ReportContextContract(Protocol):
+    ReportContext: type
+    MAX_CONTEXT_BYTES: int
+    MAX_REQUIREMENT_BYTES: int
+
+    def canonical_requirement_sha256(self, request: str) -> str: ...
+
+    def repo_root_sha256(self, root: Path) -> str: ...
+
+    def created_at_utc(self) -> str: ...
+
+    def probe_git_baseline(self, root: Path): ...
+
+    def publish_report_context(self, root: Path, context): ...
+
+    def load_report_context(self, root: Path, report_id: str, revision: int): ...
+
+
 class _BuiltinContract(Protocol):
     GRAPH: _GraphContract
     IGNORED_DIRECTORIES: frozenset[str]
@@ -222,6 +240,8 @@ class _GraphDeliveryContract(Protocol):
     ): ...
 
     def validate_graph_coverage(self, analysis: Mapping[str, object], context) -> None: ...
+
+    def source_inventory_sha256(self, source_digests: Mapping[str, str]) -> str: ...
 
     def verify_receipt_sources(self, root: Path, receipt: Mapping[str, object]) -> None: ...
 
@@ -457,6 +477,40 @@ IMPACT_RENDERER = cast(Any, LINEAGE.IMPACT_RENDERER)
 REPORT_STORE = cast(Any, LINEAGE.REPORT_STORE)
 
 
+def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContract]:
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_report_context.py")
+        and _classes(value, ("ReportContext",))
+        and all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in ("MAX_CONTEXT_BYTES", "MAX_REQUIREMENT_BYTES")
+        )
+        and _callables(
+            value,
+            (
+                "canonical_requirement_sha256",
+                "repo_root_sha256",
+                "created_at_utc",
+                "probe_git_baseline",
+                "publish_report_context",
+                "load_report_context",
+            ),
+        )
+    )
+
+
+REPORT_CONTEXT = cast(
+    _ReportContextContract,
+    _load_fixed_sibling(
+        "rir_report_context.py",
+        "rir_report_context",
+        "_rir_finalize_report_context_",
+        _is_report_context_contract,
+        "report context",
+    ),
+)
+
+
 def _is_graph_contract(value: object) -> TypeGuard[_GraphContract]:
     return (
         _module_uses_sibling(value, SCRIPT_DIR / "impact_graph.py")
@@ -625,7 +679,12 @@ def _is_graph_delivery_shape(value: object) -> bool:
         and getattr(coordinator, "GRAPH", None) is graph
         and _callables(
             value,
-            ("load_graph_context", "validate_graph_coverage", "verify_receipt_sources"),
+            (
+                "load_graph_context",
+                "validate_graph_coverage",
+                "source_inventory_sha256",
+                "verify_receipt_sources",
+            ),
         )
     )
 
@@ -664,7 +723,12 @@ def _is_payload_identity_contract(value: object) -> bool:
     return (
         isinstance(root_files, tuple)
         and all(isinstance(item, str) for item in root_files)
-        and {"scripts/rir_finalize.py", "scripts/rir_lineage.py"} <= set(root_files)
+        and {
+            "scripts/rir_finalize.py",
+            "scripts/rir_lineage.py",
+            "scripts/rir_report_context.py",
+        }
+        <= set(root_files)
         and _callables(value, ("functional_paths", "payload_sha256"))
     )
 
@@ -911,7 +975,24 @@ def load_promoted_scan_context(
     if hashlib.sha256(graph_payload).hexdigest() != binding["receipt_sha256"]:
         raise ValueError("promoted graph receipt digest is stale")
     GRAPH_DELIVERY.verify_receipt_sources(root, receipt)
-    return {"receipt": receipt, "sha256": binding["receipt_sha256"], "binding": binding}
+    inventory = wrapper.get("source_inventory")
+    if (
+        not isinstance(inventory, dict)
+        or set(inventory) != {"digests", "complete", "reason"}
+        or not isinstance(inventory.get("digests"), dict)
+        or not isinstance(inventory.get("complete"), bool)
+    ):
+        raise ValueError("promoted Fast Scan source inventory is invalid")
+    inventory_digests = cast(dict[str, str], inventory["digests"])
+    return {
+        "receipt": receipt,
+        "sha256": binding["receipt_sha256"],
+        "binding": binding,
+        "source_inventory": {
+            "sha256": GRAPH_DELIVERY.source_inventory_sha256(inventory_digests),
+            "complete": inventory["complete"],
+        },
+    }
 
 
 _RUNTIME_CALLABLES = (
@@ -930,6 +1011,14 @@ _RUNTIME_CALLABLES = (
     "load_state_bytes",
     "render_compact",
     "render_markdown",
+    "context_type",
+    "canonical_requirement_sha256",
+    "repo_root_sha256",
+    "created_at_utc",
+    "probe_git_baseline",
+    "payload_sha256",
+    "load_report_context",
+    "publish_report_context",
     "draft_path",
     "consume_draft",
     "result_type",
@@ -941,6 +1030,8 @@ def _validate_dependency_graph() -> None:
         raise ImportError("finalize lineage sibling contract is incomplete")
     if not _is_graph_delivery_contract(GRAPH_DELIVERY):
         raise ImportError("finalize graph delivery sibling contract is incomplete")
+    if not _is_report_context_contract(REPORT_CONTEXT):
+        raise ImportError("finalize report context sibling contract is incomplete")
     _payload_identity_module()
     _fast_scan_modules()
 
@@ -965,6 +1056,14 @@ def default_runtime() -> Mapping[str, object]:
         "load_state_bytes": COMPACT_STATE.load_state_bytes,
         "render_compact": IMPACT_RENDERER.render_compact,
         "render_markdown": IMPACT_RENDERER.render_markdown,
+        "context_type": REPORT_CONTEXT.ReportContext,
+        "canonical_requirement_sha256": REPORT_CONTEXT.canonical_requirement_sha256,
+        "repo_root_sha256": REPORT_CONTEXT.repo_root_sha256,
+        "created_at_utc": REPORT_CONTEXT.created_at_utc,
+        "probe_git_baseline": REPORT_CONTEXT.probe_git_baseline,
+        "payload_sha256": _payload_sha256,
+        "load_report_context": REPORT_CONTEXT.load_report_context,
+        "publish_report_context": REPORT_CONTEXT.publish_report_context,
         "draft_path": STORAGE.draft_path,
         "consume_draft": STORAGE.consume_draft,
         "result_type": CONTRACTS.FinalizeResult,
@@ -988,6 +1087,63 @@ def _operation(runtime: Mapping[str, object], name: str):
     if not callable(value):
         raise TypeError(f"finalize runtime operation is invalid: {name}")
     return value
+
+
+def _source_inventory_identity(
+    graph_context: object,
+) -> tuple[str | None, bool, bool]:
+    if not isinstance(graph_context, Mapping):
+        return None, False, False
+    promoted = graph_context.get("source_inventory")
+    if isinstance(promoted, Mapping):
+        digest = promoted.get("sha256")
+        complete = promoted.get("complete")
+        if (
+            isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+            and isinstance(complete, bool)
+        ):
+            return digest, True, complete
+    binding = graph_context.get("binding")
+    if isinstance(binding, Mapping):
+        digest = binding.get("source_inventory_sha256")
+        complete = binding.get("source_inventory_complete")
+        if (
+            isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+            and isinstance(complete, bool)
+        ):
+            return digest, True, complete
+    return None, False, False
+
+
+def _existing_context_matches(
+    context: object,
+    context_type: type,
+    *,
+    report_id: str,
+    revision: int,
+    markdown_sha256: str,
+    repo_sha256: str,
+    requirement_sha256: str,
+    source_inventory_sha256: str | None,
+    source_inventory_available: bool,
+    source_inventory_complete: bool,
+    payload_sha256: str,
+) -> bool:
+    return (
+        isinstance(context, context_type)
+        and getattr(context, "schema_version", None) == 1
+        and getattr(context, "report_id", None) == report_id
+        and getattr(context, "revision", None) == revision
+        and getattr(context, "markdown_sha256", None) == markdown_sha256
+        and getattr(context, "repo_root_sha256", None) == repo_sha256
+        and getattr(context, "requirement_sha256", None) == requirement_sha256
+        and getattr(context, "source_inventory_sha256", None) == source_inventory_sha256
+        and getattr(context, "source_inventory_available", None) is source_inventory_available
+        and getattr(context, "source_inventory_complete", None) is source_inventory_complete
+        and getattr(context, "payload_sha256", None) == payload_sha256
+    )
 
 
 def _finalize(request, runtime: Mapping[str, object]):
@@ -1027,6 +1183,23 @@ def _finalize(request, runtime: Mapping[str, object]):
             raise ValueError("graph_receipt_id is not allowed when impact graph is disabled")
         state, key_map = _operation(runtime, "build_state")(draft, request.analysis, graph_context)
         state_bytes = _operation(runtime, "canonical_bytes")(state)
+        request_value = draft.get("request")
+        if not isinstance(request_value, str):
+            raise ValueError("draft requirement identity is invalid")
+        requirement_sha256 = _operation(runtime, "canonical_requirement_sha256")(request_value)
+        repo_sha256 = _operation(runtime, "repo_root_sha256")(root)
+        payload_sha256 = _operation(runtime, "payload_sha256")()
+        source_sha256, source_available, source_complete = _source_inventory_identity(graph_context)
+        created_at = _operation(runtime, "created_at_utc")()
+        baseline = _operation(runtime, "probe_git_baseline")(root)
+        if (
+            not isinstance(baseline, tuple)
+            or len(baseline) != 2
+            or (baseline[0] is not None and not isinstance(baseline[0], str))
+            or not isinstance(baseline[1], bool)
+        ):
+            raise TypeError("finalize Git baseline result is invalid")
+        baseline_commit, baseline_clean = baseline
         _operation(runtime, "write_controller_metadata")(
             root,
             draft,
@@ -1066,6 +1239,45 @@ def _finalize(request, runtime: Mapping[str, object]):
         )
         if display.endswith("\n"):
             display = display[:-1]
+        context_type = runtime.get("context_type")
+        if not isinstance(context_type, type) or context_type is not REPORT_CONTEXT.ReportContext:
+            raise TypeError("finalize report context type is invalid")
+        existing_context = _operation(runtime, "load_report_context")(
+            root, published.report_id, published.revision
+        )
+        if existing_context is None:
+            report_context = _operation(runtime, "context_type")(
+                schema_version=1,
+                report_id=published.report_id,
+                revision=published.revision,
+                markdown_sha256=published.markdown_sha256,
+                repo_root_sha256=repo_sha256,
+                requirement_sha256=requirement_sha256,
+                source_inventory_sha256=source_sha256,
+                payload_sha256=payload_sha256,
+                created_at=created_at,
+                baseline_commit=baseline_commit,
+                baseline_clean=baseline_clean,
+                source_inventory_available=source_available,
+                source_inventory_complete=source_complete,
+            )
+        else:
+            if not _existing_context_matches(
+                existing_context,
+                context_type,
+                report_id=published.report_id,
+                revision=published.revision,
+                markdown_sha256=published.markdown_sha256,
+                repo_sha256=repo_sha256,
+                requirement_sha256=requirement_sha256,
+                source_inventory_sha256=source_sha256,
+                source_inventory_available=source_available,
+                source_inventory_complete=source_complete,
+                payload_sha256=payload_sha256,
+            ):
+                raise ValueError("published report context does not match finalization identity")
+            report_context = existing_context
+        _operation(runtime, "publish_report_context")(root, report_context)
         _operation(runtime, "consume_draft")(
             _operation(runtime, "draft_path")(root, request.draft_id),
             draft,

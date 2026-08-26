@@ -526,6 +526,13 @@ class RirControllerFacadeContractTest(unittest.TestCase):
             "markdown_path": relative_path(self.root, result.markdown_path),
             "markdown_sha256": result.markdown_sha256,
         }
+        context_relative = ".requirements-impact-refiner/reports/RPT-001/revision-0001.context.json"
+        surviving_paths = portable_artifact_paths(self.root)
+        self.assertIn(context_relative, surviving_paths)
+        self.assertEqual(
+            stat.S_IMODE((self.root / context_relative).stat().st_mode),
+            0o600,
+        )
         actual = {
             "analysis_fixture_sha256": sha256(analysis_payload),
             "result": result_value,
@@ -533,7 +540,9 @@ class RirControllerFacadeContractTest(unittest.TestCase):
             "state_canonical_sha256": sha256(result.state_path.read_bytes()),
             "markdown_canonical_sha256": sha256(result.markdown_path.read_bytes()),
             "filesystem": {
-                "surviving_paths": portable_artifact_paths(self.root),
+                # The immutable context sidecar is an additive v0.6 artifact;
+                # the sealed v0.5 facade snapshot remains byte-for-byte stable.
+                "surviving_paths": [path for path in surviving_paths if path != context_relative],
                 "modes": mode_contract(
                     self.root,
                     (
