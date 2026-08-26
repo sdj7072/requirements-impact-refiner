@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import types
@@ -371,6 +372,228 @@ class RirStorageTest(unittest.TestCase):
                 sys.modules.pop("rir_contracts", None)
             else:
                 sys.modules["rir_contracts"] = preserved
+
+    def test_pristine_facades_isolate_a_coherent_local_report_graph_from_foreign_aliases(self):
+        script = r"""
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+root_scripts = Path(sys.argv[1]).resolve()
+skill_scripts = Path(sys.argv[2]).resolve()
+
+def load(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+calls = []
+foreign_compact = types.ModuleType("compact_state")
+foreign_compact.__file__ = "/tmp/foreign-compact-state.py"
+foreign_compact.DELTA_CATEGORIES = ("added",)
+foreign_compact.load_state_bytes = lambda *args, **kwargs: calls.append("compact.load")
+foreign_compact.validate_state = lambda *args, **kwargs: calls.append("compact.validate")
+
+foreign_renderer = types.ModuleType("impact_renderer")
+foreign_renderer.__file__ = "/tmp/foreign-impact-renderer.py"
+foreign_renderer.compact_state = foreign_compact
+foreign_renderer.render_markdown = lambda *args, **kwargs: calls.append("renderer.markdown")
+foreign_renderer.render_compact = lambda *args, **kwargs: calls.append("renderer.compact")
+foreign_renderer.validate_rendered_markdown = (
+    lambda *args, **kwargs: calls.append("renderer.validate")
+)
+
+class ForeignReportStoreError(RuntimeError):
+    pass
+
+foreign_store = types.ModuleType("report_store")
+foreign_store.__file__ = "/tmp/foreign-report-store.py"
+foreign_store.compact_state = foreign_compact
+foreign_store.impact_renderer = foreign_renderer
+foreign_store.ReportStoreError = ForeignReportStoreError
+foreign_store.CurrentRevision = type("ForeignCurrentRevision", (), {})
+foreign_store.load_current = lambda *args, **kwargs: calls.append("store.load")
+foreign_store.publish_revision = lambda *args, **kwargs: calls.append("store.publish")
+foreign_store.report_directory = lambda *args, **kwargs: calls.append("store.directory")
+
+foreign = {
+    "compact_state": foreign_compact,
+    "impact_renderer": foreign_renderer,
+    "report_store": foreign_store,
+}
+sys.modules.update(foreign)
+
+for index, directory in enumerate((root_scripts, skill_scripts), start=1):
+    controller = load(f"pristine_storage_controller_{index}", directory / "rir_controller.py")
+    storage = controller.STORAGE
+    report_store = storage.report_store
+    compact_state = report_store.compact_state
+    renderer = report_store.impact_renderer
+    assert Path(storage.__file__).resolve() == (directory / "rir_storage.py").resolve()
+    assert Path(report_store.__file__).resolve() == (directory / "report_store.py").resolve()
+    assert Path(compact_state.__file__).resolve() == (directory / "compact_state.py").resolve()
+    assert Path(renderer.__file__).resolve() == (directory / "impact_renderer.py").resolve()
+    assert renderer.compact_state is compact_state
+    assert controller.LINEAGE.REPORT_STORE is report_store
+    assert controller.FINALIZE.REPORT_STORE is report_store
+    assert controller.GRAPH_DELIVERY.STORAGE.report_store is report_store
+    for name, sentinel in foreign.items():
+        assert sys.modules[name] is sentinel, name
+
+assert calls == [], calls
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SCRIPTS), str(SKILL_SCRIPTS)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_direct_storage_conflict_load_preserves_foreign_report_graph_aliases(self):
+        exact_names = {"compact_state", "impact_renderer", "report_store"}
+        prefixes = (
+            "_rir_lineage_compact_state_",
+            "_rir_lineage_impact_renderer_",
+            "_rir_lineage_report_store_",
+        )
+        preserved = {
+            name: module
+            for name, module in sys.modules.items()
+            if name in exact_names or name.startswith(prefixes)
+        }
+        module_name = "rir_storage_direct_report_conflict"
+        repeat_name = "rir_storage_vacated_report_aliases"
+        foreign = {}
+        try:
+            for name in tuple(sys.modules):
+                if name in exact_names or name.startswith(prefixes):
+                    sys.modules.pop(name, None)
+            for name in exact_names:
+                sentinel = types.ModuleType(name)
+                sentinel.__file__ = str(self.root / f"foreign-{name}.py")
+                foreign[name] = sentinel
+                sys.modules[name] = sentinel
+
+            isolated = load_module(module_name, SCRIPTS / "rir_storage.py")
+
+            self.assertEqual(
+                Path(isolated.report_store.__file__).resolve(),
+                (SCRIPTS / "report_store.py").resolve(),
+            )
+            self.assertEqual(
+                Path(isolated.COMPACT_STATE.__file__).resolve(),
+                (SCRIPTS / "compact_state.py").resolve(),
+            )
+            self.assertEqual(
+                Path(isolated.IMPACT_RENDERER.__file__).resolve(),
+                (SCRIPTS / "impact_renderer.py").resolve(),
+            )
+            self.assertIs(isolated.report_store.compact_state, isolated.COMPACT_STATE)
+            self.assertIs(isolated.report_store.impact_renderer, isolated.IMPACT_RENDERER)
+            self.assertIs(isolated.IMPACT_RENDERER.compact_state, isolated.COMPACT_STATE)
+            for name, sentinel in foreign.items():
+                self.assertIs(sys.modules[name], sentinel)
+
+            for name in exact_names:
+                sys.modules.pop(name)
+            repeated = load_module(repeat_name, SCRIPTS / "rir_storage.py")
+            self.assertIs(repeated.COMPACT_STATE, isolated.COMPACT_STATE)
+            self.assertIs(repeated.IMPACT_RENDERER, isolated.IMPACT_RENDERER)
+            self.assertIs(repeated.report_store, isolated.report_store)
+            self.assertIs(sys.modules["compact_state"], isolated.COMPACT_STATE)
+            self.assertIs(sys.modules["impact_renderer"], isolated.IMPACT_RENDERER)
+            self.assertIs(sys.modules["report_store"], isolated.report_store)
+        finally:
+            for name in tuple(sys.modules):
+                if (
+                    name in exact_names
+                    or name.startswith(prefixes)
+                    or name
+                    in {
+                        module_name,
+                        repeat_name,
+                    }
+                ):
+                    sys.modules.pop(name, None)
+            sys.modules.update(preserved)
+
+    def test_storage_report_graph_rejects_unsafe_local_and_expected_hash_modules(self):
+        script = r"""
+import hashlib
+import importlib.util
+import shutil
+import sys
+import tempfile
+import types
+from pathlib import Path
+
+source = Path(sys.argv[1]).resolve()
+
+def load(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+def clear():
+    for name in tuple(sys.modules):
+        if name in {"compact_state", "impact_report", "impact_renderer", "report_store"} or name.startswith("_rir_lineage_"):
+            sys.modules.pop(name, None)
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    shutil.copyfile(source / "rir_storage.py", root / "rir_storage.py")
+    (root / "compact_state.py").write_text("DELTA_CATEGORIES = ()\n", encoding="utf-8")
+    try:
+        load("incomplete_local_storage", root / "rir_storage.py")
+    except ImportError as error:
+        assert str(error) == "storage compact state sibling contract is incomplete", error
+    else:
+        raise AssertionError("incomplete local compact state was accepted")
+
+clear()
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    shutil.copyfile(source / "rir_storage.py", root / "rir_storage.py")
+    (root / "compact_state.py").symlink_to(source / "compact_state.py")
+    try:
+        load("symlink_local_storage", root / "rir_storage.py")
+    except ImportError as error:
+        assert str(error) == "storage compact state sibling is unsafe", error
+    else:
+        raise AssertionError("symlinked local compact state was accepted")
+
+clear()
+foreign = types.ModuleType("compact_state")
+foreign.__file__ = "/tmp/foreign-compact-state.py"
+sys.modules["compact_state"] = foreign
+expected = (source / "compact_state.py").resolve()
+hashed_name = "_rir_lineage_compact_state_" + hashlib.sha256(
+    str(expected).encode("utf-8")
+).hexdigest()[:16]
+invalid = types.ModuleType(hashed_name)
+invalid.__file__ = str(expected)
+sys.modules[hashed_name] = invalid
+try:
+    load("invalid_hashed_storage", source / "rir_storage.py")
+except ImportError as error:
+    assert str(error) == "storage compact state sibling contract is incomplete", error
+else:
+    raise AssertionError("invalid expected compact-state hash was accepted")
+assert sys.modules["compact_state"] is foreign
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SCRIPTS)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_facades_resolve_fixed_storage_siblings_despite_a_conflicting_alias(self):
         prefix = "_rir_controller_storage_"

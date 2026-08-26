@@ -70,6 +70,10 @@ class _ControllerStorageContract(Protocol):
     MAX_DRAFT_BYTES: int
     DRAFT_ID_PATTERN: re.Pattern[str]
     fcntl: _FcntlContract | None
+    COMPACT_STATE: object
+    IMPACT_RENDERER: object
+    REPORT_STORE: object
+    report_store: object
 
     def root_path(self, path: Path) -> Path: ...
 
@@ -241,6 +245,9 @@ def _is_controller_storage_contract(value: object) -> TypeGuard[_ControllerStora
     maximum = getattr(value, maximum_name, None)
     fcntl_name = "fcntl"
     storage_fcntl = getattr(value, fcntl_name, None)
+    compact_state = getattr(value, "COMPACT_STATE", None)
+    renderer = getattr(value, "IMPACT_RENDERER", None)
+    report_store = getattr(value, "REPORT_STORE", None)
     callable_names = (
         "root_path",
         "write_private_draft",
@@ -268,6 +275,30 @@ def _is_controller_storage_contract(value: object) -> TypeGuard[_ControllerStora
         and isinstance(getattr(value, "DRAFT_ID_PATTERN", None), re.Pattern)
         and hasattr(value, "fcntl")
         and (storage_fcntl is None or _is_fcntl_contract(storage_fcntl))
+        and _module_uses_sibling(compact_state, SCRIPT_DIR / "compact_state.py")
+        and _module_uses_sibling(renderer, SCRIPT_DIR / "impact_renderer.py")
+        and _module_uses_sibling(
+            getattr(renderer, "impact_report", None), SCRIPT_DIR / "impact_report.py"
+        )
+        and _module_uses_sibling(report_store, SCRIPT_DIR / "report_store.py")
+        and getattr(value, "report_store", None) is report_store
+        and getattr(report_store, "compact_state", None) is compact_state
+        and getattr(report_store, "impact_renderer", None) is renderer
+        and getattr(renderer, "compact_state", None) is compact_state
+        and all(
+            callable(getattr(compact_state, name, None))
+            for name in ("load_state_bytes", "validate_state")
+        )
+        and all(
+            callable(getattr(renderer, name, None))
+            for name in ("render_markdown", "render_compact", "validate_rendered_markdown")
+        )
+        and isinstance(getattr(report_store, "ReportStoreError", None), type)
+        and isinstance(getattr(report_store, "CurrentRevision", None), type)
+        and all(
+            callable(getattr(report_store, name, None))
+            for name in ("load_current", "publish_revision", "report_directory")
+        )
         and all(callable(getattr(value, name, None)) for name in callable_names)
     )
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 import ctypes
 import errno
 import hashlib
-import importlib
+import importlib.util
 import json
 import os
 import re
@@ -15,10 +15,11 @@ import stat
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, SupportsInt
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
 
 if TYPE_CHECKING:
     from typing_extensions import TypeGuard
@@ -30,6 +31,50 @@ class _FcntlContract(Protocol):
     LOCK_UN: int
 
     def flock(self, fd: int, operation: int) -> None: ...
+
+
+class _CompactStateContract(Protocol):
+    DELTA_CATEGORIES: Sequence[str]
+
+    def load_state_bytes(self, raw: bytes) -> tuple[dict[str, object] | None, list[str]]: ...
+
+    def validate_state(self, value: object) -> list[str]: ...
+
+
+class _ImpactReportContract(Protocol):
+    def parse_report(self, text: str): ...
+
+    def validate_semantics(self, report): ...
+
+
+class _ImpactRendererContract(Protocol):
+    compact_state: _CompactStateContract
+    impact_report: _ImpactReportContract
+
+    def render_markdown(self, state: Mapping[str, object]) -> str: ...
+
+    def render_compact(self, state: Mapping[str, object]) -> str: ...
+
+    def validate_rendered_markdown(
+        self, text: str, previous_bytes: bytes | None = None
+    ) -> list[str]: ...
+
+
+class _ReportStoreContract(Protocol):
+    compact_state: _CompactStateContract
+    impact_renderer: _ImpactRendererContract
+    ReportStoreError: type[Exception]
+    CurrentRevision: type
+
+    def load_current(self, repo_root: Path, report_id: str): ...
+
+    def publish_revision(
+        self, repo_root: Path, state_bytes: bytes, *, resume_partial: bool = False
+    ): ...
+
+    def report_directory(
+        self, repo_root: Path, report_id: str, *, create: bool = False
+    ) -> Path: ...
 
 
 def _is_fcntl_contract(value: object) -> TypeGuard[_FcntlContract]:
@@ -52,7 +97,195 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-report_store = importlib.import_module("report_store")
+
+def _regular_module_path(path: Path) -> Path | None:
+    try:
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        return None
+    return resolved
+
+
+def _module_uses_sibling(value: object, expected: Path) -> bool:
+    module_file = getattr(value, "__file__", None)
+    return isinstance(module_file, str) and _regular_module_path(Path(module_file)) == expected
+
+
+def _callables(value: object, names: Sequence[str]) -> bool:
+    return all(callable(getattr(value, name, None)) for name in names)
+
+
+def _is_compact_state_contract(value: object) -> TypeGuard[_CompactStateContract]:
+    categories = getattr(value, "DELTA_CATEGORIES", None)
+    return (
+        isinstance(categories, Sequence)
+        and not isinstance(categories, (str, bytes))
+        and all(isinstance(item, str) for item in categories)
+        and _callables(value, ("load_state_bytes", "validate_state"))
+    )
+
+
+def _is_impact_report_contract(value: object) -> TypeGuard[_ImpactReportContract]:
+    return _callables(value, ("parse_report", "validate_semantics"))
+
+
+def _execute_registered(
+    module_name: str,
+    expected: Path,
+    validator: Callable[[object], bool],
+    label: str,
+    aliases: Mapping[str, ModuleType] | None = None,
+) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError(f"cannot load fixed storage {label} sibling")
+    module = importlib.util.module_from_spec(specification)
+    previous = {name: (name in sys.modules, sys.modules.get(name)) for name in (aliases or {})}
+    sys.modules[module_name] = module
+    try:
+        if aliases:
+            sys.modules.update(aliases)
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"cannot load fixed storage {label} sibling") from error
+    finally:
+        for name, (present, value) in previous.items():
+            if name == module_name:
+                continue
+            if present:
+                sys.modules[name] = cast(ModuleType, value)
+            else:
+                sys.modules.pop(name, None)
+    if not validator(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"storage {label} sibling contract is incomplete")
+    return module
+
+
+def _load_fixed_sibling(
+    filename: str,
+    canonical_name: str,
+    prefix: str,
+    validator: Callable[[object], bool],
+    label: str,
+    aliases: Mapping[str, ModuleType] | None = None,
+) -> object:
+    sibling = SCRIPT_DIR / filename
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError(f"storage {label} sibling is unsafe")
+    hashed_name = prefix + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    hashed_present = hashed_name in sys.modules
+    hashed = sys.modules.get(hashed_name)
+    if canonical_name not in sys.modules:
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError(f"storage {label} sibling is unsafe")
+            if not validator(hashed):
+                raise ImportError(f"storage {label} sibling contract is incomplete")
+            sys.modules[canonical_name] = cast(ModuleType, hashed)
+            return hashed
+        return _execute_registered(canonical_name, expected, validator, label, aliases=aliases)
+    canonical = sys.modules.get(canonical_name)
+    if _module_uses_sibling(canonical, expected):
+        if validator(canonical) and not hashed_present:
+            return canonical
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError(f"storage {label} sibling is unsafe")
+            if not validator(hashed):
+                raise ImportError(f"storage {label} sibling contract is incomplete")
+            return hashed
+        if aliases is not None:
+            return _execute_registered(hashed_name, expected, validator, label, aliases=aliases)
+        raise ImportError(f"storage {label} sibling contract is incomplete")
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError(f"storage {label} sibling is unsafe")
+        if not validator(hashed):
+            raise ImportError(f"storage {label} sibling contract is incomplete")
+        return hashed
+    return _execute_registered(hashed_name, expected, validator, label, aliases=aliases)
+
+
+COMPACT_STATE = cast(
+    _CompactStateContract,
+    _load_fixed_sibling(
+        "compact_state.py",
+        "compact_state",
+        "_rir_lineage_compact_state_",
+        _is_compact_state_contract,
+        "compact state",
+    ),
+)
+IMPACT_REPORT = cast(
+    _ImpactReportContract,
+    _load_fixed_sibling(
+        "impact_report.py",
+        "impact_report",
+        "_rir_lineage_impact_report_",
+        _is_impact_report_contract,
+        "impact report",
+    ),
+)
+
+
+def _is_impact_renderer_contract(value: object) -> TypeGuard[_ImpactRendererContract]:
+    return (
+        getattr(value, "compact_state", None) is COMPACT_STATE
+        and getattr(value, "impact_report", None) is IMPACT_REPORT
+        and _callables(
+            value,
+            ("render_markdown", "render_compact", "validate_rendered_markdown"),
+        )
+    )
+
+
+IMPACT_RENDERER = cast(
+    _ImpactRendererContract,
+    _load_fixed_sibling(
+        "impact_renderer.py",
+        "impact_renderer",
+        "_rir_lineage_impact_renderer_",
+        _is_impact_renderer_contract,
+        "impact renderer",
+        aliases={
+            "compact_state": cast(ModuleType, COMPACT_STATE),
+            "impact_report": cast(ModuleType, IMPACT_REPORT),
+        },
+    ),
+)
+
+
+def _is_report_store_contract(value: object) -> TypeGuard[_ReportStoreContract]:
+    return (
+        getattr(value, "compact_state", None) is COMPACT_STATE
+        and getattr(value, "impact_renderer", None) is IMPACT_RENDERER
+        and isinstance(getattr(value, "ReportStoreError", None), type)
+        and isinstance(getattr(value, "CurrentRevision", None), type)
+        and _callables(value, ("load_current", "publish_revision", "report_directory"))
+    )
+
+
+REPORT_STORE = cast(
+    _ReportStoreContract,
+    _load_fixed_sibling(
+        "report_store.py",
+        "report_store",
+        "_rir_lineage_report_store_",
+        _is_report_store_contract,
+        "report store",
+        aliases={
+            "compact_state": cast(ModuleType, COMPACT_STATE),
+            "impact_renderer": cast(ModuleType, IMPACT_RENDERER),
+        },
+    ),
+)
+report_store = REPORT_STORE
 
 
 MAX_DRAFT_BYTES = 4 * 1024 * 1024
