@@ -635,9 +635,11 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                         "lines",
                         "charCount",
                         "language",
-                        "metaVariables",
                     }
-                    if not isinstance(row, dict) or set(row) != required:
+                    if not isinstance(row, dict) or set(row) not in {
+                        frozenset(required),
+                        frozenset((*required, "metaVariables")),
+                    }:
                         raise ValueError("ast-grep match shape is unsupported")
                     path = _safe_relative(row["file"])
                     if (
@@ -657,7 +659,7 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
                     if (
                         not isinstance(row["language"], str)
                         or row["language"].lower() != language
-                        or not isinstance(row["metaVariables"], dict)
+                        or not isinstance(row.get("metaVariables", {}), dict)
                     ):
                         raise ValueError("ast-grep language or metavariables are invalid")
                     start_line, start_col, end_line, end_col = _range(row["range"])

@@ -281,6 +281,43 @@ class GraphAdapterTest(unittest.TestCase):
         )
         self.assertEqual(len(result.raw_receipt_sha256), 2)
 
+    def test_ast_grep_accepts_official_literal_stream_without_metavariables(self):
+        payload = json.loads((FIXTURES / "ast-grep-query.json").read_text(encoding="utf-8"))
+        payload.pop("metaVariables")
+        runner = self.runner(
+            {
+                ("--version",): "ast-grep 0.45.0\n",
+                (
+                    "--help",
+                ): "Usage: ast-grep --json=<STYLE> --lang <LANG> --pattern <PATTERN> <PATH>\n  STYLE: pretty|stream|compact\n",
+                (
+                    "--json=stream",
+                    "--lang",
+                    "python",
+                    "--pattern",
+                    "profile.displayName",
+                    "api/profile.py",
+                ): "",
+                (
+                    "--json=stream",
+                    "--lang",
+                    "python",
+                    "--pattern",
+                    "profile.displayName",
+                    "events/profile_changed.py",
+                ): json.dumps(payload),
+            }
+        )
+        spec = PROVIDERS.ProviderSpec("ast-grep", self.executables["sg"])
+        probe = AST_GREP.probe(spec, self.root, self.deadline, runner)
+
+        result = AST_GREP.query(probe, self.seeds, self.deadline, runner)
+
+        self.assertEqual(result.status, "ready", result.detail)
+        self.assertIn(
+            ("api/profile.py", "events/profile_changed.py", "references"), edge_tuples(result)
+        )
+
     def test_ast_grep_rejects_unsupported_version_help_and_shape_drift(self):
         spec = PROVIDERS.ProviderSpec("ast-grep", self.executables["sg"])
         old = self.runner(

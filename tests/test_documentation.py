@@ -111,6 +111,19 @@ class DocumentationTest(unittest.TestCase):
         self.assertIn("pip install -r requirements-quality.txt", quality_job.group("body"))
         self.assertIn("python scripts/run-quality-gates.py", quality_job.group("body"))
 
+        provider_job = re.search(
+            r"(?ms)^  provider-canary:\n(?P<body>.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)",
+            workflow,
+        )
+        self.assertIsNotNone(provider_job, "CI must run the pinned provider canary independently")
+        self.assertNotIn("matrix:", provider_job.group("body"))
+        self.assertNotIn("needs:", provider_job.group("body"))
+        self.assertRegex(provider_job.group("body"), r'python-version:\s*["\']3\.13["\']')
+        self.assertIn("pip install -r requirements-provider-canary.txt", provider_job.group("body"))
+        self.assertIn("python scripts/run-ast-grep-canary.py", provider_job.group("body"))
+        self.assertNotIn("requirements-quality.txt", provider_job.group("body"))
+        self.assertRegex(workflow, r"(?ms)^permissions:\n  contents: read$")
+
     def test_quality_workflow_is_documented_for_local_python_313(self):
         """Keep the CI and local quality contract usable in every public language."""
         mypy_relations = {
