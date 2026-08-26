@@ -32,6 +32,7 @@ class RirControllerCliTest(unittest.TestCase):
         self.analysis_path = input_root / "analysis.json"
         self.seeds_path = input_root / "seeds.json"
         self.scan_path = input_root / "scan.json"
+        self.previous_path = input_root / "previous.json"
         self.begin_path.write_text(
             json.dumps(
                 {
@@ -55,6 +56,15 @@ class RirControllerCliTest(unittest.TestCase):
                     "change_request": "Rename profile.displayName",
                     "evidence": [],
                     "presentation": "balanced",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.previous_path.write_text(
+            json.dumps(
+                {
+                    "request": "Let workspace members edit every project.",
+                    "repository_evidence": ["authorizeProjectEdit permits owner and admin"],
                 }
             ),
             encoding="utf-8",
@@ -102,6 +112,9 @@ class RirControllerCliTest(unittest.TestCase):
     def begin(self, *extra):
         return self.run_cli("begin", "--repo-root", self.root, "--input", self.begin_path, *extra)
 
+    def previous(self):
+        return self.run_cli("previous", "--repo-root", self.root, "--input", self.previous_path)
+
     def test_begin_emits_structured_draft_metadata(self):
         result = self.begin()
 
@@ -111,6 +124,80 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertEqual(payload["report_id"], "RPT-001")
         self.assertEqual(payload["revision"], 1)
         self.assertEqual(payload["delivery"], "compact")
+
+    def test_previous_cli_returns_renderer_neutral_canonical_json(self):
+        begin = json.loads(self.begin().stdout)
+        finalized = self.run_cli(
+            "finalize",
+            "--repo-root",
+            self.root,
+            "--draft-id",
+            begin["draft_id"],
+            "--input",
+            self.analysis_path,
+        )
+        self.assertEqual(finalized.returncode, 0, finalized.stderr)
+
+        result = self.previous()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(
+            set(payload),
+            {
+                "status",
+                "report_id",
+                "revision",
+                "markdown_sha256",
+                "created_at",
+                "baseline_commit",
+                "changed_paths",
+                "changed_count",
+                "requirement_sha256",
+                "source_inventory_sha256",
+                "display_text",
+                "reason",
+                "elapsed_ms",
+            },
+        )
+        self.assertTrue(payload["display_text"].startswith("## Previous Impact Report\n"))
+        self.assertNotIn("# Requirements Impact Report\n", payload["display_text"])
+        self.assertEqual(
+            result.stdout,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+        )
+
+    def test_previous_cli_none_and_malformed_inputs_disclose_no_body(self):
+        none = self.previous()
+        self.assertEqual(none.returncode, 0, none.stderr)
+        payload = json.loads(none.stdout)
+        self.assertEqual(payload["status"], "none")
+        for field in (
+            "report_id",
+            "revision",
+            "markdown_sha256",
+            "created_at",
+            "baseline_commit",
+            "source_inventory_sha256",
+            "display_text",
+        ):
+            self.assertIsNone(payload[field], field)
+        self.assertEqual(payload["changed_paths"], [])
+        self.assertIsNone(payload["changed_count"])
+
+        for value, expected in (
+            ({"request": "x", "repository_evidence": [], "surprise": True}, "unknown"),
+            ({"request": "x"}, "missing"),
+            ({"request": "x", "repository_evidence": {}}, "array"),
+        ):
+            with self.subTest(value=value):
+                self.previous_path.write_text(json.dumps(value), encoding="utf-8")
+                invalid = self.previous()
+                self.assertEqual(invalid.returncode, 1)
+                self.assertEqual(invalid.stdout, "")
+                self.assertIn(expected, invalid.stderr)
+                self.assertNotIn("Traceback", invalid.stderr)
 
     def test_scan_text_json_and_begin_promotion(self):
         self.enable_graph_sources()

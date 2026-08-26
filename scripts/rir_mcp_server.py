@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
+import importlib.util
 import inspect
 import json
 import re
+import stat
 import sys
 from collections.abc import Mapping, Sequence
-from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Callable, Protocol, TypedDict, cast
 
 if TYPE_CHECKING:
     from typing_extensions import TypeGuard
@@ -17,6 +20,15 @@ if TYPE_CHECKING:
 
 class _PayloadIdentityContract(Protocol):
     def payload_sha256(self, plugin_root: Path) -> str: ...
+
+
+class _PreviousLookupRequestFactory(Protocol):
+    def __call__(
+        self,
+        repo_root: Path,
+        request: str,
+        repository_evidence: tuple[str, ...],
+    ) -> object: ...
 
 
 class _BeginRequestFactory(Protocol):
@@ -66,6 +78,8 @@ class _ControllerContract(Protocol):
     ADAPTERS: set[str]
     BeginRequest: _BeginRequestFactory
     FinalizeRequest: _FinalizeRequestFactory
+    PreviousLookupRequest: _PreviousLookupRequestFactory
+    PreviousReportResult: type
     ScanRequest: _ScanRequestFactory
     TraceRequest: _TraceRequestFactory
     TraceSeed: _TraceSeedFactory
@@ -73,6 +87,8 @@ class _ControllerContract(Protocol):
     def begin_refinement(self, request: object) -> object: ...
 
     def finalize_refinement(self, request: object) -> object: ...
+
+    def lookup_previous(self, request: object) -> object: ...
 
     def scan_impact(self, request: object) -> object: ...
 
@@ -146,6 +162,22 @@ class _FinalizeResult(Protocol):
     state_path: Path
     markdown_path: Path
     markdown_sha256: str
+
+
+class _PreviousResult(Protocol):
+    status: str
+    report_id: str | None
+    revision: int | None
+    markdown_sha256: str | None
+    created_at: str | None
+    baseline_commit: str | None
+    changed_paths: tuple[str, ...]
+    changed_count: int | None
+    requirement_sha256: str
+    source_inventory_sha256: str | None
+    display_text: str | None
+    reason: str
+    elapsed_ms: int
 
 
 class _ScanResult(Protocol):
@@ -227,11 +259,14 @@ def _is_controller_contract(value: object) -> bool:
             (
                 "BeginRequest",
                 "FinalizeRequest",
+                "PreviousLookupRequest",
+                "PreviousReportResult",
                 "ScanRequest",
                 "TraceRequest",
                 "TraceSeed",
                 "begin_refinement",
                 "finalize_refinement",
+                "lookup_previous",
                 "scan_impact",
                 "trace_impact",
             ),
@@ -253,6 +288,10 @@ def _is_controller_contract(value: object) -> bool:
             ("repo_root", "draft_id", "analysis", "graph_receipt_id"),
         )
         and _has_parameters(
+            getattr(value, "PreviousLookupRequest", None),
+            ("repo_root", "request", "repository_evidence"),
+        )
+        and _has_parameters(
             getattr(value, "ScanRequest", None),
             ("repo_root", "change_request", "evidence", "audience_override"),
         )
@@ -265,6 +304,7 @@ def _is_controller_contract(value: object) -> bool:
             for name in (
                 "begin_refinement",
                 "finalize_refinement",
+                "lookup_previous",
                 "scan_impact",
                 "trace_impact",
             )
@@ -272,11 +312,66 @@ def _is_controller_contract(value: object) -> bool:
     )
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _regular_module_path(path: Path) -> Path | None:
+    try:
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        return None
+    return resolved
+
+
+def _module_uses_sibling(value: object, expected: Path) -> bool:
+    module_file = getattr(value, "__file__", None)
+    return isinstance(module_file, str) and _regular_module_path(Path(module_file)) == expected
+
+
+def _load_local_sibling(
+    filename: str,
+    canonical_name: str,
+    prefix: str,
+    validator: Callable[[object], bool],
+    label: str,
+) -> object:
+    expected = _regular_module_path(SCRIPT_DIR / filename)
+    if expected is None or expected != SCRIPT_DIR / filename:
+        raise ImportError(f"{label} sibling is unsafe")
+    canonical = sys.modules.get(canonical_name)
+    if _module_uses_sibling(canonical, expected):
+        if not validator(canonical):
+            raise ImportError(f"{label} sibling contract is incomplete")
+        return canonical
+    module_name = prefix + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if not _module_uses_sibling(existing, expected):
+            raise ImportError(f"{label} sibling is unsafe")
+        if not validator(existing):
+            raise ImportError(f"{label} sibling contract is incomplete")
+        return existing
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError(f"cannot load fixed {label} sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"cannot load fixed {label} sibling") from error
+    if not validator(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"{label} sibling contract is incomplete")
+    return module
+
+
 payload_identity: _PayloadIdentityContract
 rir_controller: _ControllerContract
-
-
-SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def _json_depth(text: str) -> int:
@@ -310,14 +405,29 @@ _MAX_JSON_DEPTH = 64
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+_installed_payload_sha256: str
 if not TYPE_CHECKING:
-    _loaded_payload_identity = importlib.import_module("payload_identity")
-    _loaded_controller = importlib.import_module("rir_controller")
-    if not _is_payload_identity_contract(_loaded_payload_identity):
-        raise ImportError("payload identity sibling contract is incomplete")
-    if not _is_controller_contract(_loaded_controller):
-        raise ImportError("controller sibling contract is incomplete")
+    _loaded_payload_identity = _load_local_sibling(
+        "payload_identity.py",
+        "payload_identity",
+        "_rir_mcp_payload_identity_",
+        _is_payload_identity_contract,
+        "payload identity",
+    )
     payload_identity = cast(_PayloadIdentityContract, _loaded_payload_identity)
+    _installed_payload_sha256 = payload_identity.payload_sha256(SCRIPT_DIR.parent)
+    if (
+        not isinstance(_installed_payload_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", _installed_payload_sha256) is None
+    ):
+        raise ImportError("payload identity sibling result contract is incomplete")
+    _loaded_controller = _load_local_sibling(
+        "rir_controller.py",
+        "rir_controller",
+        "_rir_mcp_controller_",
+        _is_controller_contract,
+        "controller",
+    )
     rir_controller = cast(_ControllerContract, _loaded_controller)
 
 MAX_LINE_BYTES = 2 * 1024 * 1024
@@ -328,12 +438,6 @@ _analysis_schema: object = json.loads(
 if not isinstance(_analysis_schema, dict):
     raise ValueError("controller analysis schema must contain an object")
 ANALYSIS_SCHEMA: dict[str, object] = _analysis_schema
-_installed_payload_sha256 = payload_identity.payload_sha256(SCRIPT_DIR.parent)
-if (
-    not isinstance(_installed_payload_sha256, str)
-    or re.fullmatch(r"[0-9a-f]{64}", _installed_payload_sha256) is None
-):
-    raise ImportError("payload identity sibling result contract is incomplete")
 INSTALLED_PAYLOAD_SHA256 = _installed_payload_sha256
 
 
@@ -345,6 +449,12 @@ class _OptionalScanArguments(TypedDict, total=False):
 class ScanArguments(_OptionalScanArguments):
     repo_root: str
     change_request: str
+
+
+class PreviousArguments(TypedDict):
+    repo_root: str
+    request: str
+    repository_evidence: list[str]
 
 
 class _OptionalBeginArguments(TypedDict, total=False):
@@ -405,6 +515,17 @@ def _is_scan_arguments(value: object) -> TypeGuard[ScanArguments]:
         and isinstance(value.get("change_request"), str)
         and _is_string_list(value.get("evidence", []))
         and _is_optional_string(value.get("presentation"))
+    )
+
+
+def _is_previous_arguments(value: object) -> TypeGuard[PreviousArguments]:
+    required = frozenset({"repo_root", "request", "repository_evidence"})
+    return (
+        _exact_keys(value, required)
+        and isinstance(value, dict)
+        and isinstance(value.get("repo_root"), str)
+        and isinstance(value.get("request"), str)
+        and _is_string_list(value.get("repository_evidence"))
     )
 
 
@@ -597,6 +718,128 @@ def _is_finalize_result(value: object) -> TypeGuard[_FinalizeResult]:
     )
 
 
+_PREVIOUS_REPORT_ID = re.compile(r"RPT-\d{3}")
+_PREVIOUS_SHA256 = re.compile(r"[0-9a-f]{64}")
+_PREVIOUS_COMMIT = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+_PREVIOUS_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z")
+MAX_PREVIOUS_CHANGED_PATHS = 4096
+MAX_PREVIOUS_CHANGED_PATH_BYTES = 4096
+MAX_PREVIOUS_CHANGED_TOTAL_BYTES = 256 * 1024
+MAX_PREVIOUS_DISPLAY_BYTES = 256 * 1024
+MAX_PREVIOUS_REASON_BYTES = 4096
+MAX_PREVIOUS_ELAPSED_MS = 60_000
+
+
+def _bounded_utf8(value: object, maximum: int, *, nonblank: bool = False) -> bool:
+    if not isinstance(value, str) or (nonblank and not value.strip()):
+        return False
+    try:
+        return len(value.encode("utf-8")) <= maximum
+    except UnicodeEncodeError:
+        return False
+
+
+def _safe_previous_changed_path(value: object) -> bool:
+    if not _bounded_utf8(value, MAX_PREVIOUS_CHANGED_PATH_BYTES, nonblank=True):
+        return False
+    assert isinstance(value, str)
+    if "\\" in value or "\x00" in value:
+        return False
+    pure = PurePosixPath(value)
+    return (
+        not pure.is_absolute()
+        and value == pure.as_posix()
+        and all(part not in {"", ".", ".."} for part in pure.parts)
+        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+    )
+
+
+def _is_previous_result(value: object) -> TypeGuard[_PreviousResult]:
+    status = getattr(value, "status", None)
+    report_id = getattr(value, "report_id", None)
+    revision = getattr(value, "revision", None)
+    markdown_sha256 = getattr(value, "markdown_sha256", None)
+    created_at = getattr(value, "created_at", None)
+    baseline_commit = getattr(value, "baseline_commit", None)
+    changed_paths = getattr(value, "changed_paths", None)
+    changed_count = getattr(value, "changed_count", None)
+    requirement_sha256 = getattr(value, "requirement_sha256", None)
+    source_inventory_sha256 = getattr(value, "source_inventory_sha256", None)
+    display_text = getattr(value, "display_text", None)
+    reason = getattr(value, "reason", None)
+    elapsed_ms = getattr(value, "elapsed_ms", None)
+    if (
+        status not in {"none", "fresh", "stale", "ambiguous"}
+        or not isinstance(requirement_sha256, str)
+        or _PREVIOUS_SHA256.fullmatch(requirement_sha256) is None
+        or not _bounded_utf8(reason, MAX_PREVIOUS_REASON_BYTES, nonblank=True)
+        or type(elapsed_ms) is not int
+        or not 0 <= elapsed_ms <= MAX_PREVIOUS_ELAPSED_MS
+        or not isinstance(changed_paths, tuple)
+        or len(changed_paths) > MAX_PREVIOUS_CHANGED_PATHS
+        or not all(isinstance(path, str) for path in changed_paths)
+        or tuple(sorted(set(changed_paths))) != changed_paths
+        or not all(_safe_previous_changed_path(path) for path in changed_paths)
+    ):
+        return False
+    try:
+        changed_path_bytes = sum(len(path.encode("utf-8")) for path in changed_paths)
+    except UnicodeEncodeError:
+        return False
+    if changed_path_bytes > MAX_PREVIOUS_CHANGED_TOTAL_BYTES:
+        return False
+    if status in {"none", "ambiguous"}:
+        return (
+            all(
+                item is None
+                for item in (
+                    report_id,
+                    revision,
+                    markdown_sha256,
+                    created_at,
+                    baseline_commit,
+                    source_inventory_sha256,
+                    display_text,
+                )
+            )
+            and changed_paths == ()
+            and changed_count is None
+        )
+    return (
+        isinstance(report_id, str)
+        and _PREVIOUS_REPORT_ID.fullmatch(report_id) is not None
+        and type(revision) is int
+        and 1 <= revision <= 2_147_483_647
+        and isinstance(markdown_sha256, str)
+        and _PREVIOUS_SHA256.fullmatch(markdown_sha256) is not None
+        and isinstance(created_at, str)
+        and len(created_at) <= 64
+        and _PREVIOUS_TIMESTAMP.fullmatch(created_at) is not None
+        and (
+            baseline_commit is None
+            or (
+                isinstance(baseline_commit, str)
+                and _PREVIOUS_COMMIT.fullmatch(baseline_commit) is not None
+            )
+        )
+        and (
+            source_inventory_sha256 is None
+            or (
+                isinstance(source_inventory_sha256, str)
+                and _PREVIOUS_SHA256.fullmatch(source_inventory_sha256) is not None
+            )
+        )
+        and _bounded_utf8(display_text, MAX_PREVIOUS_DISPLAY_BYTES, nonblank=True)
+        and (
+            (changed_count is None and not changed_paths)
+            or (
+                type(changed_count) is int
+                and len(changed_paths) <= changed_count <= MAX_PREVIOUS_CHANGED_PATHS
+            )
+        )
+    )
+
+
 def _string_key_mapping(value: object) -> bool:
     return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
 
@@ -677,6 +920,21 @@ def _expand_schema(schema, root):
 
 EXPANDED_ANALYSIS_SCHEMA = _expand_schema(ANALYSIS_SCHEMA, ANALYSIS_SCHEMA)
 
+PREVIOUS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["repo_root", "request", "repository_evidence"],
+    "properties": {
+        "repo_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "request": {"type": "string", "minLength": 1, "maxLength": 262144},
+        "repository_evidence": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {"type": "string", "minLength": 1, "maxLength": 65536},
+        },
+    },
+}
+
 SCAN_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -754,6 +1012,11 @@ FINALIZE_SCHEMA = {
     },
 }
 TOOLS = [
+    {
+        "name": "rir_previous",
+        "description": "Look up one bounded local, network-free previous impact report before scanning; report content is returned only for a safe same-lineage match.",
+        "inputSchema": PREVIOUS_SCHEMA,
+    },
     {
         "name": "rir_scan",
         "description": "Run one bounded local, network-free Fast Scan without automatic detailed refinement.",
@@ -856,6 +1119,61 @@ def _validate_schema(value, schema, label):
         pattern = schema.get("pattern")
         if pattern is not None and re.fullmatch(pattern, value) is None:
             raise ValueError(f"{label} has an invalid format")
+
+
+def _validated_previous_root(value: str) -> Path:
+    if not _bounded_utf8(value, 4096, nonblank=True):
+        raise ValueError("rir_previous arguments.repo_root is invalid")
+    path = Path(value)
+    try:
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError("rir_previous repository root is unavailable") from error
+    if path.is_symlink() or not stat.S_ISDIR(metadata.st_mode) or not resolved.is_dir():
+        raise ValueError("rir_previous repository root must be a real directory")
+    return resolved
+
+
+def _previous(arguments: object) -> dict[str, object]:
+    _validate_arguments(arguments, PREVIOUS_SCHEMA, "rir_previous")
+    if not _is_previous_arguments(arguments):
+        raise ValueError("rir_previous arguments have the wrong type")
+    root = _validated_previous_root(arguments["repo_root"])
+    previous_request = rir_controller.PreviousLookupRequest(
+        root,
+        arguments["request"],
+        tuple(arguments["repository_evidence"]),
+    )
+    try:
+        result = rir_controller.lookup_previous(previous_request)
+    except Exception as error:
+        raise _ControllerContractError("controller previous operation failed") from error
+    if not _is_previous_result(result):
+        raise _ControllerContractError("controller previous result contract is incomplete")
+    structured = {
+        "status": result.status,
+        "report_id": result.report_id,
+        "revision": result.revision,
+        "markdown_sha256": result.markdown_sha256,
+        "created_at": result.created_at,
+        "baseline_commit": result.baseline_commit,
+        "changed_paths": list(result.changed_paths),
+        "changed_count": result.changed_count,
+        "requirement_sha256": result.requirement_sha256,
+        "source_inventory_sha256": result.source_inventory_sha256,
+        "display_text": result.display_text,
+        "reason": result.reason,
+        "elapsed_ms": result.elapsed_ms,
+    }
+    if not _is_json_value(structured):
+        raise _ControllerContractError("controller previous result is not JSON-safe")
+    content = [] if result.display_text is None else [{"type": "text", "text": result.display_text}]
+    return {
+        "content": content,
+        "structuredContent": structured,
+        "isError": False,
+    }
 
 
 def _begin(arguments: object) -> dict[str, object]:
@@ -1128,7 +1446,9 @@ def handle(message: object) -> dict[str, object] | None:
     name = params.get("name")
     arguments = params.get("arguments")
     try:
-        if name == "rir_scan":
+        if name == "rir_previous":
+            result = _previous(arguments)
+        elif name == "rir_scan":
             result = _scan(arguments)
         elif name == "rir_begin":
             result = _begin(arguments)

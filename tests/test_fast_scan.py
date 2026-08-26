@@ -206,6 +206,26 @@ class FastScanTest(unittest.TestCase):
             [("api/profile.py", "api/profile.py", "request-path-only")],
         )
 
+    def test_explicit_path_candidates_include_known_bare_root_files_only(self):
+        fast_scan = load_fast_scan()
+
+        candidates = fast_scan.explicit_path_candidates(
+            "Create ignored.py and update package.json, not arbitrary.prose or example.com.",
+            (),
+        )
+
+        self.assertEqual(candidates, ("ignored.py", "package.json"))
+
+    def test_bare_root_candidate_does_not_duplicate_a_dotted_path_directory(self):
+        fast_scan = load_fast_scan()
+
+        candidates = fast_scan.explicit_path_candidates(
+            "Change package.json/scripts/build and root.py",
+            (),
+        )
+
+        self.assertEqual(candidates, ("package.json/scripts/build", "root.py"))
+
     def test_request_evidence_and_maximum_bounds_are_enforced(self):
         fast_scan = load_fast_scan()
         with self.assertRaisesRegex(ValueError, "4 KiB"):

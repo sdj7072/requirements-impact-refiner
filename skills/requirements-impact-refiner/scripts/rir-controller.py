@@ -53,6 +53,7 @@ BEGIN_KEYS = {
     "delivery_override",
     "scan_id",
 }
+PREVIOUS_KEYS = {"request", "repository_evidence"}
 SCAN_KEYS = {"change_request", "evidence", "presentation"}
 TRACE_KEYS = {"seeds"}
 TRACE_SEED_KEYS = {"term", "location"}
@@ -65,6 +66,9 @@ def build_parser():
     begin.add_argument("--repo-root", type=Path, required=True)
     begin.add_argument("--input", type=Path, required=True)
     begin.add_argument("--scan-id")
+    previous = subparsers.add_parser("previous")
+    previous.add_argument("--repo-root", type=Path, required=True)
+    previous.add_argument("--input", type=Path, required=True)
     scan = subparsers.add_parser("scan")
     scan.add_argument("--repo-root", type=Path, required=True)
     scan.add_argument("--input", type=Path, required=True)
@@ -170,6 +174,43 @@ def _finalize(args) -> int:
     return 0
 
 
+def _previous(args) -> int:
+    value = _read_object(args.input, rir_controller.MAX_BEGIN_BYTES, "previous input")
+    unknown = sorted(set(value) - PREVIOUS_KEYS)
+    if unknown:
+        raise ValueError(f"unknown previous key {unknown[0]}")
+    missing = sorted(PREVIOUS_KEYS - set(value))
+    if missing:
+        raise ValueError(f"missing previous key {missing[0]}")
+    evidence = value["repository_evidence"]
+    if not isinstance(evidence, list):
+        raise ValueError("previous repository_evidence must be an array")
+    result = rir_controller.lookup_previous(
+        rir_controller.PreviousLookupRequest(
+            repo_root=args.repo_root,
+            request=value["request"],
+            repository_evidence=tuple(evidence),
+        )
+    )
+    payload = {
+        "status": result.status,
+        "report_id": result.report_id,
+        "revision": result.revision,
+        "markdown_sha256": result.markdown_sha256,
+        "created_at": result.created_at,
+        "baseline_commit": result.baseline_commit,
+        "changed_paths": list(result.changed_paths),
+        "changed_count": result.changed_count,
+        "requirement_sha256": result.requirement_sha256,
+        "source_inventory_sha256": result.source_inventory_sha256,
+        "display_text": result.display_text,
+        "reason": result.reason,
+        "elapsed_ms": result.elapsed_ms,
+    }
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def _scan(args) -> int:
     value = _read_object(args.input, rir_controller.MAX_BEGIN_BYTES, "scan input")
     unknown = sorted(set(value) - SCAN_KEYS)
@@ -248,6 +289,8 @@ def _trace(args) -> int:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "previous":
+            return _previous(args)
         if args.command == "scan":
             return _scan(args)
         if args.command == "begin":

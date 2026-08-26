@@ -1843,6 +1843,56 @@ class RirReportContextTest(unittest.TestCase):
         )
         self.assertEqual(previous.status, "stale")
 
+    def test_absent_bare_root_source_named_by_request_can_never_be_reused_as_fresh(self):
+        self.configure_graph(True)
+        source = self.root / "src" / "tracked.py"
+        source.parent.mkdir()
+        source.write_text("def create_file():\n    return True\n", encoding="utf-8")
+        (self.root / ".gitignore").write_text(
+            ".requirements-impact-refiner/\nignored.py\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
+        change = "create ignored.py"
+        evidence = ("src/tracked.py is the creation hook",)
+        scan = CONTROLLER.scan_impact(
+            CONTROLLER.ScanRequest(self.root, change, evidence, "balanced")
+        )
+        self.assertTrue(scan.can_promote)
+        draft = CONTROLLER.begin_refinement(
+            CONTROLLER.BeginRequest(
+                self.root,
+                change,
+                evidence,
+                "generic",
+                scan_id=scan.scan_id,
+            )
+        )
+        request = self.finalize_request(draft, scan.receipt_id)
+        request.analysis["impacts"][0]["graph_path_keys"] = [row["id"] for row in scan.paths]
+        if not request.analysis["impacts"][0]["graph_path_keys"]:
+            request.analysis["impacts"][0]["coverage_rationale"] = (
+                "Fast Scan found no closed repository path."
+            )
+        request.analysis["impacts"][0]["evidence_level"] = "unknown"
+
+        result = FINALIZE.finalize_refinement(request)
+        context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
+        (self.root / "ignored.py").write_text("appeared = True\n", encoding="utf-8")
+        previous = CONTROLLER.lookup_previous(
+            CONTROLLER.PreviousLookupRequest(self.root, change, evidence)
+        )
+
+        self.assertIsNotNone(context)
+        self.assertIsNone(context.required_source_digests)
+        self.assertFalse(context.source_recheck_complete)
+        self.assertEqual(previous.status, "stale")
+
     def test_complete_recheck_map_unions_inventory_with_readable_explicit_seed(self):
         self.configure_graph(True)
         tracked = self.root / "tracked.py"

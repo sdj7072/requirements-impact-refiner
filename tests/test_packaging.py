@@ -276,6 +276,13 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertEqual(manifest["mcpServers"], "./.mcp.json")
         self.assertTrue((FORBIDDEN_COMPONENTS - {"mcpServers"}).isdisjoint(manifest))
+        self.assertIn("previous impact", manifest["interface"]["longDescription"].lower())
+        self.assertTrue(
+            any(
+                "previous impact" in prompt.lower()
+                for prompt in manifest["interface"]["defaultPrompt"]
+            )
+        )
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
@@ -292,7 +299,7 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(server["args"], [])
         self.assertEqual(server["cwd"], ".")
         self.assertNotIn("url", server)
-        self.assertEqual(server.get("env_vars", []), [])
+        self.assertNotIn("env_vars", server)
         launcher = ROOT / "scripts/launch-rir-mcp"
         self.assertTrue(launcher.is_file())
         self.assertTrue(launcher.stat().st_mode & 0o111)

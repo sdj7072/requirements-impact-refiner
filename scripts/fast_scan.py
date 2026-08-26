@@ -335,10 +335,23 @@ def _terms(text: str) -> tuple[str, ...]:
 
 
 def _paths(text: str) -> tuple[str, ...]:
-    values = []
+    matches: list[tuple[int, str]] = []
     for match in _PATH.finditer(text):
         value = match.group(0).rstrip(".,:;)")
-        if _safe_relative(value) and value not in values:
+        if _safe_relative(value):
+            matches.append((match.start(), value))
+    for match in _QUALIFIED.finditer(text):
+        value = match.group(0).rstrip(".,:;)")
+        if (
+            Path(value).suffix.lower() in _SOURCE_SUFFIXES
+            and (match.start() == 0 or text[match.start() - 1] not in "/\\")
+            and (match.end() == len(text) or text[match.end()] not in "/\\")
+            and _safe_relative(value)
+        ):
+            matches.append((match.start(), value))
+    values = []
+    for _offset, value in sorted(matches):
+        if value not in values:
             values.append(value)
     return tuple(values)
 

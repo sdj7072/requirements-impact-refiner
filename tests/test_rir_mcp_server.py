@@ -67,6 +67,15 @@ class RirMcpServerTest(unittest.TestCase):
         )
         cases = (
             (
+                "rir_previous",
+                "lookup_previous",
+                {
+                    "repo_root": str(ROOT),
+                    "request": "Change the profile contract",
+                    "repository_evidence": [],
+                },
+            ),
+            (
                 "rir_scan",
                 "scan_impact",
                 {"repo_root": str(ROOT), "change_request": "Change the profile contract"},
@@ -123,6 +132,85 @@ class RirMcpServerTest(unittest.TestCase):
             )
         )
         self.assertEqual(malformed["error"]["code"], -32602)
+
+    def test_previous_result_bounds_and_cross_root_paths_fail_as_internal_errors(self):
+        module = self.load_server_module("_rir_mcp_previous_result_guard")
+        arguments = {
+            "repo_root": str(ROOT),
+            "request": "Change the profile contract",
+            "repository_evidence": [],
+        }
+        baseline = {
+            "status": "stale",
+            "report_id": "RPT-001",
+            "revision": 1,
+            "markdown_sha256": "1" * 64,
+            "created_at": "2026-08-25T12:34:56Z",
+            "baseline_commit": "2" * 40,
+            "changed_paths": (),
+            "changed_count": 0,
+            "requirement_sha256": "3" * 64,
+            "source_inventory_sha256": "4" * 64,
+            "display_text": "## Previous Impact Report\n",
+            "reason": "source changed",
+            "elapsed_ms": 1,
+        }
+        invalid = (
+            {"changed_paths": ("../foreign.py",), "changed_count": 1},
+            {"changed_paths": ("/tmp/foreign.py",), "changed_count": 1},
+            {"changed_paths": ("foreign\\path.py",), "changed_count": 1},
+            {"changed_paths": ("changed.py",), "changed_count": None},
+            {"display_text": "x" * (256 * 1024 + 1)},
+            {"reason": "x" * 4097},
+            {"created_at": "not-a-timestamp"},
+            {"elapsed_ms": 60_001},
+            {"status": "none", "display_text": None},
+        )
+        for identifier, changes in enumerate(invalid, start=1):
+            with self.subTest(changes=changes):
+                result = types.SimpleNamespace(**{**baseline, **changes})
+                with mock.patch.object(
+                    module.rir_controller, "lookup_previous", return_value=result
+                ):
+                    reply = module.handle(
+                        request(
+                            identifier,
+                            "tools/call",
+                            {"name": "rir_previous", "arguments": arguments},
+                        )
+                    )
+                self.assertEqual(
+                    reply["error"],
+                    {"code": -32603, "message": "controller operation failed"},
+                )
+                self.assertNotIn("foreign", json.dumps(reply, sort_keys=True))
+
+    def test_previous_storage_failure_is_sanitized_as_an_internal_error(self):
+        module = self.load_server_module("_rir_mcp_previous_storage_guard")
+        arguments = {
+            "repo_root": str(ROOT),
+            "request": "Change the profile contract",
+            "repository_evidence": [],
+        }
+
+        with mock.patch.object(
+            module.rir_controller,
+            "lookup_previous",
+            side_effect=OSError("/private/secret/report.json"),
+        ):
+            reply = module.handle(
+                request(
+                    1,
+                    "tools/call",
+                    {"name": "rir_previous", "arguments": arguments},
+                )
+            )
+
+        self.assertEqual(
+            reply["error"],
+            {"code": -32603, "message": "controller operation failed"},
+        )
+        self.assertNotIn("secret", json.dumps(reply, sort_keys=True))
 
     def test_nested_begin_result_shapes_fail_closed_as_internal_errors(self):
         module = self.load_server_module("_rir_mcp_nested_begin_result_guard")
@@ -356,6 +444,7 @@ from pathlib import Path
 path = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(path.parent))
 fake = types.ModuleType("payload_identity")
+fake.__file__ = str(path.parent / "payload_identity.py")
 fake.payload_sha256 = lambda plugin_root: object()
 sys.modules["payload_identity"] = fake
 spec = importlib.util.spec_from_file_location("_mcp_payload_guard", path)
@@ -424,15 +513,30 @@ else:
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual(
             [tool["name"] for tool in replies[1]["result"]["tools"]],
-            ["rir_scan", "rir_begin", "rir_trace_impact", "rir_finalize"],
+            [
+                "rir_previous",
+                "rir_scan",
+                "rir_begin",
+                "rir_trace_impact",
+                "rir_finalize",
+            ],
         )
         for tool in replies[1]["result"]["tools"]:
             self.assertEqual(tool["inputSchema"]["additionalProperties"], False)
             self.assertIn("local", tool["description"].lower())
             self.assertIn("network", tool["description"].lower())
-        scan_schema = replies[1]["result"]["tools"][0]["inputSchema"]
+        previous_schema = replies[1]["result"]["tools"][0]["inputSchema"]
+        self.assertEqual(
+            previous_schema["required"],
+            ["repo_root", "request", "repository_evidence"],
+        )
+        self.assertEqual(
+            set(previous_schema["properties"]),
+            {"repo_root", "request", "repository_evidence"},
+        )
+        scan_schema = replies[1]["result"]["tools"][1]["inputSchema"]
         self.assertEqual(scan_schema["required"], ["repo_root", "change_request"])
-        trace_schema = replies[1]["result"]["tools"][2]["inputSchema"]
+        trace_schema = replies[1]["result"]["tools"][3]["inputSchema"]
         self.assertEqual(
             trace_schema["properties"]["seeds"]["items"]["additionalProperties"], False
         )
@@ -440,7 +544,7 @@ else:
             trace_schema["properties"]["seeds"]["items"]["required"],
             ["term", "location"],
         )
-        finalize_schema = replies[1]["result"]["tools"][3]["inputSchema"]
+        finalize_schema = replies[1]["result"]["tools"][4]["inputSchema"]
         analysis = finalize_schema["properties"]["analysis"]
         self.assertEqual(analysis["additionalProperties"], False)
         self.assertIn("impacts", analysis["required"])
@@ -459,6 +563,7 @@ from pathlib import Path
 path = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(path.parent))
 fake = types.ModuleType("rir_controller")
+fake.__file__ = str(path.parent / "rir_controller.py")
 fake.BeginRequest = type("BeginRequest", (), {})
 sys.modules["rir_controller"] = fake
 spec = importlib.util.spec_from_file_location("_mcp_guard", path)
@@ -470,6 +575,64 @@ except ImportError as error:
         raise AssertionError(str(error))
 else:
     raise AssertionError("incomplete controller sibling was accepted")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(SERVER)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_server_ignores_foreign_controller_and_payload_identity_aliases(self):
+        script = r"""
+import importlib
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+server = Path(sys.argv[1]).resolve()
+scripts = server.parent
+sys.path.insert(0, str(scripts))
+local_controller = importlib.import_module("rir_controller")
+local_payload = importlib.import_module("payload_identity")
+
+foreign_controller = types.ModuleType("rir_controller")
+foreign_controller.__file__ = str(scripts.parent / "foreign" / "rir_controller.py")
+for name in (
+    "ADAPTERS",
+    "BeginRequest",
+    "FinalizeRequest",
+    "PreviousLookupRequest",
+    "PreviousReportResult",
+    "ScanRequest",
+    "TraceRequest",
+    "TraceSeed",
+    "begin_refinement",
+    "finalize_refinement",
+    "lookup_previous",
+    "scan_impact",
+    "trace_impact",
+):
+    setattr(foreign_controller, name, getattr(local_controller, name))
+foreign_payload = types.ModuleType("payload_identity")
+foreign_payload.__file__ = str(scripts.parent / "foreign" / "payload_identity.py")
+foreign_payload.payload_sha256 = local_payload.payload_sha256
+sys.modules["rir_controller"] = foreign_controller
+sys.modules["payload_identity"] = foreign_payload
+
+spec = importlib.util.spec_from_file_location("_mcp_local_alias_guard", server)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+if Path(module.rir_controller.__file__).resolve() != scripts / "rir_controller.py":
+    raise AssertionError("foreign controller alias was trusted")
+if Path(module.payload_identity.__file__).resolve() != scripts / "payload_identity.py":
+    raise AssertionError("foreign payload identity alias was trusted")
+if sys.modules["rir_controller"] is not foreign_controller:
+    raise AssertionError("foreign controller alias was not preserved")
+if sys.modules["payload_identity"] is not foreign_payload:
+    raise AssertionError("foreign payload alias was not preserved")
 """
         result = subprocess.run(
             [sys.executable, "-c", script, str(SERVER)],
@@ -595,6 +758,21 @@ else:
                 process.stdin.write(json.dumps(finalize) + "\n")
                 process.stdin.flush()
                 final_reply = json.loads(process.stdout.readline())
+                previous = request(
+                    3,
+                    "tools/call",
+                    {
+                        "name": "rir_previous",
+                        "arguments": {
+                            "repo_root": str(root),
+                            "request": "Add nickname.",
+                            "repository_evidence": ["displayName exists"],
+                        },
+                    },
+                )
+                process.stdin.write(json.dumps(previous) + "\n")
+                process.stdin.flush()
+                previous_reply = json.loads(process.stdout.readline())
             finally:
                 process.stdin.close()
                 process.wait(timeout=5)
@@ -606,6 +784,57 @@ else:
         self.assertTrue(result["content"][0]["text"].startswith("## Change Impact Summary"))
         self.assertEqual(result["content"][0]["text"], result["structuredContent"]["display_text"])
         self.assertFalse(result["structuredContent"]["display_text"].endswith("\n"))
+        previous_result = previous_reply["result"]
+        self.assertEqual(previous_result["structuredContent"]["status"], "stale")
+        self.assertEqual(
+            previous_result["content"][0]["text"],
+            previous_result["structuredContent"]["display_text"],
+        )
+        self.assertTrue(
+            previous_result["structuredContent"]["display_text"].startswith(
+                "## Previous Impact Report\n"
+            )
+        )
+        self.assertNotIn(
+            "# Requirements Impact Report\n",
+            previous_result["structuredContent"]["display_text"],
+        )
+
+    def test_previous_none_returns_structured_status_without_identity_or_body(self):
+        with tempfile.TemporaryDirectory() as directory:
+            replies = self.exchange(
+                [
+                    request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "rir_previous",
+                            "arguments": {
+                                "repo_root": directory,
+                                "request": "Add nickname.",
+                                "repository_evidence": [],
+                            },
+                        },
+                    )
+                ]
+            )
+
+        result = replies[0]["result"]
+        self.assertEqual(result["content"], [])
+        structured = result["structuredContent"]
+        self.assertEqual(structured["status"], "none")
+        for field in (
+            "report_id",
+            "revision",
+            "markdown_sha256",
+            "created_at",
+            "baseline_commit",
+            "source_inventory_sha256",
+            "display_text",
+        ):
+            self.assertIsNone(structured[field], field)
+        self.assertEqual(structured["changed_paths"], [])
+        self.assertIsNone(structured["changed_count"])
 
     def test_unknown_tool_and_malformed_params_return_bounded_errors_then_continue(self):
         replies = self.exchange(
@@ -626,6 +855,31 @@ else:
                     },
                 ),
                 request(4, "tools/list", {}),
+                request(
+                    5,
+                    "tools/call",
+                    {
+                        "name": "rir_previous",
+                        "arguments": {
+                            "repo_root": "/tmp",
+                            "request": "x",
+                            "repository_evidence": [],
+                            "surprise": True,
+                        },
+                    },
+                ),
+                request(
+                    6,
+                    "tools/call",
+                    {
+                        "name": "rir_previous",
+                        "arguments": {
+                            "repo_root": "/tmp",
+                            "request": "x",
+                            "repository_evidence": {},
+                        },
+                    },
+                ),
             ]
         )
 
@@ -633,12 +887,26 @@ else:
         self.assertEqual(replies[1]["error"]["code"], -32602)
         self.assertEqual(replies[2]["error"]["code"], -32602)
         self.assertIn("tools", replies[3]["result"])
+        self.assertEqual(replies[4]["error"]["code"], -32602)
+        self.assertEqual(replies[5]["error"]["code"], -32602)
         self.assertLess(len(json.dumps(replies[0])), 2048)
 
     def test_notification_has_no_response_and_clean_eof_exits_zero(self):
         replies = self.exchange(
             [
                 {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+                {
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "rir_previous",
+                        "arguments": {
+                            "repo_root": str(ROOT),
+                            "request": "notification",
+                            "repository_evidence": [],
+                        },
+                    },
+                },
                 request(2, "tools/list", {}),
             ]
         )
@@ -940,7 +1208,13 @@ else:
         self.assertLess(len(json.dumps(replies[0])), 2048)
         self.assertEqual(
             [tool["name"] for tool in replies[1]["result"]["tools"]],
-            ["rir_scan", "rir_begin", "rir_trace_impact", "rir_finalize"],
+            [
+                "rir_previous",
+                "rir_scan",
+                "rir_begin",
+                "rir_trace_impact",
+                "rir_finalize",
+            ],
         )
 
     @unittest.skipIf(fcntl is None, "requires POSIX flock")
