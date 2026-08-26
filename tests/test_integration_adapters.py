@@ -1,11 +1,14 @@
 import re
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = ROOT / "skills" / "requirements-impact-refiner"
 REFERENCES = SKILL_DIR / "references"
 SKILL_PATH = SKILL_DIR / "SKILL.md"
+BOOTSTRAP_SKILL_PATH = ROOT / "skills" / "using-requirements-impact-refiner" / "SKILL.md"
+PREVIOUS_REFERENCE_PATH = REFERENCES / "previous-report.md"
 
 ADAPTERS = {
     "generic": {
@@ -41,11 +44,157 @@ SUPERPOWERS_HANDOFF_MARKER = (
 )
 
 
+@dataclass(frozen=True)
+class BootstrapOutcome:
+    calls: tuple[str, ...]
+    display: str
+    asks_question: bool
+    exposes_previous_body: bool
+    scan_fields: tuple[str, ...]
+    previous_evidence: tuple[str, ...] = ()
+    scan_evidence: tuple[str, ...] = ()
+    manual_invention: bool = False
+
+
+def _contract_rows(text, heading):
+    section = text.split(f"## {heading}\n", 1)[1].split("\n## ", 1)[0]
+    rows = []
+    for line in section.splitlines():
+        if not line.startswith("|") or set(line.replace("|", "").replace(" ", "")) <= {"-"}:
+            continue
+        rows.append(tuple(cell.strip().strip("`") for cell in line.strip("|").split("|")))
+    return {row[0]: row[1:] for row in rows[1:]}
+
+
+def run_bootstrap_fixture(
+    *,
+    previous_status="none",
+    conversation="concrete-change",
+    original_request_says_yes=False,
+    followup_reply=None,
+    availability="mcp",
+    repository_evidence=("first", "duplicate", "duplicate", "last"),
+):
+    """Execute the skill's tables as a deterministic tool-order fixture."""
+    bootstrap = BOOTSTRAP_SKILL_PATH.read_text(encoding="utf-8")
+    core = SKILL_PATH.read_text(encoding="utf-8")
+    tool_order = re.findall(
+        r"`(rir_(?:previous|scan|begin|trace_impact|finalize))`", bootstrap + "\n" + core
+    )
+    if not tool_order:
+        return BootstrapOutcome((), "none", False, False, (), (), (), False)
+
+    # Preserve the pre-v0.6 behavior as an observable RED result: the first
+    # declared tool was rir_scan and no status-specific previous route existed.
+    if tool_order[0] != "rir_previous":
+        return BootstrapOutcome((tool_order[0],), "scan", False, False, (), (), (), False)
+
+    contract = PREVIOUS_REFERENCE_PATH.read_text(encoding="utf-8")
+    activation = _contract_rows(contract, "Activation contract")
+    availability_rows = _contract_rows(contract, "Availability contract")
+    statuses = _contract_rows(contract, "Status contract")
+    confirmations = _contract_rows(contract, "Confirmation contract")
+
+    if activation[conversation][0] == "stop":
+        return BootstrapOutcome((), "none", False, False, (), (), (), False)
+    if availability_rows[availability][0] == "stop-with-disclosure":
+        return BootstrapOutcome((), "disclosure", False, False, (), (), (), False)
+
+    display, next_action, raw_fields, question, body = statuses[previous_status]
+    calls = ["rir_previous"]
+    scan_fields = ()
+    if next_action == "rir_scan":
+        calls.append(next_action)
+        scan_fields = tuple(field for field in raw_fields.split(",") if field != "none")
+
+    # A "yes" embedded in the change request predates the rendered question;
+    # the confirmation table deliberately gives it no detailed tool sequence.
+    confirmation_key = "original-request-yes" if original_request_says_yes else "no-followup"
+    if followup_reply == "yes" and "rir_scan" in calls:
+        confirmation_key = "explicit-yes-after-scan"
+    detailed = confirmations[confirmation_key][0]
+    if detailed != "none":
+        calls.extend(tool for tool in detailed.split(",") if tool)
+
+    return BootstrapOutcome(
+        tuple(calls),
+        display,
+        question == "yes",
+        body == "yes",
+        scan_fields,
+        tuple(repository_evidence),
+        tuple(repository_evidence) if "repository_evidence" in scan_fields else (),
+        False,
+    )
+
+
 def headings(text):
     return re.findall(r"^## (.+)$", text, flags=re.MULTILINE)
 
 
 class IntegrationAdapterContractTest(unittest.TestCase):
+    def test_fresh_previous_returns_renderer_text_and_stops_without_scan(self):
+        outcome = run_bootstrap_fixture(previous_status="fresh")
+
+        self.assertEqual(outcome.calls, ("rir_previous",))
+        self.assertEqual(outcome.display, "display_text")
+        self.assertTrue(outcome.exposes_previous_body)
+
+    def test_stale_previous_displays_first_then_scans_selected_revision(self):
+        outcome = run_bootstrap_fixture(previous_status="stale")
+
+        self.assertEqual(outcome.calls, ("rir_previous", "rir_scan"))
+        self.assertEqual(outcome.display, "display_text-before-scan")
+        self.assertEqual(outcome.scan_fields, ("report_id", "revision", "changed_paths"))
+
+    def test_none_runs_ordinary_scan_after_exactly_one_previous_lookup(self):
+        evidence = ("path:b.py", "symbol:B", "symbol:B", "path:a.py")
+        outcome = run_bootstrap_fixture(previous_status="none", repository_evidence=evidence)
+
+        self.assertEqual(outcome.calls, ("rir_previous", "rir_scan"))
+        self.assertEqual(outcome.scan_fields, ("request", "repository_evidence"))
+        self.assertEqual(outcome.calls.count("rir_previous"), 1)
+        self.assertEqual(outcome.calls.count("rir_scan"), 1)
+        self.assertEqual(outcome.previous_evidence, evidence)
+        self.assertEqual(outcome.scan_evidence, evidence)
+
+    def test_ambiguous_asks_for_discriminator_without_scan_or_report_body(self):
+        outcome = run_bootstrap_fixture(previous_status="ambiguous")
+
+        self.assertEqual(outcome.calls, ("rir_previous",))
+        self.assertEqual(outcome.display, "candidates-and-question")
+        self.assertTrue(outcome.asks_question)
+        self.assertFalse(outcome.exposes_previous_body)
+
+    def test_only_explicit_followup_yes_after_scan_starts_detailed_tools(self):
+        first_turn = run_bootstrap_fixture(previous_status="none", original_request_says_yes=True)
+        second_turn = run_bootstrap_fixture(previous_status="none", followup_reply="yes")
+
+        self.assertEqual(first_turn.calls, ("rir_previous", "rir_scan"))
+        self.assertEqual(
+            second_turn.calls,
+            ("rir_previous", "rir_scan", "rir_begin", "rir_trace_impact", "rir_finalize"),
+        )
+
+    def test_non_change_conversations_invoke_neither_lookup_nor_scan(self):
+        for conversation in ("ideation", "explanation", "debugging", "code-review", "status"):
+            with self.subTest(conversation=conversation):
+                self.assertEqual(run_bootstrap_fixture(conversation=conversation).calls, ())
+
+    def test_unavailable_surfaces_do_not_trigger_manual_report_invention(self):
+        outcome = run_bootstrap_fixture(availability="unavailable")
+
+        self.assertEqual(outcome.calls, ())
+        self.assertEqual(outcome.display, "disclosure")
+        self.assertFalse(outcome.exposes_previous_body)
+        self.assertFalse(outcome.manual_invention)
+
+    def test_plugin_disable_switch_stops_before_lookup(self):
+        outcome = run_bootstrap_fixture(availability="plugin-disabled")
+
+        self.assertEqual(outcome.calls, ())
+        self.assertFalse(outcome.manual_invention)
+
     def test_each_adapter_has_exactly_the_four_contract_sections(self):
         for adapter in ADAPTERS.values():
             text = (REFERENCES / adapter["file"]).read_text(encoding="utf-8")

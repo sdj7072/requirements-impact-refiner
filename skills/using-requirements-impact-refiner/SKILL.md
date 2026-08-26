@@ -11,10 +11,10 @@ metadata:
 
 Before any response or action, check whether the current request proposes adding, changing, renaming, migrating, or removing software behavior.
 
-If it does, **requirements-impact-refiner is required** before planning or implementation. Invoke it automatically; do not wait for the user to name it. Respect its selected workflow adapter: with Superpowers, run it after approved brainstorming and before `writing-plans`; otherwise run it before the user's planning method.
+If it does, require **requirements-impact-refiner** before planning or implementation. With Superpowers, run it after approved brainstorming and before `writing-plans`; other adapter boundaries stay unchanged.
 
-The core skill defaults to one Fast Scan, returns its display text, asks whether to refine, and stops. Do not substitute manual searches or graph JSON. Only an explicit yes enters detailed report lineage; never infer a missing predecessor.
+For a selected change, read [Previous-report bootstrap](../requirements-impact-refiner/references/previous-report.md), call `rir_previous` exactly once before any `rir_scan`, and follow its route. Return renderer text; never substitute searches, graph JSON, or an invented report. Only a later explicit yes to the scan's question enters detailed refinement; original request wording is not confirmation.
 
-Skip it for pure ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan.
+For pure ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan, call neither `rir_previous` nor `rir_scan`.
 
 In plugin-capable clients, the plugin's enabled/disabled control is the on/off switch for this automatic check.

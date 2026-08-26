@@ -6,6 +6,7 @@ from pathlib import Path
 
 from evals.harness.catalog import load_all, select_suite
 from evals.harness.run import build_parser
+from tests.test_integration_adapters import run_bootstrap_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.ko.md", "README.ja.md"]
@@ -160,29 +161,21 @@ class DocumentationTest(unittest.TestCase):
                 r"(?:medium|중간|中)[\s\S]{0,120}-ll|-ll[\s\S]{0,120}(?:medium|중간|中)",
             )
 
-    def test_core_skill_is_a_short_controller_first_positive_recipe(self):
+    def test_core_skill_is_a_short_previous_first_positive_recipe(self):
         core = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        body = core.split("---", 2)[2]
         self.assertLess(len(core.split()), 180)
-        route = body.split("## Default Fast Scan\n", 1)[1].split("\n## ", 1)[0]
-        self.assertEqual(route.count("`rir_scan`"), 1)
-        self.assertNotIn("rir_begin", route)
-        self.assertNotIn("rir_trace_impact", route)
-        self.assertNotIn("rir_finalize", route)
-        self.assertIn("Return `display_text`", body)
-        self.assertIn("stop", route.lower())
-        self.assertIn("fast-scan.md", body)
-        self.assertIn("CLI fallback", body)
-        self.assertIn("full-inline", body)
-        recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)", route)
         self.assertEqual(
-            recipe.groups(),
-            (
-                "Call `rir_scan` once with the change and supplied evidence.",
-                "Return `display_text` verbatim.",
-                "Stop; the renderer-owned question already asks whether to refine.",
-            ),
+            run_bootstrap_fixture(previous_status="fresh").calls,
+            ("rir_previous",),
         )
+        self.assertEqual(
+            run_bootstrap_fixture(previous_status="stale").calls,
+            ("rir_previous", "rir_scan"),
+        )
+        self.assertIn("references/previous-report.md", core)
+        self.assertIn("references/fast-scan.md", core)
+        self.assertIn("scripts/rir-controller.py previous", core)
+        self.assertIn("full-inline", core)
 
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
         required = (

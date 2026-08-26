@@ -9,20 +9,20 @@ metadata:
 
 # Requirements Impact Refiner
 
-Use after bootstrap for concrete pre-planning changes; not ideation, debugging, code review, or generic PRDs.
+Use for concrete pre-planning changes; not ideation, debugging, code review, or generic PRDs.
 
-## Default Fast Scan
+## Default bootstrap
 
-1. Call `rir_scan` once with the change and supplied evidence.
-2. Return `display_text` verbatim.
-3. Stop; the renderer-owned question already asks whether to refine.
+1. Call `rir_previous` once with the change and ordered evidence.
+2. Return its renderer result and follow [Previous-report bootstrap](references/previous-report.md).
+3. Allow `rir_scan` only for `stale` or `none`, then stop.
 
-Do not invent paths, rerun providers, or hide frontiers. Resolve links from this `SKILL.md` directory. Read [Fast Scan](references/fast-scan.md) only for fallback or technical detail.
+Never invent confirmation. Resolve links from this `SKILL.md` directory; ordered evidence means supplied evidence. Read [Fast Scan](references/fast-scan.md) only for fallback.
 
 ## Detailed refinement
 
-After yes, read [Controller workflow](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), or [spec-kit](references/integration-spec-kit.md). Promoted scans skip trace.
+After yes to the scan's rendered question, read [Controller workflow](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), or [spec-kit](references/integration-spec-kit.md). Promoted scans skip trace.
 
 ## Fallbacks
 
-CLI fallback uses `scripts/rir-controller.py`. `full-inline` must disclose unavailable persistence and promotion.
+Use `scripts/rir-controller.py previous` before CLI `scan`. If neither surface exists, disclose and stop; never invent a previous body or `full-inline` replacement.

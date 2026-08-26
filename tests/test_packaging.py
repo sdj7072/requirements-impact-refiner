@@ -10,6 +10,8 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from tests.test_integration_adapters import run_bootstrap_fixture
+
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_COMPONENTS = {"mcpServers", "apps", "hooks", "agents", "dependencies"}
 PAYLOAD_SPEC = importlib.util.spec_from_file_location(
@@ -504,11 +506,10 @@ class PackagingTest(unittest.TestCase):
 
     def test_core_skill_runs_routing_before_workspace_availability_checks(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("`rir_scan`", core)
         self.assertIn("supplied evidence", core.lower())
-        self.assertIn(
-            "Stop; the renderer-owned question already asks whether to refine",
-            core,
+        self.assertEqual(
+            run_bootstrap_fixture(previous_status="stale").calls,
+            ("rir_previous", "rir_scan"),
         )
 
     def test_manifest_identity_is_consistent(self):

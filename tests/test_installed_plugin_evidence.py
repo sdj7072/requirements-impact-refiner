@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from evals.harness.evidence import find_potential_secrets, verify_manifest
+from tests.test_integration_adapters import run_bootstrap_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_ROOT = ROOT / "evals" / "results" / "installed-v0.3"
@@ -49,6 +50,34 @@ EXPECTED_CODEX_ENABLED_PLUGINS = (
     "template-creator@openai-primary-runtime",
     "visualize@openai-bundled",
 )
+
+
+class InstalledBootstrapBehaviorTest(unittest.TestCase):
+    def test_packaged_bootstrap_has_previous_first_status_and_two_turn_routes(self):
+        fresh = run_bootstrap_fixture(previous_status="fresh")
+        stale = run_bootstrap_fixture(previous_status="stale")
+        ambiguous = run_bootstrap_fixture(previous_status="ambiguous")
+        detailed = run_bootstrap_fixture(previous_status="stale", followup_reply="yes")
+
+        self.assertEqual(fresh.calls, ("rir_previous",))
+        self.assertEqual(stale.calls, ("rir_previous", "rir_scan"))
+        self.assertEqual(ambiguous.calls, ("rir_previous",))
+        self.assertEqual(
+            detailed.calls,
+            ("rir_previous", "rir_scan", "rir_begin", "rir_trace_impact", "rir_finalize"),
+        )
+
+    def test_root_and_packaged_previous_report_contracts_are_exact_mirrors(self):
+        self.assertEqual(
+            (ROOT / "references" / "previous-report.md").read_bytes(),
+            (
+                ROOT
+                / "skills"
+                / "requirements-impact-refiner"
+                / "references"
+                / "previous-report.md"
+            ).read_bytes(),
+        )
 
 
 def load_json(path):
