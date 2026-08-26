@@ -346,8 +346,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": True,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": "8" * 64,
         }
 
@@ -388,8 +391,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         old_key_map = {"version": "old"}
@@ -477,8 +483,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         metadata_path = (
@@ -531,8 +540,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         metadata_path = (
@@ -579,8 +591,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         metadata_path = (
@@ -657,8 +672,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         metadata_path = (
@@ -732,8 +750,11 @@ class RirStorageTest(unittest.TestCase):
                     "payload_sha256": "5" * 64,
                     "repo_root_sha256": "6" * 64,
                     "requirement_sha256": "7" * 64,
+                    "state_sha256": "a" * 64,
+                    "repository_evidence_sha256": "b" * 64,
                     "source_inventory_available": False,
                     "source_inventory_complete": False,
+                    "source_inventory_git_tracked_only": False,
                     "source_inventory_sha256": None,
                 }
                 metadata_path = (
@@ -798,8 +819,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         metadata_path = (
@@ -864,8 +888,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         old_key_map = {"version": "old"}
@@ -945,8 +972,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         for phase in ("after-replace", "after-fsync"):
@@ -1054,8 +1084,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         state_bytes = b'{"schema_version":1}\n'
@@ -1153,8 +1186,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         state_bytes = b'{"schema_version":1}\n'
@@ -1236,8 +1272,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
 
@@ -1271,8 +1310,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         real_unlink = STORAGE.os.unlink
@@ -1324,8 +1366,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
 
@@ -1387,8 +1432,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         real_unlink = STORAGE.os.unlink
@@ -1453,8 +1501,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         STORAGE.write_controller_metadata(
@@ -1504,8 +1555,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         real_unlink = STORAGE.os.unlink
@@ -1568,8 +1622,11 @@ class RirStorageTest(unittest.TestCase):
             "payload_sha256": "5" * 64,
             "repo_root_sha256": "6" * 64,
             "requirement_sha256": "7" * 64,
+            "state_sha256": "a" * 64,
+            "repository_evidence_sha256": "b" * 64,
             "source_inventory_available": False,
             "source_inventory_complete": False,
+            "source_inventory_git_tracked_only": False,
             "source_inventory_sha256": None,
         }
         STORAGE.write_controller_metadata(

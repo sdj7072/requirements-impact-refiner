@@ -14,7 +14,7 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Callable, Literal, Protocol, cast
@@ -33,6 +33,8 @@ class _ReportContextContract(Protocol):
     def canonical_requirement_text(self, request: str) -> str: ...
 
     def canonical_requirement_sha256(self, request: str) -> str: ...
+
+    def canonical_repository_evidence_sha256(self, evidence: Sequence[str]) -> str: ...
 
     def repo_root_sha256(self, root: Path) -> str: ...
 
@@ -201,6 +203,7 @@ def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContra
             for name in (
                 "canonical_requirement_text",
                 "canonical_requirement_sha256",
+                "canonical_repository_evidence_sha256",
                 "repo_root_sha256",
                 "load_report_context",
             )
@@ -256,6 +259,7 @@ class PreviousLookupRequest:
             not isinstance(item, str) or not item.strip() for item in self.repository_evidence
         ):
             raise ValueError("previous lookup repository_evidence must contain nonblank text")
+        REPORT_CONTEXT.canonical_repository_evidence_sha256(self.repository_evidence)
 
 
 @dataclass(frozen=True)
@@ -487,8 +491,8 @@ def _json_object(payload: bytes, label: str) -> dict[str, object]:
 
 def _context_artifact_present(report_fd: int, revision: int) -> bool:
     names = (
-        f"revision-{revision:04d}.context.json",
-        f".revision-{revision:04d}.context.json.pending",
+        f"revision-{revision:04d}.context-v2.json",
+        f".revision-{revision:04d}.context-v2.json.pending",
     )
     for name in names:
         try:
@@ -578,10 +582,11 @@ def _read_candidate(root: Path, reports_fd: int, report_id: str, deadline: float
         raise _UnsafeLookup("report context identity is unavailable")
     if context is not None:
         if (
-            getattr(context, "schema_version", None) != 1
+            getattr(context, "schema_version", None) != 2
             or getattr(context, "report_id", None) != report_id
             or getattr(context, "revision", None) != revision
             or getattr(context, "markdown_sha256", None) != markdown_sha256
+            or getattr(context, "state_sha256", None) != hashlib.sha256(state_payload).hexdigest()
             or getattr(context, "repo_root_sha256", None) != REPORT_CONTEXT.repo_root_sha256(root)
             or getattr(context, "requirement_sha256", None) != requirement_sha256
         ):
@@ -788,15 +793,110 @@ def _successful(result: _GitCommandResult | None, label: str) -> bytes:
         raise _GitUnavailable(f"{label} timed out or is unavailable")
     if result.returncode != 0:
         raise _GitUnavailable(f"{label} failed")
-    if b"\0" in result.output and label not in {"Git status", "Git diff"}:
+    if b"\0" in result.output and label not in {
+        "Git status",
+        "Git diff",
+        "Git index flags",
+    }:
         raise _GitUnavailable(f"{label} output contains NUL")
     return result.output
 
 
+def _decode_single_path(payload: bytes, label: str) -> Path:
+    if b"\0" in payload:
+        raise _GitUnavailable(f"{label} output contains NUL")
+    try:
+        value = payload.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError as error:
+        raise _GitUnavailable(f"{label} output is not UTF-8") from error
+    if not value or "\n" in value or "\r" in value:
+        raise _GitUnavailable(f"{label} output is invalid")
+    return Path(value)
+
+
+def _worktree_scope(root: Path, deadline: float) -> tuple[str, str]:
+    git_dir_payload = _successful(
+        _run_git_command(root, ("rev-parse", "--absolute-git-dir"), deadline),
+        "Git directory",
+    )
+    git_dir = _decode_single_path(git_dir_payload, "Git directory")
+    try:
+        git_dir = git_dir.resolve(strict=True)
+    except OSError as error:
+        raise _GitUnavailable("Git directory is unavailable") from error
+    if not git_dir.is_dir():
+        raise _GitUnavailable("Git directory is invalid")
+    scope = (f"--git-dir={git_dir}", f"--work-tree={root}")
+    configured = _run_git_command(
+        root, (*scope, "config", "--local", "--get", "core.worktree"), deadline
+    )
+    if configured is None:
+        raise _GitUnavailable("Git core.worktree could not be verified")
+    if configured.returncode == 0:
+        configured_path = _decode_single_path(configured.output, "Git core.worktree")
+        configured_root = (
+            configured_path if configured_path.is_absolute() else git_dir / configured_path
+        ).resolve()
+        if configured_root != root:
+            raise _GitUnavailable("Git core.worktree redirects outside the repository")
+    elif configured.returncode != 1:
+        raise _GitUnavailable("Git core.worktree could not be verified")
+    top_payload = _successful(
+        _run_git_command(root, (*scope, "rev-parse", "--show-toplevel"), deadline),
+        "Git worktree",
+    )
+    try:
+        top = _decode_single_path(top_payload, "Git worktree").resolve(strict=True)
+    except OSError as error:
+        raise _GitUnavailable("Git worktree is unavailable") from error
+    if top != root:
+        raise _GitUnavailable("Git worktree identity does not match the repository")
+    return scope
+
+
+def _index_flags_clean(root: Path, scope: tuple[str, str], deadline: float) -> bool:
+    payload = _successful(
+        _run_git_command(root, (*scope, "ls-files", "-v", "-z"), deadline),
+        "Git index flags",
+    )
+    if not payload:
+        return True
+    records = payload.split(b"\0")
+    if records[-1] != b"":
+        raise _GitUnavailable("Git index flags output is incomplete")
+    for record in records[:-1]:
+        if len(record) < 3 or record[1:2] != b" ":
+            raise _GitUnavailable("Git index flags output is malformed")
+        _safe_changed_path(record[2:])
+        if record[:1] != b"H":
+            return False
+    return True
+
+
+def _clean_submodule_paths(payload: bytes) -> tuple[str, ...] | None:
+    paths: list[str] = []
+    for line in payload.splitlines():
+        if not line.startswith(b" "):
+            return None
+        rest = line[1:]
+        commit, separator, path_and_description = rest.partition(b" ")
+        if (
+            not separator
+            or COMMIT_PATTERN.fullmatch(commit.decode("ascii", errors="ignore")) is None
+        ):
+            raise _GitUnavailable("Git submodule status output is malformed")
+        path_payload = path_and_description.split(b" (", 1)[0]
+        path = _safe_changed_path(path_payload)
+        if path not in paths:
+            paths.append(path)
+    return tuple(paths)
+
+
 def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _GitSnapshot:
     try:
+        scope = _worktree_scope(root, deadline)
         commit_payload = _successful(
-            _run_git_command(root, ("rev-parse", "--verify", "HEAD^{commit}"), deadline),
+            _run_git_command(root, (*scope, "rev-parse", "--verify", "HEAD^{commit}"), deadline),
             "Git HEAD",
         )
         try:
@@ -809,6 +909,7 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
             _run_git_command(
                 root,
                 (
+                    *scope,
                     "status",
                     "--porcelain=v1",
                     "-z",
@@ -821,17 +922,31 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
             "Git status",
         )
         status_paths = _status_paths(status_payload)
+        if not _index_flags_clean(root, scope, deadline):
+            raise _GitUnavailable("Git index visibility flags are present")
         submodule_payload = _successful(
-            _run_git_command(root, ("submodule", "status", "--recursive"), deadline),
+            _run_git_command(root, (*scope, "submodule", "status", "--recursive"), deadline),
             "Git submodule status",
         )
-        submodules_clean = all(line.startswith(b" ") for line in submodule_payload.splitlines())
+        submodule_paths = _clean_submodule_paths(submodule_payload)
+        submodules_clean = submodule_paths is not None
+        if submodule_paths is not None:
+            for submodule_path in submodule_paths:
+                submodule_root = (root / submodule_path).resolve()
+                try:
+                    submodule_root.relative_to(root)
+                except ValueError as error:
+                    raise _GitUnavailable("Git submodule path escapes the repository") from error
+                submodule_scope = _worktree_scope(submodule_root, deadline)
+                if not _index_flags_clean(submodule_root, submodule_scope, deadline):
+                    raise _GitUnavailable("Git submodule index visibility flags are present")
         diff_paths: tuple[str, ...] = ()
         if baseline_commit is not None and baseline_commit != commit:
             diff_payload = _successful(
                 _run_git_command(
                     root,
                     (
+                        *scope,
                         "diff",
                         "--name-only",
                         "--no-renames",
@@ -847,6 +962,34 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
                 "Git diff",
             )
             diff_paths = _diff_paths(diff_payload)
+        final_status_payload = _successful(
+            _run_git_command(
+                root,
+                (
+                    *scope,
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=normal",
+                    "--ignore-submodules=none",
+                    "--no-renames",
+                ),
+                deadline,
+            ),
+            "Git status",
+        )
+        if _status_paths(final_status_payload) != status_paths:
+            raise _GitUnavailable("Git working tree changed during freshness proof")
+        after_payload = _successful(
+            _run_git_command(root, (*scope, "rev-parse", "--verify", "HEAD^{commit}"), deadline),
+            "Git HEAD",
+        )
+        try:
+            after_commit = after_payload.decode("ascii", errors="strict").strip()
+        except UnicodeDecodeError as error:
+            raise _GitUnavailable("Git HEAD is not ASCII") from error
+        if after_commit != commit:
+            raise _GitUnavailable("Git HEAD changed during freshness proof")
         changed = tuple(sorted(set(status_paths) | set(diff_paths)))
         if len(changed) > MAX_CHANGED_PATHS:
             raise _GitUnavailable("Git changed path count exceeds its limit")
@@ -947,6 +1090,9 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
     started_ns = time.monotonic_ns()
     deadline = time.monotonic() + OPERATION_TIMEOUT_SECONDS
     requirement_sha256 = REPORT_CONTEXT.canonical_requirement_sha256(request.request)
+    repository_evidence_sha256 = REPORT_CONTEXT.canonical_repository_evidence_sha256(
+        request.repository_evidence
+    )
     root = _root(request.repo_root)
     try:
         payload_sha256 = _payload_sha256()
@@ -982,6 +1128,27 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
     matching = [
         candidate for candidate in candidates if candidate.requirement_sha256 == requirement_sha256
     ]
+    missing_context = [candidate for candidate in matching if candidate.context is None]
+    if missing_context:
+        return _unselected(
+            "none",
+            requirement_sha256,
+            "previous report context is unavailable",
+            started_ns,
+        )
+    evidence_mismatch = [
+        candidate
+        for candidate in matching
+        if getattr(candidate.context, "repository_evidence_sha256", None)
+        != repository_evidence_sha256
+    ]
+    if evidence_mismatch:
+        return _unselected(
+            "none",
+            requirement_sha256,
+            "previous report evidence identity does not match",
+            started_ns,
+        )
     incompatible = [
         candidate
         for candidate in matching
@@ -1011,24 +1178,12 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
             started_ns,
         )
     candidate = matching[0]
-    if candidate.context is None and len(candidates) != 1:
-        return _unselected(
-            "ambiguous",
-            requirement_sha256,
-            "legacy report lineage cannot be selected unambiguously",
-            started_ns,
-        )
     baseline_commit = getattr(candidate.context, "baseline_commit", None)
     snapshot = _probe_git(root, baseline_commit, deadline)
     context = candidate.context
-    if context is None:
-        return _selected_result(
-            "stale",
-            candidate,
-            requirement_sha256,
-            snapshot,
-            "legacy report context is unavailable",
-            started_ns,
+    if context is None:  # pragma: no cover - selected candidates require a v2 context
+        return _unselected(
+            "none", requirement_sha256, "previous report context is unavailable", started_ns
         )
     if not getattr(context, "source_inventory_available", False) or not getattr(
         context, "source_inventory_complete", False
@@ -1048,6 +1203,15 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
             requirement_sha256,
             snapshot,
             "report baseline was not clean",
+            started_ns,
+        )
+    if not getattr(context, "source_inventory_git_tracked_only", False):
+        return _selected_result(
+            "stale",
+            candidate,
+            requirement_sha256,
+            snapshot,
+            "source inventory is not proven Git-tracked",
             started_ns,
         )
     if not snapshot.available:

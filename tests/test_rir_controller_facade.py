@@ -526,7 +526,9 @@ class RirControllerFacadeContractTest(unittest.TestCase):
             "markdown_path": relative_path(self.root, result.markdown_path),
             "markdown_sha256": result.markdown_sha256,
         }
-        context_relative = ".requirements-impact-refiner/reports/RPT-001/revision-0001.context.json"
+        context_relative = (
+            ".requirements-impact-refiner/reports/RPT-001/revision-0001.context-v2.json"
+        )
         surviving_paths = portable_artifact_paths(self.root)
         self.assertIn(context_relative, surviving_paths)
         self.assertEqual(

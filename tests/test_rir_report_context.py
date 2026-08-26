@@ -75,16 +75,34 @@ class RirReportContextTest(unittest.TestCase):
         source_inventory_sha256: str | None = "4" * 64,
         source_inventory_available: bool = True,
         source_inventory_complete: bool = True,
+        source_inventory_git_tracked_only: bool = False,
         baseline_commit: str | None = None,
         baseline_clean: bool = False,
+        state_sha256: str | None = None,
     ):
+        state_path = (
+            self.root
+            / ".requirements-impact-refiner"
+            / "reports"
+            / "RPT-001"
+            / f"revision-{revision:04d}.json"
+        )
+        if state_sha256 is None:
+            state_payload = (
+                state_path.read_bytes()
+                if state_path.is_file()
+                else canonical_bytes(self.base_state)
+            )
+            state_sha256 = hashlib.sha256(state_payload).hexdigest()
         return CONTEXT.ReportContext(
-            schema_version=1,
+            schema_version=2,
             report_id="RPT-001",
             revision=revision,
             markdown_sha256=markdown_sha256,
+            state_sha256=state_sha256,
             repo_root_sha256=hashlib.sha256(str(self.root).encode("utf-8")).hexdigest(),
             requirement_sha256=CONTEXT.canonical_requirement_sha256("프로필 변경"),
+            repository_evidence_sha256=CONTEXT.canonical_repository_evidence_sha256(()),
             source_inventory_sha256=source_inventory_sha256,
             payload_sha256="5" * 64,
             created_at="2026-08-25T12:34:56.123456Z",
@@ -92,6 +110,7 @@ class RirReportContextTest(unittest.TestCase):
             baseline_clean=baseline_clean,
             source_inventory_available=source_inventory_available,
             source_inventory_complete=source_inventory_complete,
+            source_inventory_git_tracked_only=source_inventory_git_tracked_only,
         )
 
     def context_path(self, revision: int = 1) -> Path:
@@ -100,7 +119,7 @@ class RirReportContextTest(unittest.TestCase):
             / ".requirements-impact-refiner"
             / "reports"
             / "RPT-001"
-            / f"revision-{revision:04d}.context.json"
+            / f"revision-{revision:04d}.context-v2.json"
         )
 
     def configure_graph(self, enabled: bool) -> None:
@@ -119,6 +138,88 @@ class RirReportContextTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+
+    def test_v2_context_binds_state_evidence_and_tracked_source_proof(self):
+        published = self.publish_report()
+        state_sha256 = hashlib.sha256(published.state_path.read_bytes()).hexdigest()
+        evidence_sha256 = hashlib.sha256(b'["row one","row one","row two"]').hexdigest()
+        context = CONTEXT.ReportContext(
+            schema_version=2,
+            report_id="RPT-001",
+            revision=1,
+            markdown_sha256=published.markdown_sha256,
+            state_sha256=state_sha256,
+            repo_root_sha256=hashlib.sha256(str(self.root).encode("utf-8")).hexdigest(),
+            requirement_sha256=CONTEXT.canonical_requirement_sha256("프로필 변경"),
+            repository_evidence_sha256=evidence_sha256,
+            source_inventory_sha256="4" * 64,
+            payload_sha256="5" * 64,
+            created_at="2026-08-25T12:34:56Z",
+            baseline_commit=None,
+            baseline_clean=False,
+            source_inventory_available=True,
+            source_inventory_complete=True,
+            source_inventory_git_tracked_only=False,
+        )
+
+        path = CONTEXT.publish_report_context(self.root, context)
+
+        self.assertEqual(path.name, "revision-0001.context-v2.json")
+        self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 1), context)
+
+    def test_repository_evidence_digest_preserves_order_and_duplicates(self):
+        first = CONTEXT.canonical_repository_evidence_sha256(("alpha", "alpha", "beta"))
+        reordered = CONTEXT.canonical_repository_evidence_sha256(("beta", "alpha", "alpha"))
+        deduplicated = CONTEXT.canonical_repository_evidence_sha256(("alpha", "beta"))
+
+        self.assertNotEqual(first, reordered)
+        self.assertNotEqual(first, deduplicated)
+        self.assertEqual(
+            first,
+            hashlib.sha256(b'["alpha","alpha","beta"]').hexdigest(),
+        )
+        for invalid in ("text", b"bytes", [""], [1]):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises((TypeError, ValueError)):
+                    CONTEXT.canonical_repository_evidence_sha256(invalid)
+        with mock.patch.object(CONTEXT, "MAX_EVIDENCE_ROW_BYTES", 2):
+            with self.assertRaisesRegex(ValueError, "64 KiB"):
+                CONTEXT.canonical_repository_evidence_sha256(("long",))
+        with mock.patch.object(CONTEXT, "MAX_EVIDENCE_BYTES", 2):
+            with self.assertRaisesRegex(ValueError, "256 KiB"):
+                CONTEXT.canonical_repository_evidence_sha256(("row",))
+
+    def test_v1_context_artifact_does_not_block_v2_publication(self):
+        published = self.publish_report()
+        report_dir = published.state_path.parent
+        old = report_dir / "revision-0001.context.json"
+        old.write_text('{"schema_version":1}\n', encoding="utf-8")
+        os.chmod(old, 0o600)
+        self.assertIsNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
+        state_sha256 = hashlib.sha256(published.state_path.read_bytes()).hexdigest()
+        context = CONTEXT.ReportContext(
+            schema_version=2,
+            report_id="RPT-001",
+            revision=1,
+            markdown_sha256=published.markdown_sha256,
+            state_sha256=state_sha256,
+            repo_root_sha256=hashlib.sha256(str(self.root).encode("utf-8")).hexdigest(),
+            requirement_sha256=CONTEXT.canonical_requirement_sha256("프로필 변경"),
+            repository_evidence_sha256=CONTEXT.canonical_repository_evidence_sha256(()),
+            source_inventory_sha256=None,
+            payload_sha256="5" * 64,
+            created_at="2026-08-25T12:34:56Z",
+            baseline_commit=None,
+            baseline_clean=False,
+            source_inventory_available=False,
+            source_inventory_complete=False,
+            source_inventory_git_tracked_only=False,
+        )
+
+        path = CONTEXT.publish_report_context(self.root, context)
+
+        self.assertTrue(old.is_file())
+        self.assertEqual(path.name, "revision-0001.context-v2.json")
 
     def begin(self, request: str = "Let workspace members edit every project."):
         return CONTROLLER.begin_refinement(
@@ -234,7 +335,7 @@ class RirReportContextTest(unittest.TestCase):
 
         path = CONTEXT.publish_report_context(self.root, context)
 
-        self.assertEqual(path.name, "revision-0002.context.json")
+        self.assertEqual(path.name, "revision-0002.context-v2.json")
         self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 2), context)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(path.stat().st_nlink, 1)
@@ -246,14 +347,17 @@ class RirReportContextTest(unittest.TestCase):
                     "baseline_commit": None,
                     "created_at": "2026-08-25T12:34:56.123456Z",
                     "markdown_sha256": published.markdown_sha256,
+                    "state_sha256": hashlib.sha256(published.state_path.read_bytes()).hexdigest(),
                     "payload_sha256": "5" * 64,
                     "repo_root_sha256": hashlib.sha256(str(self.root).encode("utf-8")).hexdigest(),
                     "report_id": "RPT-001",
                     "requirement_sha256": CONTEXT.canonical_requirement_sha256("프로필 변경"),
+                    "repository_evidence_sha256": CONTEXT.canonical_repository_evidence_sha256(()),
                     "revision": 2,
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "source_inventory_available": True,
                     "source_inventory_complete": True,
+                    "source_inventory_git_tracked_only": False,
                     "source_inventory_sha256": "4" * 64,
                 }
             ),
@@ -516,7 +620,7 @@ class RirReportContextTest(unittest.TestCase):
                     / ".requirements-impact-refiner"
                     / "reports"
                     / "RPT-001"
-                    / "revision-0001.context.json"
+                    / "revision-0001.context-v2.json"
                 )
                 pending = path.parent / f".{path.name}.pending"
                 real_replace = CONTEXT.os.replace
@@ -754,17 +858,20 @@ class RirReportContextTest(unittest.TestCase):
             short_state = copy.deepcopy(self.base_state)
             short_report = STORE.publish_revision(short_root, canonical_bytes(short_state))
             context = CONTEXT.ReportContext(
-                schema_version=1,
+                schema_version=2,
                 report_id="RPT-001",
                 revision=1,
                 markdown_sha256=short_report.markdown_sha256,
+                state_sha256=hashlib.sha256(short_report.state_path.read_bytes()).hexdigest(),
                 repo_root_sha256=hashlib.sha256(str(short_root).encode("utf-8")).hexdigest(),
                 requirement_sha256=CONTEXT.canonical_requirement_sha256("프로필 변경"),
+                repository_evidence_sha256=CONTEXT.canonical_repository_evidence_sha256(()),
                 source_inventory_sha256="4" * 64,
                 payload_sha256="5" * 64,
                 created_at="2026-08-25T12:34:56.123456Z",
                 baseline_commit=None,
                 baseline_clean=False,
+                source_inventory_git_tracked_only=False,
             )
             socket_path = CONTEXT.publish_report_context(short_root, context)
             socket_path.unlink()
@@ -842,21 +949,56 @@ class RirReportContextTest(unittest.TestCase):
             {"markdown_sha256": "A" * 64},
             {"source_inventory_available": 1},
             {"source_inventory_complete": 1},
+            {"source_inventory_git_tracked_only": 1},
+            {
+                "source_inventory_git_tracked_only": True,
+                "source_inventory_complete": False,
+            },
             {"created_at": "2026-08-25"},
             {"baseline_commit": "not-a-commit"},
             {"baseline_clean": 1},
             {"baseline_clean": True, "baseline_commit": None},
+            {
+                "source_inventory_git_tracked_only": True,
+                "baseline_clean": False,
+            },
         )
         for changes in cases:
             with self.subTest(changes=changes):
                 with self.assertRaises((TypeError, ValueError)):
                     replace(valid, **changes)
 
+    def test_git_source_proof_parsers_reject_malformed_bounded_values(self):
+        for payload in (b"H path", b"bad\0", b"H \xff\0", b"H ../escape\0"):
+            with self.subTest(flags=payload):
+                with self.assertRaises(CONTEXT.UnsafeGitOutput):
+                    CONTEXT._tracked_paths_from_flags(payload)
+        self.assertEqual(CONTEXT._tracked_paths_from_flags(b"h path.py\0"), ({"path.py"}, False))
+
+        for payload in (b"bad\0", b"\xff", b"", b"a\nb"):
+            with self.subTest(path=payload):
+                with self.assertRaises(CONTEXT.UnsafeGitOutput):
+                    CONTEXT._git_single_path(payload, "test")
+
+        self.assertIsNone(CONTEXT._submodule_paths(b"-" + b"a" * 40 + b" deps/child\n"))
+        for payload in (
+            b" bad\n",
+            b" " + b"a" * 40 + b" \xff\n",
+            b" " + b"a" * 40 + b" ../escape\n",
+        ):
+            with self.subTest(submodule=payload):
+                with self.assertRaises(CONTEXT.UnsafeGitOutput):
+                    CONTEXT._submodule_paths(payload)
+        with self.assertRaises(ValueError):
+            CONTEXT.probe_source_inventory_git(self.root, {"path.py": "bad"})
+
     def test_context_accepts_every_positive_nonboolean_report_revision(self):
         report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
         report_dir.mkdir(parents=True)
         markdown = report_dir / "revision-10000.md"
         markdown.write_bytes(b"immutable revision 10000\n")
+        state = report_dir / "revision-10000.json"
+        state.write_bytes(b"{}\n")
         context = self.sample_context(
             revision=10_000,
             markdown_sha256=hashlib.sha256(markdown.read_bytes()).hexdigest(),
@@ -864,7 +1006,7 @@ class RirReportContextTest(unittest.TestCase):
 
         path = CONTEXT.publish_report_context(self.root, context)
 
-        self.assertEqual(path.name, "revision-10000.context.json")
+        self.assertEqual(path.name, "revision-10000.context-v2.json")
         self.assertEqual(CONTEXT.load_report_context(self.root, "RPT-001", 10_000), context)
         for invalid in (0, -1, True):
             with self.subTest(invalid=invalid):
@@ -984,6 +1126,63 @@ class RirReportContextTest(unittest.TestCase):
 
         tracked.write_text("dirty\n", encoding="utf-8")
         self.assertEqual(CONTEXT.probe_git_baseline(self.root), (expected, False))
+
+    def test_source_inventory_git_proof_rejects_index_flags_ignored_sources_and_redirects(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        tracked = self.root / "tracked.py"
+        tracked.write_text("stable = True\n", encoding="utf-8")
+        ignore = self.root / ".gitignore"
+        ignore.write_text("ignored.py\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tracked.py", ".gitignore"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        inventory = {"tracked.py": hashlib.sha256(tracked.read_bytes()).hexdigest()}
+
+        self.assertEqual(
+            CONTEXT.probe_source_inventory_git(self.root, inventory),
+            (commit, True, True),
+        )
+        subprocess.run(
+            ["git", "update-index", "--assume-unchanged", "tracked.py"],
+            cwd=self.root,
+            check=True,
+        )
+        self.assertEqual(
+            CONTEXT.probe_source_inventory_git(self.root, inventory),
+            (commit, True, False),
+        )
+        subprocess.run(
+            ["git", "update-index", "--no-assume-unchanged", "tracked.py"],
+            cwd=self.root,
+            check=True,
+        )
+
+        ignored = self.root / "ignored.py"
+        ignored.write_text("ignored = True\n", encoding="utf-8")
+        ignored_inventory = {
+            **inventory,
+            "ignored.py": hashlib.sha256(ignored.read_bytes()).hexdigest(),
+        }
+        self.assertEqual(
+            CONTEXT.probe_source_inventory_git(self.root, ignored_inventory),
+            (commit, True, False),
+        )
+
+        redirect = self.root / "redirect"
+        redirect.mkdir()
+        subprocess.run(["git", "config", "core.worktree", str(redirect)], cwd=self.root, check=True)
+        redirected = CONTEXT.probe_source_inventory_git(self.root, inventory)
+        self.assertFalse(redirected[2])
 
     def test_git_baseline_rejects_dirty_divergent_and_uninitialized_submodules(self):
         def initialize(repository: Path) -> None:
@@ -1199,8 +1398,22 @@ class RirReportContextTest(unittest.TestCase):
             CONTEXT.canonical_requirement_sha256("Allow Profile Editing"),
         )
         self.assertEqual(context.payload_sha256, FINALIZE._payload_sha256())
+        self.assertEqual(
+            context.repository_evidence_sha256,
+            CONTEXT.canonical_repository_evidence_sha256(
+                (
+                    "authorizeProjectEdit permits owner and admin",
+                    "workspace invitations default to member",
+                )
+            ),
+        )
+        self.assertEqual(
+            context.state_sha256,
+            hashlib.sha256(result.state_path.read_bytes()).hexdigest(),
+        )
         self.assertFalse(context.source_inventory_available)
         self.assertFalse(context.source_inventory_complete)
+        self.assertFalse(context.source_inventory_git_tracked_only)
         self.assertIsNone(context.source_inventory_sha256)
         self.assertIsNone(context.baseline_commit)
         self.assertFalse(context.baseline_clean)
@@ -1245,6 +1458,14 @@ class RirReportContextTest(unittest.TestCase):
         (self.root / "api" / "profile.py").write_text(
             'FIELD = "profile.displayName"\n', encoding="utf-8"
         )
+        (self.root / ".gitignore").write_text(".requirements-impact-refiner/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
         scan = CONTROLLER.scan_impact(
             CONTROLLER.ScanRequest(self.root, "Rename profile.displayName", (), "balanced")
         )
@@ -1280,6 +1501,15 @@ class RirReportContextTest(unittest.TestCase):
         )
         self.assertTrue(context.source_inventory_available)
         self.assertIs(context.source_inventory_complete, inventory["complete"])
+        self.assertTrue(context.source_inventory_git_tracked_only)
+        self.assertEqual(
+            context.state_sha256,
+            hashlib.sha256(result.state_path.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            context.repository_evidence_sha256,
+            CONTEXT.canonical_repository_evidence_sha256(()),
+        )
 
     def test_context_failure_leaves_published_report_and_unconsumed_draft_for_retry(self):
         self.configure_graph(False)
@@ -1298,9 +1528,15 @@ class RirReportContextTest(unittest.TestCase):
         self.assertIsNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
         self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
+        old_context = published.state_path.parent / "revision-0001.context.json"
+        old_context.write_text('{"schema_version":1}\n', encoding="utf-8")
+        os.chmod(old_context, 0o600)
+
         result = FINALIZE.finalize_refinement(request)
         self.assertEqual(result.markdown_sha256, published.markdown_sha256)
         self.assertIsNotNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
+        self.assertTrue(old_context.is_file())
+        self.assertTrue((published.state_path.parent / "revision-0001.context-v2.json").is_file())
         self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
     def test_context_cleanup_failure_leaves_draft_unconsumed_and_retry_recovers(self):
@@ -1310,7 +1546,7 @@ class RirReportContextTest(unittest.TestCase):
         real_unlink = FINALIZE.REPORT_CONTEXT.os.unlink
 
         def failing_context_unlink(name, *args, **kwargs):
-            if str(name).endswith(".context.json.pending"):
+            if str(name).endswith(".context-v2.json.pending"):
                 raise OSError("injected context cleanup failure")
             return real_unlink(name, *args, **kwargs)
 

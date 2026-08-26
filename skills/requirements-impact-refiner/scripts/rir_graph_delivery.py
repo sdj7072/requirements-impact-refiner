@@ -798,6 +798,7 @@ class GraphContext(TypedDict, total=False):
     receipt: ReceiptPayload
     sha256: str
     binding: dict[str, object]
+    source_inventory: dict[str, object]
     impact_paths: dict[str, list[str]]
     rationales: dict[str, str | None]
     impact_confidences: dict[str, str]
@@ -1874,7 +1875,16 @@ def load_graph_context(
         receipt,
         deadline=deadline,
     )
-    return {"receipt": receipt, "sha256": digest, "binding": binding}
+    return {
+        "receipt": receipt,
+        "sha256": digest,
+        "binding": binding,
+        "source_inventory": {
+            "sha256": inventory_sha256,
+            "complete": source_inventory_complete,
+            "digests": dict(source_digests),
+        },
+    }
 
 
 def _path_confidence(path, nodes, edges) -> str:

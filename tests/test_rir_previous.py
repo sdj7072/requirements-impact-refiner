@@ -79,8 +79,8 @@ class PreviousLookupTest(unittest.TestCase):
             },
         )
 
-    def request(self, text: str = "rename profile"):
-        return PREVIOUS.PreviousLookupRequest(self.root, text, ())
+    def request(self, text: str = "rename profile", evidence: tuple[str, ...] = ()):
+        return PREVIOUS.PreviousLookupRequest(self.root, text, evidence)
 
     def payload_sha256(self) -> str:
         return PREVIOUS.PAYLOAD_IDENTITY.payload_sha256(ROOT)
@@ -99,6 +99,8 @@ class PreviousLookupTest(unittest.TestCase):
         inventory_available: bool = True,
         inventory_complete: bool = True,
         source_inventory_sha256: str | None = "4" * 64,
+        source_inventory_git_tracked_only: bool | None = None,
+        repository_evidence: tuple[str, ...] = (),
     ) -> tuple[Path, dict[str, object], object | None]:
         state = json.loads(STATE_FIXTURE.read_text(encoding="utf-8"))
         state["report"] = {
@@ -128,12 +130,16 @@ class PreviousLookupTest(unittest.TestCase):
         context = None
         if with_context:
             context = CONTEXT.ReportContext(
-                schema_version=1,
+                schema_version=2,
                 report_id=report_id,
                 revision=revision,
                 markdown_sha256=markdown_sha256,
+                state_sha256=hashlib.sha256(state_path.read_bytes()).hexdigest(),
                 repo_root_sha256=CONTEXT.repo_root_sha256(self.root),
                 requirement_sha256=CONTEXT.canonical_requirement_sha256(request),
+                repository_evidence_sha256=CONTEXT.canonical_repository_evidence_sha256(
+                    repository_evidence
+                ),
                 source_inventory_sha256=source_inventory_sha256,
                 payload_sha256=payload_sha256 or self.payload_sha256(),
                 created_at="2026-08-25T12:34:56Z",
@@ -143,6 +149,11 @@ class PreviousLookupTest(unittest.TestCase):
                 baseline_clean=baseline_clean,
                 source_inventory_available=inventory_available,
                 source_inventory_complete=inventory_complete,
+                source_inventory_git_tracked_only=(
+                    inventory_available and inventory_complete and baseline_clean
+                    if source_inventory_git_tracked_only is None
+                    else source_inventory_git_tracked_only
+                ),
             )
             CONTEXT.publish_report_context(self.root, context)
         return report_dir, pointer, context
@@ -175,6 +186,57 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertIsNone(result.display_text)
         self.assertIsNone(result.report_id)
         self.assertIsNone(result.markdown_sha256)
+
+    def test_changed_or_reordered_repository_evidence_discloses_no_body(self):
+        evidence = ("first", "second", "first")
+        self.publish(repository_evidence=evidence)
+        exact = self.request(evidence=evidence)
+        changed = self.request(evidence=("changed",))
+        reordered = self.request(evidence=("second", "first", "first"))
+        deduplicated = self.request(evidence=("first", "second"))
+
+        self.assertEqual(PREVIOUS.lookup_previous(exact).status, "fresh")
+        self.assertEqual(PREVIOUS.lookup_previous(changed).status, "none")
+        self.assertIsNone(PREVIOUS.lookup_previous(changed).display_text)
+        self.assertEqual(PREVIOUS.lookup_previous(reordered).status, "none")
+        self.assertEqual(PREVIOUS.lookup_previous(deduplicated).status, "none")
+
+    def test_valid_shaped_compact_only_state_tamper_discloses_no_body(self):
+        report_dir, pointer, _context = self.publish()
+        state_path = report_dir / str(pointer["state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["settings"]["audience"] = "simple"
+        state_path.write_bytes(canonical_bytes(state))
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "none")
+        self.assertIsNone(result.display_text)
+
+    def test_valid_shaped_graph_paths_tamper_discloses_no_body(self):
+        report_dir, pointer, _context = self.publish()
+        state_path = report_dir / str(pointer["state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["graph_paths"] = [
+            {
+                "impact": "IMP-001",
+                "paths": [
+                    {
+                        "id": "PATH-001",
+                        "labels": ["tampered", "consumer"],
+                        "providers": ["tampered-provider"],
+                        "confidence": "verified-provider",
+                        "locations": ["tampered.py:1"],
+                    }
+                ],
+            }
+        ]
+        state_path.write_bytes(canonical_bytes(state))
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "none")
+        self.assertIsNone(result.display_text)
 
     def test_repository_without_report_storage_returns_none(self):
         result = PREVIOUS.lookup_previous(self.request())
@@ -274,6 +336,22 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertIn("source inventory", result.reason)
         self.assertIsNotNone(result.display_text)
 
+    def test_relevant_ignored_inventory_source_is_stale(self):
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text(
+            gitignore.read_text(encoding="utf-8") + "ignored.py\n", encoding="utf-8"
+        )
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore relevant source")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        (self.root / "ignored.py").write_text("relevant = True\n", encoding="utf-8")
+        self.publish(source_inventory_git_tracked_only=False)
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("Git-tracked", result.reason)
+
     def test_unavailable_source_inventory_is_stale_never_fresh(self):
         self.publish(
             inventory_available=False,
@@ -313,6 +391,53 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "stale")
         self.assertEqual(result.changed_paths, ("alpha.py", "zeta.py"))
         self.assertEqual(result.changed_count, 2)
+
+    def test_assume_unchanged_and_skip_worktree_flags_are_stale(self):
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            with self.subTest(flag=flag):
+                self.publish()
+                self.git("update-index", flag, "app.py")
+
+                result = PREVIOUS.lookup_previous(self.request())
+
+                self.assertEqual(result.status, "stale")
+                self.assertIn("index", result.reason)
+                inverse = (
+                    "--no-assume-unchanged"
+                    if flag == "--assume-unchanged"
+                    else "--no-skip-worktree"
+                )
+                self.git("update-index", inverse, "app.py")
+
+    def test_local_core_worktree_redirect_is_stale(self):
+        self.publish()
+        redirected = Path(self.temporary.name) / "redirected"
+        redirected.mkdir()
+        self.git("config", "core.worktree", str(redirected))
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("worktree", result.reason.lower())
+
+    def test_head_change_between_freshness_probes_is_stale(self):
+        self.publish()
+        real_runner = PREVIOUS._run_git_command
+        head_calls = 0
+
+        def runner(root, arguments, deadline):
+            nonlocal head_calls
+            if "rev-parse" in arguments and "--verify" in arguments:
+                head_calls += 1
+                if head_calls > 1:
+                    return PREVIOUS._GitCommandResult(0, b"f" * 40 + b"\n")
+            return real_runner(root, arguments, deadline)
+
+        with mock.patch.object(PREVIOUS, "_run_git_command", side_effect=runner):
+            result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("HEAD", result.reason)
 
     def test_changed_head_is_stale_and_lists_commit_delta_paths(self):
         self.publish()
@@ -390,7 +515,7 @@ class PreviousLookupTest(unittest.TestCase):
         real_runner = PREVIOUS._run_git_command
 
         def runner(root, arguments, deadline):
-            if arguments[:2] == ("submodule", "status"):
+            if "submodule" in arguments and "status" in arguments:
                 return PREVIOUS._GitCommandResult(0, b"-" + b"a" * 40 + b" vendor/lib\n")
             return real_runner(root, arguments, deadline)
 
@@ -400,14 +525,50 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "stale")
         self.assertIn("submodule", result.reason)
 
-    def test_legacy_single_lineage_with_matching_canonical_state_is_stale(self):
+    def test_submodule_index_visibility_flag_is_stale(self):
+        child = (Path(self.temporary.name) / "child").resolve()
+        child.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=child, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=child, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=child, check=True)
+        (child / "child.py").write_text("value = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "child.py"], cwd=child, check=True)
+        subprocess.run(["git", "commit", "-qm", "child"], cwd=child, check=True)
+        self.git(
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            str(child),
+            "deps/child",
+        )
+        self.git("commit", "-qam", "add submodule")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        self.publish()
+        self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
+
+        checkout = self.root / "deps" / "child"
+        subprocess.run(
+            ["git", "update-index", "--assume-unchanged", "child.py"],
+            cwd=checkout,
+            check=True,
+        )
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "stale")
+        self.assertIn("submodule index", result.reason)
+
+    def test_legacy_single_lineage_never_discloses_identity_or_body(self):
         self.publish(with_context=False)
 
         result = PREVIOUS.lookup_previous(self.request())
 
-        self.assertEqual(result.status, "stale")
-        self.assertEqual((result.report_id, result.revision), ("RPT-001", 1))
-        self.assertIsNotNone(result.display_text)
+        self.assertEqual(result.status, "none")
+        self.assertEqual((result.report_id, result.revision), (None, None))
+        self.assertIsNone(result.display_text)
         self.assertIsNone(result.created_at)
         self.assertIsNone(result.source_inventory_sha256)
 
@@ -476,7 +637,7 @@ class PreviousLookupTest(unittest.TestCase):
 
     def test_context_fifo_cannot_hang_or_fall_back_to_legacy(self):
         report_dir, pointer, _context = self.publish()
-        context_path = report_dir / f"revision-{pointer['revision']:04d}.context.json"
+        context_path = report_dir / f"revision-{pointer['revision']:04d}.context-v2.json"
         context_path.unlink()
         os.mkfifo(context_path, mode=0o600)
 
@@ -589,18 +750,35 @@ class PreviousLookupTest(unittest.TestCase):
 
     def test_thousand_ignored_generated_files_keep_warm_p95_within_budget(self):
         self.publish()
+        for number in range(2, 26):
+            report_dir, _pointer, _context = self.publish(
+                report_id=f"RPT-{number:03d}", request=f"unrelated requirement {number}"
+            )
+            for artifact in range(4):
+                (report_dir / f"unrelated-{artifact}.artifact").write_text(
+                    "bounded irrelevant artifact\n", encoding="utf-8"
+                )
         generated = self.root / "generated"
         generated.mkdir()
         for index in range(1000):
             (generated / f"generated-{index:04d}.txt").write_text("ignored\n", encoding="utf-8")
-        self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
-
+        clean_git = PREVIOUS._GitSnapshot(
+            available=True,
+            commit=self.baseline_commit,
+            changed_paths=(),
+            changed_count=0,
+            worktree_clean=True,
+            submodules_clean=True,
+            reason="pinned clean Git evidence",
+        )
         samples = []
-        for _index in range(20):
-            started = time.perf_counter_ns()
-            result = PREVIOUS.lookup_previous(self.request())
-            samples.append((time.perf_counter_ns() - started) / 1_000_000)
-            self.assertEqual(result.status, "fresh")
+        with mock.patch.object(PREVIOUS, "_probe_git", return_value=clean_git):
+            self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
+            for _index in range(20):
+                started = time.perf_counter_ns()
+                result = PREVIOUS.lookup_previous(self.request())
+                samples.append((time.perf_counter_ns() - started) / 1_000_000)
+                self.assertEqual(result.status, "fresh")
         samples.sort()
         p95 = samples[math.ceil(len(samples) * 0.95) - 1]
 

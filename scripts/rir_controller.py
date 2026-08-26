@@ -593,6 +593,7 @@ class GraphContext(TypedDict, total=False):
     receipt: ReceiptPayload
     sha256: str
     binding: dict[str, object]
+    source_inventory: dict[str, object]
     impact_paths: dict[str, list[str]]
     rationales: dict[str, str | None]
     impact_confidences: dict[str, str]

@@ -25,7 +25,10 @@ COMMIT_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z")
 MAX_REQUIREMENT_INPUT_BYTES = 256 * 1024
 MAX_REQUIREMENT_BYTES = 64 * 1024
+MAX_EVIDENCE_BYTES = 256 * 1024
+MAX_EVIDENCE_ROW_BYTES = 64 * 1024
 MAX_CONTEXT_BYTES = 8 * 1024
+MAX_STATE_BYTES = 4 * 1024 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
 GIT_TIMEOUT_SECONDS = 0.25
@@ -36,11 +39,14 @@ _CONTEXT_FIELDS = frozenset(
         "report_id",
         "revision",
         "markdown_sha256",
+        "state_sha256",
         "repo_root_sha256",
         "requirement_sha256",
+        "repository_evidence_sha256",
         "source_inventory_sha256",
         "source_inventory_available",
         "source_inventory_complete",
+        "source_inventory_git_tracked_only",
         "payload_sha256",
         "created_at",
         "baseline_commit",
@@ -55,8 +61,10 @@ class ReportContext:
     report_id: str
     revision: int
     markdown_sha256: str
+    state_sha256: str
     repo_root_sha256: str
     requirement_sha256: str
+    repository_evidence_sha256: str
     source_inventory_sha256: str | None
     payload_sha256: str
     created_at: str
@@ -64,18 +72,21 @@ class ReportContext:
     baseline_clean: bool
     source_inventory_available: bool = True
     source_inventory_complete: bool = True
+    source_inventory_git_tracked_only: bool = False
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version != 1:
-            raise ValueError("report context schema_version must be 1")
+        if type(self.schema_version) is not int or self.schema_version != 2:
+            raise ValueError("report context schema_version must be 2")
         if type(self.report_id) is not str or REPORT_ID_PATTERN.fullmatch(self.report_id) is None:
             raise ValueError("report context report_id is invalid")
         if type(self.revision) is not int or self.revision < 1:
             raise ValueError("report context revision is invalid")
         for label, value in (
             ("markdown_sha256", self.markdown_sha256),
+            ("state_sha256", self.state_sha256),
             ("repo_root_sha256", self.repo_root_sha256),
             ("requirement_sha256", self.requirement_sha256),
+            ("repository_evidence_sha256", self.repository_evidence_sha256),
             ("payload_sha256", self.payload_sha256),
         ):
             if type(value) is not str or SHA256_PATTERN.fullmatch(value) is None:
@@ -84,6 +95,8 @@ class ReportContext:
             raise TypeError("report context source_inventory_available must be boolean")
         if type(self.source_inventory_complete) is not bool:
             raise TypeError("report context source_inventory_complete must be boolean")
+        if type(self.source_inventory_git_tracked_only) is not bool:
+            raise TypeError("report context source_inventory_git_tracked_only must be boolean")
         if self.source_inventory_available:
             if (
                 type(self.source_inventory_sha256) is not str
@@ -94,6 +107,10 @@ class ReportContext:
             raise ValueError("unavailable source inventory cannot have a digest")
         if self.source_inventory_complete and not self.source_inventory_available:
             raise ValueError("complete source inventory must be available")
+        if self.source_inventory_git_tracked_only and (
+            not self.source_inventory_available or not self.source_inventory_complete
+        ):
+            raise ValueError("tracked-only source inventory must be available and complete")
         if (
             type(self.created_at) is not str
             or len(self.created_at.encode("utf-8")) > 64
@@ -109,6 +126,8 @@ class ReportContext:
             raise TypeError("report context baseline_clean must be boolean")
         if self.baseline_clean and self.baseline_commit is None:
             raise ValueError("clean Git baseline requires a commit")
+        if self.source_inventory_git_tracked_only and not self.baseline_clean:
+            raise ValueError("tracked-only source inventory requires a clean Git baseline")
 
 
 class UnsafeGitOutput(ValueError):
@@ -131,6 +150,20 @@ def canonical_requirement_text(request: str) -> str:
 def canonical_requirement_sha256(request: str) -> str:
     normalized = canonical_requirement_text(request)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def canonical_repository_evidence_sha256(evidence: Sequence[str]) -> str:
+    if isinstance(evidence, (str, bytes)) or not isinstance(evidence, Sequence):
+        raise TypeError("repository evidence must be a sequence of text rows")
+    rows = list(evidence)
+    if any(type(row) is not str or not row.strip() for row in rows):
+        raise ValueError("repository evidence must contain nonblank text rows")
+    if any(len(row.encode("utf-8")) > MAX_EVIDENCE_ROW_BYTES for row in rows):
+        raise ValueError("repository evidence contains a row larger than 64 KiB")
+    payload = json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(payload) > MAX_EVIDENCE_BYTES:
+        raise ValueError("repository evidence exceeds 256 KiB")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def repo_root_sha256(root: Path) -> str:
@@ -264,17 +297,34 @@ def _markdown_sha256(directory_fd: int, revision: int) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _state_sha256(directory_fd: int, revision: int) -> str:
+    payload = _read_bounded_file(
+        directory_fd,
+        f"revision-{revision:04d}.json",
+        MAX_STATE_BYTES,
+        private=False,
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _context_name(revision: int) -> str:
+    return f"revision-{revision:04d}.context-v2.json"
+
+
 def _mapping(context: ReportContext) -> dict[str, object]:
     return {
         "schema_version": context.schema_version,
         "report_id": context.report_id,
         "revision": context.revision,
         "markdown_sha256": context.markdown_sha256,
+        "state_sha256": context.state_sha256,
         "repo_root_sha256": context.repo_root_sha256,
         "requirement_sha256": context.requirement_sha256,
+        "repository_evidence_sha256": context.repository_evidence_sha256,
         "source_inventory_sha256": context.source_inventory_sha256,
         "source_inventory_available": context.source_inventory_available,
         "source_inventory_complete": context.source_inventory_complete,
+        "source_inventory_git_tracked_only": context.source_inventory_git_tracked_only,
         "payload_sha256": context.payload_sha256,
         "created_at": context.created_at,
         "baseline_commit": context.baseline_commit,
@@ -307,8 +357,10 @@ def _from_payload(payload: bytes) -> ReportContext:
             report_id=value["report_id"],
             revision=value["revision"],
             markdown_sha256=value["markdown_sha256"],
+            state_sha256=value["state_sha256"],
             repo_root_sha256=value["repo_root_sha256"],
             requirement_sha256=value["requirement_sha256"],
+            repository_evidence_sha256=value["repository_evidence_sha256"],
             source_inventory_sha256=value["source_inventory_sha256"],
             payload_sha256=value["payload_sha256"],
             created_at=value["created_at"],
@@ -316,6 +368,7 @@ def _from_payload(payload: bytes) -> ReportContext:
             baseline_clean=value["baseline_clean"],
             source_inventory_available=value["source_inventory_available"],
             source_inventory_complete=value["source_inventory_complete"],
+            source_inventory_git_tracked_only=value["source_inventory_git_tracked_only"],
         )
     except (TypeError, ValueError) as error:
         raise ValueError("report context payload has invalid values") from error
@@ -332,7 +385,7 @@ def _load_context_artifact(
     name: str | None = None,
     allowed_links: frozenset[int] = frozenset({1}),
 ) -> tuple[ReportContext, bytes, os.stat_result]:
-    selected_name = name or f"revision-{revision:04d}.context.json"
+    selected_name = name or _context_name(revision)
     expected_owner = os.fstat(directory_fd).st_uid
     payload, metadata = _read_bounded_artifact(
         directory_fd,
@@ -512,11 +565,16 @@ def _validate_context_state_identity(
     expected: ReportContext | None,
     repo_root_sha256: str,
     markdown_sha256: str,
+    state_sha256: str,
 ) -> None:
-    if context.repo_root_sha256 != repo_root_sha256 or context.markdown_sha256 != markdown_sha256:
+    if (
+        context.repo_root_sha256 != repo_root_sha256
+        or context.markdown_sha256 != markdown_sha256
+        or context.state_sha256 != state_sha256
+    ):
         raise ValueError("report context pending identity is invalid")
     if expected is not None and context != expected:
-        raise FileExistsError(f"revision-{context.revision:04d}.context.json")
+        raise FileExistsError(_context_name(context.revision))
 
 
 def _load_or_recover_context(
@@ -527,8 +585,9 @@ def _load_or_recover_context(
     expected: ReportContext | None,
     repo_root_sha256: str,
     markdown_sha256: str,
+    state_sha256: str,
 ) -> ReportContext | None:
-    name = f"revision-{revision:04d}.context.json"
+    name = _context_name(revision)
     pending = _context_pending_name(name)
     target_exists = _context_artifact_exists(directory_fd, name)
     pending_exists = _context_artifact_exists(directory_fd, pending)
@@ -548,6 +607,7 @@ def _load_or_recover_context(
             expected=expected,
             repo_root_sha256=repo_root_sha256,
             markdown_sha256=markdown_sha256,
+            state_sha256=state_sha256,
         )
     if pending_exists:
         pending_value, pending_payload, pending_metadata = _load_context_artifact(
@@ -562,6 +622,7 @@ def _load_or_recover_context(
             expected=expected,
             repo_root_sha256=repo_root_sha256,
             markdown_sha256=markdown_sha256,
+            state_sha256=state_sha256,
         )
     if not target_exists:
         if pending_metadata is None or pending_metadata.st_nlink != 1:
@@ -643,7 +704,7 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
     directory_fd = _open_report_directory(resolved, context.report_id, missing_ok=False)
     if directory_fd is None:  # pragma: no cover - missing_ok=False is exhaustive
         raise ValueError("published report directory is unavailable")
-    name = f"revision-{context.revision:04d}.context.json"
+    name = _context_name(context.revision)
     pending = _context_pending_name(name)
     stage: str | None = None
     stage_created = False
@@ -652,9 +713,12 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
     payload = _canonical_bytes(context)
     try:
         markdown_sha256 = _markdown_sha256(directory_fd, context.revision)
+        state_sha256 = _state_sha256(directory_fd, context.revision)
         repo_sha256 = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
         if markdown_sha256 != context.markdown_sha256:
             raise ValueError("report context Markdown digest is invalid")
+        if state_sha256 != context.state_sha256:
+            raise ValueError("report context state digest is invalid")
         existing = _load_or_recover_context(
             directory_fd,
             context.report_id,
@@ -662,6 +726,7 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
             expected=context,
             repo_root_sha256=repo_sha256,
             markdown_sha256=markdown_sha256,
+            state_sha256=state_sha256,
         )
         if existing is not None:
             _fsync_context_directory(directory_fd)
@@ -699,6 +764,7 @@ def publish_report_context(root: Path, context: ReportContext) -> Path:
             expected=context,
             repo_root_sha256=repo_sha256,
             markdown_sha256=markdown_sha256,
+            state_sha256=state_sha256,
         )
         if recovered != context:
             raise ValueError("published report context could not be verified")
@@ -726,6 +792,7 @@ def load_report_context(root: Path, report_id: str, revision: int) -> ReportCont
     try:
         expected_root = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
         markdown_sha256 = _markdown_sha256(directory_fd, revision)
+        state_sha256 = _state_sha256(directory_fd, revision)
         return _load_or_recover_context(
             directory_fd,
             report_id,
@@ -733,6 +800,7 @@ def load_report_context(root: Path, report_id: str, revision: int) -> ReportCont
             expected=None,
             repo_root_sha256=expected_root,
             markdown_sha256=markdown_sha256,
+            state_sha256=state_sha256,
         )
     finally:
         os.close(directory_fd)
@@ -919,3 +987,174 @@ def probe_git_baseline(root: Path) -> tuple[str | None, bool]:
     if any(not line.startswith(b" ") for line in submodule_result[1].splitlines()):
         return commit, False
     return commit, True
+
+
+def _tracked_paths_from_flags(payload: bytes) -> tuple[set[str], bool]:
+    if not payload:
+        return set(), True
+    records = payload.split(b"\0")
+    if records[-1] != b"":
+        raise UnsafeGitOutput("Git tracked-path output is incomplete")
+    paths: set[str] = set()
+    flags_clean = True
+    for record in records[:-1]:
+        if len(record) < 3 or record[1:2] != b" ":
+            raise UnsafeGitOutput("Git tracked-path output is malformed")
+        try:
+            path = record[2:].decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise UnsafeGitOutput("Git tracked path is not UTF-8") from error
+        if not path or path.startswith("/") or ".." in Path(path).parts or "\x00" in path:
+            raise UnsafeGitOutput("Git tracked path is unsafe")
+        paths.add(Path(path).as_posix())
+        if record[:1] != b"H":
+            flags_clean = False
+    return paths, flags_clean
+
+
+def _git_single_path(payload: bytes, label: str) -> Path:
+    if b"\0" in payload:
+        raise UnsafeGitOutput(f"{label} output contains NUL")
+    try:
+        value = payload.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError as error:
+        raise UnsafeGitOutput(f"{label} output is not UTF-8") from error
+    if not value or "\n" in value or "\r" in value:
+        raise UnsafeGitOutput(f"{label} output is invalid")
+    return Path(value)
+
+
+def _git_worktree_scope(root: Path) -> tuple[str, str] | None:
+    discovered = _run_git(root, ("rev-parse", "--absolute-git-dir"))
+    if discovered is None or discovered[0] != 0:
+        return None
+    git_dir = _git_single_path(discovered[1], "Git directory")
+    try:
+        git_dir = git_dir.resolve(strict=True)
+    except OSError:
+        return None
+    if not git_dir.is_dir():
+        return None
+    scope = (f"--git-dir={git_dir}", f"--work-tree={root}")
+    configured = _run_git(root, (*scope, "config", "--local", "--get", "core.worktree"))
+    if configured is None:
+        return None
+    if configured[0] == 0:
+        configured_path = _git_single_path(configured[1], "Git core.worktree")
+        configured_root = (
+            configured_path if configured_path.is_absolute() else git_dir / configured_path
+        ).resolve()
+        if configured_root != root:
+            return None
+    elif configured[0] != 1:
+        return None
+    top = _run_git(root, (*scope, "rev-parse", "--show-toplevel"))
+    if top is None or top[0] != 0:
+        return None
+    try:
+        if _git_single_path(top[1], "Git worktree").resolve(strict=True) != root:
+            return None
+    except OSError:
+        return None
+    return scope
+
+
+def _submodule_paths(payload: bytes) -> tuple[str, ...] | None:
+    paths: list[str] = []
+    for line in payload.splitlines():
+        if not line.startswith(b" "):
+            return None
+        commit, separator, path_and_description = line[1:].partition(b" ")
+        try:
+            commit_text = commit.decode("ascii", errors="strict")
+        except UnicodeDecodeError as error:
+            raise UnsafeGitOutput("Git submodule output is not ASCII") from error
+        if not separator or COMMIT_PATTERN.fullmatch(commit_text) is None:
+            raise UnsafeGitOutput("Git submodule output is malformed")
+        try:
+            path = path_and_description.split(b" (", 1)[0].decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise UnsafeGitOutput("Git submodule path is not UTF-8") from error
+        pure = Path(path)
+        if not path or pure.is_absolute() or ".." in pure.parts:
+            raise UnsafeGitOutput("Git submodule path is unsafe")
+        normalized = pure.as_posix()
+        if normalized not in paths:
+            paths.append(normalized)
+    return tuple(paths)
+
+
+def probe_source_inventory_git(
+    root: Path, source_digests: Mapping[str, str]
+) -> tuple[str | None, bool, bool]:
+    resolved = _root(root)
+    if not isinstance(source_digests, Mapping) or any(
+        not isinstance(path, str)
+        or not isinstance(digest, str)
+        or SHA256_PATTERN.fullmatch(digest) is None
+        for path, digest in source_digests.items()
+    ):
+        raise ValueError("source inventory must map paths to SHA-256 digests")
+    commit, clean = probe_git_baseline(resolved)
+    if commit is None or not clean:
+        return commit, clean, False
+    scope = _git_worktree_scope(resolved)
+    if scope is None:
+        return commit, clean, False
+    scoped_head = _run_git(resolved, (*scope, "rev-parse", "--verify", "HEAD^{commit}"))
+    if scoped_head is None or scoped_head[0] != 0:
+        return commit, clean, False
+    try:
+        if scoped_head[1].decode("ascii", errors="strict").strip() != commit:
+            return commit, clean, False
+    except UnicodeDecodeError:
+        return commit, clean, False
+    flags_result = _run_git(resolved, (*scope, "ls-files", "-v", "-z"))
+    if flags_result is None or flags_result[0] != 0:
+        return commit, clean, False
+    tracked_paths, flags_clean = _tracked_paths_from_flags(flags_result[1])
+    expected_paths = {Path(path).as_posix() for path in source_digests}
+    if not flags_clean or not expected_paths <= tracked_paths:
+        return commit, clean, False
+    submodule_result = _run_git(resolved, (*scope, "submodule", "status", "--recursive"))
+    if submodule_result is None or submodule_result[0] != 0:
+        return commit, clean, False
+    submodule_paths = _submodule_paths(submodule_result[1])
+    if submodule_paths is None:
+        return commit, clean, False
+    for path in submodule_paths:
+        submodule_root = (resolved / path).resolve()
+        try:
+            submodule_root.relative_to(resolved)
+        except ValueError:
+            return commit, clean, False
+        submodule_scope = _git_worktree_scope(submodule_root)
+        if submodule_scope is None:
+            return commit, clean, False
+        flags = _run_git(submodule_root, (*submodule_scope, "ls-files", "-v", "-z"))
+        if flags is None or flags[0] != 0:
+            return commit, clean, False
+        _paths, submodule_flags_clean = _tracked_paths_from_flags(flags[1])
+        if not submodule_flags_clean:
+            return commit, clean, False
+    final_status = _run_git(
+        resolved,
+        (
+            *scope,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=normal",
+            "--ignore-submodules=none",
+            "--no-renames",
+        ),
+    )
+    if final_status is None or final_status[0] != 0 or final_status[1] != b"":
+        return commit, clean, False
+    after_result = _run_git(resolved, (*scope, "rev-parse", "--verify", "HEAD^{commit}"))
+    if after_result is None or after_result[0] != 0 or b"\0" in after_result[1]:
+        return commit, clean, False
+    try:
+        after = after_result[1].decode("ascii", errors="strict").strip()
+    except UnicodeDecodeError:
+        return commit, clean, False
+    return commit, clean, after == commit

@@ -133,6 +133,7 @@ class _ReportStoreContract(Protocol):
 class _ReportContextContract(Protocol):
     ReportContext: type
     MAX_CONTEXT_BYTES: int
+    MAX_EVIDENCE_BYTES: int
     MAX_REQUIREMENT_INPUT_BYTES: int
     MAX_REQUIREMENT_BYTES: int
 
@@ -140,11 +141,15 @@ class _ReportContextContract(Protocol):
 
     def canonical_requirement_sha256(self, request: str) -> str: ...
 
+    def canonical_repository_evidence_sha256(self, evidence: Sequence[str]) -> str: ...
+
     def repo_root_sha256(self, root: Path) -> str: ...
 
     def created_at_utc(self) -> str: ...
 
     def probe_git_baseline(self, root: Path): ...
+
+    def probe_source_inventory_git(self, root: Path, source_digests: Mapping[str, str]): ...
 
     def publish_report_context(self, root: Path, context): ...
 
@@ -495,6 +500,7 @@ def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContra
             type(getattr(value, name, None)) is int and getattr(value, name) > 0
             for name in (
                 "MAX_CONTEXT_BYTES",
+                "MAX_EVIDENCE_BYTES",
                 "MAX_REQUIREMENT_INPUT_BYTES",
                 "MAX_REQUIREMENT_BYTES",
             )
@@ -504,9 +510,11 @@ def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContra
             (
                 "canonical_requirement_text",
                 "canonical_requirement_sha256",
+                "canonical_repository_evidence_sha256",
                 "repo_root_sha256",
                 "created_at_utc",
                 "probe_git_baseline",
+                "probe_source_inventory_git",
                 "publish_report_context",
                 "load_report_context",
             ),
@@ -1006,6 +1014,7 @@ def load_promoted_scan_context(
         "source_inventory": {
             "sha256": GRAPH_DELIVERY.source_inventory_sha256(inventory_digests),
             "complete": inventory["complete"],
+            "digests": dict(inventory_digests),
         },
     }
 
@@ -1030,9 +1039,11 @@ _RUNTIME_CALLABLES = (
     "render_markdown",
     "context_type",
     "canonical_requirement_sha256",
+    "canonical_repository_evidence_sha256",
     "repo_root_sha256",
     "created_at_utc",
     "probe_git_baseline",
+    "probe_source_inventory_git",
     "payload_sha256",
     "load_report_context",
     "publish_report_context",
@@ -1077,9 +1088,11 @@ def default_runtime() -> Mapping[str, object]:
         "render_markdown": IMPACT_RENDERER.render_markdown,
         "context_type": REPORT_CONTEXT.ReportContext,
         "canonical_requirement_sha256": REPORT_CONTEXT.canonical_requirement_sha256,
+        "canonical_repository_evidence_sha256": REPORT_CONTEXT.canonical_repository_evidence_sha256,
         "repo_root_sha256": REPORT_CONTEXT.repo_root_sha256,
         "created_at_utc": REPORT_CONTEXT.created_at_utc,
         "probe_git_baseline": REPORT_CONTEXT.probe_git_baseline,
+        "probe_source_inventory_git": REPORT_CONTEXT.probe_source_inventory_git,
         "payload_sha256": _payload_sha256,
         "load_report_context": REPORT_CONTEXT.load_report_context,
         "publish_report_context": REPORT_CONTEXT.publish_report_context,
@@ -1110,19 +1123,24 @@ def _operation(runtime: Mapping[str, object], name: str):
 
 def _source_inventory_identity(
     graph_context: object,
-) -> tuple[str | None, bool, bool]:
+) -> tuple[str | None, bool, bool, dict[str, str] | None]:
     if not isinstance(graph_context, Mapping):
-        return None, False, False
+        return None, False, False, None
     promoted = graph_context.get("source_inventory")
     if isinstance(promoted, Mapping):
         digest = promoted.get("sha256")
         complete = promoted.get("complete")
+        digests = promoted.get("digests")
         if (
             isinstance(digest, str)
             and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
             and isinstance(complete, bool)
+            and isinstance(digests, Mapping)
+            and all(
+                isinstance(key, str) and isinstance(value, str) for key, value in digests.items()
+            )
         ):
-            return digest, True, complete
+            return digest, True, complete, dict(cast(Mapping[str, str], digests))
     binding = graph_context.get("binding")
     if isinstance(binding, Mapping):
         digest = binding.get("source_inventory_sha256")
@@ -1132,8 +1150,8 @@ def _source_inventory_identity(
             and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
             and isinstance(complete, bool)
         ):
-            return digest, True, complete
-    return None, False, False
+            return digest, True, complete, None
+    return None, False, False, None
 
 
 def _existing_context_matches(
@@ -1143,24 +1161,31 @@ def _existing_context_matches(
     report_id: str,
     revision: int,
     markdown_sha256: str,
+    state_sha256: str,
     repo_sha256: str,
     requirement_sha256: str,
+    repository_evidence_sha256: str,
     source_inventory_sha256: str | None,
     source_inventory_available: bool,
     source_inventory_complete: bool,
+    source_inventory_git_tracked_only: bool,
     payload_sha256: str,
 ) -> bool:
     return (
         isinstance(context, context_type)
-        and getattr(context, "schema_version", None) == 1
+        and getattr(context, "schema_version", None) == 2
         and getattr(context, "report_id", None) == report_id
         and getattr(context, "revision", None) == revision
         and getattr(context, "markdown_sha256", None) == markdown_sha256
+        and getattr(context, "state_sha256", None) == state_sha256
         and getattr(context, "repo_root_sha256", None) == repo_sha256
         and getattr(context, "requirement_sha256", None) == requirement_sha256
+        and getattr(context, "repository_evidence_sha256", None) == repository_evidence_sha256
         and getattr(context, "source_inventory_sha256", None) == source_inventory_sha256
         and getattr(context, "source_inventory_available", None) is source_inventory_available
         and getattr(context, "source_inventory_complete", None) is source_inventory_complete
+        and getattr(context, "source_inventory_git_tracked_only", None)
+        is source_inventory_git_tracked_only
         and getattr(context, "payload_sha256", None) == payload_sha256
     )
 
@@ -1168,17 +1193,23 @@ def _existing_context_matches(
 def _context_identity(
     repo_sha256: str,
     requirement_sha256: str,
+    state_sha256: str,
+    repository_evidence_sha256: str,
     source_inventory_sha256: str | None,
     source_inventory_available: bool,
     source_inventory_complete: bool,
+    source_inventory_git_tracked_only: bool,
     payload_sha256: str,
 ) -> dict[str, object]:
     return {
         "repo_root_sha256": repo_sha256,
         "requirement_sha256": requirement_sha256,
+        "state_sha256": state_sha256,
+        "repository_evidence_sha256": repository_evidence_sha256,
         "source_inventory_sha256": source_inventory_sha256,
         "source_inventory_available": source_inventory_available,
         "source_inventory_complete": source_inventory_complete,
+        "source_inventory_git_tracked_only": source_inventory_git_tracked_only,
         "payload_sha256": payload_sha256,
     }
 
@@ -1299,18 +1330,33 @@ def _resume_completed_publication(
     source_sha256 = identity.get("source_inventory_sha256")
     source_available = identity.get("source_inventory_available")
     source_complete = identity.get("source_inventory_complete")
+    source_tracked_only = identity.get("source_inventory_git_tracked_only")
+    state_sha256 = identity.get("state_sha256")
+    evidence_sha256 = identity.get("repository_evidence_sha256")
     if (
         (source_sha256 is not None and not isinstance(source_sha256, str))
         or not isinstance(source_available, bool)
         or not isinstance(source_complete, bool)
+        or not isinstance(source_tracked_only, bool)
+        or not isinstance(state_sha256, str)
+        or not isinstance(evidence_sha256, str)
     ):
         return None
     repo_sha256 = _operation(runtime, "repo_root_sha256")(root)
     requirement_sha256 = _operation(runtime, "canonical_requirement_sha256")(request_value)
+    evidence_value = draft.get("repository_evidence")
+    if not isinstance(evidence_value, list) or not all(
+        isinstance(item, str) for item in evidence_value
+    ):
+        return None
+    expected_evidence_sha256 = _operation(runtime, "canonical_repository_evidence_sha256")(
+        tuple(evidence_value)
+    )
     payload_sha256 = _operation(runtime, "payload_sha256")()
     if (
         identity.get("repo_root_sha256") != repo_sha256
         or identity.get("requirement_sha256") != requirement_sha256
+        or evidence_sha256 != expected_evidence_sha256
         or identity.get("payload_sha256") != payload_sha256
         or not _existing_context_matches(
             context,
@@ -1318,17 +1364,23 @@ def _resume_completed_publication(
             report_id=report_id,
             revision=revision,
             markdown_sha256=current.markdown_sha256,
+            state_sha256=state_sha256,
             repo_sha256=repo_sha256,
             requirement_sha256=requirement_sha256,
+            repository_evidence_sha256=expected_evidence_sha256,
             source_inventory_sha256=source_sha256,
             source_inventory_available=source_available,
             source_inventory_complete=source_complete,
+            source_inventory_git_tracked_only=source_tracked_only,
             payload_sha256=payload_sha256,
         )
     ):
         return None
     state_bytes, stored_state, delivery, display = _verified_published_display(runtime, current)
-    if hashlib.sha256(state_bytes).hexdigest() != metadata.get("state_sha256"):
+    if (
+        hashlib.sha256(state_bytes).hexdigest() != metadata.get("state_sha256")
+        or hashlib.sha256(state_bytes).hexdigest() != state_sha256
+    ):
         return None
     original = stored_state.get("original_requirement")
     if not isinstance(original, Mapping) or original.get("request") != request_value:
@@ -1390,27 +1442,46 @@ def _finalize(request, runtime: Mapping[str, object]):
         if not isinstance(request_value, str):
             raise ValueError("draft requirement identity is invalid")
         requirement_sha256 = _operation(runtime, "canonical_requirement_sha256")(request_value)
+        evidence_value = draft.get("repository_evidence")
+        if not isinstance(evidence_value, list) or not all(
+            isinstance(item, str) for item in evidence_value
+        ):
+            raise ValueError("draft repository evidence identity is invalid")
+        repository_evidence_sha256 = _operation(runtime, "canonical_repository_evidence_sha256")(
+            tuple(evidence_value)
+        )
         repo_sha256 = _operation(runtime, "repo_root_sha256")(root)
         payload_sha256 = _operation(runtime, "payload_sha256")()
-        source_sha256, source_available, source_complete = _source_inventory_identity(graph_context)
+        source_sha256, source_available, source_complete, source_digests = (
+            _source_inventory_identity(graph_context)
+        )
+        state_sha256 = hashlib.sha256(state_bytes).hexdigest()
+        baseline = (
+            _operation(runtime, "probe_source_inventory_git")(root, source_digests)
+            if source_available and source_complete and source_digests is not None
+            else (*_operation(runtime, "probe_git_baseline")(root), False)
+        )
+        if (
+            not isinstance(baseline, tuple)
+            or len(baseline) != 3
+            or (baseline[0] is not None and not isinstance(baseline[0], str))
+            or not isinstance(baseline[1], bool)
+            or not isinstance(baseline[2], bool)
+        ):
+            raise TypeError("finalize Git source proof result is invalid")
+        baseline_commit, baseline_clean, source_inventory_git_tracked_only = baseline
         context_identity = _context_identity(
             repo_sha256,
             requirement_sha256,
+            state_sha256,
+            repository_evidence_sha256,
             source_sha256,
             source_available,
             source_complete,
+            source_inventory_git_tracked_only,
             payload_sha256,
         )
         created_at = _operation(runtime, "created_at_utc")()
-        baseline = _operation(runtime, "probe_git_baseline")(root)
-        if (
-            not isinstance(baseline, tuple)
-            or len(baseline) != 2
-            or (baseline[0] is not None and not isinstance(baseline[0], str))
-            or not isinstance(baseline[1], bool)
-        ):
-            raise TypeError("finalize Git baseline result is invalid")
-        baseline_commit, baseline_clean = baseline
         _operation(runtime, "write_controller_metadata")(
             root,
             draft,
@@ -1439,6 +1510,8 @@ def _finalize(request, runtime: Mapping[str, object]):
         _stored_bytes, _stored_state, delivery, display = _verified_published_display(
             runtime, published
         )
+        if hashlib.sha256(_stored_bytes).hexdigest() != state_sha256:
+            raise ValueError("published state does not match finalization identity")
         context_type = runtime.get("context_type")
         if not isinstance(context_type, type) or context_type is not REPORT_CONTEXT.ReportContext:
             raise TypeError("finalize report context type is invalid")
@@ -1447,12 +1520,14 @@ def _finalize(request, runtime: Mapping[str, object]):
         )
         if existing_context is None:
             report_context = _operation(runtime, "context_type")(
-                schema_version=1,
+                schema_version=2,
                 report_id=published.report_id,
                 revision=published.revision,
                 markdown_sha256=published.markdown_sha256,
+                state_sha256=state_sha256,
                 repo_root_sha256=repo_sha256,
                 requirement_sha256=requirement_sha256,
+                repository_evidence_sha256=repository_evidence_sha256,
                 source_inventory_sha256=source_sha256,
                 payload_sha256=payload_sha256,
                 created_at=created_at,
@@ -1460,6 +1535,7 @@ def _finalize(request, runtime: Mapping[str, object]):
                 baseline_clean=baseline_clean,
                 source_inventory_available=source_available,
                 source_inventory_complete=source_complete,
+                source_inventory_git_tracked_only=source_inventory_git_tracked_only,
             )
         else:
             if not _existing_context_matches(
@@ -1468,11 +1544,14 @@ def _finalize(request, runtime: Mapping[str, object]):
                 report_id=published.report_id,
                 revision=published.revision,
                 markdown_sha256=published.markdown_sha256,
+                state_sha256=state_sha256,
                 repo_sha256=repo_sha256,
                 requirement_sha256=requirement_sha256,
+                repository_evidence_sha256=repository_evidence_sha256,
                 source_inventory_sha256=source_sha256,
                 source_inventory_available=source_available,
                 source_inventory_complete=source_complete,
+                source_inventory_git_tracked_only=source_inventory_git_tracked_only,
                 payload_sha256=payload_sha256,
             ):
                 raise ValueError("published report context does not match finalization identity")

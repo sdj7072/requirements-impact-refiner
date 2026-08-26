@@ -302,9 +302,12 @@ _CONTEXT_IDENTITY_FIELDS = frozenset(
     {
         "repo_root_sha256",
         "requirement_sha256",
+        "state_sha256",
+        "repository_evidence_sha256",
         "source_inventory_sha256",
         "source_inventory_available",
         "source_inventory_complete",
+        "source_inventory_git_tracked_only",
         "payload_sha256",
     }
 )
@@ -399,14 +402,26 @@ def _controller_metadata_path(report_id: str, revision: int, root: Path) -> Path
 def _valid_context_identity(value: object) -> bool:
     if not isinstance(value, dict) or set(value) != _CONTEXT_IDENTITY_FIELDS:
         return False
-    for key in ("repo_root_sha256", "requirement_sha256", "payload_sha256"):
+    for key in (
+        "repo_root_sha256",
+        "requirement_sha256",
+        "state_sha256",
+        "repository_evidence_sha256",
+        "payload_sha256",
+    ):
         digest = value.get(key)
         if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
             return False
     available = value.get("source_inventory_available")
     complete = value.get("source_inventory_complete")
+    tracked_only = value.get("source_inventory_git_tracked_only")
     inventory_digest = value.get("source_inventory_sha256")
-    if not isinstance(available, bool) or not isinstance(complete, bool):
+    if (
+        not isinstance(available, bool)
+        or not isinstance(complete, bool)
+        or not isinstance(tracked_only, bool)
+        or (tracked_only and (not available or not complete))
+    ):
         return False
     if complete and not available:
         return False

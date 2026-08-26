@@ -15,7 +15,7 @@
 - Complete the quality-foundation and controller/graph architecture plans first.
 - Default runtime is standard-library-only, network-free, and installs no provider automatically.
 - Previous content is reusable only when repository, requirement lineage, report revision, payload, and schema identities validate.
-- A result is `fresh` only when the implementation proves it; timeout, missing Git, dirty ambiguity, or missing legacy metadata is `stale`.
+- A result is `fresh` only when the implementation proves it; timeout, missing Git, dirty ambiguity, or incomplete source proof is `stale`. Missing v2 context is `none` with no body.
 - Previous lookup p95 is at most 300ms; stale delta scan p95 is at most 3 seconds on pinned fixtures.
 - An exact fresh match performs zero provider, graph, and LLM calls.
 - Delta scanning preserves changed files, previous selected paths, preserved invariants, and every unknown frontier.
@@ -36,7 +36,7 @@
 - Test: `tests/test_rir_report_context.py`
 
 **Interfaces:**
-- Produces: `ReportContext`, `canonical_requirement_sha256(request: str) -> str`, `publish_report_context(root: Path, context: ReportContext) -> Path`, `load_report_context(root: Path, report_id: str, revision: int) -> Optional[ReportContext]`
+- Produces: v2 `ReportContext`, requirement/evidence/state/source identities, `publish_report_context(root: Path, context: ReportContext) -> Path`, `load_report_context(root: Path, report_id: str, revision: int) -> Optional[ReportContext]`
 - Consumes: validated report ID/revision, immutable Markdown digest, payload digest, graph source-inventory digest, optional Git baseline
 
 - [ ] **Step 1: Write failing canonicalization and sidecar tests**
@@ -126,7 +126,7 @@ def test_other_requirement_never_returns_previous_body(self):
     self.assertIsNone(result.display_text)
 ```
 
-Add cases for `stale`, `ambiguous`, legacy context, missing Git, Git timeout, dirty tracked files, relevant untracked files, unsafe pointer, and another repository root.
+Add cases for `stale`, `ambiguous`, missing v2 context, missing Git, Git timeout, dirty tracked files, relevant ignored/untracked files, index visibility flags, unsafe pointer, and another repository root.
 
 - [ ] **Step 2: Run and observe the missing lookup API**
 
@@ -152,7 +152,7 @@ class PreviousReportResult:
     elapsed_ms: int
 ```
 
-Use a 250ms subprocess deadline and bounded output for `git rev-parse HEAD` and `git status --porcelain=v1 --untracked-files=normal`. Only a matching clean commit and valid context is `fresh`. Missing/slow Git, dirty baseline, or legacy context is `stale`, never fresh. Multiple matching lineages are `ambiguous` without body disclosure.
+Use a 250ms operation deadline and bounded output for explicitly scoped Git probes. Only a matching v2 state/evidence/payload context, stable HEAD, clean tracked/untracked worktree and submodules, tracked-only inventory, and absence of assume-unchanged/skip-worktree flags is `fresh`. Missing/slow Git or incomplete proof is `stale`; missing context is `none`. Multiple matching lineages are `ambiguous` without body disclosure.
 
 `render_previous` reads the already-published compact state, prefixes status,
 creation time, baseline commit, changed-file count, and freshness, then appends
@@ -401,7 +401,7 @@ Run: `python3 -m unittest -q tests.test_rir_previous tests.test_rir_delta tests.
 
 - [ ] **Step 3: Request independent security, concurrency, and compatibility review**
 
-Security review attacks repository/lineage confusion, symlinked sidecars, Markdown disclosure, and Git output injection. Concurrency review attacks simultaneous lookup/finalize and interrupted sidecar publication. Compatibility review verifies legacy reports are stale-readable and existing four controller tools are byte-compatible.
+Security review attacks repository/lineage confusion, symlinked sidecars, state/evidence confusion, Markdown disclosure, index visibility flags, worktree redirection, and Git output injection. Concurrency review attacks simultaneous lookup/finalize, HEAD races, and interrupted sidecar publication. Compatibility review verifies legacy reports remain artifact-readable but previous lookup returns no body, while existing four controller tools remain byte-compatible.
 
 - [ ] **Step 4: Record review verdicts and route findings through the task review loop**
 
