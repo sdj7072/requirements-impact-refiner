@@ -36,20 +36,32 @@ class RirPerformanceTest(unittest.TestCase):
         self.assertEqual(performance.estimate_tokens(b"12345678"), 2)
         self.assertEqual(performance.estimate_tokens("한글".encode()), 2)
 
-    def test_estimated_and_actual_tokens_are_separate(self):
+    def test_serialized_estimates_are_not_model_usage(self):
         performance = load_performance()
 
         metrics = performance.PerformanceMetrics.from_payloads(previous=b"1234", delta=b"12345678")
 
-        self.assertEqual(metrics.estimated_input_tokens, 3)
-        self.assertEqual(metrics.estimated_output_tokens, 0)
+        self.assertEqual(metrics.estimated_serialized_input_tokens, 3)
+        self.assertEqual(metrics.estimated_serialized_output_tokens, 0)
+        self.assertIsNone(metrics.estimated_model_input_tokens)
+        self.assertIsNone(metrics.estimated_model_output_tokens)
         self.assertIsNone(metrics.actual_input_tokens)
         self.assertIsNone(metrics.actual_output_tokens)
+        self.assertEqual(metrics.model_calls, 0)
 
-        reported = performance.with_actual_usage(metrics, input_tokens=7, output_tokens=2)
-        self.assertEqual(reported.estimated_input_tokens, 3)
+        reported = performance.with_actual_usage(
+            metrics,
+            input_tokens=7,
+            output_tokens=2,
+            model_calls=1,
+            estimated_model_input_tokens=6,
+            estimated_model_output_tokens=2,
+        )
+        self.assertEqual(reported.estimated_serialized_input_tokens, 3)
+        self.assertEqual(reported.estimated_model_input_tokens, 6)
         self.assertEqual(reported.actual_input_tokens, 7)
         self.assertEqual(reported.actual_output_tokens, 2)
+        self.assertEqual(reported.model_calls, 1)
 
     def test_identical_payload_digest_is_counted_once_per_operation(self):
         performance = load_performance()
@@ -57,8 +69,8 @@ class RirPerformanceTest(unittest.TestCase):
 
         metrics = performance.measure(previous=payload, delta=payload)
 
-        self.assertEqual(metrics.new_evidence_bytes, len(payload))
-        self.assertEqual(metrics.estimated_input_tokens, 4)
+        self.assertEqual(metrics.accounted_new_evidence_bytes, len(payload))
+        self.assertEqual(metrics.estimated_serialized_input_tokens, 4)
 
     def test_reused_bytes_are_not_counted_as_new_evidence(self):
         performance = load_performance()
@@ -70,9 +82,9 @@ class RirPerformanceTest(unittest.TestCase):
             reused_sha256=hashlib.sha256(payload).hexdigest(),
         )
 
-        self.assertEqual(metrics.reused_previous_bytes, len(payload))
-        self.assertEqual(metrics.new_evidence_bytes, 0)
-        self.assertEqual(metrics.estimated_input_tokens, 0)
+        self.assertEqual(metrics.accounted_reused_bytes, len(payload))
+        self.assertEqual(metrics.accounted_new_evidence_bytes, 0)
+        self.assertEqual(metrics.estimated_serialized_input_tokens, 0)
 
     def test_elapsed_phase_metric_uses_injected_monotonic_clock(self):
         performance = load_performance()
@@ -96,7 +108,9 @@ class RirPerformanceTest(unittest.TestCase):
             inventory_delta=performance.PhaseMetric(31, 19, 0, "miss"),
             compact_graph=performance.PhaseMetric(4, 0, 23, None),
             cache_status="miss",
-            total_elapsed_ms=47,
+            analysis_elapsed_ms=47,
+            operation_elapsed_ms=53,
+            accounting_exclusions=("filesystem metadata",),
         )
         mapping = metrics.to_mapping()
 
@@ -104,8 +118,8 @@ class RirPerformanceTest(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(mapping)), mapping)
 
         malformed = dict(mapping)
-        malformed["total_elapsed_ms"] = True
-        with self.assertRaisesRegex(ValueError, "total_elapsed_ms"):
+        malformed["operation_elapsed_ms"] = True
+        with self.assertRaisesRegex(ValueError, "operation_elapsed_ms"):
             performance.PerformanceMetrics.from_mapping(malformed)
 
         malformed = dict(mapping)
@@ -115,13 +129,40 @@ class RirPerformanceTest(unittest.TestCase):
 
         malformed = dict(mapping)
         malformed["actual_input_tokens"] = 1
+        malformed["model_calls"] = 1
         with self.assertRaisesRegex(ValueError, "complete or absent"):
             performance.PerformanceMetrics.from_mapping(malformed)
 
         malformed = dict(mapping)
-        malformed["new_evidence_bytes"] = 16 * 1024 * 1024 + 1
-        with self.assertRaisesRegex(ValueError, "new_evidence_bytes"):
+        malformed["accounted_new_evidence_bytes"] = 16 * 1024 * 1024 + 1
+        with self.assertRaisesRegex(ValueError, "accounted_new_evidence_bytes"):
             performance.PerformanceMetrics.from_mapping(malformed)
+
+    def test_no_clamp_and_unknown_timing_are_preserved(self):
+        performance = load_performance()
+
+        unknown = performance.PhaseMetric(elapsed_ms=None, bytes_read=None)
+        long = performance.PerformanceMetrics(
+            previous_lookup=unknown,
+            analysis_elapsed_ms=31_001,
+            operation_elapsed_ms=31_123,
+        )
+
+        self.assertIsNone(unknown.elapsed_ms)
+        self.assertEqual(long.analysis_elapsed_ms, 31_001)
+        self.assertEqual(long.operation_elapsed_ms, 31_123)
+
+    def test_actual_usage_requires_a_positive_trusted_model_call_count(self):
+        performance = load_performance()
+        metrics = performance.PerformanceMetrics()
+
+        with self.assertRaisesRegex(ValueError, "model_calls"):
+            performance.with_actual_usage(
+                metrics,
+                input_tokens=7,
+                output_tokens=2,
+                model_calls=0,
+            )
 
     def test_root_and_installed_skill_implementations_are_byte_identical(self):
         self.assertEqual(MODULE_PATH.read_bytes(), MIRROR_PATH.read_bytes())

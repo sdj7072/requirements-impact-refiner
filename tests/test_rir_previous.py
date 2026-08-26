@@ -192,7 +192,7 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertIn("**Freshness:** fresh", result.display_text or "")
         self.assertEqual(result.performance_metrics.previous_lookup.elapsed_ms, result.elapsed_ms)
         self.assertGreater(result.performance_metrics.previous_lookup.bytes_read, 0)
-        self.assertGreater(result.performance_metrics.reused_previous_bytes, 0)
+        self.assertGreater(result.performance_metrics.accounted_reused_bytes, 0)
         self.assertIsNone(result.performance_metrics.actual_input_tokens)
 
     def test_fresh_lookup_preserves_detailed_request_and_evidence_bounds(self):
@@ -222,6 +222,8 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertIsNone(result.display_text)
         self.assertIsNone(result.report_id)
         self.assertIsNone(result.markdown_sha256)
+        self.assertGreater(result.performance_metrics.previous_lookup.bytes_read, 0)
+        self.assertEqual(result.performance_metrics.accounted_reused_bytes, 0)
 
     def test_changed_or_reordered_repository_evidence_discloses_no_body(self):
         evidence = ("first", "second", "first")
@@ -945,6 +947,8 @@ class PreviousLookupTest(unittest.TestCase):
                 ("RPT-002", 1, "2026-08-25T12:34:56Z"),
             ),
         )
+        self.assertGreater(result.performance_metrics.previous_lookup.bytes_read, 0)
+        self.assertEqual(result.performance_metrics.accounted_reused_bytes, 0)
 
         selected = PREVIOUS.lookup_previous(self.request(report_id="RPT-002"))
 
@@ -1010,6 +1014,8 @@ class PreviousLookupTest(unittest.TestCase):
 
         self.assertEqual(result.status, "none")
         self.assertIsNone(result.display_text)
+        self.assertGreater(result.performance_metrics.previous_lookup.bytes_read, 0)
+        self.assertTrue(result.performance_metrics.accounting_exclusions)
 
     def test_pointer_fifo_cannot_hang_or_disclose_body(self):
         report_dir, _pointer, _context = self.publish()

@@ -1,9 +1,10 @@
 """Deterministic compact-delivery performance observations and smoke gate."""
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from statistics import median
-from typing import Optional
+from typing import Optional, cast
 
 from .models import RunStatus
 
@@ -32,7 +33,6 @@ MAX_GRAPH_DURATION_MS = 30_000
 MAX_FAST_SCAN_OUTPUT_WORDS = 180
 MAX_PREVIOUS_LOOKUP_P95_MS = 300
 MAX_STALE_DELTA_P95_MS = 3_000
-V05_REPEATED_INPUT_TOKEN_BASELINE = 3_500
 
 
 @dataclass(frozen=True)
@@ -128,17 +128,22 @@ class FastScanGateResult:
 
 
 @dataclass(frozen=True)
-class InstantPerformanceObservation:
-    case_id: str
-    path: str
-    elapsed_ms: int
+class InstantWorkEvidence:
     provider_calls: int
     graph_calls: int
     model_calls: int
-    estimated_input_tokens: int
-    baseline_input_tokens: int
+    estimated_serialized_input_tokens: int
     expected_frontier: tuple[str, ...]
     observed_frontier: tuple[str, ...]
+    actual_input_tokens: Optional[int] = None
+    baseline_actual_input_tokens: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class InstantPerformanceObservation(InstantWorkEvidence):
+    case_id: str = ""
+    path: str = ""
+    elapsed_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -147,7 +152,37 @@ class InstantPerformanceGateResult:
     errors: tuple[str, ...]
     previous_lookup_p95_ms: int
     stale_delta_p95_ms: int
-    repeated_median_estimated_input_tokens: float
+    token_comparison_status: str
+
+
+def measure_instant_fixture(
+    case_id: str,
+    path: str,
+    operation,
+    *,
+    clock=time,
+) -> InstantPerformanceObservation:
+    monotonic_ns = getattr(clock, "monotonic_ns", None)
+    if not callable(monotonic_ns) or not callable(operation):
+        raise TypeError("fixture measurement requires an operation and monotonic_ns clock")
+    started_ns = monotonic_ns()
+    evidence = operation()
+    finished_ns = monotonic_ns()
+    if not isinstance(evidence, InstantWorkEvidence):
+        raise TypeError("fixture operation must return InstantWorkEvidence")
+    return InstantPerformanceObservation(
+        provider_calls=evidence.provider_calls,
+        graph_calls=evidence.graph_calls,
+        model_calls=evidence.model_calls,
+        estimated_serialized_input_tokens=evidence.estimated_serialized_input_tokens,
+        expected_frontier=evidence.expected_frontier,
+        observed_frontier=evidence.observed_frontier,
+        actual_input_tokens=evidence.actual_input_tokens,
+        baseline_actual_input_tokens=evidence.baseline_actual_input_tokens,
+        case_id=case_id,
+        path=path,
+        elapsed_ms=max(0, finished_ns - started_ns) // 1_000_000,
+    )
 
 
 def _median(values: Sequence[int]) -> float:
@@ -171,13 +206,16 @@ def evaluate_instant_performance_gate(
         errors.append("instant observations contain invalid rows")
     if len({row.case_id for row in rows}) != len(rows):
         errors.append("instant observations contain duplicate case IDs")
-    if {row.path for row in rows} != {"fresh", "stale_delta", "repeated"}:
-        errors.append("instant observations must cover fresh, stale_delta, and repeated paths")
+    required_paths = {"fresh", "stale_delta", "repeated", "changed_source"}
+    if {row.path for row in rows} != required_paths:
+        errors.append(
+            "instant observations must cover fresh, stale_delta, repeated, and changed_source paths"
+        )
     for row in rows:
         if (
             not isinstance(row.case_id, str)
             or not row.case_id
-            or row.path not in {"fresh", "stale_delta", "repeated"}
+            or row.path not in required_paths
             or any(
                 type(value) is not int or value < 0
                 for value in (
@@ -185,8 +223,7 @@ def evaluate_instant_performance_gate(
                     row.provider_calls,
                     row.graph_calls,
                     row.model_calls,
-                    row.estimated_input_tokens,
-                    row.baseline_input_tokens,
+                    row.estimated_serialized_input_tokens,
                 )
             )
             or not isinstance(row.expected_frontier, tuple)
@@ -200,7 +237,6 @@ def evaluate_instant_performance_gate(
 
     fresh = tuple(row for row in rows if row.path == "fresh")
     stale = tuple(row for row in rows if row.path == "stale_delta")
-    repeated = tuple(row for row in rows if row.path == "repeated")
     previous_p95 = _p95([row.elapsed_ms for row in fresh])
     stale_p95 = _p95([row.elapsed_ms for row in stale])
     if previous_p95 > MAX_PREVIOUS_LOOKUP_P95_MS:
@@ -209,21 +245,36 @@ def evaluate_instant_performance_gate(
         errors.append("stale delta p95 exceeds 3000 ms")
     if any((row.provider_calls, row.graph_calls, row.model_calls) != (0, 0, 0) for row in fresh):
         errors.append("fresh reuse performed provider, graph, or model work")
-    repeated_median = _median([row.estimated_input_tokens for row in repeated])
-    if any(row.baseline_input_tokens != V05_REPEATED_INPUT_TOKEN_BASELINE for row in repeated):
-        errors.append("repeated request baseline is not the pinned v0.5 value")
-    baseline_median = float(V05_REPEATED_INPUT_TOKEN_BASELINE)
-    if repeated and repeated_median >= baseline_median:
-        errors.append("repeated request did not reduce estimated input below v0.5")
+    if any(row.model_calls != 0 for row in rows):
+        errors.append("instant runtime performed model work")
+    comparison_rows = tuple(row for row in rows if row.path in {"repeated", "changed_source"})
+    client_pairs = tuple(
+        (row.actual_input_tokens, row.baseline_actual_input_tokens) for row in comparison_rows
+    )
+    if all(actual is None and baseline is None for actual, baseline in client_pairs):
+        token_status = "pending_client_evidence"
+    elif any(
+        type(actual) is not int or actual < 0 or type(baseline) is not int or baseline < 0
+        for actual, baseline in client_pairs
+    ):
+        token_status = "invalid_client_evidence"
+        errors.append("client token evidence is incomplete or invalid")
+    else:
+        token_status = "measured_client_evidence"
+        measured_pairs = tuple(
+            (cast(int, actual), cast(int, baseline)) for actual, baseline in client_pairs
+        )
+        if any(actual >= baseline for actual, baseline in measured_pairs):
+            errors.append("measured client input tokens did not improve for every compared path")
     if any(not set(row.expected_frontier) <= set(row.observed_frontier) for row in rows):
         errors.append("instant path lost an expected frontier")
     unique = tuple(sorted(set(errors)))
     return InstantPerformanceGateResult(
-        not unique,
+        not unique and token_status == "measured_client_evidence",
         unique,
         previous_p95,
         stale_p95,
-        repeated_median,
+        token_status,
     )
 
 

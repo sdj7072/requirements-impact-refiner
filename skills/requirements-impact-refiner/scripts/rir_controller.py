@@ -1635,15 +1635,26 @@ def _scan_result_from_mapping(value: object, elapsed_ms: int):
             len(previous_display.encode("utf-8")) if isinstance(previous_display, str) else 0
         )
         performance_metrics = PERFORMANCE.PerformanceMetrics(
-            reused_previous_bytes=reused_bytes,
+            accounted_reused_bytes=reused_bytes,
+            accounted_new_evidence_bytes=None,
+            accounting_exclusions=(
+                "parent cannot observe trusted worker state graph and source bytes",
+                "worker phase timing unavailable from trusted timeout fallback",
+            ),
+            estimated_serialized_input_tokens=None,
+            estimated_serialized_output_tokens=PERFORMANCE.estimate_tokens(
+                value["display_text"].encode("utf-8")
+            ),
             cache_status=value["cache_status"],
-            total_elapsed_ms=min(30_000, elapsed_ms),
+            analysis_elapsed_ms=value["elapsed_ms"],
+            operation_elapsed_ms=None if elapsed_ms == 0 else elapsed_ms,
         )
     else:
         performance_mapping = (
             dict(performance_value) if isinstance(performance_value, Mapping) else {}
         )
-        performance_mapping["total_elapsed_ms"] = min(30_000, elapsed_ms)
+        if elapsed_ms != 0:
+            performance_mapping["operation_elapsed_ms"] = elapsed_ms
         try:
             performance_metrics = PERFORMANCE.PerformanceMetrics.from_mapping(performance_mapping)
         except (TypeError, ValueError) as error:
@@ -1755,7 +1766,12 @@ def _generic_delta_preflight_fallback(request: ScanRequest, elapsed_ms: int, rea
         "bypassed",
         False,
         performance_metrics=PERFORMANCE.PerformanceMetrics(
-            cache_status="bypassed", total_elapsed_ms=min(30_000, elapsed_ms)
+            accounted_new_evidence_bytes=None,
+            accounting_exclusions=("preflight worker bytes and phase timing unavailable",),
+            estimated_serialized_input_tokens=None,
+            estimated_serialized_output_tokens=PERFORMANCE.estimate_tokens(reason.encode("utf-8")),
+            cache_status="bypassed",
+            operation_elapsed_ms=elapsed_ms,
         ),
     )
 

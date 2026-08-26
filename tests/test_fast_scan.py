@@ -493,9 +493,22 @@ class FastScanTest(unittest.TestCase):
         self.assertEqual(second.cache_status, "hit")
         self.assertEqual(second.performance_metrics.cache_status, "hit")
         self.assertEqual(second.performance_metrics.compact_graph.serialized_bytes, 0)
-        self.assertEqual(second.performance_metrics.new_evidence_bytes, 0)
-        self.assertEqual(second.performance_metrics.estimated_input_tokens, 0)
-        self.assertGreater(second.performance_metrics.reused_previous_bytes, 0)
+        self.assertEqual(second.performance_metrics.accounted_new_evidence_bytes, 0)
+        self.assertEqual(second.performance_metrics.estimated_serialized_input_tokens, 0)
+        self.assertGreater(second.performance_metrics.accounted_reused_bytes, 0)
+        self.assertIsNone(second.performance_metrics.estimated_model_input_tokens)
+        self.assertEqual(second.performance_metrics.model_calls, 0)
+        self.assertGreaterEqual(
+            second.performance_metrics.operation_elapsed_ms,
+            second.performance_metrics.analysis_elapsed_ms,
+        )
+        stored = json.loads(
+            (
+                self.root / ".requirements-impact-refiner/scans" / (first.scan_id + ".json")
+            ).read_text(encoding="utf-8")
+        )
+        self.assertIsNone(stored["performance_metrics"]["operation_elapsed_ms"])
+        self.assertIsNotNone(stored["performance_metrics"]["analysis_elapsed_ms"])
 
         source.write_text('FIELD = "profile.displayName"\n# changed\n', encoding="utf-8")
         third = fast_scan.execute_fast_scan(

@@ -95,7 +95,7 @@
         }
       }
     },
-    "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 30000},
+    "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 2147483647},
     "cache_status": {"enum": ["hit", "miss", "bypassed"]},
     "can_promote": {"type": "boolean"},
     "created_at": {
@@ -109,14 +109,19 @@
         "previous_lookup",
         "inventory_delta",
         "compact_graph",
-        "reused_previous_bytes",
-        "new_evidence_bytes",
-        "estimated_input_tokens",
-        "estimated_output_tokens",
+        "accounted_reused_bytes",
+        "accounted_new_evidence_bytes",
+        "accounting_exclusions",
+        "estimated_serialized_input_tokens",
+        "estimated_serialized_output_tokens",
+        "estimated_model_input_tokens",
+        "estimated_model_output_tokens",
         "actual_input_tokens",
         "actual_output_tokens",
+        "model_calls",
         "cache_status",
-        "total_elapsed_ms"
+        "analysis_elapsed_ms",
+        "operation_elapsed_ms"
       ],
       "oneOf": [
         {
@@ -132,18 +137,57 @@
           }
         }
       ],
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "estimated_model_input_tokens": {"type": "null"},
+                "estimated_model_output_tokens": {"type": "null"}
+              }
+            },
+            {
+              "properties": {
+                "estimated_model_input_tokens": {"type": "integer"},
+                "estimated_model_output_tokens": {"type": "integer"}
+              }
+            }
+          ]
+        },
+        {
+          "if": {"properties": {"model_calls": {"const": 0}}},
+          "then": {
+            "properties": {
+              "estimated_model_input_tokens": {"type": "null"},
+              "estimated_model_output_tokens": {"type": "null"},
+              "actual_input_tokens": {"type": "null"},
+              "actual_output_tokens": {"type": "null"}
+            }
+          }
+        }
+      ],
       "properties": {
         "previous_lookup": {"$ref": "#/$defs/phaseMetric"},
         "inventory_delta": {"$ref": "#/$defs/phaseMetric"},
         "compact_graph": {"$ref": "#/$defs/phaseMetric"},
-        "reused_previous_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
-        "new_evidence_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
-        "estimated_input_tokens": {"type": "integer", "minimum": 0, "maximum": 4194304},
-        "estimated_output_tokens": {"type": "integer", "minimum": 0, "maximum": 4194304},
+        "accounted_reused_bytes": {"type": ["integer", "null"], "minimum": 0, "maximum": 16777216},
+        "accounted_new_evidence_bytes": {"type": ["integer", "null"], "minimum": 0, "maximum": 16777216},
+        "accounting_exclusions": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 256}
+        },
+        "estimated_serialized_input_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "estimated_serialized_output_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "estimated_model_input_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "estimated_model_output_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
         "actual_input_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
         "actual_output_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "model_calls": {"type": "integer", "minimum": 0, "maximum": 2147483647},
         "cache_status": {"enum": ["hit", "miss", "bypassed"]},
-        "total_elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 30000}
+        "analysis_elapsed_ms": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "operation_elapsed_ms": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647}
       }
     },
     "delta_context": {
@@ -233,9 +277,9 @@
       "additionalProperties": false,
       "required": ["elapsed_ms", "bytes_read", "serialized_bytes", "cache_status"],
       "properties": {
-        "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 30000},
-        "bytes_read": {"type": "integer", "minimum": 0, "maximum": 16777216},
-        "serialized_bytes": {"type": "integer", "minimum": 0, "maximum": 16777216},
+        "elapsed_ms": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+        "bytes_read": {"type": ["integer", "null"], "minimum": 0, "maximum": 16777216},
+        "serialized_bytes": {"type": ["integer", "null"], "minimum": 0, "maximum": 16777216},
         "cache_status": {"type": ["string", "null"], "enum": ["hit", "miss", "bypassed", null]}
       }
     }

@@ -7,12 +7,13 @@ from evals.harness.models import RunStatus
 from evals.harness.performance import (
     FastScanPerformanceObservation,
     GraphPerformanceObservation,
-    InstantPerformanceObservation,
+    InstantWorkEvidence,
     PerformanceObservation,
     evaluate_fast_scan_gate,
     evaluate_graph_smoke,
     evaluate_instant_performance_gate,
     evaluate_smoke_gate,
+    measure_instant_fixture,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,52 +37,102 @@ GRAPH_IDS = (
 
 
 class PerformanceBudgetTest(unittest.TestCase):
-    def instant_rows(self):
+    class FixtureClock:
+        def __init__(self, elapsed_ms):
+            self.values = iter((1_000_000_000, 1_000_000_000 + elapsed_ms * 1_000_000))
+
+        def monotonic_ns(self):
+            return next(self.values)
+
+    def measured_row(
+        self,
+        case_id,
+        path,
+        elapsed_ms,
+        evidence,
+    ):
+        return measure_instant_fixture(
+            case_id,
+            path,
+            lambda: evidence,
+            clock=self.FixtureClock(elapsed_ms),
+        )
+
+    def instant_rows(self, *, with_client_usage=False):
+        client = (
+            {"actual_input_tokens": 600, "baseline_actual_input_tokens": 900}
+            if with_client_usage
+            else {}
+        )
         return (
-            InstantPerformanceObservation(
-                case_id="fresh-1",
-                path="fresh",
-                elapsed_ms=299,
-                provider_calls=0,
-                graph_calls=0,
-                model_calls=0,
-                estimated_input_tokens=0,
-                baseline_input_tokens=3500,
-                expected_frontier=("Z",),
-                observed_frontier=("Z",),
+            self.measured_row(
+                "fresh-fixture",
+                "fresh",
+                12,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=0,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=0,
+                    expected_frontier=("Z",),
+                    observed_frontier=("Z",),
+                ),
             ),
-            InstantPerformanceObservation(
-                case_id="delta-1",
-                path="stale_delta",
-                elapsed_ms=2999,
-                provider_calls=0,
-                graph_calls=1,
-                model_calls=0,
-                estimated_input_tokens=700,
-                baseline_input_tokens=3500,
-                expected_frontier=("C", "D", "Z"),
-                observed_frontier=("C", "D", "Z"),
+            self.measured_row(
+                "delta-fixture",
+                "stale_delta",
+                450,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=1,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=700,
+                    expected_frontier=("C", "D", "Z"),
+                    observed_frontier=("C", "D", "Z"),
+                ),
             ),
-            InstantPerformanceObservation(
-                case_id="repeat-1",
-                path="repeated",
-                elapsed_ms=20,
-                provider_calls=0,
-                graph_calls=0,
-                model_calls=0,
-                estimated_input_tokens=100,
-                baseline_input_tokens=3500,
-                expected_frontier=("Z",),
-                observed_frontier=("Z",),
+            self.measured_row(
+                "repeat-fixture",
+                "repeated",
+                8,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=0,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=100,
+                    expected_frontier=("Z",),
+                    observed_frontier=("Z",),
+                    **client,
+                ),
+            ),
+            self.measured_row(
+                "changed-fixture",
+                "changed_source",
+                510,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=1,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=720,
+                    expected_frontier=("C", "D", "Z"),
+                    observed_frontier=("C", "D", "Z"),
+                    **client,
+                ),
             ),
         )
 
     def test_instant_gate_enforces_latency_calls_tokens_and_frontier(self):
         result = evaluate_instant_performance_gate(self.instant_rows())
 
-        self.assertTrue(result.passed, result.errors)
-        self.assertEqual(result.previous_lookup_p95_ms, 299)
-        self.assertEqual(result.stale_delta_p95_ms, 2999)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.token_comparison_status, "pending_client_evidence")
+        self.assertEqual(result.previous_lookup_p95_ms, 12)
+        self.assertEqual(result.stale_delta_p95_ms, 450)
+
+        measured = evaluate_instant_performance_gate(self.instant_rows(with_client_usage=True))
+        self.assertTrue(measured.passed, measured.errors)
+        self.assertEqual(measured.token_comparison_status, "measured_client_evidence")
 
         rows = self.instant_rows()
         mutations = {
@@ -89,21 +140,16 @@ class PerformanceBudgetTest(unittest.TestCase):
             "stale delta p95 exceeds 3000 ms": (
                 rows[0],
                 replace(rows[1], elapsed_ms=3001),
-                rows[2],
+                *rows[2:],
             ),
             "fresh reuse performed provider, graph, or model work": (
                 replace(rows[0], graph_calls=1),
                 *rows[1:],
             ),
-            "repeated request did not reduce estimated input below v0.5": (
-                rows[0],
-                rows[1],
-                replace(rows[2], estimated_input_tokens=3500),
-            ),
             "instant path lost an expected frontier": (
                 rows[0],
                 replace(rows[1], observed_frontier=("C", "D")),
-                rows[2],
+                *rows[2:],
             ),
         }
         for expected, mutated in mutations.items():

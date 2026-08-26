@@ -365,6 +365,8 @@ class _DeltaContext(Protocol):
     changed_paths: tuple[str, ...]
     max_seconds: int
     previous_display_text: str
+    previous_state: Mapping[str, object]
+    previous_graph_receipt: Mapping[str, object]
 
     def derive_seed_selection(
         self, request_seeds: Sequence[DerivedSeed] = ()
@@ -922,8 +924,8 @@ def validate_fast_scan_receipt(value: object) -> tuple[str, ...]:
             if row["location"] is not None and not _safe_relative(row["location"]):
                 errors.append(f"candidate row {index} location is unsafe")
     elapsed_ms = value["elapsed_ms"]
-    if type(elapsed_ms) is not int or elapsed_ms < 0 or elapsed_ms > 30_000:
-        errors.append("elapsed_ms must be an integer from 0 to 30000")
+    if type(elapsed_ms) is not int or elapsed_ms < 0 or elapsed_ms > 2_147_483_647:
+        errors.append("elapsed_ms must be an integer from 0 to 2147483647")
     cache_status = value["cache_status"]
     if not isinstance(cache_status, str) or cache_status not in _CACHE:
         errors.append("cache_status is invalid")
@@ -1155,6 +1157,13 @@ def execute_fast_scan(
     delta_context: object | None = None,
     operation_started: float | None = None,
 ) -> FastScanResult:
+    local_operation_started_ns = time.monotonic_ns()
+
+    def operation_elapsed_ms() -> int:
+        if operation_started is not None:
+            return max(0, round((time.monotonic() - operation_started) * 1000))
+        return max(0, (time.monotonic_ns() - local_operation_started_ns) // 1_000_000)
+
     delta_context = _validated_delta_context(request, delta_context)
     inventory_started_ns = time.monotonic_ns()
     prepared = prepare_fast_scan_identity(
@@ -1163,9 +1172,6 @@ def execute_fast_scan(
         payload_sha256,
         delta_context,
         operation_started=operation_started,
-    )
-    inventory_elapsed_ms = min(
-        30_000, max(0, (time.monotonic_ns() - inventory_started_ns) // 1_000_000)
     )
     locale = _request_locale(request)
     root = prepared.root
@@ -1186,6 +1192,7 @@ def execute_fast_scan(
     inventory_payload = json.dumps(
         inventory_mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
+    inventory_elapsed_ms = max(0, (time.monotonic_ns() - inventory_started_ns) // 1_000_000)
 
     try:
         existing_payload = fast_scan_store.load_scan_receipt_bytes(root, scan_id)
@@ -1212,32 +1219,38 @@ def execute_fast_scan(
             changed_count,
             previous_display,
         ) = _delta_result_fields(existing.get("delta_context"))
-        elapsed = (
-            deadline.elapsed_ms()
-            if delta_context is not None
-            else min(30_000, deadline.elapsed_ms())
-        )
-        performance_metrics = rir_performance.PerformanceMetrics(
+        public_display = _display_with_previous(previous_display, display)
+        analysis_elapsed = operation_elapsed_ms()
+        performance_metrics = rir_performance.measure(
+            previous=existing_payload,
+            output=public_display.encode("utf-8"),
+            reused_sha256=hashlib.sha256(existing_payload).hexdigest(),
             inventory_delta=rir_performance.PhaseMetric(
                 elapsed_ms=inventory_elapsed_ms,
                 serialized_bytes=len(inventory_payload),
                 cache_status="hit",
             ),
-            reused_previous_bytes=len(existing_payload),
+            compact_graph=rir_performance.PhaseMetric(0, 0, 0, "hit"),
             cache_status="hit",
-            total_elapsed_ms=elapsed,
+            analysis_elapsed_ms=analysis_elapsed,
+            accounting_exclusions=(
+                "cached receipt filesystem metadata bytes",
+                "source file bytes represented only by inventory digests",
+            ),
         )
+        operation_elapsed = operation_elapsed_ms()
+        performance_metrics = replace(performance_metrics, operation_elapsed_ms=operation_elapsed)
         return FastScanResult(
             existing["status"],
             scan_id,
             existing["receipt_id"],
             hashlib.sha256(existing_payload).hexdigest(),
-            _display_with_previous(previous_display, display),
+            public_display,
             existing["risk_level"],
             _row_tuple(graph.get("paths", [])),
             tuple(existing["frontier"]),
             tuple(existing["candidates"]),
-            elapsed,
+            operation_elapsed,
             "hit",
             existing["can_promote"],
             previous_report_id,
@@ -1273,9 +1286,6 @@ def execute_fast_scan(
                 source_inventory=source_inventory,
             )
         )
-        graph_elapsed_ms = min(
-            30_000, max(0, (time.monotonic_ns() - graph_started_ns) // 1_000_000)
-        )
         receipt_value = graph["receipt_id"]
         if not isinstance(receipt_value, str):
             raise ValueError("graph receipt_id is invalid")
@@ -1299,8 +1309,14 @@ def execute_fast_scan(
         cache_value = graph.get("cache", {})
         cache_mapping = cache_value if _mapping(cache_value) else {}
         cache_status = str(cache_mapping.get("status", "bypassed"))
-    if not seeds:
-        graph_elapsed_ms = 0
+    graph_payload = (
+        json.dumps(_thaw(graph), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        if graph
+        else b""
+    )
+    graph_elapsed_ms = max(0, (time.monotonic_ns() - graph_started_ns) // 1_000_000) if seeds else 0
     if delta_context is not None:
         merged_value = delta_context.merge_frontier(graph, delta_seed_selection)
         if not isinstance(merged_value, tuple) or any(
@@ -1316,25 +1332,39 @@ def execute_fast_scan(
             status = "partial"
     else:
         merged_frontier = _row_tuple(graph.get("frontier", []))
-    elapsed = (
-        deadline.elapsed_ms() if delta_context is not None else min(30_000, deadline.elapsed_ms())
-    )
-    graph_payload = (
-        json.dumps(_thaw(graph), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-        if graph
-        else b""
-    )
     previous_payload = None
-    reused_sha256 = None
-    if delta_mapping is not None:
+    previous_state_payload = None
+    previous_graph_payload = None
+    reused_sha256: tuple[str, ...] = ()
+    if delta_mapping is not None and delta_context is not None:
         previous_value = delta_mapping.get("previous_display_text")
         if isinstance(previous_value, str):
             previous_payload = previous_value.encode("utf-8")
-            reused_sha256 = hashlib.sha256(previous_payload).hexdigest()
+        previous_state_payload = json.dumps(
+            _thaw(delta_context.previous_state),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        previous_graph_payload = json.dumps(
+            _thaw(delta_context.previous_graph_receipt),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        reused_sha256 = tuple(
+            hashlib.sha256(payload).hexdigest()
+            for payload in (
+                previous_payload,
+                previous_state_payload,
+                previous_graph_payload,
+            )
+            if payload
+        )
     performance_metrics = rir_performance.measure(
         previous=previous_payload,
+        state=previous_state_payload,
+        report=previous_graph_payload,
         delta=inventory_payload,
         compact_graph_payload=graph_payload,
         reused_sha256=reused_sha256,
@@ -1349,7 +1379,11 @@ def execute_fast_scan(
             cache_status=cache_status,
         ),
         cache_status=cache_status,
-        total_elapsed_ms=elapsed,
+        accounting_exclusions=(
+            "filesystem metadata bytes",
+            "original trusted delta artifact framing bytes not retained in memory",
+            "source file bytes represented only by inventory digests",
+        ),
     )
     receipt = FastScanReceipt(
         1,
@@ -1366,7 +1400,7 @@ def execute_fast_scan(
         risk_level,
         merged_frontier,
         tuple(candidates),
-        elapsed,
+        0,
         cache_status,
         status == "complete",
         datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -1375,14 +1409,31 @@ def execute_fast_scan(
     )
     mapping = receipt.to_mapping()
     display = fast_scan_renderer.render_fast_scan(mapping, request.audience, locale)
+    previous_for_display = (
+        delta_mapping.get("previous_display_text") if delta_mapping is not None else None
+    )
+    public_display = _display_with_previous(
+        previous_for_display if isinstance(previous_for_display, str) else None,
+        display,
+    )
+    analysis_elapsed = operation_elapsed_ms()
     performance_metrics = replace(
         performance_metrics,
-        estimated_output_tokens=rir_performance.estimate_tokens(display.encode("utf-8")),
+        estimated_serialized_output_tokens=rir_performance.estimate_tokens(
+            public_display.encode("utf-8")
+        ),
+        analysis_elapsed_ms=analysis_elapsed,
     )
-    receipt = replace(receipt, performance_metrics=performance_metrics)
+    receipt = replace(
+        receipt,
+        elapsed_ms=analysis_elapsed,
+        performance_metrics=performance_metrics,
+    )
     payload = canonical_fast_scan_bytes(receipt)
     fast_scan_store.publish_scan_receipt(root, scan_id, payload)
     digest = hashlib.sha256(payload).hexdigest()
+    operation_elapsed = operation_elapsed_ms()
+    performance_metrics = replace(performance_metrics, operation_elapsed_ms=operation_elapsed)
     (
         previous_report_id,
         previous_revision,
@@ -1395,12 +1446,12 @@ def execute_fast_scan(
         scan_id,
         receipt_id,
         digest,
-        _display_with_previous(previous_display, display),
+        public_display,
         risk_level,
         _row_tuple(graph.get("paths", [])),
         merged_frontier,
         tuple(candidates),
-        elapsed,
+        operation_elapsed,
         cache_status,
         status == "complete",
         previous_report_id,

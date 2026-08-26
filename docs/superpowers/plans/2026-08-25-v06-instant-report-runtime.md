@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Return a same-lineage completed report immediately, skip exact-repeat work, and revalidate changed repositories within a three-second default while preserving indirect-impact frontiers and bounded token input.
+**Goal:** Return a same-lineage completed report immediately, skip exact-repeat work, and revalidate changed repositories within a three-second default while preserving indirect-impact frontiers and bounded serialized context.
 
 **Architecture:** Immutable report context sidecars bind repository, requirement, source, payload, and revision identities. A new previous-report lookup runs before Fast Scan; exact clean matches stop, while stale matches seed a bounded delta scan from changed files, prior paths, and preserved invariants. Runtime metrics are semantic data consumed later by the localized UX plan.
 
@@ -327,7 +327,7 @@ git add scripts/rir_delta.py scripts/fast_scan.py scripts/graph_builtin.py scrip
 git commit -m "feat: bound indirect delta impact scans"
 ```
 
-### Task 6: Record end-to-end performance and token estimates
+### Task 6: Record end-to-end performance and serialization estimates
 
 **Files:**
 - Create: `scripts/rir_performance.py`
@@ -349,14 +349,15 @@ git commit -m "feat: bound indirect delta impact scans"
 - [ ] **Step 1: Write failing deterministic metric tests**
 
 ```python
-def test_estimated_and_actual_tokens_are_separate(self):
+def test_serialized_estimates_are_not_model_usage(self):
     metrics = PerformanceMetrics.from_payloads(previous=b"1234", delta=b"12345678")
-    self.assertEqual(metrics.estimated_input_tokens, 3)
+    self.assertEqual(metrics.estimated_serialized_input_tokens, 3)
+    self.assertIsNone(metrics.estimated_model_input_tokens)
     self.assertIsNone(metrics.actual_input_tokens)
 
 def test_reused_bytes_are_not_counted_twice(self):
     metrics = measure(previous=PAYLOAD, delta=PAYLOAD, reused_sha256=sha256(PAYLOAD))
-    self.assertEqual(metrics.new_evidence_bytes, 0)
+    self.assertEqual(metrics.accounted_new_evidence_bytes, 0)
 ```
 
 - [ ] **Step 2: Run and confirm missing metric types**
@@ -365,11 +366,21 @@ Run: `python3 -m unittest -q tests.test_rir_performance`
 
 - [ ] **Step 3: Implement deterministic byte-based estimates**
 
-Use `ceil(utf8_bytes / 4)` and name fields `estimated_*`. Client-reported usage is stored only in `actual_*`. Record lookup, inventory/delta, compact serialization, reused bytes, new evidence bytes, cache status, and total elapsed time. Metrics do not enter scan identity or evidence confidence.
+Use `ceil(utf8_bytes / 4)` only for hypothetical `estimated_serialized_*`
+fields. Keep model estimates and actual usage null while `model_calls=0`; only a
+trusted client/model result boundary may populate them. Record lookup,
+inventory/delta, compact serialization, scoped accounted reuse/new evidence,
+named exclusions, cache status, persisted analysis time, and result-only
+operation time. Metrics do not enter scan identity or evidence confidence.
 
-- [ ] **Step 4: Add literal performance gates**
+- [ ] **Step 4: Add measured-fixture performance gates**
 
-Pinned fixtures assert lookup p95 `<=300ms`, stale delta p95 `<=3000ms`, exact-match provider/graph/model call counts equal zero, repeated-request estimated input tokens below the v0.5 baseline, and no lost frontier.
+Measured fixture functions assert lookup p95 `<=300ms`, stale delta p95
+`<=3000ms`, exact-match provider/graph/model call counts equal zero, and no lost
+frontier. Repeated and changed-source rows are mandatory. Their model-token
+comparison reports `pending_client_evidence` until actual Codex or Claude usage
+and an actual baseline exist; the v0.3.2 word baseline and byte/4 serialization
+estimates cannot satisfy the release gate.
 
 - [ ] **Step 5: Verify and commit**
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import importlib.util
 import json
@@ -82,8 +83,11 @@ class _PreviousRendererContract(Protocol):
 
 
 class _PerformanceContract(Protocol):
+    MAX_METRIC_BYTES: int
     PhaseMetric: type
     PerformanceMetrics: type
+
+    def estimate_tokens(self, payload: bytes) -> int: ...
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -211,6 +215,7 @@ RENDERER = _load_previous_renderer()
 def _is_performance_contract(value: object) -> TypeGuard[_PerformanceContract]:
     return (
         RENDERER.module_uses_sibling(value, "rir_performance.py")
+        and type(getattr(value, "MAX_METRIC_BYTES", None)) is int
         and isinstance(getattr(value, "PhaseMetric", None), type)
         and isinstance(getattr(value, "PerformanceMetrics", None), type)
     )
@@ -226,6 +231,40 @@ PERFORMANCE = cast(
         "performance metrics",
     ),
 )
+
+
+@dataclass
+class _LookupAccounting:
+    bytes_read: int = 0
+    reused_payloads: dict[str, int] = field(default_factory=dict)
+    exclusions: set[str] = field(
+        default_factory=lambda: {
+            "directory entry and filesystem metadata bytes",
+            "report-context recovery staging bytes not exposed by loader",
+            "subprocess stderr bytes",
+        }
+    )
+
+    def read(self, payload: bytes) -> None:
+        self.bytes_read += len(payload)
+
+    def read_size(self, size: int) -> None:
+        if type(size) is int and size > 0:
+            self.bytes_read += size
+
+    def reuse(self, payload: bytes) -> None:
+        if payload:
+            self.reused_payloads.setdefault(hashlib.sha256(payload).hexdigest(), len(payload))
+
+
+_ACCOUNTING: contextvars.ContextVar[_LookupAccounting | None] = contextvars.ContextVar(
+    "rir_previous_accounting", default=None
+)
+
+
+def _accounting() -> _LookupAccounting:
+    current = _ACCOUNTING.get()
+    return current if current is not None else _LookupAccounting()
 
 
 def _is_report_context_contract(value: object) -> TypeGuard[_ReportContextContract]:
@@ -427,8 +466,8 @@ class _CurrentCandidate:
     requirement_sha256: str
     context: object | None
     incompatible_context: bool
-    bytes_read: int
-    reused_bytes: int
+    state_payload: bytes
+    markdown_payload: bytes
 
 
 @dataclass(frozen=True)
@@ -476,7 +515,17 @@ def _plugin_root() -> Path:
 
 
 def _payload_sha256() -> str:
-    return PAYLOAD_IDENTITY.payload_sha256(_plugin_root())
+    plugin_root = _plugin_root()
+    digest = PAYLOAD_IDENTITY.payload_sha256(plugin_root)
+    accounting = _ACCOUNTING.get()
+    if accounting is not None:
+        try:
+            accounting.read_size(
+                sum(path.stat().st_size for path in PAYLOAD_IDENTITY.functional_paths(plugin_root))
+            )
+        except OSError:
+            accounting.exclusions.add("payload identity bytes after an unstable read")
+    return digest
 
 
 def _directory_flags() -> int:
@@ -564,9 +613,13 @@ def _read_regular(
             if not chunk:
                 break
             payload.extend(chunk)
+            accounting = _ACCOUNTING.get()
+            if accounting is not None:
+                accounting.read(chunk)
         if len(payload) > maximum:
             raise _UnsafeLookup(f"report artifact exceeds its byte limit: {name}")
-        return bytes(payload)
+        raw = bytes(payload)
+        return raw
     except OSError as error:
         raise _UnsafeLookup(f"cannot read report artifact: {name}") from error
     finally:
@@ -683,6 +736,22 @@ def _read_candidate(root: Path, reports_fd: int, report_id: str, deadline: float
     except (OSError, TypeError, ValueError) as error:
         raise _UnsafeLookup("report context identity is unsafe") from error
     _check_deadline(deadline)
+    accounting = _ACCOUNTING.get()
+    if accounting is not None and context_present:
+        try:
+            accounting.read_size(
+                (
+                    root
+                    / ".requirements-impact-refiner"
+                    / "reports"
+                    / report_id
+                    / f"revision-{revision:04d}.context-v2.json"
+                )
+                .stat()
+                .st_size
+            )
+        except OSError:
+            accounting.exclusions.add("report context bytes after an unstable read")
     if context_present and context is None:
         raise _UnsafeLookup("report context identity is unavailable")
     if context is not None:
@@ -704,8 +773,8 @@ def _read_candidate(root: Path, reports_fd: int, report_id: str, deadline: float
         requirement_sha256=requirement_sha256,
         context=context,
         incompatible_context=legacy_context_present and context is None,
-        bytes_read=len(pointer_payload) + len(state_payload) + len(markdown_payload),
-        reused_bytes=len(state_payload) + len(markdown_payload),
+        state_payload=state_payload,
+        markdown_payload=markdown_payload,
     )
 
 
@@ -841,6 +910,9 @@ def _run_git_command(
             if not chunk:
                 break
             payload.extend(chunk)
+            accounting = _ACCOUNTING.get()
+            if accounting is not None:
+                accounting.read(chunk)
             if len(payload) > MAX_GIT_OUTPUT_BYTES:
                 _stop_process(process)
                 raise _GitUnavailable("Git output exceeds its byte limit")
@@ -853,7 +925,8 @@ def _run_git_command(
         except subprocess.TimeoutExpired:
             _stop_process(process)
             return None
-        return _GitCommandResult(returncode, bytes(payload))
+        raw = bytes(payload)
+        return _GitCommandResult(returncode, raw)
     except OSError:
         _stop_process(process)
         return None
@@ -1028,6 +1101,9 @@ def _hash_required_source(
             if not chunk:
                 raise _GitUnavailable("required source was truncated during hashing")
             digest.update(chunk)
+            accounting = _ACCOUNTING.get()
+            if accounting is not None:
+                accounting.read(chunk)
             remaining -= len(chunk)
         if os.read(descriptor, 1):
             raise _GitUnavailable("required source grew during hashing")
@@ -1117,6 +1193,9 @@ def _filesystem_git_dir(root: Path) -> Path:
             os.close(descriptor)
     except OSError as error:
         raise _GitUnavailable("Git directory marker is unavailable") from error
+    accounting = _ACCOUNTING.get()
+    if accounting is not None:
+        accounting.read(payload)
     try:
         text = payload.decode("utf-8", errors="strict").strip()
     except UnicodeDecodeError as error:
@@ -1155,6 +1234,9 @@ def _read_git_control_file(path: Path, maximum: int) -> bytes | None:
         raise _GitUnavailable("Git control file is unavailable") from error
     if len(payload) > maximum:
         raise _GitUnavailable("Git control file exceeds its byte limit")
+    accounting = _ACCOUNTING.get()
+    if accounting is not None:
+        accounting.read(payload)
     return payload
 
 
@@ -1491,17 +1573,32 @@ def _elapsed_ms(started_ns: int) -> int:
     return max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
 
 
-def _lookup_metrics(elapsed_ms: int, *, bytes_read: int = 0, reused_bytes: int = 0):
-    cache_status = "hit" if reused_bytes else "miss"
+def _lookup_metrics(elapsed_ms: int, *, output: str | None = None):
+    accounting = _accounting()
+    cache_status = "hit" if accounting.reused_payloads else "miss"
+    reused_bytes: int | None = sum(accounting.reused_payloads.values())
+    bytes_read: int | None = accounting.bytes_read
+    if accounting.bytes_read > PERFORMANCE.MAX_METRIC_BYTES:
+        bytes_read = None
+        accounting.exclusions.add("bounded read-byte accounting overflow")
+    if reused_bytes is not None and reused_bytes > PERFORMANCE.MAX_METRIC_BYTES:
+        reused_bytes = None
+        accounting.exclusions.add("bounded reused-byte accounting overflow")
     return PERFORMANCE.PerformanceMetrics(
         previous_lookup=PERFORMANCE.PhaseMetric(
             elapsed_ms=elapsed_ms,
             bytes_read=bytes_read,
+            serialized_bytes=0 if output is None else len(output.encode("utf-8")),
             cache_status=cache_status,
         ),
-        reused_previous_bytes=reused_bytes,
+        accounted_reused_bytes=reused_bytes,
+        accounting_exclusions=tuple(sorted(accounting.exclusions)),
+        estimated_serialized_output_tokens=(
+            0 if output is None else PERFORMANCE.estimate_tokens(output.encode("utf-8"))
+        ),
         cache_status=cache_status,
-        total_elapsed_ms=elapsed_ms,
+        analysis_elapsed_ms=elapsed_ms,
+        operation_elapsed_ms=elapsed_ms,
     )
 
 
@@ -1554,6 +1651,10 @@ def _selected_result(
     started_ns: int,
 ) -> PreviousReportResult:
     context = candidate.context
+    accounting = _ACCOUNTING.get()
+    if accounting is not None:
+        accounting.reuse(candidate.state_payload)
+        accounting.reuse(candidate.markdown_payload)
     elapsed_ms = _elapsed_ms(started_ns)
     base = PreviousReportResult(
         status=status,
@@ -1569,11 +1670,7 @@ def _selected_result(
         display_text=None,
         reason=reason,
         elapsed_ms=elapsed_ms,
-        performance_metrics=_lookup_metrics(
-            elapsed_ms,
-            bytes_read=candidate.bytes_read,
-            reused_bytes=candidate.reused_bytes,
-        ),
+        performance_metrics=_lookup_metrics(elapsed_ms),
     )
     try:
         display = RENDERER.render_previous(base, candidate.state)
@@ -1589,15 +1686,11 @@ def _selected_result(
         base,
         display_text=display,
         elapsed_ms=elapsed_ms,
-        performance_metrics=_lookup_metrics(
-            elapsed_ms,
-            bytes_read=candidate.bytes_read,
-            reused_bytes=candidate.reused_bytes,
-        ),
+        performance_metrics=_lookup_metrics(elapsed_ms, output=display),
     )
 
 
-def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
+def _lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
     """Select and compactly render one exact report lineage within 250 milliseconds."""
 
     if not isinstance(request, PreviousLookupRequest):
@@ -1803,3 +1896,12 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
         "repository and report identities match a clean Git baseline",
         started_ns,
     )
+
+
+def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
+    accounting = _LookupAccounting()
+    token = _ACCOUNTING.set(accounting)
+    try:
+        return _lookup_previous(request)
+    finally:
+        _ACCOUNTING.reset(token)

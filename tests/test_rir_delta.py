@@ -704,6 +704,9 @@ class DeltaScanTest(unittest.TestCase):
         self.assertIn("preflight", result.display_text)
         self.assertEqual(result.status, "partial")
         self.assertFalse(result.can_promote)
+        self.assertIsNone(result.performance_metrics.analysis_elapsed_ms)
+        self.assertIsNotNone(result.performance_metrics.operation_elapsed_ms)
+        self.assertIsNone(result.performance_metrics.accounted_new_evidence_bytes)
 
     def test_worker_filesystem_trust_failure_returns_identity_free_partial(self):
         missing_root = Path(self.temporary.name) / "missing-repository"
@@ -1898,6 +1901,12 @@ class DeltaScanTest(unittest.TestCase):
         self.assertEqual(result.previous_report_id, "RPT-001")
         self.assertEqual(result.status, "partial")
         self.assertFalse(result.can_promote)
+        self.assertIsNotNone(result.performance_metrics.analysis_elapsed_ms)
+        self.assertLessEqual(
+            result.performance_metrics.analysis_elapsed_ms,
+            result.performance_metrics.operation_elapsed_ms,
+        )
+        self.assertTrue(result.performance_metrics.accounting_exclusions)
 
     def test_worker_emits_authenticated_control_fallback_then_result_frames(self):
         input_path = Path(self.temporary.name) / "worker-input.json"
@@ -2076,6 +2085,35 @@ class DeltaScanTest(unittest.TestCase):
         self.assertIn("shared graph deadline exhausted", reasons)
         self.assertIn("previous evidence remains unverified: checks/missing.py", reasons)
         self.assertLessEqual(result.elapsed_ms, 3_000)
+        self.assertGreater(
+            result.performance_metrics.accounted_reused_bytes,
+            len(context.previous_display_text.encode("utf-8")),
+        )
+        reused_payloads = (
+            context.previous_display_text.encode("utf-8"),
+            json.dumps(
+                previous_state(),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+            json.dumps(
+                graph_receipt(self.root, frontier=prior_frontier),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+        )
+        expected_reused = {
+            hashlib.sha256(payload).hexdigest(): len(payload) for payload in reused_payloads
+        }
+        self.assertEqual(
+            result.performance_metrics.accounted_reused_bytes,
+            sum(expected_reused.values()),
+        )
+        self.assertGreater(result.performance_metrics.accounted_new_evidence_bytes, 0)
+        self.assertIsNone(result.performance_metrics.estimated_model_input_tokens)
+        self.assertEqual(result.performance_metrics.model_calls, 0)
 
     def test_ordinary_scan_keeps_existing_budget_and_hints_without_context_fail_closed(self):
         captured = []
