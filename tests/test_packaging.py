@@ -10,7 +10,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from tests.test_integration_adapters import run_bootstrap_fixture
+from tests.test_integration_adapters import McpBootstrapHarness
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_COMPONENTS = {"mcpServers", "apps", "hooks", "agents", "dependencies"}
@@ -507,9 +507,11 @@ class PackagingTest(unittest.TestCase):
     def test_core_skill_runs_routing_before_workspace_availability_checks(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("supplied evidence", core.lower())
+        with tempfile.TemporaryDirectory() as directory:
+            stale = McpBootstrapHarness(directory, status="stale").run()
         self.assertEqual(
-            run_bootstrap_fixture(previous_status="stale").calls,
-            ("rir_previous", "rir_scan"),
+            [name for name, _ in stale.calls],
+            ["rir_previous", "rir_scan"],
         )
 
     def test_manifest_identity_is_consistent(self):

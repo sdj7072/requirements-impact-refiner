@@ -1,12 +1,13 @@
 import hashlib
 import json
 import subprocess
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
 
 from evals.harness.evidence import find_potential_secrets, verify_manifest
-from tests.test_integration_adapters import run_bootstrap_fixture
+from tests.test_integration_adapters import McpBootstrapHarness
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_ROOT = ROOT / "evals" / "results" / "installed-v0.3"
@@ -54,17 +55,21 @@ EXPECTED_CODEX_ENABLED_PLUGINS = (
 
 class InstalledBootstrapBehaviorTest(unittest.TestCase):
     def test_packaged_bootstrap_has_previous_first_status_and_two_turn_routes(self):
-        fresh = run_bootstrap_fixture(previous_status="fresh")
-        stale = run_bootstrap_fixture(previous_status="stale")
-        ambiguous = run_bootstrap_fixture(previous_status="ambiguous")
-        detailed = run_bootstrap_fixture(previous_status="stale", followup_reply="yes")
+        with tempfile.TemporaryDirectory() as directory:
+            fresh = McpBootstrapHarness(directory, status="fresh").run()
+        with tempfile.TemporaryDirectory() as directory:
+            stale = McpBootstrapHarness(directory, status="stale").run()
+        with tempfile.TemporaryDirectory() as directory:
+            ambiguous = McpBootstrapHarness(directory, status="ambiguous").run()
+        with tempfile.TemporaryDirectory() as directory:
+            detailed = McpBootstrapHarness(directory, status="stale").run(confirm_detail=True)
 
-        self.assertEqual(fresh.calls, ("rir_previous",))
-        self.assertEqual(stale.calls, ("rir_previous", "rir_scan"))
-        self.assertEqual(ambiguous.calls, ("rir_previous",))
+        self.assertEqual([name for name, _ in fresh.calls], ["rir_previous"])
+        self.assertEqual([name for name, _ in stale.calls], ["rir_previous", "rir_scan"])
+        self.assertEqual([name for name, _ in ambiguous.calls], ["rir_previous"])
         self.assertEqual(
-            detailed.calls,
-            ("rir_previous", "rir_scan", "rir_begin", "rir_trace_impact", "rir_finalize"),
+            [name for name, _ in detailed.calls],
+            ["rir_previous", "rir_scan", "rir_begin", "rir_finalize"],
         )
 
     def test_root_and_packaged_previous_report_contracts_are_exact_mirrors(self):

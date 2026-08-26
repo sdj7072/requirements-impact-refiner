@@ -1,12 +1,13 @@
 import json
 import re
 import shlex
+import tempfile
 import unittest
 from pathlib import Path
 
 from evals.harness.catalog import load_all, select_suite
 from evals.harness.run import build_parser
-from tests.test_integration_adapters import run_bootstrap_fixture
+from tests.test_integration_adapters import McpBootstrapHarness
 
 ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.ko.md", "README.ja.md"]
@@ -164,14 +165,12 @@ class DocumentationTest(unittest.TestCase):
     def test_core_skill_is_a_short_previous_first_positive_recipe(self):
         core = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertLess(len(core.split()), 180)
-        self.assertEqual(
-            run_bootstrap_fixture(previous_status="fresh").calls,
-            ("rir_previous",),
-        )
-        self.assertEqual(
-            run_bootstrap_fixture(previous_status="stale").calls,
-            ("rir_previous", "rir_scan"),
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            fresh = McpBootstrapHarness(directory, status="fresh").run()
+        with tempfile.TemporaryDirectory() as directory:
+            stale = McpBootstrapHarness(directory, status="stale").run()
+        self.assertEqual([name for name, _ in fresh.calls], ["rir_previous"])
+        self.assertEqual([name for name, _ in stale.calls], ["rir_previous", "rir_scan"])
         self.assertIn("references/previous-report.md", core)
         self.assertIn("references/fast-scan.md", core)
         self.assertIn("scripts/rir-controller.py previous", core)

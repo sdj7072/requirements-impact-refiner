@@ -920,17 +920,29 @@ def _expand_schema(schema, root):
 
 EXPANDED_ANALYSIS_SCHEMA = _expand_schema(ANALYSIS_SCHEMA, ANALYSIS_SCHEMA)
 
+MAX_FAST_SCAN_CHANGE_BYTES = 4 * 1024
+MAX_FAST_SCAN_EVIDENCE_ROWS = 32
+MAX_FAST_SCAN_EVIDENCE_BYTES = 4 * 1024
+
 PREVIOUS_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": ["repo_root", "request", "repository_evidence"],
     "properties": {
         "repo_root": {"type": "string", "minLength": 1, "maxLength": 4096},
-        "request": {"type": "string", "minLength": 1, "maxLength": 262144},
+        "request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": MAX_FAST_SCAN_CHANGE_BYTES,
+        },
         "repository_evidence": {
             "type": "array",
-            "maxItems": 128,
-            "items": {"type": "string", "minLength": 1, "maxLength": 65536},
+            "maxItems": MAX_FAST_SCAN_EVIDENCE_ROWS,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_FAST_SCAN_EVIDENCE_BYTES,
+            },
         },
     },
 }
@@ -941,11 +953,19 @@ SCAN_SCHEMA = {
     "required": ["repo_root", "change_request"],
     "properties": {
         "repo_root": {"type": "string", "minLength": 1},
-        "change_request": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "change_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": MAX_FAST_SCAN_CHANGE_BYTES,
+        },
         "evidence": {
             "type": "array",
-            "maxItems": 32,
-            "items": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "maxItems": MAX_FAST_SCAN_EVIDENCE_ROWS,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_FAST_SCAN_EVIDENCE_BYTES,
+            },
         },
         "presentation": {"enum": ["simple", "balanced", "technical"]},
     },
@@ -1135,10 +1155,22 @@ def _validated_previous_root(value: str) -> Path:
     return resolved
 
 
+def _validate_previous_scan_bounds(request: str, evidence: list[str]) -> None:
+    if not _bounded_utf8(request, MAX_FAST_SCAN_CHANGE_BYTES, nonblank=True):
+        raise ValueError("rir_previous arguments.request exceeds the Fast Scan limit")
+    if len(evidence) > MAX_FAST_SCAN_EVIDENCE_ROWS:
+        raise ValueError("rir_previous arguments.repository_evidence has too many items")
+    if any(not _bounded_utf8(row, MAX_FAST_SCAN_EVIDENCE_BYTES, nonblank=True) for row in evidence):
+        raise ValueError(
+            "rir_previous arguments.repository_evidence item exceeds the Fast Scan limit"
+        )
+
+
 def _previous(arguments: object) -> dict[str, object]:
     _validate_arguments(arguments, PREVIOUS_SCHEMA, "rir_previous")
     if not _is_previous_arguments(arguments):
         raise ValueError("rir_previous arguments have the wrong type")
+    _validate_previous_scan_bounds(arguments["request"], arguments["repository_evidence"])
     root = _validated_previous_root(arguments["repo_root"])
     previous_request = rir_controller.PreviousLookupRequest(
         root,

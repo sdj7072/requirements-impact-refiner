@@ -57,6 +57,9 @@ PREVIOUS_KEYS = {"request", "repository_evidence"}
 SCAN_KEYS = {"change_request", "evidence", "presentation"}
 TRACE_KEYS = {"seeds"}
 TRACE_SEED_KEYS = {"term", "location"}
+MAX_FAST_SCAN_CHANGE_BYTES = 4 * 1024
+MAX_FAST_SCAN_EVIDENCE_ROWS = 32
+MAX_FAST_SCAN_EVIDENCE_BYTES = 4 * 1024
 
 
 def build_parser():
@@ -174,6 +177,28 @@ def _finalize(args) -> int:
     return 0
 
 
+def _validate_previous_scan_bounds(request, evidence) -> None:
+    if not isinstance(request, str) or not request.strip():
+        raise ValueError("previous request must be a nonblank string")
+    try:
+        request_bytes = len(request.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise ValueError("previous request is not valid UTF-8") from error
+    if request_bytes > MAX_FAST_SCAN_CHANGE_BYTES:
+        raise ValueError("previous request exceeds the Fast Scan limit")
+    if len(evidence) > MAX_FAST_SCAN_EVIDENCE_ROWS:
+        raise ValueError("previous repository_evidence has too many items")
+    for row in evidence:
+        if not isinstance(row, str) or not row.strip():
+            raise ValueError("previous repository_evidence must contain nonblank strings")
+        try:
+            row_bytes = len(row.encode("utf-8"))
+        except UnicodeEncodeError as error:
+            raise ValueError("previous repository_evidence is not valid UTF-8") from error
+        if row_bytes > MAX_FAST_SCAN_EVIDENCE_BYTES:
+            raise ValueError("previous repository_evidence item exceeds the Fast Scan limit")
+
+
 def _previous(args) -> int:
     value = _read_object(args.input, rir_controller.MAX_BEGIN_BYTES, "previous input")
     unknown = sorted(set(value) - PREVIOUS_KEYS)
@@ -185,6 +210,7 @@ def _previous(args) -> int:
     evidence = value["repository_evidence"]
     if not isinstance(evidence, list):
         raise ValueError("previous repository_evidence must be an array")
+    _validate_previous_scan_bounds(value["request"], evidence)
     result = rir_controller.lookup_previous(
         rir_controller.PreviousLookupRequest(
             repo_root=args.repo_root,

@@ -13,15 +13,15 @@ Use for concrete pre-planning changes; not ideation, debugging, code review, or 
 
 ## Default bootstrap
 
-1. Call `rir_previous` once with the change and ordered evidence.
-2. Return its renderer result and follow [Previous-report bootstrap](references/previous-report.md).
-3. Allow `rir_scan` only for `stale` or `none`, then stop.
+1. Read [Previous-report bootstrap](references/previous-report.md).
+2. Call `rir_previous` once with the change and ordered evidence.
+3. Use `rir_scan` for `stale`/`none`; for `ambiguous`, only after yes. Stop.
 
 Never invent confirmation. Resolve links from this `SKILL.md` directory; ordered evidence means supplied evidence. Read [Fast Scan](references/fast-scan.md) only for fallback.
 
 ## Detailed refinement
 
-After yes to the scan's rendered question, read [Controller workflow](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), or [spec-kit](references/integration-spec-kit.md). Promoted scans skip trace.
+After yes—an explicit reply to the scan's question—follow the reference branch, then read [Controller workflow](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), or [spec-kit](references/integration-spec-kit.md).
 
 ## Fallbacks
 
