@@ -101,6 +101,7 @@ MAX_CHANGED_PATH_BYTES = 4096
 MAX_REPORT_ENTRIES = 4096
 MAX_REPORT_LINEAGES = 1000
 OPERATION_TIMEOUT_SECONDS = 0.25
+_TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile|filter\.)"
 
 
 class _UnsafeLookup(ValueError):
@@ -343,6 +344,7 @@ class _CurrentCandidate:
     state: Mapping[str, object]
     requirement_sha256: str
     context: object | None
+    incompatible_context: bool
 
 
 @dataclass(frozen=True)
@@ -358,7 +360,6 @@ class _GitSnapshot:
     changed_paths: tuple[str, ...]
     changed_count: int | None
     worktree_clean: bool
-    submodules_clean: bool
     reason: str
 
 
@@ -489,11 +490,12 @@ def _json_object(payload: bytes, label: str) -> dict[str, object]:
     return value
 
 
-def _context_artifact_present(report_fd: int, revision: int) -> bool:
+def _context_artifact_state(report_fd: int, revision: int) -> tuple[bool, bool]:
     names = (
         f"revision-{revision:04d}.context-v2.json",
         f".revision-{revision:04d}.context-v2.json.pending",
     )
+    current = False
     for name in names:
         try:
             os.stat(name, dir_fd=report_fd, follow_symlinks=False)
@@ -501,8 +503,18 @@ def _context_artifact_present(report_fd: int, revision: int) -> bool:
             continue
         except OSError as error:
             raise _UnsafeLookup("report context identity is unsafe") from error
-        return True
-    return False
+        current = True
+        break
+    legacy_name = f"revision-{revision:04d}.context.json"
+    try:
+        os.stat(legacy_name, dir_fd=report_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        legacy = False
+    except OSError as error:
+        raise _UnsafeLookup("report context identity is unsafe") from error
+    else:
+        legacy = True
+    return current, legacy
 
 
 def _read_candidate(root: Path, reports_fd: int, report_id: str, deadline: float):
@@ -569,7 +581,7 @@ def _read_candidate(root: Path, reports_fd: int, report_id: str, deadline: float
         requirement_sha256 = REPORT_CONTEXT.canonical_requirement_sha256(
             cast(str, original["request"])
         )
-        context_present = _context_artifact_present(report_fd, revision)
+        context_present, legacy_context_present = _context_artifact_state(report_fd, revision)
     finally:
         os.close(report_fd)
     _check_deadline(deadline)
@@ -598,6 +610,7 @@ def _read_candidate(root: Path, reports_fd: int, report_id: str, deadline: float
         state=state,
         requirement_sha256=requirement_sha256,
         context=context,
+        incompatible_context=legacy_context_present and context is None,
     )
 
 
@@ -616,6 +629,17 @@ def _git_environment() -> dict[str, str]:
     system_root = os.environ.get("SYSTEMROOT")
     if system_root:
         environment["SYSTEMROOT"] = system_root
+    return environment
+
+
+def _git_configuration_environment() -> dict[str, str]:
+    environment = _git_environment()
+    environment.pop("GIT_CONFIG_GLOBAL", None)
+    environment.pop("GIT_CONFIG_NOSYSTEM", None)
+    for name in ("HOME", "XDG_CONFIG_HOME", "PROGRAMDATA"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
     return environment
 
 
@@ -653,7 +677,11 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
 
 
 def _run_git_command(
-    root: Path, arguments: tuple[str, ...], deadline: float
+    root: Path,
+    arguments: tuple[str, ...],
+    deadline: float,
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> _GitCommandResult | None:
     command = (
         "git",
@@ -682,7 +710,7 @@ def _run_git_command(
         process = subprocess.Popen(
             command,
             cwd=str(root),
-            env=_git_environment(),
+            env=dict(environment) if environment is not None else _git_environment(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -1026,69 +1054,51 @@ def _index_flags_snapshot(root: Path, scope: tuple[str, str], deadline: float) -
         fields = header.split(b" ")
         if not separator or len(fields) != 4 or len(fields[0]) != 1:
             raise _GitUnavailable("Git index flags output is malformed")
-        _safe_changed_path(path)
+        relative = _safe_changed_path(path)
         if fields[0] != b"H":
             raise _GitUnavailable("Git index visibility flags are present")
+        if fields[1] == b"160000":
+            raise _GitUnavailable("Git gitlinks are outside the freshness proof scope")
+        if relative == ".gitattributes" or relative.endswith("/.gitattributes"):
+            raise _GitUnavailable("tracked Git attributes are outside the freshness proof scope")
     return payload
 
 
-def _gitlinks_from_index(payload: bytes) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for record in payload.split(b"\0")[:-1]:
-        header, separator, path_payload = record.partition(b"\t")
-        fields = header.split(b" ")
-        if not separator or len(fields) != 4:
-            raise _GitUnavailable("Git index output is malformed")
-        if fields[1] != b"160000" or fields[3] != b"0":
-            continue
-        path = _safe_changed_path(path_payload)
+def _checkout_transform_snapshot(
+    root: Path,
+    scope: tuple[str, str],
+    git_dir: Path,
+    deadline: float,
+) -> tuple[tuple[str, bytes | None], ...]:
+    config = _run_git_command(
+        root,
+        (*scope, "config", "--null", "--get-regexp", _TRANSFORM_CONFIG_PATTERN),
+        deadline,
+        environment=_git_configuration_environment(),
+    )
+    if config is None or config.returncode not in {0, 1}:
+        raise _GitUnavailable("Git checkout transform configuration is unavailable")
+    if config.returncode == 0 or config.output:
+        raise _GitUnavailable("Git checkout transform configuration is present")
+
+    snapshots: list[tuple[str, bytes | None]] = []
+    directories = (git_dir, _filesystem_common_dir(git_dir))
+    for directory in dict.fromkeys(directories):
+        info = directory / "info"
         try:
-            commit = fields[2].decode("ascii", errors="strict")
-        except UnicodeDecodeError as error:
-            raise _GitUnavailable("Git gitlink object is not ASCII") from error
-        if COMMIT_PATTERN.fullmatch(commit) is None or path in result:
-            raise _GitUnavailable("Git gitlink object is invalid")
-        result[path] = commit
-    return result
-
-
-def _submodule_index_snapshots(
-    root: Path, flags: bytes, deadline: float
-) -> list[tuple[Path, tuple[str, str], str, bytes]]:
-    snapshots: list[tuple[Path, tuple[str, str], str, bytes]] = []
-    for path, expected_head in sorted(_gitlinks_from_index(flags).items()):
-        submodule_root = (root / path).resolve()
-        try:
-            submodule_root.relative_to(root)
-        except ValueError as error:
-            raise _GitUnavailable("Git submodule path escapes the repository") from error
-        submodule_scope = _worktree_scope(submodule_root, deadline)
-        submodule_git_dir = Path(submodule_scope[0].split("=", 1)[1])
-        if _filesystem_head(submodule_git_dir) != expected_head:
-            raise _GitUnavailable("Git submodule HEAD does not match its gitlink")
-        submodule_flags = _index_flags_snapshot(submodule_root, submodule_scope, deadline)
-        snapshots.append((submodule_root, submodule_scope, expected_head, submodule_flags))
-        snapshots.extend(_submodule_index_snapshots(submodule_root, submodule_flags, deadline))
-    return snapshots
-
-
-def _clean_submodule_paths(payload: bytes) -> tuple[str, ...] | None:
-    paths: list[str] = []
-    for line in payload.splitlines():
-        if not line.startswith(b" "):
-            return None
-        rest = line[1:]
-        commit, separator, path_and_description = rest.partition(b" ")
-        if (
-            not separator
-            or COMMIT_PATTERN.fullmatch(commit.decode("ascii", errors="ignore")) is None
-        ):
-            raise _GitUnavailable("Git submodule status output is malformed")
-        path_payload = path_and_description.split(b" (", 1)[0]
-        path = _safe_changed_path(path_payload)
-        if path not in paths:
-            paths.append(path)
-    return tuple(paths)
+            info_metadata = info.lstat()
+        except FileNotFoundError:
+            payload = None
+        except OSError as error:
+            raise _GitUnavailable("Git info attributes are unavailable") from error
+        else:
+            if info.is_symlink() or not stat.S_ISDIR(info_metadata.st_mode):
+                raise _GitUnavailable("Git info attributes are unsafe")
+            payload = _read_git_control_file(info / "attributes", MAX_GIT_OUTPUT_BYTES)
+        if payload:
+            raise _GitUnavailable("Git info attributes are present")
+        snapshots.append((str(info / "attributes"), payload))
+    return tuple(snapshots)
 
 
 def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _GitSnapshot:
@@ -1098,6 +1108,7 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
         if _replacement_refs_present(git_dir):
             raise _GitUnavailable("Git replacement refs are present")
         commit = _filesystem_head(git_dir)
+        transforms_before = _checkout_transform_snapshot(root, scope, git_dir, deadline)
         status_payload = _successful(
             _run_git_command(
                 root,
@@ -1116,8 +1127,6 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
         )
         status_paths = _status_paths(status_payload)
         index_flags_before = _index_flags_snapshot(root, scope, deadline)
-        submodule_snapshots = _submodule_index_snapshots(root, index_flags_before, deadline)
-        submodules_clean = True
         diff_paths: tuple[str, ...] = ()
         if baseline_commit is not None and baseline_commit != commit:
             diff_payload = _successful(
@@ -1158,14 +1167,12 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
         )
         if _status_paths(final_status_payload) != status_paths:
             raise _GitUnavailable("Git working tree changed during freshness proof")
-        if _index_flags_snapshot(root, scope, deadline) != index_flags_before:
+        index_flags_after = _index_flags_snapshot(root, scope, deadline)
+        if index_flags_after != index_flags_before:
             raise _GitUnavailable("Git index changed during freshness proof")
-        for submodule_root, submodule_scope, expected_head, submodule_flags in submodule_snapshots:
-            submodule_git_dir = Path(submodule_scope[0].split("=", 1)[1])
-            if _filesystem_head(submodule_git_dir) != expected_head:
-                raise _GitUnavailable("Git submodule HEAD changed during freshness proof")
-            if _index_flags_snapshot(submodule_root, submodule_scope, deadline) != submodule_flags:
-                raise _GitUnavailable("Git submodule index changed during freshness proof")
+        transforms_after = _checkout_transform_snapshot(root, scope, git_dir, deadline)
+        if transforms_after != transforms_before:
+            raise _GitUnavailable("Git checkout transform state changed during freshness proof")
         after_commit = _filesystem_head(git_dir)
         if after_commit != commit:
             raise _GitUnavailable("Git HEAD changed during freshness proof")
@@ -1178,7 +1185,6 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
             changed_paths=changed,
             changed_count=len(changed),
             worktree_clean=not status_paths,
-            submodules_clean=submodules_clean,
             reason="Git freshness proof is complete",
         )
     except _GitUnavailable as error:
@@ -1188,7 +1194,6 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
             changed_paths=(),
             changed_count=None,
             worktree_clean=False,
-            submodules_clean=False,
             reason=str(error),
         )
 
@@ -1307,6 +1312,13 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
     matching = [
         candidate for candidate in candidates if candidate.requirement_sha256 == requirement_sha256
     ]
+    if any(candidate.incompatible_context for candidate in matching):
+        return _unselected(
+            "none",
+            requirement_sha256,
+            "previous report schema or payload identity is incompatible with this runtime",
+            started_ns,
+        )
     missing_context = [candidate for candidate in matching if candidate.context is None]
     if missing_context:
         return _unselected(
@@ -1338,7 +1350,7 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
         return _unselected(
             "none",
             requirement_sha256,
-            "previous report payload identity does not match",
+            "previous report schema or payload identity is incompatible with this runtime",
             started_ns,
         )
     matching = [candidate for candidate in matching if candidate not in incompatible]
@@ -1409,15 +1421,6 @@ def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
             requirement_sha256,
             snapshot,
             "Git working tree contains tracked or untracked changes",
-            started_ns,
-        )
-    if not snapshot.submodules_clean:
-        return _selected_result(
-            "stale",
-            candidate,
-            requirement_sha256,
-            snapshot,
-            "Git submodule state is not clean",
             started_ns,
         )
     if snapshot.commit != baseline_commit:

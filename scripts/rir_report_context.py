@@ -39,6 +39,7 @@ MAX_REQUIRED_SOURCE_PATH_BYTES = 256 * 1024
 GIT_SOURCE_PROOF_TIMEOUT_SECONDS = 5.0
 GIT_TIMEOUT_SECONDS = 0.25
 MAX_CONTEXT_STAGE_CANDIDATES = 8
+_TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile|filter\.)"
 _CONTEXT_FIELDS = frozenset(
     {
         "schema_version",
@@ -53,23 +54,6 @@ _CONTEXT_FIELDS = frozenset(
         "source_inventory_available",
         "source_inventory_complete",
         "source_inventory_git_tracked_only",
-        "payload_sha256",
-        "created_at",
-        "baseline_commit",
-        "baseline_clean",
-    }
-)
-_LEGACY_CONTEXT_FIELDS = frozenset(
-    {
-        "schema_version",
-        "report_id",
-        "revision",
-        "markdown_sha256",
-        "repo_root_sha256",
-        "requirement_sha256",
-        "source_inventory_sha256",
-        "source_inventory_available",
-        "source_inventory_complete",
         "payload_sha256",
         "created_at",
         "baseline_commit",
@@ -829,88 +813,9 @@ def load_report_context(root: Path, report_id: str, revision: int) -> ReportCont
         os.close(directory_fd)
 
 
-def load_legacy_report_context(
-    root: Path, report_id: str, revision: int
-) -> dict[str, object] | None:
-    _validate_identity(report_id, revision)
-    resolved = _root(root)
-    directory_fd = _open_report_directory(resolved, report_id, missing_ok=True)
-    if directory_fd is None:
-        return None
-    name = f"revision-{revision:04d}.context.json"
-    try:
-        if not _context_artifact_exists(directory_fd, name):
-            return None
-        payload = _read_bounded_file(
-            directory_fd,
-            name,
-            MAX_CONTEXT_BYTES,
-            private=True,
-            expected_owner=os.fstat(directory_fd).st_uid,
-        )
-        try:
-            value = json.loads(payload.decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError("legacy report context payload is invalid") from error
-        if (
-            not isinstance(value, dict)
-            or set(value) != _LEGACY_CONTEXT_FIELDS
-            or json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8"
-            )
-            + b"\n"
-            != payload
-            or type(value.get("schema_version")) is not int
-            or value.get("schema_version") != 1
-            or value.get("report_id") != report_id
-            or type(value.get("revision")) is not int
-            or value.get("revision") != revision
-        ):
-            raise ValueError("legacy report context identity is invalid")
-        for key in (
-            "markdown_sha256",
-            "repo_root_sha256",
-            "requirement_sha256",
-            "payload_sha256",
-        ):
-            if not isinstance(value.get(key), str) or SHA256_PATTERN.fullmatch(value[key]) is None:
-                raise ValueError("legacy report context digest is invalid")
-        available = value.get("source_inventory_available")
-        complete = value.get("source_inventory_complete")
-        inventory = value.get("source_inventory_sha256")
-        if (
-            not isinstance(available, bool)
-            or not isinstance(complete, bool)
-            or (complete and not available)
-            or (
-                available
-                and (not isinstance(inventory, str) or SHA256_PATTERN.fullmatch(inventory) is None)
-            )
-            or (not available and inventory is not None)
-            or not isinstance(value.get("baseline_clean"), bool)
-            or (
-                value.get("baseline_commit") is not None
-                and (
-                    not isinstance(value["baseline_commit"], str)
-                    or COMMIT_PATTERN.fullmatch(value["baseline_commit"]) is None
-                )
-            )
-            or (value["baseline_clean"] and value.get("baseline_commit") is None)
-            or not isinstance(value.get("created_at"), str)
-            or TIMESTAMP_PATTERN.fullmatch(value["created_at"]) is None
-        ):
-            raise ValueError("legacy report context values are invalid")
-        if value["repo_root_sha256"] != hashlib.sha256(str(resolved).encode("utf-8")).hexdigest():
-            raise ValueError("legacy report context repository identity is invalid")
-        if value["markdown_sha256"] != _markdown_sha256(directory_fd, revision):
-            raise ValueError("legacy report context Markdown digest is invalid")
-        return value
-    finally:
-        os.close(directory_fd)
-
-
 def _git_environment() -> dict[str, str]:
     environment = {
+        "GIT_ATTR_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_OPTIONAL_LOCKS": "0",
@@ -923,6 +828,17 @@ def _git_environment() -> dict[str, str]:
     system_root = os.environ.get("SYSTEMROOT")
     if system_root:
         environment["SYSTEMROOT"] = system_root
+    return environment
+
+
+def _git_configuration_environment() -> dict[str, str]:
+    environment = _git_environment()
+    environment.pop("GIT_CONFIG_GLOBAL", None)
+    environment.pop("GIT_CONFIG_NOSYSTEM", None)
+    for name in ("HOME", "XDG_CONFIG_HOME", "PROGRAMDATA"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
     return environment
 
 
@@ -965,6 +881,7 @@ def _run_git(
     *,
     input_payload: bytes | None = None,
     maximum_output: int = MAX_GIT_OUTPUT_BYTES,
+    environment: Mapping[str, str] | None = None,
 ) -> tuple[int, bytes] | None:
     command = (
         "git",
@@ -993,7 +910,7 @@ def _run_git(
         process = subprocess.Popen(
             command,
             cwd=str(root),
-            env=_git_environment(),
+            env=dict(environment) if environment is not None else _git_environment(),
             stdin=subprocess.DEVNULL if input_stream is None else input_stream,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -1089,30 +1006,17 @@ def probe_git_baseline(root: Path) -> tuple[str | None, bool]:
         raise UnsafeGitOutput("Git commit output is not ASCII") from error
     if COMMIT_PATTERN.fullmatch(commit) is None:
         return None, False
-    status_result = _run_git(
-        resolved,
-        (
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=normal",
-            "--ignore-submodules=none",
-            "--no-renames",
-        ),
-    )
-    if status_result is None or status_result[0] != 0:
+    try:
+        deadline = time.monotonic() + GIT_SOURCE_PROOF_TIMEOUT_SECONDS
+        before = _capture_repository_git_state(resolved, commit, deadline)
+        after = _capture_repository_git_state(resolved, commit, deadline)
+        if before[1:] != after[1:]:
+            return commit, False
+        return commit, True
+    except UnsafeGitOutput:
+        raise
+    except (OSError, TimeoutError, ValueError):
         return commit, False
-    if b"\0" in status_result[1]:
-        raise UnsafeGitOutput("Git status output contains NUL")
-    if status_result[1] != b"":
-        return commit, False
-    submodule_result = _run_git(resolved, ("submodule", "status", "--recursive"))
-    if submodule_result is None or submodule_result[0] != 0:
-        return commit, False
-    if b"\0" in submodule_result[1]:
-        raise UnsafeGitOutput("Git submodule output contains NUL")
-    if any(not line.startswith(b" ") for line in submodule_result[1].splitlines()):
-        return commit, False
-    return commit, True
 
 
 def _tracked_paths_from_flags(payload: bytes) -> tuple[set[str], bool]:
@@ -1136,6 +1040,32 @@ def _tracked_paths_from_flags(payload: bytes) -> tuple[set[str], bool]:
         if record[:1] != b"H":
             flags_clean = False
     return paths, flags_clean
+
+
+def _index_paths_without_unsupported_entries(payload: bytes) -> set[str]:
+    if payload and not payload.endswith(b"\0"):
+        raise UnsafeGitOutput("Git index output is incomplete")
+    paths: set[str] = set()
+    for record in payload.split(b"\0")[:-1]:
+        header, separator, path_payload = record.partition(b"\t")
+        fields = header.split(b" ")
+        if not separator or len(fields) != 3:
+            raise UnsafeGitOutput("Git index output is malformed")
+        try:
+            mode, object_id, stage = (field.decode("ascii", errors="strict") for field in fields)
+            path = _required_path(path_payload.decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, ValueError) as error:
+            raise UnsafeGitOutput("Git index output is unsafe") from error
+        if mode == "160000":
+            raise ValueError("Git gitlinks are outside the freshness proof scope")
+        if path == ".gitattributes" or path.endswith("/.gitattributes"):
+            raise ValueError("tracked Git attributes are outside the freshness proof scope")
+        if not re.fullmatch(r"[0-7]{6}", mode) or not object_id or not stage.isdigit():
+            raise UnsafeGitOutput("Git index output is malformed")
+        if path in paths:
+            raise UnsafeGitOutput("Git index output contains duplicate paths")
+        paths.add(path)
+    return paths
 
 
 def _git_single_path(payload: bytes, label: str) -> Path:
@@ -1183,44 +1113,6 @@ def _git_worktree_scope(root: Path) -> tuple[str, str] | None:
     except OSError:
         return None
     return scope
-
-
-def _submodule_paths(payload: bytes) -> tuple[str, ...] | None:
-    paths: list[str] = []
-    for line in payload.splitlines():
-        if not line.startswith(b" "):
-            return None
-        commit, separator, path_and_description = line[1:].partition(b" ")
-        try:
-            commit_text = commit.decode("ascii", errors="strict")
-        except UnicodeDecodeError as error:
-            raise UnsafeGitOutput("Git submodule output is not ASCII") from error
-        if not separator or COMMIT_PATTERN.fullmatch(commit_text) is None:
-            raise UnsafeGitOutput("Git submodule output is malformed")
-        try:
-            path = path_and_description.split(b" (", 1)[0].decode("utf-8", errors="strict")
-        except UnicodeDecodeError as error:
-            raise UnsafeGitOutput("Git submodule path is not UTF-8") from error
-        pure = Path(path)
-        if not path or pure.is_absolute() or ".." in pure.parts:
-            raise UnsafeGitOutput("Git submodule path is unsafe")
-        normalized = pure.as_posix()
-        if normalized not in paths:
-            paths.append(normalized)
-    return tuple(paths)
-
-
-def _submodule_status(payload: bytes) -> dict[str, str] | None:
-    paths = _submodule_paths(payload)
-    if paths is None:
-        return None
-    result: dict[str, str] = {}
-    for line, path in zip(payload.splitlines(), paths):
-        commit = line[1:].partition(b" ")[0].decode("ascii", errors="strict")
-        if path in result and result[path] != commit:
-            raise UnsafeGitOutput("Git submodule path has conflicting commits")
-        result[path] = commit
-    return result
 
 
 def _proof_deadline(deadline: float) -> None:
@@ -1365,51 +1257,94 @@ def _worktree_source_sha256(root: Path, relative: str) -> str:
             os.close(descriptor)
 
 
-def _checkout_transforms_present(root: Path, scope: tuple[str, str], paths: Sequence[str]) -> bool:
+def _read_optional_git_attributes(path: Path) -> bytes | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ValueError("Git info attributes are unavailable") from error
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size > MAX_GIT_OUTPUT_BYTES
+    ):
+        raise ValueError("Git info attributes are unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+        try:
+            payload = os.read(descriptor, MAX_GIT_OUTPUT_BYTES + 1)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise ValueError("Git info attributes are unavailable") from error
+    if len(payload) > MAX_GIT_OUTPUT_BYTES:
+        raise ValueError("Git info attributes exceed their byte limit")
+    return payload
+
+
+def _checkout_transform_snapshot(
+    root: Path,
+    scope: tuple[str, str],
+    deadline: float,
+) -> tuple[tuple[str, bytes | None], ...]:
+    _proof_deadline(deadline)
     config = _run_git(
         root,
-        (
-            *scope,
-            "config",
-            "--local",
-            "--get-regexp",
-            r"^(core\.autocrlf|core\.eol|filter\..*\.(clean|smudge|process|required))$",
-        ),
+        (*scope, "config", "--null", "--get-regexp", _TRANSFORM_CONFIG_PATTERN),
+        environment=_git_configuration_environment(),
     )
     if config is None or config[0] not in {0, 1}:
-        return True
-    if config[0] == 0 and config[1].strip():
-        return True
-    if not paths:
-        return False
-    attributes = _run_git(
-        root,
-        (
-            *scope,
-            "check-attr",
-            "-z",
-            "--stdin",
-            "filter",
-            "working-tree-encoding",
-            "text",
-            "eol",
-        ),
-        input_payload=b"\0".join(path.encode() for path in paths) + b"\0",
-        maximum_output=MAX_REQUIRED_SOURCE_PATH_BYTES,
+        raise ValueError("Git checkout transform configuration is unavailable")
+    if config[0] == 0 or config[1]:
+        raise ValueError("Git checkout transform configuration is present")
+
+    git_dir = Path(scope[0].split("=", 1)[1])
+    common_value = _git_single_path(
+        _git_bytes(root, (*scope, "rev-parse", "--git-common-dir"), "Git common directory"),
+        "Git common directory",
     )
-    if attributes is None or attributes[0] != 0:
-        return True
-    fields = attributes[1].split(b"\0")
-    if fields[-1] != b"" or (len(fields) - 1) % 3:
-        return True
-    return any(value not in {b"unspecified", b"unset"} for value in fields[2:-1:3])
+    try:
+        common_dir = (common_value if common_value.is_absolute() else root / common_value).resolve(
+            strict=True
+        )
+    except OSError as error:
+        raise ValueError("Git common directory is unavailable") from error
+    if not common_dir.is_dir():
+        raise ValueError("Git common directory is invalid")
+
+    snapshots: list[tuple[str, bytes | None]] = []
+    for directory in dict.fromkeys((git_dir, common_dir)):
+        info = directory / "info"
+        try:
+            info_metadata = info.lstat()
+        except FileNotFoundError:
+            payload = None
+        except OSError as error:
+            raise ValueError("Git info attributes are unavailable") from error
+        else:
+            if info.is_symlink() or not stat.S_ISDIR(info_metadata.st_mode):
+                raise ValueError("Git info attributes are unsafe")
+            payload = _read_optional_git_attributes(info / "attributes")
+        if payload:
+            raise ValueError("Git info attributes are present")
+        snapshots.append((str(info / "attributes"), payload))
+    return tuple(snapshots)
 
 
 def _capture_repository_git_state(
     root: Path,
     expected_commit: str | None,
     deadline: float,
-) -> tuple[tuple[str, str], str, bytes, bytes, bytes, dict[str, str]]:
+) -> tuple[
+    tuple[str, str],
+    str,
+    bytes,
+    bytes,
+    bytes,
+    tuple[tuple[str, bytes | None], ...],
+]:
     _proof_deadline(deadline)
     scope = _git_worktree_scope(root)
     if scope is None:
@@ -1426,11 +1361,13 @@ def _capture_repository_git_state(
     if replacements.strip():
         raise ValueError("Git replacement refs are present")
     if expected_commit is not None and head != expected_commit:
-        raise ValueError("Git HEAD does not match the captured gitlink")
+        raise ValueError("Git HEAD does not match the captured commit")
     flags = _git_bytes(root, (*scope, "ls-files", "-v", "-z"), "Git index flags")
     _tracked, flags_clean = _tracked_paths_from_flags(flags)
     if not flags_clean:
         raise ValueError("Git index visibility flags are present")
+    index = _git_bytes(root, (*scope, "ls-files", "-s", "-z"), "Git index")
+    _index_paths_without_unsupported_entries(index)
     status = _git_bytes(
         root,
         (
@@ -1446,15 +1383,8 @@ def _capture_repository_git_state(
     )
     if status:
         raise ValueError("Git worktree is not clean")
-    submodules = _git_bytes(
-        root,
-        (*scope, "submodule", "status", "--recursive"),
-        "Git submodule status",
-    )
-    submodule_status = _submodule_status(submodules)
-    if submodule_status is None:
-        raise ValueError("Git submodule state is not clean")
-    return scope, head, flags, status, submodules, submodule_status
+    transforms = _checkout_transform_snapshot(root, scope, deadline)
+    return scope, head, flags, index, status, transforms
 
 
 def _prove_required_sources(
@@ -1464,7 +1394,7 @@ def _prove_required_sources(
     deadline: float,
 ) -> str:
     before = _capture_repository_git_state(root, expected_commit, deadline)
-    scope, commit, _flags, _status, _submodules, submodule_status = before
+    scope, commit, _flags, _index, _status, _transforms = before
     _proof_deadline(deadline)
     tree = _tree_entries(
         _git_bytes(
@@ -1474,40 +1404,13 @@ def _prove_required_sources(
             maximum_output=MAX_GIT_TREE_OUTPUT_BYTES,
         )
     )
-    gitlinks = {
-        path: object_id
-        for path, (mode, kind, object_id) in tree.items()
-        if mode == "160000" and kind == "commit"
-    }
-    direct: dict[str, str] = {}
-    nested: dict[str, dict[str, str]] = {}
-    for path, digest in required.items():
-        matching_links = [link for link in gitlinks if path == link or path.startswith(link + "/")]
-        if not matching_links:
-            direct[path] = digest
-            continue
-        link = max(matching_links, key=len)
-        if path == link:
-            raise ValueError("required source resolves to a submodule gitlink")
-        nested.setdefault(link, {})[path[len(link) + 1 :]] = digest
+    if any(mode == "160000" and kind == "commit" for mode, kind, _object_id in tree.values()):
+        raise ValueError("Git gitlinks are outside the freshness proof scope")
     if any(_worktree_source_sha256(root, path) != digest for path, digest in required.items()):
         raise ValueError("required worktree source digest does not match report evidence")
-    if _checkout_transforms_present(root, scope, tuple(sorted(direct))):
-        raise ValueError("Git checkout transformations make commit blobs non-equivalent")
-    observed = _batch_blob_sha256(root, scope, commit, tuple(sorted(direct)))
-    if observed != direct:
+    observed = _batch_blob_sha256(root, scope, commit, tuple(sorted(required)))
+    if observed != required:
         raise ValueError("required source digest does not match the captured commit")
-    for link, child_required in sorted(nested.items()):
-        _proof_deadline(deadline)
-        gitlink_commit = gitlinks[link]
-        if submodule_status.get(link) != gitlink_commit:
-            raise ValueError("initialized submodule HEAD does not match its gitlink")
-        child_root = (root / link).resolve()
-        try:
-            child_root.relative_to(root)
-        except ValueError as error:
-            raise ValueError("submodule path escapes the repository") from error
-        _prove_required_sources(child_root, gitlink_commit, child_required, deadline)
     _proof_deadline(deadline)
     after = _capture_repository_git_state(root, commit, deadline)
     if before[1:] != after[1:]:

@@ -3606,6 +3606,32 @@ else:
             {"legacy-imp-001": "IMP-001"},
         )
 
+    def test_begin_reads_public_v05_schema1_completed_lineage_key_map(self):
+        state = self.fixture("compact-state-pre-decision.json")
+        published = CONTROLLER.report_store.publish_revision(
+            self.root, CONTROLLER._canonical_bytes(state)
+        )
+        key_map = CONTROLLER._legacy_key_map(state)
+        key_map["impacts"] = {"public-v05-impact": "IMP-001"}
+        metadata = {
+            "schema_version": 1,
+            "draft_id": "a" * 32,
+            "report_id": "RPT-001",
+            "revision": 1,
+            "state_sha256": CONTROLLER.hashlib.sha256(
+                published.state_path.read_bytes()
+            ).hexdigest(),
+            "key_map": key_map,
+        }
+        metadata_path = published.state_path.with_name("revision-0001.controller.json")
+        metadata_path.write_bytes(CONTROLLER._canonical_bytes(metadata))
+        metadata_path.chmod(0o600)
+
+        result = CONTROLLER.begin_refinement(self.request(request="Revise public v0.5 report."))
+
+        self.assertEqual(result.revision, 2)
+        self.assertEqual(result.prior_key_map["impacts"], {"public-v05-impact": "IMP-001"})
+
     def test_begin_creates_private_draft_without_post_creation_chmod_window(self):
         with mock.patch.object(
             CONTROLLER.os,

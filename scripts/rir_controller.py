@@ -95,10 +95,6 @@ class _ControllerStorageContract(Protocol):
 
     def load_controller_completion_metadata(self, current: object) -> dict[str, object] | None: ...
 
-    def load_legacy_controller_completion_metadata(
-        self, current: object
-    ) -> dict[str, object] | None: ...
-
     def cas_replace_private_draft(
         self, root: Path, draft_id: str, expected: bytes, replacement: bytes
     ) -> None: ...
@@ -117,8 +113,6 @@ class _ControllerStorageContract(Protocol):
         analysis_sha256: str | None = None,
         context_identity: Mapping[str, object] | None = None,
     ) -> None: ...
-
-    def migrate_legacy_controller_metadata(self, *args, **kwargs) -> None: ...
 
     def consume_draft(self, path: Path, draft: dict[str, object], published, key_map) -> None: ...
 
@@ -269,12 +263,10 @@ def _is_controller_storage_contract(value: object) -> TypeGuard[_ControllerStora
         "controller_metadata_path",
         "load_controller_metadata",
         "load_controller_completion_metadata",
-        "load_legacy_controller_completion_metadata",
         "cas_replace_private_draft",
         "recover_private_draft_transaction",
         "report_lock",
         "write_controller_metadata",
-        "migrate_legacy_controller_metadata",
         "consume_draft",
         "_read_bounded_descriptor",
         "_open_optional_transaction_component",

@@ -326,6 +326,10 @@ class PreviousLookupTest(unittest.TestCase):
 
         self.assertEqual(result.status, "none")
         self.assertIsNone(result.display_text)
+        self.assertEqual(
+            result.reason,
+            "previous report schema or payload identity is incompatible with this runtime",
+        )
 
     def test_incomplete_source_inventory_is_stale_never_fresh(self):
         self.publish(inventory_complete=False)
@@ -467,23 +471,6 @@ class PreviousLookupTest(unittest.TestCase):
         with self.assertRaises(PREVIOUS._GitUnavailable):
             PREVIOUS._filesystem_git_dir(unsafe_root)
 
-    def test_gitlink_index_parser_rejects_malformed_and_duplicate_entries(self):
-        malformed = (
-            b"H malformed\0",
-            b"H 160000 not-a-commit 0\tdeps/child\0",
-            (
-                b"H 160000 "
-                + b"a" * 40
-                + b" 0\tdeps/child\0H 160000 "
-                + b"b" * 40
-                + b" 0\tdeps/child\0"
-            ),
-        )
-        for payload in malformed:
-            with self.subTest(payload=payload[:60]):
-                with self.assertRaises(PREVIOUS._GitUnavailable):
-                    PREVIOUS._gitlinks_from_index(payload)
-
     def test_head_change_between_freshness_probes_is_stale(self):
         self.publish()
         real_head = PREVIOUS._filesystem_head
@@ -526,9 +513,9 @@ class PreviousLookupTest(unittest.TestCase):
         real_runner = PREVIOUS._run_git_command
         raced = False
 
-        def runner(root, arguments, deadline):
+        def runner(root, arguments, deadline, **kwargs):
             nonlocal raced
-            result = real_runner(root, arguments, deadline)
+            result = real_runner(root, arguments, deadline, **kwargs)
             if not raced and "ls-files" in arguments:
                 raced = True
                 self.git("update-index", "--assume-unchanged", "app.py")
@@ -612,19 +599,90 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "none")
         self.assertIsNone(result.display_text)
 
-    def test_unproved_submodule_state_is_stale_never_fresh(self):
+    def test_checkout_transform_config_is_stale_at_the_same_commit(self):
         self.publish()
-        with mock.patch.object(
-            PREVIOUS,
-            "_submodule_index_snapshots",
-            side_effect=PREVIOUS._GitUnavailable("Git submodule state is not clean"),
+        for key, value in (
+            ("core.autocrlf", "false"),
+            ("core.eol", "lf"),
+            ("core.attributesfile", ".git/custom-attributes"),
+            ("filter.demo.required", "false"),
         ):
+            with self.subTest(key=key):
+                self.git("config", key, value)
+                self.git("checkout", "-q", "--", "app.py")
+
+                result = PREVIOUS.lookup_previous(self.request())
+
+                self.assertEqual(result.status, "stale")
+                self.assertIn("transform", result.reason.lower())
+                self.git("config", "--unset-all", key)
+
+        global_home = Path(self.temporary.name) / "global-home"
+        global_home.mkdir()
+        (global_home / ".gitconfig").write_text(
+            '[filter "global"]\n\trequired = false\n', encoding="utf-8"
+        )
+        with mock.patch.dict(PREVIOUS.os.environ, {"HOME": str(global_home)}):
+            result = PREVIOUS.lookup_previous(self.request())
+        self.assertEqual(result.status, "stale")
+        self.assertIn("transform", result.reason.lower())
+
+        self.git("config", "extensions.worktreeConfig", "true")
+        self.git("config", "--worktree", "core.eol", "lf")
+        result = PREVIOUS.lookup_previous(self.request())
+        self.assertEqual(result.status, "stale")
+        self.assertIn("transform", result.reason.lower())
+
+    def test_info_or_tracked_attributes_are_stale(self):
+        nested = self.root / "nested"
+        nested.mkdir()
+        (nested / ".gitattributes").write_text("*.py text\n", encoding="utf-8")
+        self.git("add", "nested/.gitattributes")
+        self.git("commit", "-qm", "add nested attributes")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        self.publish()
+
+        tracked = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(tracked.status, "stale")
+        self.assertIn("attributes", tracked.reason.lower())
+
+        (nested / ".gitattributes").unlink()
+        self.git("add", "nested/.gitattributes")
+        self.git("commit", "-qm", "remove nested attributes")
+        self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
+        shutil.rmtree(report_dir)
+        self.publish()
+        info_attributes = self.root / ".git" / "info" / "attributes"
+        info_attributes.write_text("*.py text\n", encoding="utf-8")
+        self.git("checkout", "-q", "--", "app.py")
+
+        info = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(info.status, "stale")
+        self.assertIn("attributes", info.reason.lower())
+
+    def test_transform_config_race_during_lookup_is_stale(self):
+        self.publish()
+        real_runner = PREVIOUS._run_git_command
+        sampled = False
+
+        def runner(root, arguments, deadline, **kwargs):
+            nonlocal sampled
+            result = real_runner(root, arguments, deadline, **kwargs)
+            if not sampled and "config" in arguments and "--get-regexp" in arguments:
+                sampled = True
+                self.git("config", "filter.race.clean", "cat")
+            return result
+
+        with mock.patch.object(PREVIOUS, "_run_git_command", side_effect=runner):
             result = PREVIOUS.lookup_previous(self.request())
 
         self.assertEqual(result.status, "stale")
-        self.assertIn("submodule", result.reason)
+        self.assertIn("transform", result.reason.lower())
 
-    def test_submodule_index_visibility_flag_is_stale(self):
+    def test_any_gitlink_is_stale_even_when_submodule_is_clean(self):
         child = (Path(self.temporary.name) / "child").resolve()
         child.mkdir()
         subprocess.run(["git", "init", "-q"], cwd=child, check=True)
@@ -647,19 +705,11 @@ class PreviousLookupTest(unittest.TestCase):
         self.git("commit", "-qam", "add submodule")
         self.baseline_commit = self.git("rev-parse", "HEAD").stdout.strip()
         self.publish()
-        clean_result = PREVIOUS.lookup_previous(self.request())
-        self.assertEqual(clean_result.status, "fresh", clean_result.reason)
 
-        checkout = self.root / "deps" / "child"
-        subprocess.run(
-            ["git", "update-index", "--assume-unchanged", "child.py"],
-            cwd=checkout,
-            check=True,
-        )
         result = PREVIOUS.lookup_previous(self.request())
 
         self.assertEqual(result.status, "stale")
-        self.assertIn("index", result.reason.lower())
+        self.assertIn("gitlink", result.reason.lower())
 
     def test_legacy_single_lineage_never_discloses_identity_or_body(self):
         self.publish(with_context=False)
@@ -820,7 +870,6 @@ class PreviousLookupTest(unittest.TestCase):
             changed_paths=(),
             changed_count=0,
             worktree_clean=True,
-            submodules_clean=True,
             reason="pinned clean Git evidence",
         )
         with mock.patch.object(PREVIOUS, "_probe_git", return_value=clean_git):
@@ -868,7 +917,6 @@ class PreviousLookupTest(unittest.TestCase):
             changed_paths=(),
             changed_count=0,
             worktree_clean=True,
-            submodules_clean=True,
             reason="pinned clean Git evidence",
         )
         samples = []

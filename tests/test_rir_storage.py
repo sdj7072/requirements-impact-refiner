@@ -383,15 +383,39 @@ class RirStorageTest(unittest.TestCase):
         self.assertEqual(metadata["key_map"], key_map)
         self.assertEqual(STORAGE.load_controller_metadata(current), key_map)
 
-    def test_legacy_completion_metadata_validator_accepts_only_exact_v1_identity(self):
+    def test_public_v05_metadata_key_map_is_readable_but_intermediate_shapes_are_rejected(self):
         state_sha256 = "1" * 64
-        legacy = {
+        public_v05 = {
             "schema_version": 1,
             "draft_id": DRAFT_ID,
             "report_id": "RPT-001",
             "revision": 1,
             "state_sha256": state_sha256,
             "key_map": {"impacts": {}},
+        }
+        raw = canonical_bytes(public_v05)
+        self.assertEqual(
+            STORAGE._validate_v05_controller_metadata_bytes(
+                raw,
+                report_id="RPT-001",
+                revision=1,
+                state_sha256=state_sha256,
+            ),
+            public_v05,
+        )
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
+        report_dir.mkdir(parents=True)
+        state_path = report_dir / "revision-0001.json"
+        state_path.write_bytes(b"public v0.5 state\n")
+        public_v05["state_sha256"] = hashlib.sha256(state_path.read_bytes()).hexdigest()
+        metadata_path = report_dir / "revision-0001.controller.json"
+        metadata_path.write_bytes(canonical_bytes(public_v05))
+        os.chmod(metadata_path, 0o600)
+        current = SimpleNamespace(report_id="RPT-001", revision=1, state_path=state_path)
+        self.assertEqual(STORAGE.load_controller_metadata(current), public_v05["key_map"])
+
+        intermediate_v1 = {
+            **public_v05,
             "analysis_sha256": "2" * 64,
             "context_identity": {
                 "repo_root_sha256": "3" * 64,
@@ -402,77 +426,42 @@ class RirStorageTest(unittest.TestCase):
                 "payload_sha256": "5" * 64,
             },
         }
-        raw = canonical_bytes(legacy)
-        self.assertEqual(
-            STORAGE._validate_legacy_controller_metadata_bytes(
-                raw,
-                report_id="RPT-001",
-                revision=1,
-                state_sha256=state_sha256,
-            ),
-            legacy,
-        )
-        schema1_with_v2_identity = {
-            **legacy,
-            "context_identity": {
-                "repo_root_sha256": "3" * 64,
-                "requirement_sha256": "4" * 64,
-                "state_sha256": state_sha256,
-                "repository_evidence_sha256": "6" * 64,
-                "source_inventory_sha256": None,
-                "source_inventory_available": False,
-                "source_inventory_complete": False,
-                "source_inventory_git_tracked_only": False,
-                "payload_sha256": "5" * 64,
-            },
-        }
-        self.assertEqual(
-            STORAGE._validate_legacy_controller_metadata_bytes(
-                canonical_bytes(schema1_with_v2_identity),
-                report_id="RPT-001",
-                revision=1,
-                state_sha256=state_sha256,
-            ),
-            schema1_with_v2_identity,
-        )
-        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
-        report_dir.mkdir(parents=True)
-        state_path = report_dir / "revision-0001.json"
-        state_path.write_bytes(b"legacy state\n")
-        schema1_with_v2_identity["state_sha256"] = hashlib.sha256(
-            state_path.read_bytes()
-        ).hexdigest()
-        metadata_path = report_dir / "revision-0001.controller.json"
-        metadata_path.write_bytes(canonical_bytes(schema1_with_v2_identity))
-        os.chmod(metadata_path, 0o600)
-        current = SimpleNamespace(report_id="RPT-001", revision=1, state_path=state_path)
-        self.assertEqual(
-            STORAGE.load_controller_metadata(current),
-            schema1_with_v2_identity["key_map"],
-        )
         variants = (
-            {**legacy, "schema_version": 2},
-            {**legacy, "draft_id": "bad"},
-            {**legacy, "state_sha256": "6" * 64},
-            {**legacy, "analysis_sha256": "bad"},
-            {**legacy, "context_identity": {}},
-            {**legacy, "unknown": True},
+            intermediate_v1,
             {
-                **legacy,
+                **intermediate_v1,
+                "context_identity": {
+                    "repo_root_sha256": "3" * 64,
+                    "requirement_sha256": "4" * 64,
+                    "state_sha256": public_v05["state_sha256"],
+                    "repository_evidence_sha256": "6" * 64,
+                    "source_inventory_sha256": None,
+                    "source_inventory_available": False,
+                    "source_inventory_complete": False,
+                    "source_inventory_git_tracked_only": False,
+                    "payload_sha256": "5" * 64,
+                },
+            },
+            {**public_v05, "schema_version": 2},
+            {**public_v05, "draft_id": "bad"},
+            {**public_v05, "state_sha256": "6" * 64},
+            {**public_v05, "unknown": True},
+            {
+                **public_v05,
                 "graph_receipt": {"receipt_id": "bad", "sha256": "7" * 64},
             },
         )
         for value in variants:
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
-                    STORAGE._validate_legacy_controller_metadata_bytes(
+                    STORAGE._validate_v05_controller_metadata_bytes(
                         canonical_bytes(value),
                         report_id="RPT-001",
                         revision=1,
-                        state_sha256=state_sha256,
+                        state_sha256=str(public_v05["state_sha256"]),
                     )
         with self.assertRaises(ValueError):
-            STORAGE._validate_legacy_controller_metadata_bytes(
+            STORAGE._validate_v05_controller_metadata_bytes(
                 b"{}",
                 report_id="RPT-001",
                 revision=1,

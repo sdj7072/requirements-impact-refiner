@@ -980,15 +980,14 @@ class RirReportContextTest(unittest.TestCase):
                 with self.assertRaises(CONTEXT.UnsafeGitOutput):
                     CONTEXT._git_single_path(payload, "test")
 
-        self.assertIsNone(CONTEXT._submodule_paths(b"-" + b"a" * 40 + b" deps/child\n"))
         for payload in (
-            b" bad\n",
-            b" " + b"a" * 40 + b" \xff\n",
-            b" " + b"a" * 40 + b" ../escape\n",
+            b"bad\0",
+            b"100644 " + b"a" * 40 + b" 0\t\xff\0",
+            b"100644 " + b"a" * 40 + b" 0\t../escape\0",
         ):
-            with self.subTest(submodule=payload):
+            with self.subTest(index=payload):
                 with self.assertRaises(CONTEXT.UnsafeGitOutput):
-                    CONTEXT._submodule_paths(payload)
+                    CONTEXT._index_paths_without_unsupported_entries(payload)
         with self.assertRaises(ValueError):
             CONTEXT.probe_source_inventory_git(self.root, {"path.py": "bad"})
 
@@ -1159,7 +1158,7 @@ class RirReportContextTest(unittest.TestCase):
         )
         self.assertEqual(
             CONTEXT.probe_source_inventory_git(self.root, inventory),
-            (commit, True, False),
+            (commit, False, False),
         )
         subprocess.run(
             ["git", "update-index", "--no-assume-unchanged", "tracked.py"],
@@ -1233,9 +1232,9 @@ class RirReportContextTest(unittest.TestCase):
 
         result = CONTEXT.probe_source_inventory_git(self.root, required)
 
-        self.assertEqual(result, (commit_a, True, False))
+        self.assertEqual(result, (commit_a, False, False))
 
-    def test_source_inventory_git_proof_rejects_checkout_transform_configuration(self):
+    def test_source_inventory_git_proof_rejects_all_checkout_transform_state(self):
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
         subprocess.run(
             ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
@@ -1247,18 +1246,84 @@ class RirReportContextTest(unittest.TestCase):
         subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
         required = {"api.py": hashlib.sha256(source.read_bytes()).hexdigest()}
 
-        for autocrlf in ("true", "false"):
-            subprocess.run(["git", "config", "core.autocrlf", autocrlf], cwd=self.root, check=True)
+        for key, value in (
+            ("core.autocrlf", "false"),
+            ("core.eol", "lf"),
+            ("core.attributesfile", ".git/custom-attributes"),
+            ("filter.demo.required", "false"),
+        ):
+            subprocess.run(["git", "config", key, value], cwd=self.root, check=True)
             self.assertFalse(CONTEXT.probe_source_inventory_git(self.root, required)[2])
-        subprocess.run(["git", "config", "--unset", "core.autocrlf"], cwd=self.root, check=True)
+            subprocess.run(["git", "config", "--unset-all", key], cwd=self.root, check=True)
 
-        for attribute in ("filter=demo", "working-tree-encoding=UTF-8", "text eol=crlf"):
-            with self.subTest(attribute=attribute):
-                attributes = self.root / ".gitattributes"
-                attributes.write_text(f"api.py {attribute}\n", encoding="utf-8")
-                subprocess.run(["git", "add", ".gitattributes"], cwd=self.root, check=True)
-                subprocess.run(["git", "commit", "-qm", "attributes"], cwd=self.root, check=True)
-                self.assertFalse(CONTEXT.probe_source_inventory_git(self.root, required)[2])
+        info_attributes = self.root / ".git" / "info" / "attributes"
+        info_attributes.write_text("*.py text\n", encoding="utf-8")
+        self.assertFalse(CONTEXT.probe_source_inventory_git(self.root, required)[2])
+        info_attributes.unlink()
+
+        nested = self.root / "nested"
+        nested.mkdir()
+        attributes = nested / ".gitattributes"
+        attributes.write_text("*.py text\n", encoding="utf-8")
+        subprocess.run(["git", "add", "nested/.gitattributes"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "attributes"], cwd=self.root, check=True)
+        self.assertFalse(CONTEXT.probe_source_inventory_git(self.root, required)[2])
+
+    def test_git_baseline_rejects_transform_state_and_transform_races(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"], cwd=self.root, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        source = self.root / "api.py"
+        source.write_text("value = 'stable'\n", encoding="utf-8")
+        subprocess.run(["git", "add", "api.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, True))
+
+        subprocess.run(
+            ["git", "config", "filter.demo.arbitrary", "configured"],
+            cwd=self.root,
+            check=True,
+        )
+        self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, False))
+        subprocess.run(
+            ["git", "config", "--unset-all", "filter.demo.arbitrary"],
+            cwd=self.root,
+            check=True,
+        )
+
+        global_temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(global_temporary.cleanup)
+        global_home = Path(global_temporary.name)
+        (global_home / ".gitconfig").write_text("[core]\n\teol = lf\n", encoding="utf-8")
+        with mock.patch.dict(CONTEXT.os.environ, {"HOME": str(global_home)}):
+            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, False))
+
+        real_run_git = CONTEXT._run_git
+        sampled = False
+
+        def transform_race(root, arguments, **kwargs):
+            nonlocal sampled
+            result = real_run_git(root, arguments, **kwargs)
+            if not sampled and "config" in arguments and "--get-regexp" in arguments:
+                sampled = True
+                subprocess.run(
+                    ["git", "config", "filter.race.clean", "cat"],
+                    cwd=self.root,
+                    check=True,
+                )
+            return result
+
+        with mock.patch.object(CONTEXT, "_run_git", side_effect=transform_race):
+            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, False))
 
     def test_source_inventory_git_proof_rejects_checkout_and_index_flag_races(self):
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
@@ -1315,7 +1380,7 @@ class RirReportContextTest(unittest.TestCase):
             index_result = CONTEXT.probe_source_inventory_git(self.root, {"api.py": digest_a})
         self.assertFalse(index_result[2])
 
-    def test_source_inventory_git_proof_accepts_clean_source_bearing_submodule(self):
+    def test_source_inventory_git_proof_rejects_any_clean_source_bearing_submodule(self):
         child_temporary = tempfile.TemporaryDirectory()
         self.addCleanup(child_temporary.cleanup)
         child = Path(child_temporary.name).resolve()
@@ -1360,37 +1425,10 @@ class RirReportContextTest(unittest.TestCase):
 
         self.assertEqual(
             CONTEXT.probe_source_inventory_git(self.root, required),
-            (commit, True, True),
-        )
-        published = self.publish_report()
-        original_request = self.base_state["original_requirement"]["request"]
-        context = CONTEXT.ReportContext(
-            schema_version=2,
-            report_id="RPT-001",
-            revision=1,
-            markdown_sha256=published.markdown_sha256,
-            state_sha256=hashlib.sha256(published.state_path.read_bytes()).hexdigest(),
-            repo_root_sha256=CONTEXT.repo_root_sha256(self.root),
-            requirement_sha256=CONTEXT.canonical_requirement_sha256(original_request),
-            repository_evidence_sha256=CONTEXT.canonical_repository_evidence_sha256(()),
-            source_inventory_sha256=FINALIZE.GRAPH_DELIVERY.source_inventory_sha256(required),
-            payload_sha256=FINALIZE._payload_sha256(),
-            created_at="2026-08-25T12:34:56Z",
-            baseline_commit=commit,
-            baseline_clean=True,
-            source_inventory_available=True,
-            source_inventory_complete=True,
-            source_inventory_git_tracked_only=True,
-        )
-        CONTEXT.publish_report_context(self.root, context)
-
-        previous = CONTROLLER.lookup_previous(
-            CONTROLLER.PreviousLookupRequest(self.root, original_request, ())
+            (commit, False, False),
         )
 
-        self.assertEqual(previous.status, "fresh", previous.reason)
-
-    def test_git_baseline_rejects_dirty_divergent_and_uninitialized_submodules(self):
+    def test_git_baseline_rejects_any_gitlink_even_when_checkout_is_clean(self):
         def initialize(repository: Path) -> None:
             subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
             subprocess.run(
@@ -1435,37 +1473,6 @@ class RirReportContextTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            checkout = self.root / "deps" / "child"
-            checked_out_commit = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=checkout,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-
-            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, True))
-            (checkout / "child.txt").write_text("dirty\n", encoding="utf-8")
-            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, False))
-            (checkout / "child.txt").write_text("one\n", encoding="utf-8")
-
-            subprocess.run(
-                ["git", "config", "user.email", "rir@example.invalid"],
-                cwd=checkout,
-                check=True,
-            )
-            subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=checkout, check=True)
-            (checkout / "child.txt").write_text("two\n", encoding="utf-8")
-            subprocess.run(["git", "add", "child.txt"], cwd=checkout, check=True)
-            subprocess.run(["git", "commit", "-qm", "diverge"], cwd=checkout, check=True)
-            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, False))
-            subprocess.run(["git", "checkout", "-q", checked_out_commit], cwd=checkout, check=True)
-
-            subprocess.run(
-                ["git", "submodule", "deinit", "-q", "-f", "--", "deps/child"],
-                cwd=self.root,
-                check=True,
-            )
             self.assertEqual(CONTEXT.probe_git_baseline(self.root), (parent_commit, False))
 
     def test_non_git_and_git_execution_failure_are_unproven_not_errors(self):
@@ -1776,6 +1783,28 @@ class RirReportContextTest(unittest.TestCase):
         )
         self.assertEqual(previous.status, "stale")
 
+    def test_explicit_path_candidate_overflow_finalizes_with_incomplete_proof(self):
+        self.configure_graph(False)
+        change = "Change " + " ".join(f"src/path-{index}.py" for index in range(17))
+        draft = self.begin(change)
+
+        result = FINALIZE.finalize_refinement(self.finalize_request(draft))
+
+        context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
+        self.assertIsNotNone(context)
+        self.assertFalse(context.source_inventory_git_tracked_only)
+        previous = CONTROLLER.lookup_previous(
+            CONTROLLER.PreviousLookupRequest(
+                self.root,
+                change,
+                (
+                    "authorizeProjectEdit permits owner and admin",
+                    "workspace invitations default to member",
+                ),
+            )
+        )
+        self.assertEqual(previous.status, "stale")
+
     def test_context_failure_leaves_published_report_and_unconsumed_draft_for_retry(self):
         self.configure_graph(False)
         draft = self.begin("Context failure remains retryable.")
@@ -1793,18 +1822,13 @@ class RirReportContextTest(unittest.TestCase):
         self.assertIsNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
         self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
-        old_context = published.state_path.parent / "revision-0001.context.json"
-        old_context.write_text('{"schema_version":1}\n', encoding="utf-8")
-        os.chmod(old_context, 0o600)
-
         result = FINALIZE.finalize_refinement(request)
         self.assertEqual(result.markdown_sha256, published.markdown_sha256)
         self.assertIsNotNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
-        self.assertTrue(old_context.is_file())
         self.assertTrue((published.state_path.parent / "revision-0001.context-v2.json").is_file())
         self.assertTrue(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
-    def test_literal_v1_metadata_and_context_migrate_stale_then_consume(self):
+    def test_intermediate_v1_metadata_and_context_fail_closed_without_rebinding(self):
         self.configure_graph(False)
         source = self.root / "source.py"
         source.write_text("value = 'old'\n", encoding="utf-8")
@@ -1874,52 +1898,20 @@ class RirReportContextTest(unittest.TestCase):
         os.chmod(old_context_path, 0o600)
         source.write_text("value = 'changed after v1 publication'\n", encoding="utf-8")
 
-        interrupted_runtime = dict(FINALIZE.default_runtime())
-        interrupted_runtime["migrate_legacy_controller_metadata"] = mock.Mock(
-            side_effect=ValueError("injected metadata migration crash")
-        )
-        with self.assertRaisesRegex(ValueError, "metadata migration crash"):
-            FINALIZE.finalize_refinement(request, _runtime=interrupted_runtime)
-        self.assertIsNotNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
-        self.assertEqual(json.loads(metadata_path.read_text(encoding="utf-8"))["schema_version"], 1)
-        self.assertFalse(
-            FINALIZE.STORAGE.load_private_draft(self.root, draft_result.draft_id)["consumed"]
-        )
+        metadata_before = metadata_path.read_bytes()
+        context_before = old_context_path.read_bytes()
 
-        staged_context = CONTEXT.load_report_context(self.root, "RPT-001", 1)
-        context_identity = {
-            "repo_root_sha256": staged_context.repo_root_sha256,
-            "requirement_sha256": staged_context.requirement_sha256,
-            "state_sha256": staged_context.state_sha256,
-            "repository_evidence_sha256": staged_context.repository_evidence_sha256,
-            "source_inventory_sha256": staged_context.source_inventory_sha256,
-            "source_inventory_available": staged_context.source_inventory_available,
-            "source_inventory_complete": staged_context.source_inventory_complete,
-            "source_inventory_git_tracked_only": False,
-            "payload_sha256": staged_context.payload_sha256,
-        }
-        staged_context_path = published.state_path.with_name("revision-0001.context-v2.json")
-        staged_context_path.unlink()
-        FINALIZE.STORAGE.migrate_legacy_controller_metadata(
-            self.root,
-            draft,
-            state_bytes,
-            key_map,
-            None,
-            analysis_sha256,
-            context_identity,
-        )
-        self.assertEqual(json.loads(metadata_path.read_text(encoding="utf-8"))["schema_version"], 2)
+        with self.assertRaisesRegex(
+            ValueError,
+            "completed report schema or payload identity is incompatible with this runtime",
+        ):
+            FINALIZE.finalize_refinement(request)
+
+        self.assertEqual(metadata_path.read_bytes(), metadata_before)
+        self.assertEqual(old_context_path.read_bytes(), context_before)
         self.assertIsNone(CONTEXT.load_report_context(self.root, "RPT-001", 1))
-
-        result = FINALIZE.finalize_refinement(request)
-
-        migrated = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
-        self.assertIsNotNone(migrated)
-        self.assertFalse(migrated.source_inventory_git_tracked_only)
-        self.assertEqual(migrated.state_sha256, hashlib.sha256(state_bytes).hexdigest())
         self.assertTrue(old_context_path.is_file())
-        self.assertTrue(
+        self.assertFalse(
             FINALIZE.STORAGE.load_private_draft(self.root, draft_result.draft_id)["consumed"]
         )
         previous = CONTROLLER.lookup_previous(
@@ -1927,79 +1919,42 @@ class RirReportContextTest(unittest.TestCase):
                 self.root, draft["request"], tuple(draft["repository_evidence"])
             )
         )
-        self.assertEqual(previous.status, "stale")
-        self.assertIn("Git-tracked", previous.reason)
+        self.assertEqual(previous.status, "none")
+        self.assertIsNone(previous.display_text)
+        self.assertEqual(
+            previous.reason,
+            "previous report schema or payload identity is incompatible with this runtime",
+        )
 
-    def test_legacy_metadata_migration_rejects_wrong_draft_analysis_and_state(self):
+    def test_current_schema_payload_mismatch_fails_with_stable_diagnostic(self):
         self.configure_graph(False)
-        draft_result = self.begin("Reject mismatched v1 migration.")
+        draft_result = self.begin("Reject mismatched current payload.")
         request = self.finalize_request(draft_result)
-        draft = CONTROLLER.load_draft(self.root, draft_result.draft_id)
-        state, key_map = FINALIZE.LINEAGE.build_state(draft, request.analysis, None)
-        state_bytes = FINALIZE.CONTRACTS.canonical_bytes(state)
-        published = FINALIZE.REPORT_STORE.publish_revision(
-            self.root, state_bytes, resume_partial=True
-        )
-        analysis_sha256 = hashlib.sha256(
-            FINALIZE.CONTRACTS.canonical_bytes(request.analysis)
-        ).hexdigest()
-        old_metadata = {
-            "schema_version": 1,
-            "draft_id": draft["draft_id"],
-            "report_id": draft["report_id"],
-            "revision": draft["revision"],
-            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
-            "key_map": key_map,
-            "analysis_sha256": analysis_sha256,
-            "context_identity": {
-                "repo_root_sha256": CONTEXT.repo_root_sha256(self.root),
-                "requirement_sha256": CONTEXT.canonical_requirement_sha256(draft["request"]),
-                "source_inventory_sha256": None,
-                "source_inventory_available": False,
-                "source_inventory_complete": False,
-                "payload_sha256": "5" * 64,
-            },
-        }
+        runtime = dict(FINALIZE.default_runtime())
+
+        class SimulatedInterruption(BaseException):
+            pass
+
+        runtime["consume_draft"] = mock.Mock(side_effect=SimulatedInterruption("before consume"))
+        with self.assertRaises(SimulatedInterruption):
+            FINALIZE.finalize_refinement(request, _runtime=runtime)
+
+        published = FINALIZE.REPORT_STORE.load_current(self.root, "RPT-001")
         metadata_path = published.state_path.with_name("revision-0001.controller.json")
-        original = canonical_bytes(old_metadata)
-        metadata_path.write_bytes(original)
-        os.chmod(metadata_path, 0o600)
-        evidence_sha256 = CONTEXT.canonical_repository_evidence_sha256(
-            tuple(draft["repository_evidence"])
-        )
-        context_identity = {
-            "repo_root_sha256": CONTEXT.repo_root_sha256(self.root),
-            "requirement_sha256": CONTEXT.canonical_requirement_sha256(draft["request"]),
-            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
-            "repository_evidence_sha256": evidence_sha256,
-            "source_inventory_sha256": None,
-            "source_inventory_available": False,
-            "source_inventory_complete": False,
-            "source_inventory_git_tracked_only": False,
-            "payload_sha256": FINALIZE._payload_sha256(),
-        }
-        cases = (
-            (dict(draft, draft_id="f" * 32), state_bytes, analysis_sha256),
-            (draft, state_bytes, "e" * 64),
-            (draft, state_bytes + b"tamper", analysis_sha256),
-        )
-        for selected_draft, selected_state, selected_analysis in cases:
-            with self.subTest(
-                draft_id=selected_draft["draft_id"],
-                analysis=selected_analysis,
-                tampered=selected_state != state_bytes,
-            ):
-                with self.assertRaises(ValueError):
-                    FINALIZE.STORAGE.migrate_legacy_controller_metadata(
-                        self.root,
-                        selected_draft,
-                        selected_state,
-                        key_map,
-                        None,
-                        selected_analysis,
-                        context_identity,
-                    )
-                self.assertEqual(metadata_path.read_bytes(), original)
+        context_path = published.state_path.with_name("revision-0001.context-v2.json")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        context = json.loads(context_path.read_text(encoding="utf-8"))
+        metadata["context_identity"]["payload_sha256"] = "f" * 64
+        context["payload_sha256"] = "f" * 64
+        metadata_path.write_bytes(canonical_bytes(metadata))
+        context_path.write_bytes(canonical_bytes(context))
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "completed report schema or payload identity is incompatible with this runtime",
+        ):
+            FINALIZE.finalize_refinement(request)
+
         self.assertFalse(
             FINALIZE.STORAGE.load_private_draft(self.root, draft_result.draft_id)["consumed"]
         )
@@ -2228,9 +2183,12 @@ class RirReportContextTest(unittest.TestCase):
         )
         foreign_graph = mock.Mock(side_effect=ValueError("foreign context revalidation"))
         foreign_runtime["load_promoted_scan_context"] = foreign_graph
-        with self.assertRaisesRegex(ValueError, "foreign context revalidation"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "completed report schema or payload identity is incompatible with this runtime",
+        ):
             FINALIZE.finalize_refinement(request, _runtime=foreign_runtime)
-        foreign_graph.assert_called_once()
+        foreign_graph.assert_not_called()
 
         changed_analysis = copy.deepcopy(request.analysis)
         changed_analysis["scope"][0]["evidence"] += " Changed after publication."
