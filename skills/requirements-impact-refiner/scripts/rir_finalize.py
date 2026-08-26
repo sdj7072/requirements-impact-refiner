@@ -283,6 +283,10 @@ class _FastScanContract(Protocol):
 
     def execute_fast_scan(self, *args, **kwargs): ...
 
+    def explicit_path_candidates(
+        self, change_request: str, evidence: Sequence[str]
+    ) -> tuple[str, ...]: ...
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -850,6 +854,7 @@ def _is_fast_scan_shape(value: object) -> bool:
             (
                 "derive_seeds",
                 "execute_fast_scan",
+                "explicit_path_candidates",
                 "prepare_fast_scan_identity",
                 "validate_fast_scan_receipt",
                 "canonical_fast_scan_bytes",
@@ -1412,15 +1417,6 @@ def _resume_legacy_completed_publication(
         payload_sha256,
     )
     graph_receipt = cast(Any, metadata_graph)
-    _operation(runtime, "migrate_legacy_controller_metadata")(
-        root,
-        draft,
-        state_bytes,
-        metadata["key_map"],
-        graph_receipt,
-        analysis_sha256,
-        context_identity,
-    )
     context_type = runtime.get("context_type")
     if not isinstance(context_type, type) or context_type is not REPORT_CONTEXT.ReportContext:
         raise TypeError("finalize report context type is invalid")
@@ -1443,6 +1439,15 @@ def _resume_legacy_completed_publication(
         source_inventory_git_tracked_only=False,
     )
     _operation(runtime, "publish_report_context")(root, migrated_context)
+    _operation(runtime, "migrate_legacy_controller_metadata")(
+        root,
+        draft,
+        state_bytes,
+        metadata["key_map"],
+        graph_receipt,
+        analysis_sha256,
+        context_identity,
+    )
     _operation(runtime, "consume_draft")(
         _operation(runtime, "draft_path")(root, str(draft["draft_id"])),
         draft,
@@ -1519,7 +1524,59 @@ def _resume_completed_publication(
         raise TypeError("finalize report context type is invalid")
     context = _operation(runtime, "load_report_context")(root, report_id, revision)
     if context is None:
-        return None
+        identity = metadata["context_identity"]
+        try:
+            legacy_context = _operation(runtime, "load_legacy_report_context")(
+                root, report_id, revision
+            )
+        except ValueError:
+            return None
+        request_value = draft.get("request")
+        evidence_value = draft.get("repository_evidence")
+        if (
+            not isinstance(identity, Mapping)
+            or identity.get("source_inventory_git_tracked_only") is not False
+            or not isinstance(legacy_context, Mapping)
+            or not isinstance(request_value, str)
+            or not isinstance(evidence_value, list)
+            or not all(isinstance(item, str) for item in evidence_value)
+        ):
+            return None
+        state_bytes, _stored_state, _delivery, _display = _verified_published_display(
+            runtime, current
+        )
+        repo_sha256 = _operation(runtime, "repo_root_sha256")(root)
+        requirement_sha256 = _operation(runtime, "canonical_requirement_sha256")(request_value)
+        evidence_sha256 = _operation(runtime, "canonical_repository_evidence_sha256")(
+            tuple(evidence_value)
+        )
+        if (
+            identity.get("repo_root_sha256") != repo_sha256
+            or identity.get("requirement_sha256") != requirement_sha256
+            or identity.get("repository_evidence_sha256") != evidence_sha256
+            or identity.get("state_sha256") != hashlib.sha256(state_bytes).hexdigest()
+            or legacy_context.get("markdown_sha256") != current.markdown_sha256
+        ):
+            return None
+        context = _operation(runtime, "context_type")(
+            schema_version=2,
+            report_id=report_id,
+            revision=revision,
+            markdown_sha256=current.markdown_sha256,
+            state_sha256=identity["state_sha256"],
+            repo_root_sha256=repo_sha256,
+            requirement_sha256=requirement_sha256,
+            repository_evidence_sha256=evidence_sha256,
+            source_inventory_sha256=identity.get("source_inventory_sha256"),
+            payload_sha256=identity["payload_sha256"],
+            created_at=legacy_context["created_at"],
+            baseline_commit=legacy_context["baseline_commit"],
+            baseline_clean=legacy_context["baseline_clean"],
+            source_inventory_available=identity["source_inventory_available"],
+            source_inventory_complete=identity["source_inventory_complete"],
+            source_inventory_git_tracked_only=False,
+        )
+        _operation(runtime, "publish_report_context")(root, context)
     request_value = draft.get("request")
     if not isinstance(request_value, str):
         return None
@@ -1652,6 +1709,15 @@ def _finalize(request, runtime: Mapping[str, object]):
         source_sha256, source_available, source_complete, source_digests = (
             _source_inventory_identity(graph_context)
         )
+        fast_scan_module, _fast_scan_store = _fast_scan_modules()
+        explicit_paths = fast_scan_module.explicit_path_candidates(
+            request_value, tuple(evidence_value)
+        )
+        explicit_paths_complete = source_digests is not None and all(
+            path in source_digests for path in explicit_paths
+        )
+        if not explicit_paths_complete:
+            source_digests = None
         state_sha256 = hashlib.sha256(state_bytes).hexdigest()
         baseline = (
             _operation(runtime, "probe_source_inventory_git")(root, source_digests)

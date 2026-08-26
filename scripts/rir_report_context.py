@@ -18,7 +18,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
@@ -914,6 +914,7 @@ def _git_environment() -> dict[str, str]:
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_NO_REPLACE_OBJECTS": "1",
         "GIT_TERMINAL_PROMPT": "0",
         "LANG": "C",
         "LC_ALL": "C",
@@ -968,6 +969,7 @@ def _run_git(
     command = (
         "git",
         "--no-pager",
+        "--no-replace-objects",
         "-c",
         "core.hooksPath=/dev/null",
         "-c",
@@ -1333,6 +1335,76 @@ def _batch_blob_sha256(
     return result
 
 
+def _worktree_source_sha256(root: Path, relative: str) -> str:
+    parts = PurePosixPath(relative).parts
+    directory_fd = os.open(root, _directory_flags())
+    opened = [directory_fd]
+    try:
+        for part in parts[:-1]:
+            directory_fd = os.open(part, _directory_flags(), dir_fd=directory_fd)
+            opened.append(directory_fd)
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(parts[-1], flags, dir_fd=directory_fd)
+        opened.append(descriptor)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_GIT_BLOB_OUTPUT_BYTES:
+            raise ValueError("required worktree source is unsafe")
+        digest = hashlib.sha256()
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                raise ValueError("required worktree source is truncated")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        return digest.hexdigest()
+    except OSError as error:
+        raise ValueError("required worktree source is unavailable") from error
+    finally:
+        for descriptor in reversed(opened):
+            os.close(descriptor)
+
+
+def _checkout_transforms_present(root: Path, scope: tuple[str, str], paths: Sequence[str]) -> bool:
+    config = _run_git(
+        root,
+        (
+            *scope,
+            "config",
+            "--local",
+            "--get-regexp",
+            r"^(core\.autocrlf|core\.eol|filter\..*\.(clean|smudge|process|required))$",
+        ),
+    )
+    if config is None or config[0] not in {0, 1}:
+        return True
+    if config[0] == 0 and config[1].strip():
+        return True
+    if not paths:
+        return False
+    attributes = _run_git(
+        root,
+        (
+            *scope,
+            "check-attr",
+            "-z",
+            "--stdin",
+            "filter",
+            "working-tree-encoding",
+            "text",
+            "eol",
+        ),
+        input_payload=b"\0".join(path.encode() for path in paths) + b"\0",
+        maximum_output=MAX_REQUIRED_SOURCE_PATH_BYTES,
+    )
+    if attributes is None or attributes[0] != 0:
+        return True
+    fields = attributes[1].split(b"\0")
+    if fields[-1] != b"" or (len(fields) - 1) % 3:
+        return True
+    return any(value not in {b"unspecified", b"unset"} for value in fields[2:-1:3])
+
+
 def _capture_repository_git_state(
     root: Path,
     expected_commit: str | None,
@@ -1346,6 +1418,13 @@ def _capture_repository_git_state(
         _git_bytes(root, (*scope, "rev-parse", "--verify", "HEAD^{commit}"), "Git HEAD"),
         "Git HEAD",
     )
+    replacements = _git_bytes(
+        root,
+        (*scope, "for-each-ref", "--format=%(refname)", "refs/replace"),
+        "Git replacement refs",
+    )
+    if replacements.strip():
+        raise ValueError("Git replacement refs are present")
     if expected_commit is not None and head != expected_commit:
         raise ValueError("Git HEAD does not match the captured gitlink")
     flags = _git_bytes(root, (*scope, "ls-files", "-v", "-z"), "Git index flags")
@@ -1411,6 +1490,10 @@ def _prove_required_sources(
         if path == link:
             raise ValueError("required source resolves to a submodule gitlink")
         nested.setdefault(link, {})[path[len(link) + 1 :]] = digest
+    if any(_worktree_source_sha256(root, path) != digest for path, digest in required.items()):
+        raise ValueError("required worktree source digest does not match report evidence")
+    if _checkout_transforms_present(root, scope, tuple(sorted(direct))):
+        raise ValueError("Git checkout transformations make commit blobs non-equivalent")
     observed = _batch_blob_sha256(root, scope, commit, tuple(sorted(direct)))
     if observed != direct:
         raise ValueError("required source digest does not match the captured commit")
@@ -1429,6 +1512,8 @@ def _prove_required_sources(
     after = _capture_repository_git_state(root, commit, deadline)
     if before[1:] != after[1:]:
         raise ValueError("Git repository state changed during source proof")
+    if any(_worktree_source_sha256(root, path) != digest for path, digest in required.items()):
+        raise ValueError("required worktree source changed during source proof")
     return commit
 
 

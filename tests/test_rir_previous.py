@@ -502,6 +502,25 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "stale")
         self.assertIn("HEAD", result.reason)
 
+    def test_replacement_ref_is_never_fresh_at_the_same_head(self):
+        self.publish()
+        original_head = self.git("rev-parse", "HEAD").stdout.strip()
+        (self.root / "replacement.py").write_text("replacement = True\n", encoding="utf-8")
+        self.git("add", "replacement.py")
+        self.git("commit", "-qm", "replacement commit")
+        replacement = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", original_head)
+        (self.root / "replacement.py").unlink(missing_ok=True)
+        self.git("replace", original_head, replacement)
+
+        result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(self.git("rev-parse", "HEAD").stdout.strip(), original_head)
+        self.assertEqual(result.status, "stale")
+        self.assertIn("replace", result.reason.lower())
+        self.git("replace", "-d", original_head)
+        self.assertEqual(PREVIOUS.lookup_previous(self.request()).status, "fresh")
+
     def test_index_flag_race_hiding_a_real_edit_is_stale(self):
         self.publish()
         real_runner = PREVIOUS._run_git_command

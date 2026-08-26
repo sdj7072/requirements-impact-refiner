@@ -607,6 +607,7 @@ def _git_environment() -> dict[str, str]:
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_NO_REPLACE_OBJECTS": "1",
         "GIT_TERMINAL_PROMPT": "0",
         "LANG": "C",
         "LC_ALL": "C",
@@ -657,6 +658,7 @@ def _run_git_command(
     command = (
         "git",
         "--no-pager",
+        "--no-replace-objects",
         "--literal-pathspecs",
         "-c",
         "core.hooksPath=/dev/null",
@@ -979,6 +981,28 @@ def _configured_worktree_matches(root: Path, git_dir: Path) -> bool:
     return all(path.resolve() == root for path in configured_paths)
 
 
+def _replacement_refs_present(git_dir: Path) -> bool:
+    common_dir = _filesystem_common_dir(git_dir)
+    replace_dir = common_dir / "refs" / "replace"
+    try:
+        metadata = replace_dir.lstat()
+    except FileNotFoundError:
+        metadata = None
+    except OSError as error:
+        raise _GitUnavailable("Git replacement refs are unavailable") from error
+    if metadata is not None:
+        if replace_dir.is_symlink() or not stat.S_ISDIR(metadata.st_mode):
+            raise _GitUnavailable("Git replacement refs are unsafe")
+        try:
+            with os.scandir(replace_dir) as entries:
+                if next(entries, None) is not None:
+                    return True
+        except OSError as error:
+            raise _GitUnavailable("Git replacement refs are unavailable") from error
+    packed = _read_git_control_file(common_dir / "packed-refs", 4 * 1024 * 1024)
+    return packed is not None and b" refs/replace/" in packed
+
+
 def _worktree_scope(root: Path, deadline: float) -> tuple[str, str]:
     git_dir = _filesystem_git_dir(root)
     scope = (f"--git-dir={git_dir}", f"--work-tree={root}")
@@ -1071,6 +1095,8 @@ def _probe_git(root: Path, baseline_commit: str | None, deadline: float) -> _Git
     try:
         scope = _worktree_scope(root, deadline)
         git_dir = Path(scope[0].split("=", 1)[1])
+        if _replacement_refs_present(git_dir):
+            raise _GitUnavailable("Git replacement refs are present")
         commit = _filesystem_head(git_dir)
         status_payload = _successful(
             _run_git_command(

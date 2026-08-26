@@ -343,6 +343,21 @@ def _paths(text: str) -> tuple[str, ...]:
     return tuple(values)
 
 
+def explicit_path_candidates(change_request: str, evidence: Sequence[str]) -> tuple[str, ...]:
+    if not isinstance(change_request, str) or not isinstance(evidence, (tuple, list)):
+        raise TypeError("explicit path inputs are invalid")
+    values: list[str] = []
+    for text in (change_request, *evidence):
+        if not isinstance(text, str):
+            raise TypeError("explicit path evidence must be text")
+        for path in _paths(text):
+            if path not in values:
+                values.append(path)
+                if len(values) > MAX_SEEDS:
+                    raise ValueError("explicit path candidates exceed their limit")
+    return tuple(values)
+
+
 def _read_source(root: Path, relative: str) -> tuple[str, str] | None:
     return _read_source_detailed(root, relative)[0]
 
@@ -1042,6 +1057,7 @@ __all__ = [
     "canonical_fast_scan_bytes",
     "derive_seeds",
     "execute_fast_scan",
+    "explicit_path_candidates",
     "prepare_fast_scan_identity",
     "validate_fast_scan_receipt",
 ]

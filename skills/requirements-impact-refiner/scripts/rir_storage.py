@@ -990,7 +990,10 @@ def _validate_legacy_controller_metadata_bytes(
         or not isinstance(value.get("key_map"), dict)
         or not isinstance(value.get("analysis_sha256"), str)
         or _SHA256_PATTERN.fullmatch(value["analysis_sha256"]) is None
-        or not _valid_legacy_context_identity(value.get("context_identity"))
+        or not (
+            _valid_legacy_context_identity(value.get("context_identity"))
+            or _valid_context_identity(value.get("context_identity"))
+        )
         or (
             graph is not None
             and (
@@ -1067,7 +1070,13 @@ def _load_legacy_controller_completion_metadata(current) -> dict[str, object] | 
 
 
 def _load_controller_metadata(current) -> dict[str, object] | None:
-    metadata = _load_controller_completion_metadata(current)
+    try:
+        metadata = _load_controller_completion_metadata(current)
+    except ValueError as current_error:
+        try:
+            metadata = _load_legacy_controller_completion_metadata(current)
+        except ValueError:
+            raise current_error from None
     if metadata is None:
         return None
     return cast(dict[str, object], metadata["key_map"])

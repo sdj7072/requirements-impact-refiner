@@ -412,6 +412,44 @@ class RirStorageTest(unittest.TestCase):
             ),
             legacy,
         )
+        schema1_with_v2_identity = {
+            **legacy,
+            "context_identity": {
+                "repo_root_sha256": "3" * 64,
+                "requirement_sha256": "4" * 64,
+                "state_sha256": state_sha256,
+                "repository_evidence_sha256": "6" * 64,
+                "source_inventory_sha256": None,
+                "source_inventory_available": False,
+                "source_inventory_complete": False,
+                "source_inventory_git_tracked_only": False,
+                "payload_sha256": "5" * 64,
+            },
+        }
+        self.assertEqual(
+            STORAGE._validate_legacy_controller_metadata_bytes(
+                canonical_bytes(schema1_with_v2_identity),
+                report_id="RPT-001",
+                revision=1,
+                state_sha256=state_sha256,
+            ),
+            schema1_with_v2_identity,
+        )
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
+        report_dir.mkdir(parents=True)
+        state_path = report_dir / "revision-0001.json"
+        state_path.write_bytes(b"legacy state\n")
+        schema1_with_v2_identity["state_sha256"] = hashlib.sha256(
+            state_path.read_bytes()
+        ).hexdigest()
+        metadata_path = report_dir / "revision-0001.controller.json"
+        metadata_path.write_bytes(canonical_bytes(schema1_with_v2_identity))
+        os.chmod(metadata_path, 0o600)
+        current = SimpleNamespace(report_id="RPT-001", revision=1, state_path=state_path)
+        self.assertEqual(
+            STORAGE.load_controller_metadata(current),
+            schema1_with_v2_identity["key_map"],
+        )
         variants = (
             {**legacy, "schema_version": 2},
             {**legacy, "draft_id": "bad"},
