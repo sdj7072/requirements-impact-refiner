@@ -53,18 +53,25 @@ codex plugin add requirements-impact-refiner@requirements-impact-refiner
 
 저장소의 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)은 루트 [Codex 플러그인 매니페스트](.codex-plugin/plugin.json)를 가리키며, 그 `skills` 필드는 하나뿐인 기준 `./skills/` 트리를 사용합니다. [`.mcp.json`](.mcp.json)은 로컬 표준 라이브러리 기반의 `rir_begin`, `rir_finalize` 도구도 노출합니다. MCP는 호스트가 도구를 호출할 때 구조화된 강제를 제공하고, 번들 CLI는 잘못된 finalize 시 사용자 출력을 내지 않는 하드 강제 경계입니다. 컨트롤러에는 네트워크 클라이언트나 서드파티 런타임 의존성이 없으며 hook, app, agent도 추가하지 않습니다.
 
-Claude Code에서는 Claude Code 내부에서 다음 명령을 실행합니다.
+Claude Code 릴리스를 태그에 고정해 설치하려면 Claude Code 내부에서 다음 명령을 실행합니다.
 
 ```text
-/plugin marketplace add sdj7072/requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@requirements-impact-refiner--v0.6.0
 /plugin install requirements-impact-refiner@requirements-impact-refiner
 ```
 
-기존 Claude Code 설치를 업그레이드하려면 마켓플레이스를 갱신하고 설치된 플러그인을 업데이트한 뒤 다시 로드합니다.
+릴리스되지 않은 저장소 변경을 평가하려는 경우에만 아래 `main` 마켓플레이스 소스를 추가합니다. `main`은 development-only이며 게시된 릴리스와 바이트 단위로 같지 않습니다.
 
 ```text
-/plugin marketplace update requirements-impact-refiner
-/plugin update requirements-impact-refiner@requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@main
+```
+
+기존 태그 고정 Claude Code 설치를 업그레이드하거나 이전 `main` 스냅샷을 교체하려면 마켓플레이스 소스를 교체하고 플러그인을 재설치한 뒤 다시 로드합니다.
+
+```text
+/plugin marketplace remove requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@requirements-impact-refiner--v0.6.0
+/plugin install requirements-impact-refiner@requirements-impact-refiner
 /reload-plugins
 ```
 

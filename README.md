@@ -53,18 +53,25 @@ codex plugin add requirements-impact-refiner@requirements-impact-refiner
 
 The repository marketplace at [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) resolves the root [Codex plugin manifest](.codex-plugin/plugin.json), whose `skills` field points to the single canonical `./skills/` tree. [`.mcp.json`](.mcp.json) also exposes the local, standard-library-only `rir_begin` and `rir_finalize` tools. MCP provides structured enforcement when the host calls those tools; the bundled CLI is the hard-enforcement boundary because an invalid finalize prints no user response. The controller has no network client or third-party runtime dependency, and the plugin adds no hooks, apps, or agents.
 
-For Claude Code, run these commands inside Claude Code:
+For a tag-pinned Claude Code release installation, run these commands inside Claude Code:
 
 ```text
-/plugin marketplace add sdj7072/requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@requirements-impact-refiner--v0.6.0
 /plugin install requirements-impact-refiner@requirements-impact-refiner
 ```
 
-To upgrade an existing Claude Code installation, refresh the marketplace, update the installed plugin, and reload it:
+To evaluate unreleased repository changes instead, add the `main` marketplace source below. `main` is development-only and is not byte-identical to the published release:
 
 ```text
-/plugin marketplace update requirements-impact-refiner
-/plugin update requirements-impact-refiner@requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@main
+```
+
+To upgrade an existing tag-pinned Claude Code installation or replace an older `main` snapshot, replace the marketplace source, reinstall the plugin, and reload it:
+
+```text
+/plugin marketplace remove requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@requirements-impact-refiner--v0.6.0
+/plugin install requirements-impact-refiner@requirements-impact-refiner
 /reload-plugins
 ```
 

@@ -89,7 +89,7 @@ def harness_commands(path):
 
 
 class DocumentationTest(unittest.TestCase):
-    def test_codex_release_install_is_tag_pinned_and_main_is_development_only(self):
+    def test_release_installs_are_tag_pinned_and_main_is_development_only(self):
         release_add = (
             "codex plugin marketplace add sdj7072/requirements-impact-refiner "
             "--ref requirements-impact-refiner--v0.6.0"
@@ -107,6 +107,19 @@ class DocumentationTest(unittest.TestCase):
             self.assertIn(
                 "codex plugin marketplace remove requirements-impact-refiner", commands, name
             )
+            claude_release_add = (
+                "/plugin marketplace add sdj7072/requirements-impact-refiner"
+                "@requirements-impact-refiner--v0.6.0"
+            )
+            claude_development_add = (
+                "/plugin marketplace add sdj7072/requirements-impact-refiner@main"
+            )
+            self.assertGreaterEqual(text.count(claude_release_add), 2, name)
+            self.assertEqual(text.count(claude_development_add), 1, name)
+            development_offset = text.index(claude_development_add)
+            self.assertIn("development-only", text[development_offset - 300 : development_offset])
+            self.assertIn("/plugin marketplace remove requirements-impact-refiner", text, name)
+            self.assertNotIn("/plugin marketplace update requirements-impact-refiner", text, name)
 
     def test_ci_has_separate_runtime_matrix_and_python_313_quality_job(self):
         """Catch CI changes that drop the dedicated pinned-tool quality gate."""
@@ -301,8 +314,6 @@ class DocumentationTest(unittest.TestCase):
                 "--previous",
                 "--print-expected-delta",
                 "Revision 1",
-                "/plugin marketplace update requirements-impact-refiner",
-                "/plugin update requirements-impact-refiner@requirements-impact-refiner",
             ):
                 self.assertIn(token, text, f"{token} missing from {name}")
             self.assertRegex(text, r"v?0\.2(?:\.0)?.{0,80}(historical|과거|履歴)")

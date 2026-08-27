@@ -53,18 +53,25 @@ codex plugin add requirements-impact-refiner@requirements-impact-refiner
 
 リポジトリの [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) はルートの [Codex plugin manifest](.codex-plugin/plugin.json) を参照し、その `skills` は単一の正本 `./skills/` ツリーを指します。[`.mcp.json`](.mcp.json) はローカルかつ標準ライブラリのみの `rir_begin` と `rir_finalize` も公開します。MCP はホストが tool を呼ぶ場合に構造化された強制を提供し、同梱 CLI は不正な finalize でユーザー出力を返さない hard-enforcement 境界です。controller に network client や third-party runtime dependency はなく、hook、app、agent も追加しません。
 
-Claude Code では、Claude Code 内で次を実行します。
+Claude Code の release installation を tag-pinned にするには、Claude Code 内で次を実行します。
 
 ```text
-/plugin marketplace add sdj7072/requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@requirements-impact-refiner--v0.6.0
 /plugin install requirements-impact-refiner@requirements-impact-refiner
 ```
 
-既存の Claude Code インストールをアップグレードするには、マーケットプレイスを更新し、インストール済みプラグインを更新して再読み込みします。
+未リリースのリポジトリ変更を評価する場合に限り、次の `main` marketplace source を追加します。`main` は development-only であり、公開 release と byte-identical ではありません。
 
 ```text
-/plugin marketplace update requirements-impact-refiner
-/plugin update requirements-impact-refiner@requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@main
+```
+
+既存の tag-pinned Claude Code installation を upgrade する場合、または古い `main` snapshot を置き換える場合は、marketplace source を置き換えて plugin を再インストールし、reload します。
+
+```text
+/plugin marketplace remove requirements-impact-refiner
+/plugin marketplace add sdj7072/requirements-impact-refiner@requirements-impact-refiner--v0.6.0
+/plugin install requirements-impact-refiner@requirements-impact-refiner
 /reload-plugins
 ```
 
