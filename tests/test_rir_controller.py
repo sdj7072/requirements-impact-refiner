@@ -3613,6 +3613,33 @@ else:
         self.assertIsNone(result.prior_state)
         self.assertIsNone(result.prior_key_map)
 
+    def test_begin_selects_only_matching_lineage_from_multiple_reports(self):
+        first = self.fixture("compact-state-post-decision.json")
+        CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(first))
+        second = json.loads(json.dumps(first))
+        second["report"]["id"] = "RPT-002"
+        second["original_requirement"]["request"] = "Introduce a second independent requirement."
+        CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(second))
+
+        result = CONTROLLER.begin_refinement(
+            self.request(request="Introduce a second independent requirement.")
+        )
+
+        self.assertEqual(result.report_id, "RPT-002")
+        self.assertEqual(result.revision, 2)
+
+    def test_begin_rejects_duplicate_matching_lineages(self):
+        first = self.fixture("compact-state-post-decision.json")
+        CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(first))
+        duplicate = json.loads(json.dumps(first))
+        duplicate["report"]["id"] = "RPT-002"
+        CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(duplicate))
+
+        with self.assertRaisesRegex(ValueError, "multiple current reports match requirement"):
+            CONTROLLER.begin_refinement(
+                self.request(request=first["original_requirement"]["request"])
+            )
+
     def test_begin_migrates_valid_precontroller_report_lineage(self):
         state = self.fixture("compact-state-pre-decision.json")
         CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(state))

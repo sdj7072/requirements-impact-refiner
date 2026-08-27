@@ -349,7 +349,10 @@ GRAPH_CONFIDENCE_RANK = {
 }
 
 
-def current_lineage(root: Path):
+def current_lineage(
+    root: Path,
+    matches: Callable[[Mapping[str, object]], bool] | None = None,
+):
     reports = root / ".requirements-impact-refiner" / "reports"
     if not reports.exists():
         return None
@@ -365,18 +368,27 @@ def current_lineage(root: Path):
     )
     if not report_ids:
         return None
-    if len(report_ids) != 1:
-        raise ValueError("multiple current reports require an explicit report ID")
-    current = REPORT_STORE.load_current(root, report_ids[0])
-    if current is None:
+    selected = []
+    for report_id in report_ids:
+        current = REPORT_STORE.load_current(root, report_id)
+        if current is None:
+            continue
+        prior_state, errors = COMPACT_STATE.load_state_bytes(current.state_path.read_bytes())
+        if errors or prior_state is None:
+            raise ValueError("current report state is invalid")
+        if matches is not None and not matches(prior_state):
+            continue
+        key_map: Mapping[str, object] | None = STORAGE.load_controller_metadata(current)
+        if key_map is None:
+            key_map = legacy_key_map(prior_state)
+        selected.append((current, prior_state, key_map))
+    if not selected:
         return None
-    prior_state, errors = COMPACT_STATE.load_state_bytes(current.state_path.read_bytes())
-    if errors or prior_state is None:
-        raise ValueError("current report state is invalid")
-    key_map: Mapping[str, object] | None = STORAGE.load_controller_metadata(current)
-    if key_map is None:
-        key_map = legacy_key_map(prior_state)
-    return current, prior_state, key_map
+    if len(selected) != 1:
+        if matches is None:
+            raise ValueError("multiple current reports require an explicit report ID")
+        raise ValueError("multiple current reports match requirement")
+    return selected[0]
 
 
 def legacy_key_map(state: Mapping[str, object]) -> dict[str, dict[str, str]]:

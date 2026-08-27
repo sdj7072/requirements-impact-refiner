@@ -2550,15 +2550,17 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
     )
     settings = SETTINGS.resolve(root, request.audience_override, request.delivery_override)
     promotion = _promoted_scan(root, request, settings)
-    current_lineage = _current_lineage(root)
-    if current_lineage is not None:
-        _current, prior_state, _prior_key_map = current_lineage
+
+    def matches_requirement(prior_state: Mapping[str, object]) -> bool:
         original = prior_state.get("original_requirement")
         prior_request = original.get("request") if isinstance(original, Mapping) else None
         if not isinstance(prior_request, str):
             raise ValueError("current report requirement is invalid")
-        if FINALIZE.REPORT_CONTEXT.canonical_requirement_text(prior_request) != normalized_request:
-            current_lineage = None
+        return (
+            FINALIZE.REPORT_CONTEXT.canonical_requirement_text(prior_request) == normalized_request
+        )
+
+    current_lineage = _current_lineage(root, matches_requirement)
     if current_lineage is None:
         report_id = _next_report_id(root)
         revision = 1
