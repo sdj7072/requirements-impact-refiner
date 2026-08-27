@@ -3599,11 +3599,27 @@ else:
         self.assertEqual(stored["repo_root"], str(self.root.resolve()))
         self.assertFalse(stored["consumed"])
 
+    def test_begin_allocates_new_report_for_unrelated_requirement(self):
+        state = self.fixture("compact-state-post-decision.json")
+        CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(state))
+
+        result = CONTROLLER.begin_refinement(
+            self.request(request="Introduce an unrelated audit export requirement.")
+        )
+
+        self.assertEqual(result.report_id, "RPT-002")
+        self.assertEqual(result.revision, 1)
+        self.assertEqual(result.previous_sha256, "none")
+        self.assertIsNone(result.prior_state)
+        self.assertIsNone(result.prior_key_map)
+
     def test_begin_migrates_valid_precontroller_report_lineage(self):
         state = self.fixture("compact-state-pre-decision.json")
         CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(state))
 
-        result = CONTROLLER.begin_refinement(self.request(request="Revise legacy report."))
+        result = CONTROLLER.begin_refinement(
+            self.request(request=state["original_requirement"]["request"])
+        )
 
         self.assertEqual(result.report_id, "RPT-001")
         self.assertEqual(result.revision, 2)
@@ -3633,7 +3649,9 @@ else:
         metadata_path.write_bytes(CONTROLLER._canonical_bytes(metadata))
         metadata_path.chmod(0o600)
 
-        result = CONTROLLER.begin_refinement(self.request(request="Revise public v0.5 report."))
+        result = CONTROLLER.begin_refinement(
+            self.request(request=state["original_requirement"]["request"])
+        )
 
         self.assertEqual(result.revision, 2)
         self.assertEqual(result.prior_key_map["impacts"], {"public-v05-impact": "IMP-001"})
