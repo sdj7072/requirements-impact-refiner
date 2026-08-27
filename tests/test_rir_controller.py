@@ -368,6 +368,8 @@ with tempfile.TemporaryDirectory() as temporary:
         )
         stored = controller.load_draft(root, draft.draft_id)
         assert stored["promoted_scan"]["scan_id"] == scan.scan_id
+        stored["consumed"] = True
+        controller._replace_private_draft(root, draft.draft_id, stored)
         for name, sentinel in foreign.items():
             assert sys.modules[name] is sentinel, name
 
@@ -3639,6 +3641,21 @@ else:
             CONTROLLER.begin_refinement(
                 self.request(request=first["original_requirement"]["request"])
             )
+
+    def test_begin_rejects_second_active_draft_for_same_report_revision(self):
+        first = CONTROLLER.begin_refinement(self.request())
+
+        with self.assertRaisesRegex(ValueError, "active draft already exists for requirement"):
+            CONTROLLER.begin_refinement(self.request())
+
+        self.assertFalse(CONTROLLER.load_draft(self.root, first.draft_id)["consumed"])
+
+    def test_begin_gives_unrelated_active_drafts_distinct_report_ids(self):
+        first = CONTROLLER.begin_refinement(self.request(request="First independent requirement"))
+        second = CONTROLLER.begin_refinement(self.request(request="Second independent requirement"))
+
+        self.assertEqual((first.report_id, first.revision), ("RPT-001", 1))
+        self.assertEqual((second.report_id, second.revision), ("RPT-002", 1))
 
     def test_begin_migrates_valid_precontroller_report_lineage(self):
         state = self.fixture("compact-state-pre-decision.json")

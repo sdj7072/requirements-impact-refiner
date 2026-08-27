@@ -85,6 +85,12 @@ class _ControllerStorageContract(Protocol):
 
     def write_private_draft(self, root: Path, draft_id: str, payload: bytes) -> Path: ...
 
+    def write_reserved_draft(
+        self, root: Path, draft_id: str, payload: bytes, requirement_sha256: str
+    ) -> Path: ...
+
+    def active_draft_reservations(self, root: Path) -> tuple[dict[str, object], ...]: ...
+
     def load_private_draft(self, repo_root: Path, draft_id: str) -> dict[str, object]: ...
 
     def replace_private_draft(
@@ -261,6 +267,8 @@ def _is_controller_storage_contract(value: object) -> TypeGuard[_ControllerStora
     callable_names = (
         "root_path",
         "write_private_draft",
+        "write_reserved_draft",
+        "active_draft_reservations",
         "load_private_draft",
         "replace_private_draft",
         "draft_path",
@@ -394,6 +402,8 @@ DRAFT_ID_PATTERN = STORAGE.DRAFT_ID_PATTERN
 fcntl = STORAGE.fcntl
 _root = STORAGE.root_path
 _write_private_draft = STORAGE.write_private_draft
+_write_reserved_draft = STORAGE.write_reserved_draft
+_active_draft_reservations = STORAGE.active_draft_reservations
 _controller_metadata_path = STORAGE.controller_metadata_path
 _load_controller_metadata = STORAGE.load_controller_metadata
 _load_controller_completion_metadata = STORAGE.load_controller_completion_metadata
@@ -1309,7 +1319,7 @@ _bounded = bounded_bytes
 _validate_analysis = validate_analysis
 
 
-def _next_report_id(root: Path) -> str:
+def _next_report_id(root: Path, reserved: set[str] | None = None) -> str:
     reports = root / ".requirements-impact-refiner" / "reports"
     existing = set()
     if reports.is_dir() and not reports.is_symlink():
@@ -1320,7 +1330,7 @@ def _next_report_id(root: Path) -> str:
         }
     for number in range(1, 1000):
         candidate = f"RPT-{number:03d}"
-        if candidate not in existing:
+        if candidate not in existing and candidate not in (reserved or set()):
             return candidate
     raise ValueError("no report IDs remain")
 
@@ -2543,6 +2553,7 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
     ):
         raise ValueError("repository_evidence must contain nonempty strings")
     normalized_request = FINALIZE.REPORT_CONTEXT.canonical_requirement_text(request.request)
+    requirement_sha256 = hashlib.sha256(normalized_request.encode("utf-8")).hexdigest()
     _bounded(
         {"request": normalized_request, "repository_evidence": request.repository_evidence},
         MAX_BEGIN_BYTES,
@@ -2561,8 +2572,12 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         )
 
     current_lineage = _current_lineage(root, matches_requirement)
+    reservations = _active_draft_reservations(root)
+    if any(row["requirement_sha256"] == requirement_sha256 for row in reservations):
+        raise ValueError("active draft already exists for requirement")
+    reserved_report_ids = {str(row["report_id"]) for row in reservations}
     if current_lineage is None:
-        report_id = _next_report_id(root)
+        report_id = _next_report_id(root, reserved_report_ids)
         revision = 1
         previous_sha256 = "none"
         prior_state = None
@@ -2594,7 +2609,7 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
     }
     if promotion is not None:
         draft["promoted_scan"] = promotion
-    path = _write_private_draft(root, draft_id, _canonical_bytes(draft))
+    path = _write_reserved_draft(root, draft_id, _canonical_bytes(draft), requirement_sha256)
     return DraftResult(
         draft_id=draft_id,
         draft_path=path,

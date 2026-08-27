@@ -1185,6 +1185,135 @@ def _draft_transaction_lock(directory_fd: int):
             os.close(descriptor)
 
 
+def _reservation_payload(directory_fd: int, name: str) -> dict[str, object]:
+    descriptor = None
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_fd)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+        ):
+            raise ValueError("draft reservation is unsafe")
+        raw = _read_bounded_descriptor(descriptor, 4096, "draft reservation")
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"draft reservation is invalid: {error}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {"schema_version", "draft_id", "report_id", "revision", "requirement_sha256"}
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("draft_id"), str)
+        or DRAFT_ID_PATTERN.fullmatch(value["draft_id"]) is None
+        or not isinstance(value.get("report_id"), str)
+        or re.fullmatch(r"RPT-\d{3}", value["report_id"]) is None
+        or not isinstance(value.get("revision"), int)
+        or isinstance(value.get("revision"), bool)
+        or value["revision"] < 1
+        or not isinstance(value.get("requirement_sha256"), str)
+        or _SHA256_PATTERN.fullmatch(value["requirement_sha256"]) is None
+    ):
+        raise ValueError("draft reservation identity is invalid")
+    return value
+
+
+def _active_draft_reservations(root: Path) -> tuple[dict[str, object], ...]:
+    directory_fd = _private_draft_directory_fd(root)
+    try:
+        with _draft_transaction_lock(directory_fd):
+            active = []
+            for name in sorted(os.listdir(directory_fd)):
+                if re.fullmatch(r"\.reservation-RPT-\d{3}-\d{4}", name) is None:
+                    continue
+                reservation = _reservation_payload(directory_fd, name)
+                expected_name = (
+                    f".reservation-{reservation['report_id']}-{reservation['revision']:04d}"
+                )
+                if name != expected_name:
+                    raise ValueError("draft reservation filename does not match identity")
+                draft = load_draft(root, str(reservation["draft_id"]))
+                if draft.get("consumed") is False:
+                    active.append(reservation)
+            return tuple(active)
+    finally:
+        os.close(directory_fd)
+
+
+def _write_reserved_draft(
+    root: Path,
+    draft_id: str,
+    payload: bytes,
+    requirement_sha256: str,
+) -> Path:
+    try:
+        proposed = json.loads(payload.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"draft payload is invalid: {error}") from error
+    report_id = proposed.get("report_id") if isinstance(proposed, dict) else None
+    revision = proposed.get("revision") if isinstance(proposed, dict) else None
+    if (
+        not isinstance(proposed, dict)
+        or proposed.get("draft_id") != draft_id
+        or not isinstance(report_id, str)
+        or re.fullmatch(r"RPT-\d{3}", report_id) is None
+        or not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision < 1
+        or proposed.get("consumed") is not False
+        or _SHA256_PATTERN.fullmatch(requirement_sha256) is None
+    ):
+        raise ValueError("draft reservation identity is invalid")
+    reservation = f".reservation-{report_id}-{revision:04d}"
+    reservation_payload = _canonical_bytes(
+        {
+            "schema_version": 1,
+            "draft_id": draft_id,
+            "report_id": report_id,
+            "revision": revision,
+            "requirement_sha256": requirement_sha256,
+        }
+    )
+    directory_fd = _private_draft_directory_fd(root)
+    reservation_fd = None
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        with _draft_transaction_lock(directory_fd):
+            try:
+                reservation_fd = os.open(reservation, flags, 0o600, dir_fd=directory_fd)
+            except FileExistsError as error:
+                existing = _reservation_payload(directory_fd, reservation)
+                existing_draft = load_draft(root, str(existing["draft_id"]))
+                if existing_draft.get("consumed") is not True:
+                    raise ValueError("active draft already reserves report revision") from error
+                os.unlink(reservation, dir_fd=directory_fd)
+                reservation_fd = os.open(reservation, flags, 0o600, dir_fd=directory_fd)
+            offset = 0
+            while offset < len(reservation_payload):
+                offset += os.write(reservation_fd, reservation_payload[offset:])
+            os.fsync(reservation_fd)
+            try:
+                return _write_private_draft(root, draft_id, payload)
+            except BaseException:
+                os.unlink(reservation, dir_fd=directory_fd)
+                raise
+    except OSError as error:
+        raise ValueError(f"draft reservation is unavailable: {error}") from error
+    finally:
+        if reservation_fd is not None:
+            os.close(reservation_fd)
+        os.close(directory_fd)
+
+
 def _write_private_transaction_component(directory_fd: int, name: str, payload: bytes, label: str):
     descriptor = None
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
@@ -2545,6 +2674,8 @@ def _write_controller_metadata(
 
 root_path = _root
 write_private_draft = _write_private_draft
+write_reserved_draft = _write_reserved_draft
+active_draft_reservations = _active_draft_reservations
 controller_metadata_path = _controller_metadata_path
 load_controller_metadata = _load_controller_metadata
 load_controller_completion_metadata = _load_controller_completion_metadata
