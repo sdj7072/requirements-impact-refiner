@@ -1091,28 +1091,38 @@ if sys.modules["payload_identity"] is not foreign_payload:
                 bufsize=1,
             )
             try:
-                drafts = []
-                for identifier in (1, 2):
-                    message = request(
-                        identifier,
-                        "tools/call",
-                        {
-                            "name": "rir_begin",
-                            "arguments": {
-                                "repo_root": str(root),
-                                "request": "Add nickname.",
-                                "repository_evidence": ["displayName exists"],
-                                "adapter": "generic",
-                            },
+                message = request(
+                    1,
+                    "tools/call",
+                    {
+                        "name": "rir_begin",
+                        "arguments": {
+                            "repo_root": str(root),
+                            "request": "Add nickname.",
+                            "repository_evidence": ["displayName exists"],
+                            "adapter": "generic",
                         },
-                    )
-                    process.stdin.write(json.dumps(message) + "\n")
-                    process.stdin.flush()
-                    drafts.append(
-                        json.loads(process.stdout.readline())["result"]["structuredContent"][
-                            "draft_id"
-                        ]
-                    )
+                    },
+                )
+                process.stdin.write(json.dumps(message) + "\n")
+                process.stdin.flush()
+                first_draft = json.loads(process.stdout.readline())["result"]["structuredContent"][
+                    "draft_id"
+                ]
+                second_draft = "f" * 32
+                first_path = (
+                    root / ".requirements-impact-refiner" / "drafts" / f"{first_draft}.json"
+                )
+                clone = json.loads(first_path.read_text(encoding="utf-8"))
+                clone["draft_id"] = second_draft
+                second_path = first_path.with_name(f"{second_draft}.json")
+                second_path.write_text(
+                    json.dumps(clone, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    + "\n",
+                    encoding="utf-8",
+                )
+                second_path.chmod(0o600)
+                drafts = [first_draft, second_draft]
                 analysis = json.loads(
                     (FIXTURES / "controller-analysis-pre-decision.json").read_text()
                 )
@@ -1193,7 +1203,7 @@ if sys.modules["payload_identity"] is not foreign_payload:
                     "rir_begin",
                     {
                         "repo_root": str(root),
-                        "request": "Desktop cache evidence arrived.",
+                        "request": "Remove displayName.",
                         "repository_evidence": ["desktop cache persists displayName"],
                         "adapter": "generic",
                     },

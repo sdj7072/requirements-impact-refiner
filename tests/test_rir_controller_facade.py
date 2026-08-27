@@ -179,6 +179,8 @@ def artifact_snapshot(root):
         return {}
     snapshot = {}
     for path in sorted((base, *base.rglob("*")), key=lambda item: item.as_posix()):
+        if path.name == ".draft-transaction.lock" or path.name.startswith(".reservation-"):
+            continue
         metadata = path.lstat()
         row = {
             "kind": "directory" if stat.S_ISDIR(metadata.st_mode) else "file",
@@ -299,6 +301,7 @@ class RirControllerFacadeContractTest(unittest.TestCase):
             [
                 ".requirements-impact-refiner",
                 ".requirements-impact-refiner/cache and descendants",
+                ".requirements-impact-refiner/drafts internal lock and reservation files",
                 ".requirements-impact-refiner/reports and report-ID directories",
             ],
             self.fixture["filesystem_mode_exclusions"],
@@ -502,7 +505,6 @@ class RirControllerFacadeContractTest(unittest.TestCase):
                         (
                             ".requirements-impact-refiner/drafts",
                             f".requirements-impact-refiner/drafts/{FIXED_DRAFT_ID}.json",
-                            ".requirements-impact-refiner/drafts/.draft-transaction.lock",
                         ),
                     ),
                 },

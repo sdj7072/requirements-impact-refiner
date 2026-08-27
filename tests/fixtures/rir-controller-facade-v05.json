@@ -130,7 +130,6 @@
           "after_paths": [
             ".requirements-impact-refiner",
             ".requirements-impact-refiner/drafts",
-            ".requirements-impact-refiner/drafts/.draft-transaction.lock",
             ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json"
           ],
           "before_paths": [
@@ -141,7 +140,6 @@
           "draft_consumed": false,
           "modes": {
             ".requirements-impact-refiner/drafts": "0700",
-            ".requirements-impact-refiner/drafts/.draft-transaction.lock": "0600",
             ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json": "0600"
           },
           "preexisting_unchanged": true,
@@ -166,7 +164,6 @@
             ".requirements-impact-refiner/cache/graph/v1/<sha256>.json",
             ".requirements-impact-refiner/cache/graph/v1/current",
             ".requirements-impact-refiner/drafts",
-            ".requirements-impact-refiner/drafts/.draft-transaction.lock",
             ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json",
             ".requirements-impact-refiner/graph",
             ".requirements-impact-refiner/graph/11111111111111111111111111111111.json",
@@ -268,6 +265,7 @@
   "filesystem_mode_exclusions": [
     ".requirements-impact-refiner",
     ".requirements-impact-refiner/cache and descendants",
+    ".requirements-impact-refiner/drafts internal lock and reservation files",
     ".requirements-impact-refiner/reports and report-ID directories"
   ],
   "metadata": {
