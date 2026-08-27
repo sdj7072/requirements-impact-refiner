@@ -192,13 +192,20 @@ class DocumentationTest(unittest.TestCase):
             "no automatic install or network",
             "unknown frontiers",
             "Deep",
-            "Task 7",
             "297.159",
         )
         for name in READMES:
             text = (ROOT / name).read_text(encoding="utf-8")
             for token in required:
                 self.assertIn(token, text, f"{token} missing from {name}")
+        resolved_race_status = {
+            "README.md": "exclusive-quarantine race is closed by deterministic no-clobber and interruption-recovery tests",
+            "README.ko.md": "exclusive-quarantine race는 deterministic no-clobber 및 interruption-recovery 테스트로 해결됐습니다",
+            "README.ja.md": "exclusive-quarantine race は deterministic no-clobber および interruption-recovery テストによって解決済みです",
+        }
+        for name, status in resolved_race_status.items():
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn(status, text, f"resolved race status missing from {name}")
 
     def test_graph_cli_and_settings_are_identical_in_all_languages(self):
         canonical = (ROOT / "README.md").read_text(encoding="utf-8")

@@ -103,7 +103,7 @@ python3 "$SKILL_DIR/scripts/rir-controller.py" trace --repo-root REPO --draft-id
 python3 "$SKILL_DIR/scripts/rir-controller.py" finalize --repo-root REPO --draft-id DRAFT_ID --graph-receipt-id RECEIPT_ID --input ANALYSIS.json
 ```
 
-목표는 `10s`, hard ceiling은 `30s`입니다. detect-only이며 no automatic install or network입니다. 선택적 로컬 provider (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`)에는 각각의 license가 적용되고 missing, unsafe, unsupported, stale, failed, timed out일 수 있습니다. builtin fallback은 precision이 제한적이고, cache hit은 일치하는 receipt만 재사용하며 partial cache는 partial로 남습니다. Deep은 bounded discovery를 넓힐 뿐 complete를 증명하지 않습니다. unknown frontiers를 계속 표시합니다. `full-inline` 및 CLI fallback도 이 한계를 보존합니다. 표의 compatibility 상태는 `not verified`/`blocked` 그대로이며 transaction correctness와 review는 닫히지 않았습니다. Task 5의 parked exclusive-quarantine race는 Task 7이 해결해야 합니다.
+목표는 `10s`, hard ceiling은 `30s`입니다. detect-only이며 no automatic install or network입니다. 선택적 로컬 provider (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`)에는 각각의 license가 적용되고 missing, unsafe, unsupported, stale, failed, timed out일 수 있습니다. builtin fallback은 precision이 제한적이고, cache hit은 일치하는 receipt만 재사용하며 partial cache는 partial로 남습니다. Deep은 bounded discovery를 넓힐 뿐 complete를 증명하지 않습니다. unknown frontiers를 계속 표시합니다. `full-inline` 및 CLI fallback도 이 한계를 보존합니다. 이전에 보류됐던 exclusive-quarantine race는 deterministic no-clobber 및 interruption-recovery 테스트로 해결됐습니다. 이 변경은 아래 표의 `not verified`/`blocked` compatibility 상태를 바꾸지 않습니다.
 
 ![Compact delivery 흐름](assets/compact-delivery-demo.svg)
 

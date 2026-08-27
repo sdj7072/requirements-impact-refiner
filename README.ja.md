@@ -103,7 +103,7 @@ python3 "$SKILL_DIR/scripts/rir-controller.py" trace --repo-root REPO --draft-id
 python3 "$SKILL_DIR/scripts/rir-controller.py" finalize --repo-root REPO --draft-id DRAFT_ID --graph-receipt-id RECEIPT_ID --input ANALYSIS.json
 ```
 
-target は `10s`、hard ceiling は `30s` です。detect-only であり no automatic install or network です。optional local provider (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`) は各自の license に従い、missing、unsafe、unsupported、stale、failed、timed out になり得ます。builtin fallback の precision は限定的で、cache hit は一致する receipt だけを再利用し、partial cache は partial のままです。Deep は bounded discovery を広げるだけで complete を証明しません。unknown frontiers は残します。`full-inline` と CLI fallback もこの制限を維持します。表の compatibility は `not verified`/`blocked` のままで、transaction correctness と review は closed ではありません。Task 5 の parked exclusive-quarantine race は Task 7 が閉じる必要があります。
+target は `10s`、hard ceiling は `30s` です。detect-only であり no automatic install or network です。optional local provider (`builtin`, `codegraph`, `scip`, `joern`, `ast-grep`) は各自の license に従い、missing、unsafe、unsupported、stale、failed、timed out になり得ます。builtin fallback の precision は限定的で、cache hit は一致する receipt だけを再利用し、partial cache は partial のままです。Deep は bounded discovery を広げるだけで complete を証明しません。unknown frontiers は残します。`full-inline` と CLI fallback もこの制限を維持します。以前保留されていた exclusive-quarantine race は deterministic no-clobber および interruption-recovery テストによって解決済みです。この変更は、下表の `not verified`/`blocked` compatibility status を変更しません。
 
 ![Compact delivery flow](assets/compact-delivery-demo.svg)
 
