@@ -707,6 +707,20 @@ class IntegrationAdapterContractTest(unittest.TestCase):
             self.assertIn(conversation, bootstrap)
         self.assertIn("call neither `rir_previous` nor `rir_scan`", bootstrap)
 
+    def test_bootstrap_confirmation_rule_is_explicitly_flow_specific(self):
+        bootstrap = BOOTSTRAP_SKILL_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "Report flow enters detailed refinement immediately after a non-`needs_input` scan; "
+            "ask flow enters it only after a later explicit yes",
+            bootstrap,
+        )
+        self.assertNotIn(
+            "Only a later explicit yes to a non-`needs_input` scan's refinement question "
+            "enters detailed refinement",
+            bootstrap,
+        )
+
     def test_disabled_and_unavailable_routes_make_no_tool_calls(self):
         with tempfile.TemporaryDirectory() as directory:
             disabled = McpBootstrapHarness(directory, enabled=False).run()
