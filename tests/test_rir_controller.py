@@ -3673,6 +3673,34 @@ else:
         with self.assertRaisesRegex(ValueError, "draft is invalid"):
             CONTROLLER.load_draft(self.root, first.draft_id)
 
+    def test_begin_recovers_expired_draft_after_quarantine_link_crash(self):
+        first = CONTROLLER.begin_refinement(self.request())
+        stored = CONTROLLER.load_draft(self.root, first.draft_id)
+        stored["created_at"] = "2000-01-01T00:00:00Z"
+        CONTROLLER._replace_private_draft(self.root, first.draft_id, stored)
+        expired = first.draft_path.with_name(f".expired-{first.draft_id}.json")
+        os.link(first.draft_path, expired)
+
+        second = CONTROLLER.begin_refinement(self.request())
+
+        self.assertEqual((second.report_id, second.revision), ("RPT-001", 1))
+        self.assertFalse(first.draft_path.exists())
+        self.assertTrue(expired.is_file())
+
+    def test_begin_recovers_expired_draft_after_source_unlink_crash(self):
+        first = CONTROLLER.begin_refinement(self.request())
+        stored = CONTROLLER.load_draft(self.root, first.draft_id)
+        stored["created_at"] = "2000-01-01T00:00:00Z"
+        CONTROLLER._replace_private_draft(self.root, first.draft_id, stored)
+        expired = first.draft_path.with_name(f".expired-{first.draft_id}.json")
+        os.link(first.draft_path, expired)
+        first.draft_path.unlink()
+
+        second = CONTROLLER.begin_refinement(self.request())
+
+        self.assertEqual((second.report_id, second.revision), ("RPT-001", 1))
+        self.assertTrue(expired.is_file())
+
     def test_begin_migrates_valid_precontroller_report_lineage(self):
         state = self.fixture("compact-state-pre-decision.json")
         CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(state))

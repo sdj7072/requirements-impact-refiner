@@ -1227,6 +1227,34 @@ def _reservation_payload(directory_fd: int, name: str) -> dict[str, object]:
     return value
 
 
+def _reserved_draft_payload(directory_fd: int, name: str, draft_id: str) -> dict[str, object]:
+    descriptor = None
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_fd)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink not in {1, 2}
+        ):
+            raise ValueError("reserved draft is unsafe")
+        raw = _read_bounded_descriptor(descriptor, MAX_DRAFT_BYTES, "reserved draft")
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except FileNotFoundError:
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"reserved draft is invalid: {error}") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if not isinstance(value, dict) or value.get("draft_id") != draft_id:
+        raise ValueError("reserved draft identity is invalid")
+    return value
+
+
 def _draft_reservation_expired(draft: Mapping[str, object]) -> bool:
     created_at = draft.get("created_at")
     if not isinstance(created_at, str):
@@ -1250,13 +1278,22 @@ def _quarantine_expired_draft(
     source = f"{draft_id}.json"
     expired = f".expired-{draft_id}.json"
     try:
-        os.link(
-            source,
-            expired,
-            src_dir_fd=directory_fd,
-            dst_dir_fd=directory_fd,
-            follow_symlinks=False,
-        )
+        try:
+            os.link(
+                source,
+                expired,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            source_metadata = os.stat(source, dir_fd=directory_fd, follow_symlinks=False)
+            expired_metadata = os.stat(expired, dir_fd=directory_fd, follow_symlinks=False)
+            if (source_metadata.st_dev, source_metadata.st_ino) != (
+                expired_metadata.st_dev,
+                expired_metadata.st_ino,
+            ):
+                raise ValueError("expired draft quarantine target is foreign") from None
         os.fsync(directory_fd)
         os.unlink(source, dir_fd=directory_fd)
         os.fsync(directory_fd)
@@ -1280,10 +1317,25 @@ def _active_draft_reservations(root: Path) -> tuple[dict[str, object], ...]:
                 )
                 if name != expected_name:
                     raise ValueError("draft reservation filename does not match identity")
-                draft = load_draft(root, str(reservation["draft_id"]))
+                draft_id = str(reservation["draft_id"])
+                try:
+                    draft = _reserved_draft_payload(directory_fd, f"{draft_id}.json", draft_id)
+                except FileNotFoundError:
+                    expired_name = f".expired-{draft_id}.json"
+                    expired_draft = _reserved_draft_payload(directory_fd, expired_name, draft_id)
+                    if (
+                        expired_draft.get("report_id") != reservation["report_id"]
+                        or expired_draft.get("revision") != reservation["revision"]
+                        or not _draft_reservation_expired(expired_draft)
+                    ):
+                        raise ValueError("expired draft reservation is invalid") from None
+                    os.unlink(name, dir_fd=directory_fd)
+                    os.fsync(directory_fd)
+                    continue
                 if (
                     draft.get("report_id") != reservation["report_id"]
                     or draft.get("revision") != reservation["revision"]
+                    or draft.get("repo_root") != str(root)
                 ):
                     raise ValueError("draft reservation does not match draft identity")
                 if draft.get("consumed") is False:
