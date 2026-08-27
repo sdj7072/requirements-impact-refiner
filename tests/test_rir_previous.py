@@ -1146,7 +1146,10 @@ class PreviousLookupTest(unittest.TestCase):
             worktree_clean=True,
             reason="pinned clean Git evidence",
         )
-        with mock.patch.object(PREVIOUS, "_probe_git", return_value=clean_git):
+        with (
+            mock.patch.object(PREVIOUS, "_probe_git", return_value=clean_git),
+            mock.patch.object(PREVIOUS, "OPERATION_TIMEOUT_SECONDS", 2.0),
+        ):
             writer = threading.Thread(target=refresh)
             writer.start()
             try:
