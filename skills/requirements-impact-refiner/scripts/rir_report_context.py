@@ -53,7 +53,7 @@ def _configure_delta_worker(enabled=True):
 
 
 MAX_CONTEXT_STAGE_CANDIDATES = 8
-_TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile|filter\.)"
+_TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile)"
 _PRE_SOURCE_RECHECK_CONTEXT_FIELDS = frozenset(
     {
         "schema_version",

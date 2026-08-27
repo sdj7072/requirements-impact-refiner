@@ -195,15 +195,19 @@ class FlowSettingTest(unittest.TestCase):
     (scan summary plus a refinement question) is an explicit opt-in."""
 
     def run_resolver(self, root, *args):
-        import subprocess, sys
         return subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "resolve-settings.py"),
-             "--project-root", str(root), *args],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "resolve-settings.py"),
+                "--project-root",
+                str(root),
+                *args,
+            ],
+            capture_output=True,
+            text=True,
         )
 
     def test_flow_defaults_to_report(self):
-        import json, tempfile
         with tempfile.TemporaryDirectory() as root:
             result = self.run_resolver(root)
             settings = json.loads(result.stdout)
@@ -211,24 +215,16 @@ class FlowSettingTest(unittest.TestCase):
             self.assertEqual(settings["flow_source"], "default")
 
     def test_repository_config_can_opt_into_ask(self):
-        import json, tempfile
-        from pathlib import Path as _Path
         with tempfile.TemporaryDirectory() as root:
-            (_Path(root) / ".requirements-impact-refiner.json").write_text(
-                '{"flow": "ask"}'
-            )
+            (Path(root) / ".requirements-impact-refiner.json").write_text('{"flow": "ask"}')
             result = self.run_resolver(root)
             settings = json.loads(result.stdout)
             self.assertEqual(settings["flow"], "ask")
             self.assertEqual(settings["flow_source"], "repository")
 
     def test_request_override_beats_repository(self):
-        import json, tempfile
-        from pathlib import Path as _Path
         with tempfile.TemporaryDirectory() as root:
-            (_Path(root) / ".requirements-impact-refiner.json").write_text(
-                '{"flow": "ask"}'
-            )
+            (Path(root) / ".requirements-impact-refiner.json").write_text('{"flow": "ask"}')
             result = self.run_resolver(root, "--flow", "report")
             settings = json.loads(result.stdout)
             self.assertEqual(settings["flow"], "report")
@@ -241,15 +237,19 @@ class ReportFlowDeliveryTest(unittest.TestCase):
     of reconstructing tables from memory. Explicit configuration still wins."""
 
     def run_resolver(self, root, *args):
-        import subprocess, sys
         return subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "resolve-settings.py"),
-             "--project-root", str(root), *args],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "resolve-settings.py"),
+                "--project-root",
+                str(root),
+                *args,
+            ],
+            capture_output=True,
+            text=True,
         )
 
     def test_report_flow_defaults_delivery_to_full(self):
-        import json, tempfile
         with tempfile.TemporaryDirectory() as root:
             settings = json.loads(self.run_resolver(root).stdout)
             self.assertEqual(settings["flow"], "report")
@@ -257,22 +257,14 @@ class ReportFlowDeliveryTest(unittest.TestCase):
             self.assertEqual(settings["delivery_source"], "default")
 
     def test_ask_flow_keeps_compact_default(self):
-        import json, tempfile
-        from pathlib import Path as _Path
         with tempfile.TemporaryDirectory() as root:
-            (_Path(root) / ".requirements-impact-refiner.json").write_text(
-                '{"flow": "ask"}'
-            )
+            (Path(root) / ".requirements-impact-refiner.json").write_text('{"flow": "ask"}')
             settings = json.loads(self.run_resolver(root).stdout)
             self.assertEqual(settings["delivery"], "compact")
 
     def test_explicit_compact_config_wins_in_report_flow(self):
-        import json, tempfile
-        from pathlib import Path as _Path
         with tempfile.TemporaryDirectory() as root:
-            (_Path(root) / ".requirements-impact-refiner.json").write_text(
-                '{"delivery": "compact"}'
-            )
+            (Path(root) / ".requirements-impact-refiner.json").write_text('{"delivery": "compact"}')
             settings = json.loads(self.run_resolver(root).stdout)
             self.assertEqual(settings["flow"], "report")
             self.assertEqual(settings["delivery"], "compact")

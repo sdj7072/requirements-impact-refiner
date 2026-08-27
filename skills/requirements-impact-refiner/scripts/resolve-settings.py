@@ -56,8 +56,7 @@ def load_repository_config(project_root: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"{CONFIG_NAME} must contain a JSON object")
     unknown = sorted(
-        set(value)
-        - {"audience", "delivery", "flow", "impact_graph", "delta_max_seconds"}
+        set(value) - {"audience", "delivery", "flow", "impact_graph", "delta_max_seconds"}
     )
     if unknown:
         raise ValueError(f"unsupported setting(s): {', '.join(unknown)}")
@@ -160,9 +159,7 @@ def resolve(
     )
     # The default flow answers with the impact report itself; the scan
     # summary plus a refinement question is an explicit opt-in ("ask").
-    flow, flow_source = resolve_value(
-        "flow", flow_override, config, FLOWS, "report"
-    )
+    flow, flow_source = resolve_value("flow", flow_override, config, FLOWS, "report")
     # Report flow relays the canonical markdown verbatim, so its delivery
     # default is full; reconstructing tables from a compact summary is how
     # inline copies got silently abbreviated. Explicit config still wins.

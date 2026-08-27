@@ -793,7 +793,6 @@ class PreviousLookupTest(unittest.TestCase):
             ("core.autocrlf", "false"),
             ("core.eol", "lf"),
             ("core.attributesfile", ".git/custom-attributes"),
-            ("filter.demo.required", "false"),
         ):
             with self.subTest(key=key):
                 self.git("config", key, value)
@@ -807,9 +806,7 @@ class PreviousLookupTest(unittest.TestCase):
 
         global_home = Path(self.temporary.name) / "global-home"
         global_home.mkdir()
-        (global_home / ".gitconfig").write_text(
-            '[filter "global"]\n\trequired = false\n', encoding="utf-8"
-        )
+        (global_home / ".gitconfig").write_text("[core]\n\teol = lf\n", encoding="utf-8")
         with mock.patch.dict(PREVIOUS.os.environ, {"HOME": str(global_home)}):
             result = PREVIOUS.lookup_previous(self.request())
         self.assertEqual(result.status, "stale")
@@ -820,6 +817,20 @@ class PreviousLookupTest(unittest.TestCase):
         result = PREVIOUS.lookup_previous(self.request())
         self.assertEqual(result.status, "stale")
         self.assertIn("transform", result.reason.lower())
+
+    def test_unused_global_filter_config_does_not_stale_without_attributes(self):
+        self.publish()
+        global_home = Path(self.temporary.name) / "unused-filter-home"
+        global_home.mkdir()
+        (global_home / ".gitconfig").write_text(
+            '[filter "lfs"]\n\trequired = true\n\tclean = git-lfs clean -- %f\n',
+            encoding="utf-8",
+        )
+
+        with mock.patch.dict(PREVIOUS.os.environ, {"HOME": str(global_home)}):
+            result = PREVIOUS.lookup_previous(self.request())
+
+        self.assertEqual(result.status, "fresh")
 
     def test_info_or_tracked_attributes_are_stale(self):
         nested = self.root / "nested"
@@ -861,7 +872,7 @@ class PreviousLookupTest(unittest.TestCase):
             result = real_runner(root, arguments, deadline, **kwargs)
             if not sampled and "config" in arguments and "--get-regexp" in arguments:
                 sampled = True
-                self.git("config", "filter.race.clean", "cat")
+                self.git("config", "core.eol", "lf")
             return result
 
         with mock.patch.object(PREVIOUS, "_run_git_command", side_effect=runner):

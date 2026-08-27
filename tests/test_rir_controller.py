@@ -48,7 +48,7 @@ class RirControllerTest(unittest.TestCase):
                         "providers": ["builtin"],
                         "install_policy": "never",
                         "deep": False,
-                    }
+                    },
                 }
             ),
             encoding="utf-8",
@@ -93,7 +93,7 @@ class RirControllerTest(unittest.TestCase):
                         "providers": ["builtin"],
                         "install_policy": "never",
                         "deep": False,
-                    }
+                    },
                 }
             ),
             encoding="utf-8",
@@ -916,7 +916,7 @@ assert sys.modules["fast_scan_store"] is foreign
                         "providers": ["builtin"],
                         "install_policy": "never",
                         "deep": False,
-                    }
+                    },
                 }
             ),
             encoding="utf-8",

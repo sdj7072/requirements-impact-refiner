@@ -587,7 +587,7 @@ else:
                         "providers": ["builtin"],
                         "install_policy": "never",
                         "deep": False,
-                    }
+                    },
                 }
             ),
             encoding="utf-8",

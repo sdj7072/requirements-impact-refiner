@@ -29,7 +29,9 @@ GATES = (
         "tests",
     ),
     ("mypy", "scripts", "evals/harness"),
+    ("coverage", "erase"),
     ("coverage", "run", "--branch", "-m", "unittest", "discover", "-s", "tests", "-q"),
+    ("coverage", "combine"),
     ("coverage", "report", "--fail-under=80"),
     (
         "bandit",
@@ -86,6 +88,7 @@ def run_gates(gates: Sequence[Sequence[str]]) -> int:
     """Run each gate in order and return the first failing process status."""
     environment = os.environ.copy()
     environment["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), environment["PATH"]))
+    environment["COVERAGE_FILE"] = str(Path(".coverage").resolve())
     for command in gates:
         try:
             subprocess.run(command, check=True, env=environment)

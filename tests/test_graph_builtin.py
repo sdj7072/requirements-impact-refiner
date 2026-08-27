@@ -1103,9 +1103,7 @@ class WorktreeExclusionTest(unittest.TestCase):
             )
             shadow = root / ".worktrees" / "feature-x" / "api"
             shadow.mkdir(parents=True)
-            (shadow / "profile.py").write_text(
-                'FIELD = "profile.displayName"\n', encoding="utf-8"
-            )
+            (shadow / "profile.py").write_text('FIELD = "profile.displayName"\n', encoding="utf-8")
             result = scan(
                 root,
                 seeds=(BUILTIN.ScanSeed("profile.displayName", "api/profile.py"),),

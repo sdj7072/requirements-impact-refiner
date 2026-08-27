@@ -57,6 +57,7 @@ no_implicit_optional = true
 
 [tool.coverage.run]
 branch = true
+patch = ["subprocess"]
 # Root scripts are the complete shipped set; installed-skill copies are mirrors.
 source = ["scripts", "evals/harness"]
 

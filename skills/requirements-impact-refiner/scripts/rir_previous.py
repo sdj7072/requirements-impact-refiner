@@ -116,7 +116,7 @@ MAX_REQUIRED_SOURCE_PATH_BYTES = 1024
 MAX_REQUIRED_SOURCE_MAP_BYTES = 64 * 1024
 MAX_SOURCE_RECHECK_BYTES = 4 * 1024 * 1024
 OPERATION_TIMEOUT_SECONDS = 0.25
-_TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile|filter\.)"
+_TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile)"
 _DELTA_WORKER_SHARED_GROUP = False
 
 

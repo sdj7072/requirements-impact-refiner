@@ -37,7 +37,9 @@ class QualityRunnerTest(unittest.TestCase):
                 "ruff check scripts skills/requirements-impact-refiner/scripts evals/harness tests",
                 "ruff format --check scripts skills/requirements-impact-refiner/scripts evals/harness tests",
                 "mypy scripts evals/harness",
+                "coverage erase",
                 "coverage run --branch -m unittest discover -s tests -q",
+                "coverage combine",
                 "coverage report --fail-under=80",
                 "bandit -q -r scripts skills/requirements-impact-refiner/scripts evals/harness "
                 "-x tests,evals/results -ll",
@@ -56,7 +58,9 @@ class QualityRunnerTest(unittest.TestCase):
                 "ruff check scripts skills/requirements-impact-refiner/scripts evals/harness tests",
                 "ruff format --check scripts skills/requirements-impact-refiner/scripts evals/harness tests",
                 "mypy scripts evals/harness",
+                "coverage erase",
                 "coverage run --branch -m unittest discover -s tests -q",
+                "coverage combine",
                 "coverage report --fail-under=80",
                 "bandit -q -r scripts skills/requirements-impact-refiner/scripts evals/harness "
                 "-x tests,evals/results -ll",
@@ -86,6 +90,14 @@ class QualityRunnerTest(unittest.TestCase):
         exit_code = QUALITY_RUNNER.run_gates(((sys.executable, "-c", "import sys; sys.exit(17)"),))
 
         self.assertEqual(exit_code, 17)
+
+    def test_runner_anchors_subprocess_coverage_data_outside_temporary_repositories(self):
+        expected = str(Path(".coverage").resolve())
+        probe = (
+            f"import os,sys; sys.exit(0 if os.environ.get('COVERAGE_FILE') == {expected!r} else 19)"
+        )
+
+        self.assertEqual(QUALITY_RUNNER.run_gates(((sys.executable, "-c", probe),)), 0)
 
 
 if __name__ == "__main__":

@@ -1304,7 +1304,6 @@ class RirReportContextTest(unittest.TestCase):
             ("core.autocrlf", "false"),
             ("core.eol", "lf"),
             ("core.attributesfile", ".git/custom-attributes"),
-            ("filter.demo.required", "false"),
         ):
             subprocess.run(["git", "config", key, value], cwd=self.root, check=True)
             self.assertFalse(CONTEXT.probe_source_inventory_git(self.root, required)[2])
@@ -1342,18 +1341,6 @@ class RirReportContextTest(unittest.TestCase):
         ).stdout.strip()
         self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, True))
 
-        subprocess.run(
-            ["git", "config", "filter.demo.arbitrary", "configured"],
-            cwd=self.root,
-            check=True,
-        )
-        self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, False))
-        subprocess.run(
-            ["git", "config", "--unset-all", "filter.demo.arbitrary"],
-            cwd=self.root,
-            check=True,
-        )
-
         global_temporary = tempfile.TemporaryDirectory()
         self.addCleanup(global_temporary.cleanup)
         global_home = Path(global_temporary.name)
@@ -1370,7 +1357,7 @@ class RirReportContextTest(unittest.TestCase):
             if not sampled and "config" in arguments and "--get-regexp" in arguments:
                 sampled = True
                 subprocess.run(
-                    ["git", "config", "filter.race.clean", "cat"],
+                    ["git", "config", "core.eol", "lf"],
                     cwd=self.root,
                     check=True,
                 )
@@ -1378,6 +1365,36 @@ class RirReportContextTest(unittest.TestCase):
 
         with mock.patch.object(CONTEXT, "_run_git", side_effect=transform_race):
             self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, False))
+
+    def test_git_baseline_accepts_unused_global_filter_without_attributes(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "rir@example.invalid"],
+            cwd=self.root,
+            check=True,
+        )
+        subprocess.run(["git", "config", "user.name", "RIR Test"], cwd=self.root, check=True)
+        source = self.root / "api.py"
+        source.write_text("value = 'stable'\n", encoding="utf-8")
+        subprocess.run(["git", "add", "api.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=self.root, check=True)
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        global_temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(global_temporary.cleanup)
+        global_home = Path(global_temporary.name)
+        (global_home / ".gitconfig").write_text(
+            '[filter "lfs"]\n\trequired = true\n\tclean = git-lfs clean -- %f\n',
+            encoding="utf-8",
+        )
+
+        with mock.patch.dict(CONTEXT.os.environ, {"HOME": str(global_home)}):
+            self.assertEqual(CONTEXT.probe_git_baseline(self.root), (commit, True))
 
     def test_source_inventory_git_proof_rejects_checkout_and_index_flag_races(self):
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)

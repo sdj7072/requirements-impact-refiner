@@ -78,6 +78,7 @@ class QualityConfigurationTest(unittest.TestCase):
     def test_coverage_measures_root_scripts_and_harness_exactly_once(self):
         configuration = Path("pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('source = ["scripts", "evals/harness"]', configuration)
+        self.assertIn('patch = ["subprocess"]', configuration)
 
     @unittest.skipUnless(importlib.util.find_spec("coverage"), "quality environment only")
     def test_coverage_report_includes_root_only_shipped_scripts(self):
