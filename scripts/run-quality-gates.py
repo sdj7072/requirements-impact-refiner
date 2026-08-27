@@ -89,6 +89,7 @@ def run_gates(gates: Sequence[Sequence[str]]) -> int:
     environment = os.environ.copy()
     environment["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), environment["PATH"]))
     environment["COVERAGE_FILE"] = str(Path(".coverage").resolve())
+    environment["RIR_COVERAGE_RUN"] = "1"
     for command in gates:
         try:
             subprocess.run(command, check=True, env=environment)

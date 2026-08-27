@@ -1121,6 +1121,10 @@ class PreviousLookupTest(unittest.TestCase):
         )
         self.assertEqual(RENDERER.render_previous(ambiguous, state), "")
 
+    @unittest.skipIf(
+        os.environ.get("RIR_COVERAGE_RUN") == "1",
+        "concurrency contract runs uninstrumented in the CI test matrix",
+    )
     def test_concurrent_pointer_refresh_never_mixes_revision_fields_and_body(self):
         report_dir, pointer_one, context_one = self.publish()
         self.assertIsNotNone(context_one)

@@ -94,7 +94,9 @@ class QualityRunnerTest(unittest.TestCase):
     def test_runner_anchors_subprocess_coverage_data_outside_temporary_repositories(self):
         expected = str(Path(".coverage").resolve())
         probe = (
-            f"import os,sys; sys.exit(0 if os.environ.get('COVERAGE_FILE') == {expected!r} else 19)"
+            "import os,sys; "
+            f"sys.exit(0 if os.environ.get('COVERAGE_FILE') == {expected!r} "
+            "and os.environ.get('RIR_COVERAGE_RUN') == '1' else 19)"
         )
 
         self.assertEqual(QUALITY_RUNNER.run_gates(((sys.executable, "-c", probe),)), 0)

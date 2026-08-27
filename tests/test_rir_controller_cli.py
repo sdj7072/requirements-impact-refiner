@@ -480,6 +480,10 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertNotIn("Traceback", deep.stderr + oversized.stderr)
 
     @unittest.skipIf(fcntl is None, "requires POSIX flock")
+    @unittest.skipIf(
+        os.environ.get("RIR_COVERAGE_RUN") == "1",
+        "timing contract runs uninstrumented in the CI test matrix",
+    )
     def test_trace_held_lock_returns_bounded_validation_error(self):
         self.enable_graph_sources()
         config_path = self.root / ".requirements-impact-refiner.json"
