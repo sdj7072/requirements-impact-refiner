@@ -27,20 +27,27 @@ Requirements Impact Refiner `0.6.0` は、具体的なソフトウェア変更�
 
 ## 3. クイックスタート
 
-クライアントが対応している場合は、GitHub リポジトリをネイティブのマーケットプレイス機能でインストールします。マーケットプレイス名とプラグイン名はどちらも `requirements-impact-refiner` です。
+クライアントが対応している場合は、GitHub リポジトリをネイティブのマーケットプレイス機能でインストールします。マーケットプレイス名とプラグイン名はどちらも `requirements-impact-refiner` です。release installation は immutable な `requirements-impact-refiner--v0.6.0` tag に固定します。
 
 Codex CLI では次を実行します。
 
 ```sh
-codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref requirements-impact-refiner--v0.6.0
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-既存の Codex インストールをアップグレードするには、マーケットプレイスのスナップショットを更新し、プラグインを再インストールしてキャッシュ済みコピーを置き換えます。
+未リリースのリポジトリ変更を評価する場合に限り、次の marketplace command を使用します。`main` は development-only であり、公開 release と byte-identical ではありません。
 
 ```sh
-codex plugin marketplace upgrade requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+```
+
+既存の tag-pinned Codex installation を upgrade する場合、または古い `main` snapshot を置き換える場合は、marketplace source を追加し直して plugin を再インストールし、cached copy が immutable release tag から取得されるようにします。
+
+```sh
 codex plugin remove requirements-impact-refiner@requirements-impact-refiner
+codex plugin marketplace remove requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref requirements-impact-refiner--v0.6.0
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 

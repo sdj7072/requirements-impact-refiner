@@ -89,6 +89,25 @@ def harness_commands(path):
 
 
 class DocumentationTest(unittest.TestCase):
+    def test_codex_release_install_is_tag_pinned_and_main_is_development_only(self):
+        release_add = (
+            "codex plugin marketplace add sdj7072/requirements-impact-refiner "
+            "--ref requirements-impact-refiner--v0.6.0"
+        )
+        development_add = (
+            "codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main"
+        )
+        for name in READMES:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            commands = [line for block in shell_blocks(ROOT / name) for line in block.splitlines()]
+            self.assertGreaterEqual(commands.count(release_add), 2, name)
+            self.assertEqual(commands.count(development_add), 1, name)
+            development_offset = text.index(development_add)
+            self.assertIn("development-only", text[development_offset - 300 : development_offset])
+            self.assertIn(
+                "codex plugin marketplace remove requirements-impact-refiner", commands, name
+            )
+
     def test_ci_has_separate_runtime_matrix_and_python_313_quality_job(self):
         """Catch CI changes that drop the dedicated pinned-tool quality gate."""
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -281,7 +300,6 @@ class DocumentationTest(unittest.TestCase):
                 "--previous",
                 "--print-expected-delta",
                 "Revision 1",
-                "codex plugin marketplace upgrade requirements-impact-refiner",
                 "/plugin marketplace update requirements-impact-refiner",
                 "/plugin update requirements-impact-refiner@requirements-impact-refiner",
             ):

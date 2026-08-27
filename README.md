@@ -27,20 +27,27 @@ Evidence levels are exactly `verified`, `inferred`, and `unknown`. Impact states
 
 ## 3. Quick Start
 
-Install from the GitHub repository with the native marketplace flow when your client supports it. The marketplace and plugin use the same name: `requirements-impact-refiner`.
+Install from the GitHub repository with the native marketplace flow when your client supports it. The marketplace and plugin use the same name: `requirements-impact-refiner`. Release installation pins the immutable `requirements-impact-refiner--v0.6.0` tag.
 
 For Codex CLI:
 
 ```sh
-codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref requirements-impact-refiner--v0.6.0
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-To upgrade an existing Codex installation, refresh the marketplace snapshot and reinstall the plugin so the cached copy is replaced:
+To evaluate unreleased repository changes instead, use the following marketplace command. `main` is development-only and is not byte-identical to the published release:
 
 ```sh
-codex plugin marketplace upgrade requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+```
+
+To upgrade an existing tag-pinned Codex installation or replace an older `main` snapshot, replace the marketplace source and reinstall the plugin so the cached copy comes from the immutable release tag:
+
+```sh
 codex plugin remove requirements-impact-refiner@requirements-impact-refiner
+codex plugin marketplace remove requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref requirements-impact-refiner--v0.6.0
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 

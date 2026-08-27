@@ -27,20 +27,27 @@ Requirements Impact Refiner `0.6.0`은 구체적인 소프트웨어 변경을 �
 
 ## 3. 빠른 시작
 
-클라이언트가 지원한다면 GitHub 저장소를 네이티브 마켓플레이스 방식으로 설치합니다. 마켓플레이스와 플러그인 이름은 모두 `requirements-impact-refiner`입니다.
+클라이언트가 지원한다면 GitHub 저장소를 네이티브 마켓플레이스 방식으로 설치합니다. 마켓플레이스와 플러그인 이름은 모두 `requirements-impact-refiner`입니다. 릴리스 설치는 불변 `requirements-impact-refiner--v0.6.0` 태그에 고정합니다.
 
 Codex CLI에서는 다음을 실행합니다.
 
 ```sh
-codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref requirements-impact-refiner--v0.6.0
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
-기존 Codex 설치를 업그레이드하려면 마켓플레이스 스냅샷을 갱신하고 플러그인을 다시 설치해 캐시된 복사본을 교체합니다.
+릴리스되지 않은 저장소 변경을 평가하려는 경우에만 다음 마켓플레이스 명령을 사용합니다. `main`은 development-only이며 게시된 릴리스와 바이트 단위로 같지 않습니다.
 
 ```sh
-codex plugin marketplace upgrade requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref main
+```
+
+기존 태그 고정 Codex 설치를 업그레이드하거나 이전 `main` 스냅샷을 교체하려면 마켓플레이스 소스를 다시 추가하고 플러그인을 재설치해 캐시된 복사본이 불변 릴리스 태그에서 오도록 합니다.
+
+```sh
 codex plugin remove requirements-impact-refiner@requirements-impact-refiner
+codex plugin marketplace remove requirements-impact-refiner
+codex plugin marketplace add sdj7072/requirements-impact-refiner --ref requirements-impact-refiner--v0.6.0
 codex plugin add requirements-impact-refiner@requirements-impact-refiner
 ```
 
