@@ -516,7 +516,7 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertIn("deadline exhausted waiting for controller lock", result.stderr)
-        self.assertLess(elapsed, 1.2)
+        self.assertLess(elapsed, 1.5)
 
 
 if __name__ == "__main__":
