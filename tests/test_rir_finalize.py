@@ -115,6 +115,25 @@ class RirFinalizeTest(unittest.TestCase):
         self.assertIs(type(result), finalize.CONTRACTS.FinalizeResult)
         self.assertTrue(CONTROLLER.load_draft(self.root, draft.draft_id)["consumed"])
 
+    def test_graph_disabled_finalize_rejects_receipt_without_publication_or_consumption(self):
+        finalize = self.finalize()
+        draft = self.begin("Reject a graph receipt when graph analysis is disabled.")
+        request = finalize.FinalizeRequest(
+            self.root,
+            draft.draft_id,
+            fixture("controller-analysis-pre-decision.json"),
+            "9" * 32,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "^graph_receipt_id is not allowed when impact graph is disabled$",
+        ):
+            finalize.finalize_refinement(request)
+
+        self.assertIsNone(finalize.REPORT_STORE.load_current(self.root, draft.report_id))
+        self.assertFalse(finalize.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
     def test_facade_signature_result_type_and_fault_injection_remain_stable(self):
         finalize = self.finalize()
         self.assertEqual(
