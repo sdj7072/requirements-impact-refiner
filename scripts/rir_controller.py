@@ -1514,6 +1514,19 @@ def _is_delta_protocol_contract(value: object) -> bool:
     )
 
 
+def _is_delta_process_contract(value: object) -> bool:
+    return (
+        type(getattr(value, "CLEANUP_GRACE_SECONDS", None)) is float
+        and type(getattr(value, "CLEANUP_SCAN_SECONDS", None)) is float
+        and type(getattr(value, "MAX_CLEANUP_ENTRIES", None)) is int
+        and type(getattr(value, "MAX_PRIVATE_TEMP_ENTRIES", None)) is int
+        and _callables(
+            value,
+            ("terminate_worker", "cleanup_shared_temps", "cleanup_private_directory"),
+        )
+    )
+
+
 DELTA_PROTOCOL = cast(
     Any,
     _load_controller_sibling(
@@ -1522,6 +1535,16 @@ DELTA_PROTOCOL = cast(
         "_rir_controller_delta_protocol_",
         _is_delta_protocol_contract,
         "delta protocol",
+    ),
+)
+DELTA_PROCESS = cast(
+    Any,
+    _load_controller_sibling(
+        "rir_delta_process.py",
+        "rir_delta_process",
+        "_rir_controller_delta_process_",
+        _is_delta_process_contract,
+        "delta process",
     ),
 )
 _DELTA_WORKER_MAX_INPUT = 512 * 1024
@@ -1537,10 +1560,10 @@ _DELTA_WORKER_MAX_OUTPUT = (
 )
 _DELTA_WORKER_MAX_ERROR = 64 * 1024
 _DELTA_WORKER_MIN_SECONDS = 1.0
-_DELTA_WORKER_CLEANUP_GRACE_SECONDS = 0.1
-_DELTA_WORKER_CLEANUP_SCAN_SECONDS = 0.025
-_DELTA_WORKER_MAX_CLEANUP_ENTRIES = 4096
-_DELTA_WORKER_MAX_PRIVATE_TEMP_ENTRIES = 128
+_DELTA_WORKER_CLEANUP_GRACE_SECONDS = DELTA_PROCESS.CLEANUP_GRACE_SECONDS
+_DELTA_WORKER_CLEANUP_SCAN_SECONDS = DELTA_PROCESS.CLEANUP_SCAN_SECONDS
+_DELTA_WORKER_MAX_CLEANUP_ENTRIES = DELTA_PROCESS.MAX_CLEANUP_ENTRIES
+_DELTA_WORKER_MAX_PRIVATE_TEMP_ENTRIES = DELTA_PROCESS.MAX_PRIVATE_TEMP_ENTRIES
 _DELTA_HINT_PATH = re.compile(r"^(?!/)(?!.*(?:^|/)\.{1,2}(?:/|$))(?!.*\\).+$")
 
 
@@ -1803,100 +1826,11 @@ def _generic_delta_preflight_fallback(request: ScanRequest, elapsed_ms: int, rea
 
 
 def _terminate_delta_worker(process: subprocess.Popen[bytes]) -> bool:
-    if hasattr(os, "killpg"):
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except OSError:
-            pass
-    elif process.poll() is None:
-        try:
-            process.terminate()
-        except OSError:
-            pass
-    try:
-        process.wait(timeout=_DELTA_WORKER_CLEANUP_GRACE_SECONDS / 4)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    if hasattr(os, "killpg"):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except OSError:
-            pass
-    elif process.poll() is None:
-        try:
-            process.kill()
-        except OSError:
-            pass
-    try:
-        process.wait(timeout=_DELTA_WORKER_CLEANUP_GRACE_SECONDS / 2)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return process.poll() is not None
+    return DELTA_PROCESS.terminate_worker(process)
 
 
 def _cleanup_delta_worker_temps(root: Path, token: str, deadline: float | None = None) -> bool:
-    directories = (
-        (".requirements-impact-refiner", "scans"),
-        (".requirements-impact-refiner", "graph"),
-        (".requirements-impact-refiner", "cache", "graph", "v1"),
-    )
-    marker = f".{token}."
-    directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
-    complete = True
-    for parts in directories:
-        if deadline is not None and time.monotonic() >= deadline:
-            return False
-        opened = []
-        try:
-            parent = os.open(root, directory_flags)
-            opened.append(parent)
-            for part in parts:
-                parent = os.open(part, directory_flags, dir_fd=parent)
-                opened.append(parent)
-        except (FileNotFoundError, NotADirectoryError):
-            for descriptor in reversed(opened):
-                os.close(descriptor)
-            continue
-        except OSError:
-            complete = False
-            for descriptor in reversed(opened):
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    complete = False
-            continue
-        try:
-            with os.scandir(parent) as entries:
-                for index, entry in enumerate(entries, start=1):
-                    if index > _DELTA_WORKER_MAX_CLEANUP_ENTRIES:
-                        complete = False
-                        break
-                    if deadline is not None and time.monotonic() >= deadline:
-                        complete = False
-                        break
-                    if marker not in entry.name or not entry.name.endswith(".tmp"):
-                        continue
-                    try:
-                        removable = not entry.is_symlink() and entry.is_file(follow_symlinks=False)
-                    except OSError:
-                        complete = False
-                        continue
-                    if not removable:
-                        complete = False
-                        continue
-                    try:
-                        os.unlink(entry.name, dir_fd=parent)
-                    except OSError:
-                        complete = False
-        except OSError:
-            complete = False
-        finally:
-            for descriptor in reversed(opened):
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    complete = False
-    return complete
+    return DELTA_PROCESS.cleanup_shared_temps(root, token, deadline)
 
 
 def _cleanup_delta_worker_directory(
@@ -1904,86 +1838,7 @@ def _cleanup_delta_worker_directory(
     input_path: Path,
     deadline: float,
 ) -> bool:
-    if input_path.parent != worker_temp or input_path.name != "input.json":
-        return False
-    directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
-    parent_descriptor = -1
-    directory_descriptor = -1
-    complete = True
-    removed = False
-    try:
-        parent_descriptor = os.open(worker_temp.parent, directory_flags)
-        directory_descriptor = os.open(
-            worker_temp.name,
-            directory_flags,
-            dir_fd=parent_descriptor,
-        )
-    except FileNotFoundError:
-        for descriptor in (directory_descriptor, parent_descriptor):
-            if descriptor >= 0:
-                os.close(descriptor)
-        return False
-    except OSError:
-        for descriptor in (directory_descriptor, parent_descriptor):
-            if descriptor >= 0:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-        return False
-    try:
-        try:
-            os.unlink(input_path.name, dir_fd=directory_descriptor)
-        except FileNotFoundError:
-            pass
-        except OSError:
-            complete = False
-        if time.monotonic() >= deadline:
-            complete = False
-        else:
-            try:
-                with os.scandir(directory_descriptor) as entries:
-                    for index, entry in enumerate(entries, start=1):
-                        if index > _DELTA_WORKER_MAX_PRIVATE_TEMP_ENTRIES:
-                            complete = False
-                            break
-                        if time.monotonic() >= deadline:
-                            complete = False
-                            break
-                        try:
-                            if entry.is_dir(follow_symlinks=False):
-                                os.rmdir(entry.name, dir_fd=directory_descriptor)
-                            else:
-                                os.unlink(entry.name, dir_fd=directory_descriptor)
-                        except OSError:
-                            complete = False
-            except OSError:
-                complete = False
-        try:
-            opened = os.fstat(directory_descriptor)
-            current = os.stat(
-                worker_temp.name,
-                dir_fd=parent_descriptor,
-                follow_symlinks=False,
-            )
-            if (
-                not stat.S_ISDIR(current.st_mode)
-                or opened.st_dev != current.st_dev
-                or opened.st_ino != current.st_ino
-            ):
-                complete = False
-            else:
-                os.rmdir(worker_temp.name, dir_fd=parent_descriptor)
-                removed = True
-        except OSError:
-            complete = False
-    finally:
-        for descriptor in (directory_descriptor, parent_descriptor):
-            try:
-                os.close(descriptor)
-            except OSError:
-                complete = False
-    return complete and removed
+    return DELTA_PROCESS.cleanup_private_directory(worker_temp, input_path, deadline)
 
 
 def _delta_worker_body(payload: bytes, token: str) -> tuple[str, Mapping[str, object]]:
