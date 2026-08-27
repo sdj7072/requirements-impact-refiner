@@ -189,7 +189,7 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.changed_count, 0)
         self.assertEqual((result.report_id, result.revision), ("RPT-001", 1))
         self.assertEqual(result.baseline_commit, self.baseline_commit)
-        self.assertIn("**Freshness:** fresh", result.display_text or "")
+        self.assertTrue((result.display_text or "").startswith("# Requirements Impact Report\n"))
         self.assertEqual(result.performance_metrics.previous_lookup.elapsed_ms, result.elapsed_ms)
         self.assertGreater(result.performance_metrics.previous_lookup.bytes_read, 0)
         self.assertGreater(result.performance_metrics.accounted_reused_bytes, 0)
@@ -1079,29 +1079,22 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "none")
         self.assertIsNone(result.display_text)
 
-    def test_renderer_returns_only_structured_header_and_existing_compact_summary(self):
+    def test_renderer_returns_canonical_full_report_for_fresh_match(self):
         _report_dir, _pointer, _context = self.publish()
 
         result = PREVIOUS.lookup_previous(self.request())
         text = result.display_text or ""
 
-        self.assertTrue(text.startswith("## Previous Impact Report\n\n"))
-        for field in (
-            "**Freshness:** fresh",
-            "**Report:** `RPT-001` revision 1",
-            "**Created:** 2026-08-25T12:34:56Z",
-            f"**Commit:** `{self.baseline_commit}`",
-            "**Changed files:** 0",
-            "## Change Impact Summary",
-        ):
-            self.assertIn(field, text)
+        self.assertTrue(text.startswith("# Requirements Impact Report\n\n"))
         for full_report_block in (
             "# Requirements Impact Report",
             "## Original Requirement",
             "## Current Behavior",
             "## Impact Ledger",
+            "## Planning Handoff",
         ):
-            self.assertNotIn(full_report_block, text)
+            self.assertIn(full_report_block, text)
+        self.assertNotIn("## Previous Impact Report", text)
 
     def test_renderer_returns_empty_text_for_none_and_ambiguous(self):
         self.publish()
@@ -1172,9 +1165,7 @@ class PreviousLookupTest(unittest.TestCase):
         for result in results:
             self.assertEqual(result.status, "fresh")
             self.assertIn(result.revision, {1, 2})
-            self.assertIn(
-                f"**Report:** `RPT-001` revision {result.revision}", result.display_text or ""
-            )
+            self.assertIn(f"| `RPT-001` | {result.revision} |", result.display_text or "")
             expected = pointer_one if result.revision == 1 else pointer_two
             self.assertEqual(result.markdown_sha256, expected["markdown_sha256"])
 

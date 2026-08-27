@@ -224,7 +224,7 @@ def _header_text(value: str) -> str:
 
 
 def render_previous(result: _PreviousResult, compact_state: Mapping[str, object]) -> str:
-    """Render a bounded previous-result header plus the existing compact summary."""
+    """Render a fresh canonical report or a bounded stale-report preview."""
 
     if result.status in {"none", "ambiguous"}:
         return ""
@@ -240,6 +240,8 @@ def render_previous(result: _PreviousResult, compact_state: Mapping[str, object]
         raise ValueError("previous compact state identity does not match the result")
     if result.report_id is None or result.revision is None:
         raise ValueError("selected previous result identity is unavailable")
+    if result.status == "fresh":
+        return IMPACT_RENDERER.render_markdown(compact_state)
     created = result.created_at or "unavailable"
     commit = f"`{result.baseline_commit}`" if result.baseline_commit else "unavailable"
     changed = str(result.changed_count) if result.changed_count is not None else "unavailable"
