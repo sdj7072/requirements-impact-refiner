@@ -3657,6 +3657,22 @@ else:
         self.assertEqual((first.report_id, first.revision), ("RPT-001", 1))
         self.assertEqual((second.report_id, second.revision), ("RPT-002", 1))
 
+    def test_begin_quarantines_draft_older_than_twenty_four_hours(self):
+        first = CONTROLLER.begin_refinement(self.request())
+        stored = CONTROLLER.load_draft(self.root, first.draft_id)
+        stored["created_at"] = "2000-01-01T00:00:00Z"
+        CONTROLLER._replace_private_draft(self.root, first.draft_id, stored)
+
+        second = CONTROLLER.begin_refinement(self.request())
+
+        self.assertEqual((second.report_id, second.revision), ("RPT-001", 1))
+        self.assertFalse(first.draft_path.exists())
+        expired = first.draft_path.with_name(f".expired-{first.draft_id}.json")
+        self.assertTrue(expired.is_file())
+        self.assertEqual(expired.stat().st_mode & 0o777, 0o600)
+        with self.assertRaisesRegex(ValueError, "draft is invalid"):
+            CONTROLLER.load_draft(self.root, first.draft_id)
+
     def test_begin_migrates_valid_precontroller_report_lineage(self):
         state = self.fixture("compact-state-pre-decision.json")
         CONTROLLER.report_store.publish_revision(self.root, CONTROLLER._canonical_bytes(state))

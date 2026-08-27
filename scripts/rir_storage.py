@@ -17,6 +17,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
@@ -289,6 +290,7 @@ report_store = REPORT_STORE
 
 
 MAX_DRAFT_BYTES = 4 * 1024 * 1024
+DRAFT_RESERVATION_TTL_SECONDS = 24 * 60 * 60
 MAX_CONTROLLER_METADATA_BYTES = 256 * 1024
 MAX_CONTROLLER_METADATA_DEPTH = 64
 MAX_CONTROLLER_METADATA_STAGE_CANDIDATES = 8
@@ -1225,6 +1227,45 @@ def _reservation_payload(directory_fd: int, name: str) -> dict[str, object]:
     return value
 
 
+def _draft_reservation_expired(draft: Mapping[str, object]) -> bool:
+    created_at = draft.get("created_at")
+    if not isinstance(created_at, str):
+        raise ValueError("draft creation time is invalid")
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("draft creation time is invalid") from error
+    if created.tzinfo is None:
+        raise ValueError("draft creation time is invalid")
+    age = datetime.now(timezone.utc).timestamp() - created.timestamp()
+    return age >= DRAFT_RESERVATION_TTL_SECONDS
+
+
+def _quarantine_expired_draft(
+    directory_fd: int,
+    reservation_name: str,
+    reservation: Mapping[str, object],
+) -> None:
+    draft_id = str(reservation["draft_id"])
+    source = f"{draft_id}.json"
+    expired = f".expired-{draft_id}.json"
+    try:
+        os.link(
+            source,
+            expired,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        os.fsync(directory_fd)
+        os.unlink(source, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+        os.unlink(reservation_name, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+    except OSError as error:
+        raise ValueError(f"expired draft quarantine is unavailable: {error}") from error
+
+
 def _active_draft_reservations(root: Path) -> tuple[dict[str, object], ...]:
     directory_fd = _private_draft_directory_fd(root)
     try:
@@ -1240,7 +1281,15 @@ def _active_draft_reservations(root: Path) -> tuple[dict[str, object], ...]:
                 if name != expected_name:
                     raise ValueError("draft reservation filename does not match identity")
                 draft = load_draft(root, str(reservation["draft_id"]))
+                if (
+                    draft.get("report_id") != reservation["report_id"]
+                    or draft.get("revision") != reservation["revision"]
+                ):
+                    raise ValueError("draft reservation does not match draft identity")
                 if draft.get("consumed") is False:
+                    if _draft_reservation_expired(draft):
+                        _quarantine_expired_draft(directory_fd, name, reservation)
+                        continue
                     active.append(reservation)
             return tuple(active)
     finally:
