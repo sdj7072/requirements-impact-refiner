@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 
 class RunStatus(str, Enum):
@@ -18,17 +18,17 @@ class RunStatus(str, Enum):
 @dataclass(frozen=True)
 class CaseTurn:
     prompt: str
-    repository_evidence: Tuple[str, ...]
+    repository_evidence: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class CaseSpec:
     id: str
     kind: str
-    turns: Tuple[CaseTurn, ...]
-    must_detect: Tuple[str, ...]
-    must_not_do: Tuple[str, ...]
-    modes: Tuple[str, ...]
+    turns: tuple[CaseTurn, ...]
+    must_detect: tuple[str, ...]
+    must_not_do: tuple[str, ...]
+    modes: tuple[str, ...]
     expected_transition: Optional[str] = None
 
 
@@ -46,7 +46,7 @@ class RunRequest:
 
 @dataclass(frozen=True)
 class CommandResult:
-    argv: Tuple[str, ...]
+    argv: tuple[str, ...]
     returncode: Optional[int]
     stdout: str
     stderr: str
@@ -61,8 +61,8 @@ class ClientProbe:
     version: Optional[str]
     authenticated: Optional[bool]
     plugin_version: Optional[str]
-    enabled_plugins: Tuple[str, ...]
-    capabilities: Tuple[str, ...]
+    enabled_plugins: tuple[str, ...]
+    capabilities: tuple[str, ...]
     reason: Optional[str] = None
 
 
@@ -76,7 +76,7 @@ class RunResult:
     command: Optional[CommandResult] = None
     final_output: Optional[str] = None
     session_id: Optional[str] = None
-    metadata: Tuple[Tuple[str, str], ...] = ()
+    metadata: tuple[tuple[str, str], ...] = ()
     attempt: int = 1
     retry_of: Optional[str] = None
 
@@ -86,7 +86,7 @@ class MechanicalScore:
     case_id: str
     repetition: int
     passed: bool
-    findings: Tuple[str, ...]
+    findings: tuple[str, ...]
 
 
 @dataclass(frozen=True)

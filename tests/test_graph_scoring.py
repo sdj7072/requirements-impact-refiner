@@ -1,13 +1,9 @@
+import hashlib
 import importlib
 import importlib.util
-import hashlib
-import json
-import sys
 import tempfile
 import unittest
-from copy import deepcopy
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,9 +17,7 @@ class GraphScoringTest(unittest.TestCase):
         return importlib.import_module("evals.harness.graph_scoring")
 
     def case(self):
-        return self.module().load_graph_cases(
-            ROOT / "evals" / "graph-cases.json"
-        )[0]
+        return self.module().load_graph_cases(ROOT / "evals" / "graph-cases.json")[0]
 
     def receipt(self, case=None):
         selected = case or self.case()
@@ -31,39 +25,69 @@ class GraphScoringTest(unittest.TestCase):
         nodes = []
         edges = []
         for index, required in enumerate(selected.required_nodes, start=1):
-            nodes.append({
-                "id": f"NODE-{index:03d}",
-                "kind": required.kind,
-                "label": required.label,
-                "location": required.location,
-                "provider": "builtin",
-                "confidence": "structural-inferred" if index == 1 else "lexical",
-                "source_sha256": str(index) * 64,
-                "risk_domains": list(required.risk_domains),
-            })
+            nodes.append(
+                {
+                    "id": f"NODE-{index:03d}",
+                    "kind": required.kind,
+                    "label": required.label,
+                    "location": required.location,
+                    "provider": "builtin",
+                    "confidence": "structural-inferred" if index == 1 else "lexical",
+                    "source_sha256": str(index) * 64,
+                    "risk_domains": list(required.risk_domains),
+                }
+            )
         for index, kind in enumerate(selected.required_edge_types, start=1):
-            edges.append({
-                "id": f"EDGE-{index:03d}",
-                "source": f"NODE-{index:03d}",
-                "target": f"NODE-{index + 1:03d}",
-                "kind": kind,
-                "location": selected.required_nodes[index].location,
-                "evidence": f"fixture-link-{index}",
-                "confidence": "lexical",
-                "provider": "builtin",
-                "source_sha256": str(index + 4) * 64,
-            })
+            edges.append(
+                {
+                    "id": f"EDGE-{index:03d}",
+                    "source": f"NODE-{index:03d}",
+                    "target": f"NODE-{index + 1:03d}",
+                    "kind": kind,
+                    "location": selected.required_nodes[index].location,
+                    "evidence": f"fixture-link-{index}",
+                    "confidence": "lexical",
+                    "provider": "builtin",
+                    "source_sha256": str(index + 4) * 64,
+                }
+            )
         return {
             "schema_version": 1,
             "receipt_id": "a" * 32,
             "draft_id": "b" * 32,
             "repo_root_sha256": "c" * 64,
             "request_sha256": "d" * 64,
-            "settings": {"enabled": True, "max_seconds": 30, "target_seconds": 10, "providers": ["builtin"], "install_policy": "never", "deep": False},
-            "providers": [{"name": name, "status": "ready", "confidence": "structural-inferred", "version": "builtin-v1", "executable_sha256": None} for name in providers],
+            "settings": {
+                "enabled": True,
+                "max_seconds": 30,
+                "target_seconds": 10,
+                "providers": ["builtin"],
+                "install_policy": "never",
+                "deep": False,
+            },
+            "providers": [
+                {
+                    "name": name,
+                    "status": "ready",
+                    "confidence": "structural-inferred",
+                    "version": "builtin-v1",
+                    "executable_sha256": None,
+                }
+                for name in providers
+            ],
             "nodes": nodes,
             "edges": edges,
-            "paths": [{"id": "PATH-001", "nodes": [row["id"] for row in nodes], "edges": [row["id"] for row in edges], "distance": 3, "risk_domains": sorted({domain for row in nodes for domain in row["risk_domains"]})}],
+            "paths": [
+                {
+                    "id": "PATH-001",
+                    "nodes": [row["id"] for row in nodes],
+                    "edges": [row["id"] for row in edges],
+                    "distance": 3,
+                    "risk_domains": sorted(
+                        {domain for row in nodes for domain in row["risk_domains"]}
+                    ),
+                }
+            ],
             "frontier": [],
             "timings_ms": {"total": 8400},
             "budget_status": "closed",
@@ -90,7 +114,8 @@ class GraphScoringTest(unittest.TestCase):
         production_bytes = module.GRAPH_CONTRACT.canonical_receipt_bytes(receipt)
 
         score = module.score_graph(
-            self.case(), receipt,
+            self.case(),
+            receipt,
             "Impact scan: 8.4 s\nImpact paths: PATH-001",
         )
 
@@ -116,10 +141,7 @@ class GraphScoringTest(unittest.TestCase):
             receipt = COORDINATOR.trace_impact(
                 root,
                 {"draft_id": "1" * 32, "request": case.request},
-                tuple(
-                    COORDINATOR.ScanSeed(term, location)
-                    for term, location in case.seeds
-                ),
+                tuple(COORDINATOR.ScanSeed(term, location) for term, location in case.seeds),
                 COORDINATOR.GraphSettings(
                     providers=("builtin",), max_seconds=30, target_seconds=10
                 ),
@@ -131,12 +153,12 @@ class GraphScoringTest(unittest.TestCase):
 
         self.assertEqual(errors, ())
         score = module.score_graph(
-            case, mapping, "Impact scan: 0.0 s\nImpact paths: distant",
+            case,
+            mapping,
+            "Impact scan: 0.0 s\nImpact paths: distant",
         )
         self.assertTrue(score.passed, score.findings)
-        self.assertEqual(
-            score.receipt_sha256, hashlib.sha256(payload).hexdigest()
-        )
+        self.assertEqual(score.receipt_sha256, hashlib.sha256(payload).hexdigest())
 
     def test_production_invalid_receipts_never_reach_graph_scoring(self):
         module = self.module()
@@ -166,14 +188,21 @@ class GraphScoringTest(unittest.TestCase):
         module = self.module()
         receipt = self.receipt()
         receipt["settings"]["providers"] = ["ast-grep", "builtin"]
-        receipt["providers"].insert(0, {
-            "name": "ast-grep", "status": "missing", "confidence": "lexical",
-            "version": None, "executable_sha256": None,
-        })
+        receipt["providers"].insert(
+            0,
+            {
+                "name": "ast-grep",
+                "status": "missing",
+                "confidence": "lexical",
+                "version": None,
+                "executable_sha256": None,
+            },
+        )
 
         self.assertEqual(module.GRAPH_CONTRACT.validate_receipt(receipt), ())
         score = module.score_graph(
-            self.case(), receipt,
+            self.case(),
+            receipt,
             "Impact scan: 8.4 s\nImpact paths: PATH-001",
         )
         self.assertFalse(score.passed)
@@ -198,12 +227,20 @@ class GraphScoringTest(unittest.TestCase):
             "risk_domains": list(case.required_nodes[0].risk_domains),
         }
         split["nodes"].insert(1, split_node)
-        split["edges"].insert(0, {
-            "id": "EDGE-004", "source": "NODE-001", "target": "NODE-005",
-            "kind": "references", "location": exact["location"],
-            "evidence": "split semantics", "confidence": "lexical",
-            "provider": "builtin", "source_sha256": "9" * 64,
-        })
+        split["edges"].insert(
+            0,
+            {
+                "id": "EDGE-004",
+                "source": "NODE-001",
+                "target": "NODE-005",
+                "kind": "references",
+                "location": exact["location"],
+                "evidence": "split semantics",
+                "confidence": "lexical",
+                "provider": "builtin",
+                "source_sha256": "9" * 64,
+            },
+        )
         split["edges"][1]["source"] = "NODE-005"
         split["paths"][0] = {
             **split["paths"][0],
@@ -238,14 +275,17 @@ class GraphScoringTest(unittest.TestCase):
         mutations["unknown-provider"] = ("production receipt validation", provider)
         fabricated = self.receipt(case)
         fabricated["nodes"][0]["confidence"] = "verified-provider"
-        mutations["confidence-upgrade"] = (
-            "production receipt validation", fabricated
-        )
+        mutations["confidence-upgrade"] = ("production receipt validation", fabricated)
         frontier = self.receipt(case)
-        frontier["frontier"] = [{"id": "FRONTIER-001", "node": "NODE-004", "reason": "unexpected", "risk_domains": ["regression"]}]
-        mutations["unexpected-frontier"] = (
-            "unknown frontier expectation", frontier
-        )
+        frontier["frontier"] = [
+            {
+                "id": "FRONTIER-001",
+                "node": "NODE-004",
+                "reason": "unexpected",
+                "risk_domains": ["regression"],
+            }
+        ]
+        mutations["unexpected-frontier"] = ("unknown frontier expectation", frontier)
         wrong_risk = self.receipt(case)
         wrong_risk["nodes"][0]["risk_domains"] = ["functionality"]
         mutations["wrong-risk"] = ("required node identity", wrong_risk)
@@ -264,19 +304,29 @@ class GraphScoringTest(unittest.TestCase):
         module = self.module()
         case = self.case()
         receipt = self.receipt(case)
-        receipt["nodes"].append({
-            "id": "NODE-005", "kind": "permission", "label": "uncovered auth",
-            "location": "auth/uncovered.py", "provider": "builtin", "confidence": "lexical",
-            "source_sha256": "9" * 64, "risk_domains": ["authorization/privacy"],
-        })
+        receipt["nodes"].append(
+            {
+                "id": "NODE-005",
+                "kind": "permission",
+                "label": "uncovered auth",
+                "location": "auth/uncovered.py",
+                "provider": "builtin",
+                "confidence": "lexical",
+                "source_sha256": "9" * 64,
+                "risk_domains": ["authorization/privacy"],
+            }
+        )
 
-        uncovered = module.score_graph(
-            case, receipt, "Impact scan: 8.4 s\nImpact paths: PATH-001"
-        )
-        receipt["frontier"] = [{"id": "FRONTIER-001", "node": "NODE-005", "reason": "bounded unknown", "risk_domains": ["authorization/privacy"]}]
-        visible = module.score_graph(
-            case, receipt, "Impact scan: 8.4 s\nImpact paths: PATH-001"
-        )
+        uncovered = module.score_graph(case, receipt, "Impact scan: 8.4 s\nImpact paths: PATH-001")
+        receipt["frontier"] = [
+            {
+                "id": "FRONTIER-001",
+                "node": "NODE-005",
+                "reason": "bounded unknown",
+                "risk_domains": ["authorization/privacy"],
+            }
+        ]
+        visible = module.score_graph(case, receipt, "Impact scan: 8.4 s\nImpact paths: PATH-001")
 
         self.assertFalse(uncovered.passed)
         self.assertEqual(uncovered.uncovered_high_risk_nodes, ("NODE-005",))

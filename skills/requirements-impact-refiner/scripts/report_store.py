@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import tempfile
-
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -18,7 +18,6 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import compact_state
 import impact_renderer
-
 
 REPORT_ID_PATTERN = re.compile(r"RPT-\d{3}")
 REPORT_ROOT = Path(".requirements-impact-refiner/reports")
@@ -148,7 +147,12 @@ def load_current(repo_root: Path, report_id: str) -> CurrentRevision | None:
         raise ReportStoreUnavailable(f"cannot read current pointer: {error}") from error
     if not isinstance(pointer, dict) or set(pointer) != POINTER_KEYS:
         raise ReportStoreUnavailable("current pointer has an invalid schema")
-    if pointer.get("schema_version") != 1 or pointer.get("report_id") != report_id:
+    pointer_schema_version = pointer.get("schema_version")
+    if (
+        type(pointer_schema_version) is not int
+        or pointer_schema_version != 1
+        or pointer.get("report_id") != report_id
+    ):
         raise ReportStoreUnavailable("current pointer identity is invalid")
     revision = pointer.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
@@ -208,7 +212,7 @@ def _write_or_verify(path: Path, payload: bytes, *, resume_partial: bool) -> Non
                 f"cannot verify existing artifact {path.name}: {error}"
             ) from error
         if existing != payload:
-            raise FileExistsError(path)
+            raise FileExistsError(path) from None
 
 
 def _replace_pointer(pointer_path: Path, payload: bytes) -> None:
@@ -237,7 +241,10 @@ def publish_revision(
     state, state_errors = compact_state.load_state_bytes(state_bytes)
     if state_errors or state is None:
         raise ValueError("; ".join(state_errors))
-    report = state["report"]
+    typed_state = cast(
+        compact_state.State, state
+    )  # compact_state.load_state_bytes validates the complete State shape.
+    report = typed_state["report"]
     report_id = report["id"]
     revision = report["revision"]
     report_dir = report_directory(repo_root, report_id, create=True)
@@ -257,9 +264,7 @@ def publish_revision(
             if current.markdown_path.read_bytes() != markdown_bytes:
                 raise FileExistsError(markdown_path)
         except OSError as error:
-            raise ReportStoreUnavailable(
-                f"cannot verify published revision: {error}"
-            ) from error
+            raise ReportStoreUnavailable(f"cannot verify published revision: {error}") from error
         return current
     if revision == 1:
         if current is not None:

@@ -7,11 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-
 AUDIENCES = ("simple", "balanced", "technical")
 DELIVERIES = ("compact", "full")
 FLOWS = ("report", "ask")
 CONFIG_NAME = ".requirements-impact-refiner.json"
+DELTA_MAX_SECONDS_DEFAULT = 3
+DELTA_MAX_SECONDS_LIMIT = 30
 GRAPH_DEFAULTS = {
     "enabled": True,
     "max_seconds": 30,
@@ -54,7 +55,10 @@ def load_repository_config(project_root: Path) -> dict[str, object]:
         raise ValueError(f"cannot read {CONFIG_NAME}: {error}") from error
     if not isinstance(value, dict):
         raise ValueError(f"{CONFIG_NAME} must contain a JSON object")
-    unknown = sorted(set(value) - {"audience", "delivery", "flow", "impact_graph"})
+    unknown = sorted(
+        set(value)
+        - {"audience", "delivery", "flow", "impact_graph", "delta_max_seconds"}
+    )
     if unknown:
         raise ValueError(f"unsupported setting(s): {', '.join(unknown)}")
     return value
@@ -98,18 +102,50 @@ def resolve_graph_settings(config: dict[str, object]) -> tuple[dict[str, object]
     providers, install_policy = configured.get("providers"), configured.get("install_policy")
     if not isinstance(enabled, bool) or not isinstance(deep, bool):
         return graph_defaults(), "enabled and deep must be booleans"
-    if (not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1 or maximum > 30):
+    if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1 or maximum > 30:
         return graph_defaults(), "max_seconds must be a positive integer at most 30"
-    if (not isinstance(target, int) or isinstance(target, bool) or target < 1 or target > maximum):
-        return graph_defaults(), "target_seconds must be a positive integer no greater than max_seconds"
-    if (not isinstance(providers, list) or not providers or any(not isinstance(item, str) or not item for item in providers) or len(set(providers)) != len(providers)):
+    if not isinstance(target, int) or isinstance(target, bool) or target < 1 or target > maximum:
+        return (
+            graph_defaults(),
+            "target_seconds must be a positive integer no greater than max_seconds",
+        )
+    if (
+        not isinstance(providers, list)
+        or not providers
+        or any(not isinstance(item, str) or not item for item in providers)
+        or len(set(providers)) != len(providers)
+    ):
         return graph_defaults(), "providers must be a non-empty list of unique names"
     if install_policy != "never":
         return graph_defaults(), "install_policy must be never"
     return {
-        "enabled": enabled, "max_seconds": maximum, "target_seconds": target,
-        "providers": list(providers), "install_policy": install_policy, "deep": deep,
+        "enabled": enabled,
+        "max_seconds": maximum,
+        "target_seconds": target,
+        "providers": list(providers),
+        "install_policy": install_policy,
+        "deep": deep,
     }, None
+
+
+def _resolve_delta_max_seconds(config: dict[str, object]) -> tuple[int, str | None]:
+    configured = config.get("delta_max_seconds", DELTA_MAX_SECONDS_DEFAULT)
+    if (
+        not isinstance(configured, int)
+        or isinstance(configured, bool)
+        or configured < 1
+        or configured > DELTA_MAX_SECONDS_LIMIT
+    ):
+        return (
+            DELTA_MAX_SECONDS_DEFAULT,
+            "delta_max_seconds must be a positive integer at most 30",
+        )
+    return configured, None
+
+
+def resolve_delta_max_seconds(project_root: Path) -> int:
+    value, _warning = _resolve_delta_max_seconds(load_repository_config(project_root))
+    return value
 
 
 def resolve(
@@ -135,6 +171,7 @@ def resolve(
         "delivery", delivery_override, config, DELIVERIES, delivery_default
     )
     impact_graph, warning = resolve_graph_settings(config)
+    _delta_max_seconds, delta_warning = _resolve_delta_max_seconds(config)
     resolved: dict[str, object] = {
         "audience": audience,
         "audience_source": audience_source,
@@ -144,8 +181,13 @@ def resolve(
         "flow_source": flow_source,
         "impact_graph": impact_graph,
     }
+    warnings = []
     if warning is not None:
-        resolved["warnings"] = ["invalid impact_graph configuration: " + warning]
+        warnings.append("invalid impact_graph configuration: " + warning)
+    if delta_warning is not None:
+        warnings.append("invalid delta_max_seconds configuration: " + delta_warning)
+    if warnings:
+        resolved["warnings"] = warnings
     return resolved
 
 

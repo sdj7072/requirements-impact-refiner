@@ -1,12 +1,13 @@
+import json
 import re
 import shlex
-import json
+import tempfile
 import unittest
 from pathlib import Path
 
 from evals.harness.catalog import load_all, select_suite
 from evals.harness.run import build_parser
-
+from tests.test_integration_adapters import McpBootstrapHarness
 
 ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.ko.md", "README.ja.md"]
@@ -40,19 +41,13 @@ PRE_LIVE_COMPATIBILITY = {
 def headings(path):
     text = path.read_text(encoding="utf-8")
     return [
-        re.sub(r"^#+\s+", "", line).strip()
-        for line in text.splitlines()
-        if line.startswith("## ")
+        re.sub(r"^#+\s+", "", line).strip() for line in text.splitlines() if line.startswith("## ")
     ]
 
 
 def compatibility_identity_rows(path):
     lines = path.read_text(encoding="utf-8").splitlines()
-    start = next(
-        index
-        for index, line in enumerate(lines)
-        if re.match(r"^## 6\.", line)
-    )
+    start = next(index for index, line in enumerate(lines) if re.match(r"^## 6\.", line))
     header = next(
         index
         for index in range(start + 1, len(lines))
@@ -94,29 +89,97 @@ def harness_commands(path):
 
 
 class DocumentationTest(unittest.TestCase):
-    def test_core_skill_is_a_short_controller_first_positive_recipe(self):
+    def test_ci_has_separate_runtime_matrix_and_python_313_quality_job(self):
+        """Catch CI changes that drop the dedicated pinned-tool quality gate."""
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        test_job = re.search(r"(?ms)^  test:\n(?P<body>.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", workflow)
+        self.assertIsNotNone(test_job, "CI must retain a separate test job")
+        self.assertRegex(
+            test_job.group("body"),
+            r'python-version:\s*\[\s*["\']3\.9["\']\s*,\s*["\']3\.11["\']\s*,\s*["\']3\.13["\']\s*\]',
+        )
+        self.assertIn("python3 -m unittest discover -s tests -v", test_job.group("body"))
+        self.assertIn("python3 -m py_compile scripts/*.py", test_job.group("body"))
+        self.assertIn("Check unfinished markers", test_job.group("body"))
+
+        quality_job = re.search(
+            r"(?ms)^  quality:\n(?P<body>.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", workflow
+        )
+        self.assertIsNotNone(quality_job, "CI must keep quality independent from the test matrix")
+        self.assertNotIn("matrix:", quality_job.group("body"))
+        self.assertNotIn("needs:", quality_job.group("body"))
+        self.assertRegex(quality_job.group("body"), r'python-version:\s*["\']3\.13["\']')
+        self.assertIn("pip install -r requirements-quality.txt", quality_job.group("body"))
+        self.assertIn("python scripts/run-quality-gates.py", quality_job.group("body"))
+
+        provider_job = re.search(
+            r"(?ms)^  provider-canary:\n(?P<body>.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)",
+            workflow,
+        )
+        self.assertIsNotNone(provider_job, "CI must run the pinned provider canary independently")
+        self.assertNotIn("matrix:", provider_job.group("body"))
+        self.assertNotIn("needs:", provider_job.group("body"))
+        self.assertRegex(provider_job.group("body"), r'python-version:\s*["\']3\.13["\']')
+        self.assertIn("pip install -r requirements-provider-canary.txt", provider_job.group("body"))
+        self.assertIn("python scripts/run-ast-grep-canary.py", provider_job.group("body"))
+        self.assertNotIn("requirements-quality.txt", provider_job.group("body"))
+        self.assertRegex(workflow, r"(?ms)^permissions:\n  contents: read$")
+
+    def test_quality_workflow_is_documented_for_local_python_313(self):
+        """Keep the CI and local quality contract usable in every public language."""
+        mypy_relations = {
+            "README.md": "`mypy==1.18.2` runs in the Python 3.13 quality job while checking Python 3.9 source compatibility.",
+            "README.ko.md": "`mypy==1.18.2`는 Python 3.13 품질 작업에서 실행되며 Python 3.9 소스 호환성을 검사합니다.",
+            "README.ja.md": "`mypy==1.18.2` は Python 3.13 の品質ジョブで実行され、Python 3.9 のソース互換性を検査します。",
+            "CONTRIBUTING.md": "`mypy==1.18.2` runs in the Python 3.13 quality job while checking Python 3.9 source compatibility.",
+        }
+        required = (
+            "3.9",
+            "3.11",
+            "3.13",
+            "requirements-quality.txt",
+            "python3.13 -m venv .quality-venv",
+            ".quality-venv/bin/pip install -r requirements-quality.txt",
+            ".quality-venv/bin/python scripts/run-quality-gates.py",
+            "bandit==1.9.4",
+            "coverage==7.15.4",
+            "mypy==1.18.2",
+            "ruff==0.16.3",
+            "80%",
+            "-ll",
+        )
+        for name in (*READMES, "CONTRIBUTING.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for token in required:
+                self.assertIn(token, text, f"{token} missing from {name}")
+            self.assertIn(
+                mypy_relations[name], text, f"Mypy runtime/target relation missing from {name}"
+            )
+            self.assertRegex(text, r"(?:root|루트|ルート).{0,120}`scripts`.{0,120}`evals/harness`")
+            self.assertRegex(
+                text,
+                r"(?:medium|중간|中)[\s\S]{0,120}-ll|-ll[\s\S]{0,120}(?:medium|중간|中)",
+            )
+
+    def test_core_skill_is_a_short_previous_first_report_recipe(self):
         core = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        body = core.split("---", 2)[2]
         self.assertLess(len(core.split()), 180)
-        route = body.split("## Default Fast Scan\n", 1)[1].split("\n## ", 1)[0]
-        self.assertEqual(route.count("`rir_scan`"), 1)
-        self.assertNotIn("rir_begin", route)
-        self.assertNotIn("rir_trace_impact", route)
-        self.assertNotIn("rir_finalize", route)
-        self.assertIn("Return `display_text`", body)
-        self.assertIn("stop", route.lower())
-        self.assertIn("fast-scan.md", body)
-        self.assertIn("CLI fallback", body)
-        self.assertIn("full-inline", body)
-        recipe = re.search(r"1\. (.+)\n2\. (.+)\n3\. (.+)", route)
-        self.assertEqual(recipe.groups(), (
-            "Call `rir_scan` once with the change and supplied evidence.",
-            "`needs_input`: relay its question verbatim and stop.",
-            "Report flow: hide `display_text`, continue below. Ask flow: "
-            "Return `display_text` verbatim. Stop; the renderer-owned "
-            "question already asks whether to refine "
-            "([Fast Scan](references/fast-scan.md)).",
-        ))
+        with tempfile.TemporaryDirectory() as directory:
+            fresh = McpBootstrapHarness(directory, status="fresh").run()
+        with tempfile.TemporaryDirectory() as directory:
+            stale = McpBootstrapHarness(directory, status="stale").run()
+        self.assertEqual([name for name, _ in fresh.calls], ["rir_previous"])
+        self.assertEqual([name for name, _ in stale.calls], ["rir_previous", "rir_scan"])
+        self.assertIn("references/previous-report.md", core)
+        self.assertIn("references/fast-scan.md", core)
+        self.assertIn("scripts/rir-controller.py previous", core)
+        self.assertIn("full-inline", core)
+        route = core.split("## Default bootstrap\n", 1)[1].split("\n## ", 1)[0]
+        self.assertEqual(route.count("`rir_previous`"), 1)
+        self.assertIn("Report flow: hide scan `display_text` and continue.", route)
+        self.assertIn("Ask flow: return scan `display_text` and stop.", route)
+        self.assertIn("immediately (report)", core)
 
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
         required = (
@@ -141,12 +204,23 @@ class DocumentationTest(unittest.TestCase):
         canonical = (ROOT / "README.md").read_text(encoding="utf-8")
         graph_setting = re.findall(r'\{"impact_graph":.*\}', canonical)[0]
         commands = next(
-            block for block in re.findall(r"```sh\n(.*?)\n```", canonical, re.DOTALL)
+            block
+            for block in re.findall(r"```sh\n(.*?)\n```", canonical, re.DOTALL)
             if "trace --repo-root REPO" in block and "--graph-receipt-id RECEIPT_ID" in block
         )
-        self.assertEqual(json.loads(graph_setting), {
-            "impact_graph": {"enabled": True, "max_seconds": 30, "target_seconds": 10, "providers": ["auto"], "install_policy": "never", "deep": False}
-        })
+        self.assertEqual(
+            json.loads(graph_setting),
+            {
+                "impact_graph": {
+                    "enabled": True,
+                    "max_seconds": 30,
+                    "target_seconds": 10,
+                    "providers": ["auto"],
+                    "install_policy": "never",
+                    "deep": False,
+                }
+            },
+        )
         for name in READMES[1:]:
             text = (ROOT / name).read_text(encoding="utf-8")
             self.assertIn(graph_setting, text)

@@ -2,7 +2,6 @@ import copy
 import hashlib
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -10,9 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+SCRIPTS = ROOT / "scripts"
 FIXTURE = ROOT / "tests" / "fixtures" / "compact-state-post-decision.json"
 
 
@@ -77,36 +75,23 @@ class ReportStoreTest(unittest.TestCase):
 
     def test_retry_resumes_matching_partial_revision_artifacts(self):
         state_bytes = self.state_bytes()
-        report_dir = (
-            self.root
-            / ".requirements-impact-refiner"
-            / "reports"
-            / "RPT-001"
-        )
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
         report_dir.mkdir(parents=True)
         (report_dir / "revision-0001.json").write_bytes(state_bytes)
 
-        published = STORE.publish_revision(
-            self.root, state_bytes, resume_partial=True
-        )
+        published = STORE.publish_revision(self.root, state_bytes, resume_partial=True)
 
         self.assertTrue(published.pointer_path.is_file())
         self.assertTrue(published.markdown_path.is_file())
 
     def test_failed_atomic_claim_leaves_no_partial_final_artifact(self):
-        report_dir = (
-            self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
-        )
+        report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
         with mock.patch.object(STORE.os, "link", side_effect=OSError("fault")):
             with self.assertRaises(STORE.ReportStoreUnavailable):
-                STORE.publish_revision(
-                    self.root, self.state_bytes(), resume_partial=True
-                )
+                STORE.publish_revision(self.root, self.state_bytes(), resume_partial=True)
 
         self.assertFalse((report_dir / "revision-0001.json").exists())
-        published = STORE.publish_revision(
-            self.root, self.state_bytes(), resume_partial=True
-        )
+        published = STORE.publish_revision(self.root, self.state_bytes(), resume_partial=True)
         self.assertTrue(published.pointer_path.is_file())
 
     def test_revision_two_hashes_exact_selected_markdown_bytes(self):
@@ -144,6 +129,34 @@ class ReportStoreTest(unittest.TestCase):
 
         self.assertEqual(STORE.load_current(self.root, "RPT-001").revision, 1)
 
+    def test_state_and_pointer_schema_versions_require_the_exact_integer_one(self):
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(boundary="publish", sentinel=sentinel):
+                state = self.state()
+                state["schema_version"] = sentinel
+                with tempfile.TemporaryDirectory() as temporary:
+                    if valid:
+                        published = STORE.publish_revision(Path(temporary), canonical_json(state))
+                        self.assertEqual(published.revision, 1)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "schema_version must be 1"):
+                            STORE.publish_revision(Path(temporary), canonical_json(state))
+
+        published = STORE.publish_revision(self.root, self.state_bytes())
+        baseline = json.loads(published.pointer_path.read_text(encoding="utf-8"))
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(boundary="load", sentinel=sentinel):
+                pointer = dict(baseline)
+                pointer["schema_version"] = sentinel
+                published.pointer_path.write_bytes(canonical_json(pointer))
+                if valid:
+                    self.assertEqual(STORE.load_current(self.root, "RPT-001").revision, 1)
+                else:
+                    with self.assertRaisesRegex(
+                        STORE.ReportStoreUnavailable, "current pointer identity is invalid"
+                    ):
+                        STORE.load_current(self.root, "RPT-001")
+
     def test_store_rejects_traversal_and_external_symlink(self):
         for report_id in ("../escape", "/tmp/escape", "RPT-001/../../escape"):
             with self.subTest(report_id=report_id):
@@ -152,9 +165,7 @@ class ReportStoreTest(unittest.TestCase):
 
         outside = self.root / "outside"
         outside.mkdir()
-        (self.root / ".requirements-impact-refiner").symlink_to(
-            outside, target_is_directory=True
-        )
+        (self.root / ".requirements-impact-refiner").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(STORE.UnsafeReportPath):
             STORE.publish_revision(self.root, self.state_bytes())
 

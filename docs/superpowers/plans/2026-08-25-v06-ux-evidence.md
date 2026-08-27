@@ -2,22 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver structured en/ko/ja Fast Scan and detailed reports, then produce a sealed five-repetition Codex and Claude release matrix.
+**Goal:** Render the instant-report runtime as structured en/ko/ja previous, Fast Scan, and detailed reports, then produce a sealed five-repetition Codex and Claude release matrix.
 
 **Architecture:** Locale selection is explicit-first and presentation-only. Renderers share one catalog and preserve machine identifiers. The evaluation harness stages isolated repositories and sessions, records every first attempt, and fails closed on any mechanical or evidence-integrity error.
 
 **Tech Stack:** Python standard library; existing renderer/controller schemas; Codex CLI; Claude Code; sealed JSONL/Markdown evidence.
 
-**Spec:** `docs/superpowers/specs/2026-08-25-v0.6-production-readiness-design.md`
+**Spec:** `docs/superpowers/specs/2026-08-25-v0.6-production-readiness-design.md` and `docs/superpowers/specs/2026-08-25-v0.6-instant-report-performance-design.md`
 
 ## Global Constraints
 
-- Complete the quality-foundation and controller/graph plans first.
+- Complete the quality-foundation, controller/graph, and instant-report runtime plans first.
 - Locale never changes scan identity, evidence values, IDs, lifecycle enums, or canonical transition rules.
 - Exact machine strings such as `verified`, `IMP-001`, provider names, paths, and the Superpowers handoff marker stay untranslated.
 - Fast Scan remains at most 180 words; compact detailed output remains at most 450 words.
 - Every live run uses an isolated repository, session, and output directory.
 - A failed first attempt remains a release failure even if a diagnostic retry passes.
+- Rendering consumes `PreviousReportResult` and `PerformanceMetrics` without changing report identity, freshness classification, timeout state, cache status, or token calculations.
+- Every locale exposes previous-result freshness, changed-file count, unknown frontier, elapsed time, cache, bytes, and token estimate fields with the same semantics.
 
 ---
 
@@ -79,7 +81,7 @@ git commit -m "feat: add explicit presentation locale"
 
 **Interfaces:**
 - Produces: `render_fast_scan(receipt, audience, locale) -> str` with newline-preserving blocks
-- Consumes: existing receipt and locale catalog
+- Consumes: existing receipt, optional `PreviousReportResult`, `PerformanceMetrics`, and locale catalog
 
 - [ ] **Step 1: Write golden structure tests**
 
@@ -90,6 +92,11 @@ def test_balanced_korean_output_keeps_sections_and_numbered_paths(self):
     self.assertIn("\n### 발생 가능한 영향 경로\n", text)
     self.assertIn("\n1. `api/profile.py` → `mobile/profile.py`\n", text)
     self.assertIn("\n### 미확인 범위\n", text)
+    self.assertIn("\n### 이전 결과\n", text)
+    self.assertIn("기준 커밋:", text)
+    self.assertIn("변경 파일:", text)
+    self.assertIn("\n### 검사 정보\n", text)
+    self.assertIn("예상 토큰:", text)
     self.assertTrue(text.rstrip().endswith("상세 영향도 정제를 진행할까요?"))
 ```
 
@@ -101,13 +108,13 @@ Expected: golden tests fail because `_bounded_lines` joins blocks with spaces.
 
 - [ ] **Step 3: Replace word arrays with complete render blocks**
 
-Represent headings, path records, frontier records, metadata, and the question as blocks. Count words across blocks. Drop the lowest-priority complete path block before safety or metadata blocks. Simple mode emits path and risk only; balanced emits risk and selected provenance; technical emits provider, confidence, locations, receipt coverage, and omission counts.
+Represent status, previous-result identity/freshness, path records, cause-impact-prevention rows, frontier records, performance metadata, and the question as complete blocks. Count words across blocks. Drop the lowest-priority complete path block before freshness, safety, or metadata blocks. Simple mode emits freshness, path, risk, and next action; balanced adds cause, impact, prevention, and selected provenance; technical adds provider, confidence, locations, receipt coverage, byte/token metrics, and omission counts.
 
 - [ ] **Step 4: Verify all locales and boundary mutations**
 
 Run: `python3 -m unittest -q tests.test_fast_scan_renderer tests.test_fast_scan tests.test_fast_scan_eval_cases`
 
-Assert all golden outputs are at most 180 words and contain no truncated Markdown marker, path, or warning.
+Assert all golden outputs are at most 180 words, contain the same semantic freshness/frontier/performance fields, and contain no truncated Markdown marker, path, or warning.
 
 - [ ] **Step 5: Commit**
 
@@ -128,7 +135,7 @@ git commit -m "feat: structure localized fast scan output"
 
 **Interfaces:**
 - Produces: `catalog(locale) -> PresentationCatalog`; `render_markdown(state, locale="en")`; `render_compact(state, locale="en")`
-- Consumes: canonical state whose machine values remain English
+- Consumes: canonical state plus previous-result and performance fields whose machine values remain English
 
 - [ ] **Step 1: Write semantic-equivalence tests**
 
@@ -150,7 +157,7 @@ Run: `python3 -m unittest -q tests.test_impact_renderer_locale`
 
 - [ ] **Step 3: Add catalog-backed headings and parsers**
 
-Translate headings, explanatory labels, questions, validation summaries, and handoff guidance. Preserve IDs, evidence levels, lifecycle states, category keys in canonical JSON, provider names, paths, and `superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans` exactly.
+Translate headings, explanatory labels, freshness states, changed-file summaries, performance labels, questions, validation summaries, and handoff guidance. Preserve IDs, evidence levels, lifecycle states, category keys in canonical JSON, provider names, paths, digests, numeric metrics, and `superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans` exactly.
 
 - [ ] **Step 4: Verify compact budgets and full parser parity**
 
@@ -191,6 +198,8 @@ def test_positive_cases_have_scan_and_confirmation_turns(self):
         elif case.kind == "negative":
             self.assertEqual(len(case.turns), 1)
 ```
+
+Add exact-repeat cases whose only tool is `rir_previous`, stale cases whose order is `rir_previous` then `rir_scan`, ambiguous-lineage cases that stop after `rir_previous`, and changed-A fixtures that require indirect C/D/Z impact or an explicit unknown frontier.
 
 - [ ] **Step 2: Run and capture the one-turn catalog failure**
 

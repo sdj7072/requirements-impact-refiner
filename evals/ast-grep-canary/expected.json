@@ -1,0 +1,68 @@
+{
+  "version": "ast-grep 0.45.0",
+  "scan_matches": [
+    {
+      "rule_id": "python-import",
+      "file": "evals/ast-grep-canary/fixture/imports.py",
+      "text": "from services.profile import ProfileService",
+      "start": [0, 0],
+      "end": [0, 43],
+      "source_sha256": "6f7046a4a251c5c8182441abfbfab6ea696437818420e5d33c181e0ba9e99a93"
+    }
+  ],
+  "adapter": {
+    "seed": {
+      "term": "ProfileService",
+      "location": "imports.py"
+    },
+    "nodes": [
+      {
+        "key": "seed:0",
+        "kind": "symbol",
+        "label": "ProfileService",
+        "location": "imports.py",
+        "confidence": "structural-inferred",
+        "source_sha256": "6f7046a4a251c5c8182441abfbfab6ea696437818420e5d33c181e0ba9e99a93",
+        "risk_domains": ["functionality"]
+      },
+      {
+        "key": "match:0:a82f7b8b:0",
+        "kind": "symbol",
+        "label": "ProfileService",
+        "location": "imports.py",
+        "confidence": "structural-inferred",
+        "source_sha256": "6f7046a4a251c5c8182441abfbfab6ea696437818420e5d33c181e0ba9e99a93",
+        "risk_domains": ["functionality"]
+      },
+      {
+        "key": "match:0:a82f7b8b:1",
+        "kind": "symbol",
+        "label": "ProfileService",
+        "location": "imports.py",
+        "confidence": "structural-inferred",
+        "source_sha256": "6f7046a4a251c5c8182441abfbfab6ea696437818420e5d33c181e0ba9e99a93",
+        "risk_domains": ["functionality"]
+      }
+    ],
+    "edges": [
+      {
+        "source": "seed:0",
+        "target": "match:0:a82f7b8b:0",
+        "kind": "references",
+        "location": "imports.py",
+        "evidence": "ast-grep structural match at 1:30-1:44: ProfileService",
+        "confidence": "structural-inferred",
+        "source_sha256": "6f7046a4a251c5c8182441abfbfab6ea696437818420e5d33c181e0ba9e99a93"
+      },
+      {
+        "source": "seed:0",
+        "target": "match:0:a82f7b8b:1",
+        "kind": "references",
+        "location": "imports.py",
+        "evidence": "ast-grep structural match at 3:11-3:25: ProfileService",
+        "confidence": "structural-inferred",
+        "source_sha256": "6f7046a4a251c5c8182441abfbfab6ea696437818420e5d33c181e0ba9e99a93"
+      }
+    ]
+  }
+}

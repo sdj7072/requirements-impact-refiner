@@ -4,11 +4,11 @@ import json
 import sys
 import unittest
 from pathlib import Path
-
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
-MODULE_PATH = ROOT / "skills" / "requirements-impact-refiner" / "scripts" / "impact_graph.py"
+MODULE_PATH = ROOT / "scripts" / "impact_graph.py"
 SPEC = importlib.util.spec_from_file_location("impact_graph", MODULE_PATH)
 GRAPH = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = GRAPH
@@ -36,14 +36,14 @@ class ImpactGraphTest(unittest.TestCase):
         value = fixture()
         value["providers"][0]["status"] = "installed"
 
-        self.assertIn("provider builtin has invalid status installed", GRAPH.validate_receipt(value))
+        self.assertIn(
+            "provider builtin has invalid status installed", GRAPH.validate_receipt(value)
+        )
 
     def test_receipt_rejects_non_object_rows_and_empty_or_duplicate_providers(self):
         value = fixture()
         value["providers"] = [42]
-        self.assertIn(
-            "providers row 1 must be an object", GRAPH.validate_receipt(value)
-        )
+        self.assertIn("providers row 1 must be an object", GRAPH.validate_receipt(value))
 
         value = fixture()
         value["settings"]["providers"] = []
@@ -76,6 +76,81 @@ class ImpactGraphTest(unittest.TestCase):
         value["providers"][0]["confidence"] = "lexical"
         errors = GRAPH.validate_receipt(value)
         self.assertIn("node NODE-001 upgrades provider builtin confidence", errors)
+
+    def test_receipt_reports_malformed_provider_confidence_without_crashing(self):
+        value = fixture()
+        value["providers"][0]["confidence"] = ["lexical"]
+
+        errors = GRAPH.validate_receipt(value)
+
+        self.assertIn("provider builtin has invalid confidence ['lexical']", errors)
+
+    def test_unhashable_scalar_and_reference_fields_fail_closed(self):
+        cases = (
+            (("providers", 0, "status"), [], "provider builtin has invalid status"),
+            (("nodes", 0, "kind"), {}, "node NODE-001 has invalid kind"),
+            (("nodes", 0, "provider"), [], "references unknown provider"),
+            (("edges", 0, "source"), {}, "references unknown graph node"),
+            (("paths", 0, "nodes", 0), [], "path PATH-001 nodes must contain"),
+            (("frontier", 0, "node"), {}, "references unknown graph node"),
+            (("budget_status",), [], "invalid budget_status"),
+            (("cache", "status"), {}, "cache has invalid status"),
+            (
+                ("cache", "invalidated_nodes", 0),
+                [],
+                "cache invalidated_nodes must contain",
+            ),
+        )
+        for path, malformed, expected in cases:
+            with self.subTest(path=path, malformed=malformed):
+                value = fixture()
+                if path == ("cache", "invalidated_nodes", 0):
+                    value["cache"]["invalidated_nodes"] = ["NODE-001"]
+                target = value
+                for component in path[:-1]:
+                    target = target[component]
+                target[path[-1]] = malformed
+
+                errors = GRAPH.validate_receipt(value)
+
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_schema_version_requires_the_exact_integer_one_at_load_boundary(self):
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(sentinel=sentinel):
+                value = fixture()
+                value["schema_version"] = sentinel
+                payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
+
+                loaded, errors = GRAPH.load_receipt_bytes(payload)
+
+                if valid:
+                    self.assertEqual(errors, ())
+                    self.assertEqual(loaded, value)
+                else:
+                    self.assertIsNone(loaded)
+                    self.assertIn("schema_version must be 1", errors)
+
+    def test_over_deep_json_is_rejected_before_decoder_invocation(self):
+        payload = ("[" * 65 + "0" + "]" * 65).encode("utf-8")
+        with mock.patch.object(
+            GRAPH.json,
+            "loads",
+            side_effect=AssertionError("over-deep JSON reached the decoder"),
+        ):
+            loaded, errors = GRAPH.load_receipt_bytes(payload)
+
+        self.assertIsNone(loaded)
+        self.assertEqual(errors, ("receipt exceeds maximum JSON nesting depth",))
+
+    def test_malformed_recursive_canonical_value_is_a_validation_error(self):
+        value = fixture()
+        recursive = []
+        recursive.append(recursive)
+        value["cache"]["invalidated_nodes"] = recursive
+
+        with self.assertRaisesRegex(ValueError, "^invalid graph receipt:"):
+            GRAPH.canonical_receipt_bytes(value)
 
     def test_receipt_requires_sha_inputs(self):
         value = fixture()
@@ -112,8 +187,13 @@ class ImpactGraphTest(unittest.TestCase):
             repo_root_sha256="2" * 64,
             request_sha256="3" * 64,
             settings=settings,
-            providers=[], nodes=[], edges=[], paths=[], frontier=[],
-            timings_ms={"total": 0}, budget_status="closed",
+            providers=[],
+            nodes=[],
+            edges=[],
+            paths=[],
+            frontier=[],
+            timings_ms={"total": 0},
+            budget_status="closed",
             cache={"status": "miss", "key": "4" * 64, "invalidated_nodes": []},
         )
         self.assertEqual(settings.providers, ("auto",))
@@ -131,10 +211,14 @@ class ImpactGraphTest(unittest.TestCase):
         value = fixture()
         value["nodes"] = [
             {
-                "id": f"NODE-{index:03d}", "kind": "symbol",
-                "label": "x" * GRAPH.MAX_STRING_LENGTH, "location": "api/profile.py",
-                "provider": "builtin", "confidence": "verified-source",
-                "source_sha256": "d" * 64, "risk_domains": ["interfaces"],
+                "id": f"NODE-{index:03d}",
+                "kind": "symbol",
+                "label": "x" * GRAPH.MAX_STRING_LENGTH,
+                "location": "api/profile.py",
+                "provider": "builtin",
+                "confidence": "verified-source",
+                "source_sha256": "d" * 64,
+                "risk_domains": ["interfaces"],
             }
             for index in range(GRAPH.MAX_NODES)
         ]

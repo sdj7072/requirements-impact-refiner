@@ -1,0 +1,6 @@
+id: python-import
+language: Python
+severity: warning
+message: Python import is structurally visible
+rule:
+  kind: import_from_statement

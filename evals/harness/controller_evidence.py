@@ -1,11 +1,11 @@
 """Derive controller-call evidence from immutable Codex JSONL events."""
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
 import re
-from typing import Optional, Sequence, Tuple, Union
-
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
+from typing import Optional, Union
 
 _DRAFT_ID = re.compile(r"\A[0-9a-f]{32}\Z")
 _TOOLS = ("rir_begin", "rir_trace_impact", "rir_finalize")
@@ -15,8 +15,8 @@ _SERVER = "requirements-impact-refiner"
 @dataclass(frozen=True)
 class ControllerEvidence:
     valid: bool
-    errors: Tuple[str, ...]
-    tool_order: Tuple[str, ...]
+    errors: tuple[str, ...]
+    tool_order: tuple[str, ...]
     begin_calls: int
     trace_calls: int
     finalize_calls: int
@@ -28,16 +28,16 @@ class ControllerEvidence:
     display_text_exact_match: bool
     display_text_presentation_equivalent: bool
     display_comparison: str
-    display_text_sha256: Tuple[str, ...]
-    final_output_sha256: Tuple[str, ...]
-    installed_payload_sha256: Tuple[str, ...]
-    draft_ids: Tuple[str, ...]
-    receipt_ids: Tuple[str, ...]
-    receipt_paths: Tuple[str, ...]
-    receipt_sha256: Tuple[str, ...]
-    trace_compact_graph_sha256: Tuple[str, ...]
-    trace_request_sha256: Tuple[str, ...]
-    trace_seeds: Tuple[Tuple[Tuple[str, Optional[str]], ...], ...]
+    display_text_sha256: tuple[str, ...]
+    final_output_sha256: tuple[str, ...]
+    installed_payload_sha256: tuple[str, ...]
+    draft_ids: tuple[str, ...]
+    receipt_ids: tuple[str, ...]
+    receipt_paths: tuple[str, ...]
+    receipt_sha256: tuple[str, ...]
+    trace_compact_graph_sha256: tuple[str, ...]
+    trace_request_sha256: tuple[str, ...]
+    trace_seeds: tuple[tuple[tuple[str, Optional[str]], ...], ...]
 
     def to_json(self) -> str:
         payload = asdict(self)
@@ -50,21 +50,16 @@ class ControllerEvidence:
         payload["receipt_ids"] = list(self.receipt_ids)
         payload["receipt_paths"] = list(self.receipt_paths)
         payload["receipt_sha256"] = list(self.receipt_sha256)
-        payload["trace_compact_graph_sha256"] = list(
-            self.trace_compact_graph_sha256
-        )
+        payload["trace_compact_graph_sha256"] = list(self.trace_compact_graph_sha256)
         payload["trace_request_sha256"] = list(self.trace_request_sha256)
         payload["trace_seeds"] = [
-            [
-                {"term": term, "location": location}
-                for term, location in seeds
-            ]
+            [{"term": term, "location": location} for term, location in seeds]
             for seeds in self.trace_seeds
         ]
         return json.dumps(payload, sort_keys=True) + "\n"
 
 
-def _structured(result):
+def _structured(result: object) -> Optional[dict[str, object]]:
     if not isinstance(result, dict):
         return None
     snake = result.get("structured_content")
@@ -82,10 +77,10 @@ def _presentation_bytes(value: str) -> str:
     return "\n".join(line.rstrip(" \t") for line in normalized.split("\n"))
 
 
-def _normalized_seeds(value):
+def _normalized_seeds(value: object) -> Optional[tuple[tuple[str, Optional[str]], ...]]:
     if not isinstance(value, list):
         return None
-    seeds = []
+    seeds: list[tuple[str, Optional[str]]] = []
     for row in value:
         if not isinstance(row, dict) or set(row) != {"term", "location"}:
             return None
@@ -100,9 +95,11 @@ def _normalized_seeds(value):
     return tuple(sorted(set(seeds), key=lambda row: (row[1] or "", row[0])))
 
 
-def _attempted_calls(streams: Sequence[str]):
-    calls = {}
-    order = []
+def _attempted_calls(
+    streams: Sequence[str],
+) -> tuple[tuple[dict[str, object], ...], bool]:
+    calls: dict[tuple[int, str], dict[str, object]] = {}
+    order: list[tuple[int, str]] = []
     malformed = False
     for stream_index, stream in enumerate(streams):
         for line in stream.splitlines():
@@ -114,11 +111,13 @@ def _attempted_calls(streams: Sequence[str]):
                 malformed = True
                 continue
             item = event.get("item") if isinstance(event, dict) else None
+            tool = item.get("tool") if isinstance(item, dict) else None
             if (
                 not isinstance(item, dict)
                 or item.get("type") != "mcp_tool_call"
                 or item.get("server") != _SERVER
-                or item.get("tool") not in _TOOLS
+                or not isinstance(tool, str)
+                or tool not in _TOOLS
             ):
                 continue
             identifier = item.get("id")
@@ -146,7 +145,11 @@ def analyze_controller_trace(
     expected_turns: int,
 ) -> ControllerEvidence:
     """Require exact begin/finalize pairs and renderer-owned final bytes."""
-    if isinstance(expected_turns, bool) or not isinstance(expected_turns, int) or expected_turns < 0:
+    if (
+        isinstance(expected_turns, bool)
+        or not isinstance(expected_turns, int)
+        or expected_turns < 0
+    ):
         raise ValueError("expected_turns must be a non-negative integer")
     final_outputs = (final_output,) if isinstance(final_output, str) else tuple(final_output)
     if any(not isinstance(value, str) for value in final_outputs):
@@ -154,24 +157,21 @@ def analyze_controller_trace(
     if expected_turns > 0 and len(final_outputs) != expected_turns:
         raise ValueError("final outputs must match expected turns")
     calls, malformed = _attempted_calls(jsonl_streams)
-    order = tuple(call["tool"] for call in calls)
+    order = tuple(tool for call in calls if isinstance((tool := call.get("tool")), str))
     begins = tuple(call for call in calls if call["tool"] == "rir_begin")
     traces = tuple(call for call in calls if call["tool"] == "rir_trace_impact")
     finalizes = tuple(call for call in calls if call["tool"] == "rir_finalize")
-    errors = []
+    errors: list[str] = []
     expected_order = _TOOLS * expected_turns
     if malformed:
         errors.append("controller JSONL is malformed")
     if order != expected_order:
         errors.append("controller tool order or count does not match expected turns")
-    if any(
-        call.get("status") != "completed" or call.get("error") is not None
-        for call in calls
-    ):
+    if any(call.get("status") != "completed" or call.get("error") is not None for call in calls):
         errors.append("controller tool attempt failed or did not complete")
 
-    begin_ids = []
-    payload_digests = []
+    begin_ids: list[Optional[str]] = []
+    payload_digests: list[Optional[str]] = []
     for call in begins:
         result = _structured(call.get("result"))
         value = result.get("draft_id") if result is not None else None
@@ -179,25 +179,22 @@ def analyze_controller_trace(
         payload_digest = result.get("installed_payload_sha256") if result is not None else None
         payload_digests.append(
             payload_digest
-            if isinstance(payload_digest, str)
-            and re.fullmatch(r"[0-9a-f]{64}", payload_digest)
+            if isinstance(payload_digest, str) and re.fullmatch(r"[0-9a-f]{64}", payload_digest)
             else None
         )
-    trace_ids = []
-    receipt_ids = []
-    receipt_paths = []
-    receipt_digests = []
-    compact_digests = []
-    request_digests = []
-    trace_seed_values = []
-    trace_success = []
+    trace_ids: list[Optional[str]] = []
+    receipt_ids: list[Optional[str]] = []
+    receipt_paths: list[Optional[str]] = []
+    receipt_digests: list[Optional[str]] = []
+    compact_digests: list[Optional[str]] = []
+    request_digests: list[Optional[str]] = []
+    trace_seed_values: list[Optional[tuple[tuple[str, Optional[str]], ...]]] = []
+    trace_success: list[bool] = []
     for call in traces:
         arguments = call.get("arguments")
         trace_id = arguments.get("draft_id") if isinstance(arguments, dict) else None
         trace_ids.append(
-            trace_id
-            if isinstance(trace_id, str) and _DRAFT_ID.fullmatch(trace_id)
-            else None
+            trace_id if isinstance(trace_id, str) and _DRAFT_ID.fullmatch(trace_id) else None
         )
         result = _structured(call.get("result"))
         receipt_id = result.get("receipt_id") if result is not None else None
@@ -208,25 +205,19 @@ def analyze_controller_trace(
         argument_seeds = _normalized_seeds(
             arguments.get("seeds") if isinstance(arguments, dict) else None
         )
-        result_seeds = _normalized_seeds(
-            result.get("seeds") if result is not None else None
-        )
+        result_seeds = _normalized_seeds(result.get("seeds") if result is not None else None)
         valid_receipt_id = (
-            receipt_id
-            if isinstance(receipt_id, str) and _DRAFT_ID.fullmatch(receipt_id)
-            else None
+            receipt_id if isinstance(receipt_id, str) and _DRAFT_ID.fullmatch(receipt_id) else None
         )
         valid_path = (
             receipt_path
             if isinstance(receipt_path, str)
-            and receipt_path
-            == f".requirements-impact-refiner/graph/{trace_id}.json"
+            and receipt_path == f".requirements-impact-refiner/graph/{trace_id}.json"
             else None
         )
         valid_digest = (
             receipt_digest
-            if isinstance(receipt_digest, str)
-            and re.fullmatch(r"[0-9a-f]{64}", receipt_digest)
+            if isinstance(receipt_digest, str) and re.fullmatch(r"[0-9a-f]{64}", receipt_digest)
             else None
         )
         compact_digest = None
@@ -248,8 +239,7 @@ def analyze_controller_trace(
         compact_digests.append(compact_digest)
         valid_request_digest = (
             request_digest
-            if isinstance(request_digest, str)
-            and re.fullmatch(r"[0-9a-f]{64}", request_digest)
+            if isinstance(request_digest, str) and re.fullmatch(r"[0-9a-f]{64}", request_digest)
             else None
         )
         request_digests.append(valid_request_digest)
@@ -261,37 +251,37 @@ def analyze_controller_trace(
             and all(
                 value is not None
                 for value in (
-                    trace_ids[-1], valid_receipt_id, valid_path,
-                    valid_digest, compact_digest, valid_request_digest,
+                    trace_ids[-1],
+                    valid_receipt_id,
+                    valid_path,
+                    valid_digest,
+                    compact_digest,
+                    valid_request_digest,
                 )
             )
             and argument_seeds is not None
             and result_seeds == argument_seeds
         )
-    finalize_ids = []
-    finalize_receipt_ids = []
-    finalize_success = []
-    displays = []
+    finalize_ids: list[Optional[str]] = []
+    finalize_receipt_ids: list[Optional[str]] = []
+    finalize_success: list[bool] = []
+    displays: list[Optional[str]] = []
     for call in finalizes:
         arguments = call.get("arguments")
         draft_id = arguments.get("draft_id") if isinstance(arguments, dict) else None
-        finalize_ids.append(draft_id if isinstance(draft_id, str) and _DRAFT_ID.fullmatch(draft_id) else None)
-        receipt_id = (
-            arguments.get("graph_receipt_id")
-            if isinstance(arguments, dict) else None
+        finalize_ids.append(
+            draft_id if isinstance(draft_id, str) and _DRAFT_ID.fullmatch(draft_id) else None
         )
+        receipt_id = arguments.get("graph_receipt_id") if isinstance(arguments, dict) else None
         finalize_receipt_ids.append(
-            receipt_id
-            if isinstance(receipt_id, str) and _DRAFT_ID.fullmatch(receipt_id)
-            else None
+            receipt_id if isinstance(receipt_id, str) and _DRAFT_ID.fullmatch(receipt_id) else None
         )
         result = _structured(call.get("result"))
         display = result.get("display_text") if result is not None else None
         displays.append(display if isinstance(display, str) else None)
         finalize_success.append(
             call.get("status") == "completed"
-            and
-            call.get("error") is None
+            and call.get("error") is None
             and result is not None
             and result.get("status") == "published"
             and isinstance(display, str)
@@ -319,7 +309,7 @@ def analyze_controller_trace(
         traced = not calls
         receipt_match = not calls
         succeeded = not calls
-        compared_displays = ()
+        compared_displays: tuple[Optional[str], ...] = ()
     else:
         compared_displays = tuple(displays)
         exact_match = (
@@ -330,7 +320,9 @@ def analyze_controller_trace(
         presentation_equivalent = (
             len(compared_displays) == expected_turns
             and all(isinstance(value, str) for value in compared_displays)
-            and tuple(_presentation_bytes(value) for value in compared_displays)
+            and tuple(
+                _presentation_bytes(value) for value in compared_displays if isinstance(value, str)
+            )
             == tuple(_presentation_bytes(value) for value in final_outputs)
         )
     if not draft_match:
@@ -351,8 +343,7 @@ def analyze_controller_trace(
         errors.append("controller display text differs from final output under codex-markdown-v1")
 
     final_digests = tuple(
-        hashlib.sha256(value.encode("utf-8")).hexdigest()
-        for value in final_outputs
+        hashlib.sha256(value.encode("utf-8")).hexdigest() for value in final_outputs
     )
     display_digests = tuple(
         hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -363,10 +354,7 @@ def analyze_controller_trace(
     duplicate_or_error = (
         malformed
         or order != expected_order
-        or any(
-            call.get("status") != "completed" or call.get("error") is not None
-            for call in calls
-        )
+        or any(call.get("status") != "completed" or call.get("error") is not None for call in calls)
     )
     return ControllerEvidence(
         valid=not unique_errors,
@@ -388,25 +376,13 @@ def analyze_controller_trace(
         installed_payload_sha256=tuple(
             value for value in payload_digests if isinstance(value, str)
         ),
-        draft_ids=tuple(
-            value for value in begin_ids if isinstance(value, str)
-        ),
-        receipt_ids=tuple(
-            value for value in receipt_ids if isinstance(value, str)
-        ),
-        receipt_paths=tuple(
-            value for value in receipt_paths if isinstance(value, str)
-        ),
-        receipt_sha256=tuple(
-            value for value in receipt_digests if isinstance(value, str)
-        ),
+        draft_ids=tuple(value for value in begin_ids if isinstance(value, str)),
+        receipt_ids=tuple(value for value in receipt_ids if isinstance(value, str)),
+        receipt_paths=tuple(value for value in receipt_paths if isinstance(value, str)),
+        receipt_sha256=tuple(value for value in receipt_digests if isinstance(value, str)),
         trace_compact_graph_sha256=tuple(
             value for value in compact_digests if isinstance(value, str)
         ),
-        trace_request_sha256=tuple(
-            value for value in request_digests if isinstance(value, str)
-        ),
-        trace_seeds=tuple(
-            value for value in trace_seed_values if value is not None
-        ),
+        trace_request_sha256=tuple(value for value in request_digests if isinstance(value, str)),
+        trace_seeds=tuple(value for value in trace_seed_values if value is not None),
     )

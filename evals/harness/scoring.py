@@ -8,11 +8,12 @@ recorded run.  Whether a response discovered a meaningful impact remains an
 import importlib.util
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from types import ModuleType
+from typing import Optional
 
 from .models import Adjudication, CaseSpec, MechanicalScore, RunResult, RunStatus
-
 
 _REFINEMENT_ID = re.compile(r"\b(?:RPT|REQ|IMP|INV|DEC|AC)-\d{3}\b")
 _REPORT_WORKFLOW = re.compile(
@@ -23,7 +24,7 @@ _REPORT_WORKFLOW = re.compile(
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
 
 
-def _load_validator():
+def _load_validator() -> ModuleType:
     """Load the checked-in canonical validator without copying its behavior."""
     validator_path = (
         Path(__file__).resolve().parents[2]
@@ -45,16 +46,24 @@ def _load_validator():
     return module
 
 
-_VALIDATOR = _load_validator()
+_VALIDATOR: ModuleType = _load_validator()
 _REPORT_MODEL = sys.modules.get("impact_report")
-if _REPORT_MODEL is None:
+if not isinstance(_REPORT_MODEL, ModuleType):
     raise RuntimeError("canonical impact report model is unavailable")
+
+
+def _report_model() -> ModuleType:
+    """Return the dynamically loaded model after its import-time validation."""
+    model = _REPORT_MODEL
+    if not isinstance(model, ModuleType):
+        raise RuntimeError("canonical impact report model is unavailable")
+    return model
 
 
 def _complete_report_errors(
     output: str,
     previous_bytes: Optional[bytes],
-) -> List[str]:
+) -> list[str]:
     """Delegate complete report validation to the canonical implementation."""
     if previous_bytes is None:
         return list(_VALIDATOR.validate_report(output))
@@ -81,10 +90,10 @@ def _planning_handoff_workflow(output: str) -> Optional[str]:
     rows = parsed.tables.get("Planning Handoff", ())
     if len(rows) != 1:
         return None
-    return _REPORT_MODEL.unquote(rows[0].get("Selected planning workflow", ""))
+    return _report_model().unquote(rows[0].get("Selected planning workflow", ""))
 
 
-def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
+def _lineage_findings(case: CaseSpec, output: str) -> list[str]:
     """Check the catalog's transition claim without making a human judgment."""
     transition = case.expected_transition
     if transition == "rejected":
@@ -97,18 +106,18 @@ def _lineage_findings(case: CaseSpec, output: str) -> List[str]:
         }
         findings = []
         if not states or not states <= _REJECTION_ACTIVE_STATES:
-            findings.append("%s requires an active evidence-supported ledger state" % case.id)
-        authored = _REPORT_MODEL.authored_delta(parsed)
+            findings.append(f"{case.id} requires an active evidence-supported ledger state")
+        authored = _report_model().authored_delta(parsed)
         if authored.get("resolved") or authored.get("accepted"):
-            findings.append("%s forbids resolved or accepted Impact Delta" % case.id)
+            findings.append(f"{case.id} forbids resolved or accepted Impact Delta")
         return findings
     if transition in {"unchanged", "reopened"}:
         parsed, parse_errors = _VALIDATOR.parse_report(output)
         if parse_errors:
             return []
-        authored = _REPORT_MODEL.authored_delta(parsed)
+        authored = _report_model().authored_delta(parsed)
         if not authored.get(transition):
-            return ["%s requires %s Impact Delta transition" % (case.id, transition)]
+            return [f"{case.id} requires {transition} Impact Delta transition"]
     return []
 
 
@@ -125,11 +134,11 @@ def score_mechanical(
     is mechanical only when expressed as the exact structured Planning Handoff
     workflow marker; semantic prose remains quoted human adjudication.
     """
-    findings: List[str] = []
+    findings: list[str] = []
     if result.case_id != case.id:
         findings.append("result case ID does not match case")
     if result.status is not RunStatus.PASS:
-        findings.append("run status %s is not pass" % result.status.value)
+        findings.append(f"run status {result.status.value} is not pass")
         return MechanicalScore(case.id, result.repetition, False, tuple(findings))
 
     output = result.final_output or ""
@@ -149,13 +158,8 @@ def score_mechanical(
         findings.extend(_complete_report_errors(output, previous_bytes))
 
     if case.id == "INT-superpowers":
-        if (
-            _planning_handoff_workflow(output)
-            != _REPORT_MODEL.SUPERPOWERS_HANDOFF_MARKER
-        ):
-            findings.append(
-                "INT-superpowers requires the exact structured Planning Handoff marker"
-            )
+        if _planning_handoff_workflow(output) != _report_model().SUPERPOWERS_HANDOFF_MARKER:
+            findings.append("INT-superpowers requires the exact structured Planning Handoff marker")
     if case.kind == "lineage":
         findings.extend(_lineage_findings(case, output))
 
@@ -166,19 +170,18 @@ def validate_adjudications(
     rows: Sequence[Adjudication],
     cases: Optional[Sequence[CaseSpec]] = None,
     runs: Optional[Sequence[RunResult]] = None,
-) -> List[str]:
+) -> list[str]:
     """Validate human judgments against the exact catalog and sealed transcript.
 
     Without the optional catalog/run index this retains the narrow local check
     used by callers that only need quote/rationale completeness.  Passing both
     enables full, one-row-per-rubric transcript validation.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for row in rows:
         if not isinstance(row.passed, bool):
             errors.append(
-                "%s/%02d %s passed must be boolean"
-                % (row.case_id, row.repetition, row.rubric)
+                "%s/%02d %s passed must be boolean" % (row.case_id, row.repetition, row.rubric)
             )
         if (
             not isinstance(row.quote, str)
@@ -193,40 +196,39 @@ def validate_adjudications(
     if cases is None and runs is None:
         return errors
     if cases is None or runs is None:
-        return errors + ["adjudication validation requires both cases and runs"]
+        return [*errors, "adjudication validation requires both cases and runs"]
 
-    expected = {
+    expected: set[tuple[str, int, str]] = {
         (case.id, repetition, rubric)
         for case in cases
         for repetition in range(1, 6)
         for rubric in case.must_detect + case.must_not_do
     }
-    run_index = {}
+    run_index: dict[tuple[str, int], RunResult] = {}
     for run in runs:
-        key = (run.case_id, run.repetition)
-        if key in run_index:
-            errors.append("duplicate sealed run %s/%02d" % key)
+        run_key = (run.case_id, run.repetition)
+        if run_key in run_index:
+            errors.append("duplicate sealed run %s/%02d" % run_key)
         else:
-            run_index[key] = run
+            run_index[run_key] = run
 
-    seen = set()
+    seen: set[tuple[str, int, str]] = set()
     for row in rows:
-        key = (row.case_id, row.repetition, row.rubric)
-        label = "%s/%02d %s" % key
-        if key not in expected:
-            errors.append("unknown adjudication %s" % label)
+        adjudication_key = (row.case_id, row.repetition, row.rubric)
+        label = f"{row.case_id}/{row.repetition:02d} {row.rubric}"
+        if adjudication_key not in expected:
+            errors.append(f"unknown adjudication {label}")
             continue
-        if key in seen:
-            errors.append("duplicate adjudication %s" % label)
+        if adjudication_key in seen:
+            errors.append(f"duplicate adjudication {label}")
             continue
-        seen.add(key)
-        run = run_index.get((row.case_id, row.repetition))
-        if run is None:
-            errors.append("%s has no sealed run" % label)
-        elif isinstance(row.quote, str) and row.quote.strip() not in (run.final_output or ""):
-            errors.append("%s quote is not in sealed final output" % label)
-    errors.extend(
-        "missing adjudication %s/%02d %s" % key
-        for key in sorted(expected - seen)
-    )
+        seen.add(adjudication_key)
+        sealed_run = run_index.get((row.case_id, row.repetition))
+        if sealed_run is None:
+            errors.append(f"{label} has no sealed run")
+        elif isinstance(row.quote, str) and row.quote.strip() not in (
+            sealed_run.final_output or ""
+        ):
+            errors.append(f"{label} quote is not in sealed final output")
+    errors.extend("missing adjudication %s/%02d %s" % key for key in sorted(expected - seen))
     return errors

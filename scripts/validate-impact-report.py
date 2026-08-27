@@ -13,16 +13,15 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from impact_report import (
     calculate_delta,
-    strip_fenced_blocks,
-    table_block,
     parse_report,
     render_delta,
+    strip_fenced_blocks,
+    table_block,
     validate_authored_delta,
     validate_baseline,
     validate_lineage,
     validate_semantics,
 )
-
 
 ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
 ID_LIKE_PATTERN = re.compile(r"^(?:REQ|INV|IMP|DEC|AC)-")
@@ -230,7 +229,7 @@ def parse_table(
     if extra_table:
         errors.append(f"multiple tables in {section_name}")
     if len(lines) < 2:
-        return [], errors + [f"invalid table schema in {section_name}"]
+        return [], [*errors, f"invalid table schema in {section_name}"]
     headers = table_cells(lines[0])
     if headers != expected_headers:
         return [], [f"invalid table schema in {section_name}"]
@@ -318,10 +317,7 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
         if any(not option for option in options) or len(set(options)) != len(options):
             errors.append("pre-decision report requires distinct options")
         for row in option_rows:
-            if not any(
-                ref.startswith("IMP-")
-                for ref in references(row.get("Impact IDs", ""))
-            ):
+            if not any(ref.startswith("IMP-") for ref in references(row.get("Impact IDs", ""))):
                 errors.append("pre-decision option requires IMP reference")
             if not row.get("Trade-off", "").strip():
                 errors.append("pre-decision option requires a nonempty trade-off")
@@ -333,30 +329,19 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
         for row in tables["Decisions and Accepted Risks"]:
             decision_id = row.get("Decision ID", "unknown decision").strip("`")
             if not row.get("Choice", "").strip():
-                errors.append(
-                    f"recorded decision {decision_id} requires a nonempty choice"
-                )
+                errors.append(f"recorded decision {decision_id} requires a nonempty choice")
             if not row.get("Rationale", "").strip():
-                errors.append(
-                    f"recorded decision {decision_id} requires a nonempty rationale"
-                )
+                errors.append(f"recorded decision {decision_id} requires a nonempty rationale")
             if not any(
-                ref.startswith("REQ-")
-                for ref in references(row.get("Requirement revision", ""))
+                ref.startswith("REQ-") for ref in references(row.get("Requirement revision", ""))
             ):
-                errors.append(
-                    f"recorded decision {decision_id} requires a requirement revision"
-                )
+                errors.append(f"recorded decision {decision_id} requires a requirement revision")
             accepted = enum_value(row.get("Accepted impacts", ""))
             accepted_refs = {
-                ref
-                for ref in references(row.get("Accepted impacts", ""))
-                if ref.startswith("IMP-")
+                ref for ref in references(row.get("Accepted impacts", "")) if ref.startswith("IMP-")
             }
             if accepted != "none" and not accepted_refs:
-                errors.append(
-                    f"recorded decision {decision_id} requires accepted impacts or none"
-                )
+                errors.append(f"recorded decision {decision_id} requires accepted impacts or none")
         current_rows = tables["Current Refined Requirement"]
         if not any(
             any(ref.startswith("DEC-") for ref in references(row.get("Refined by decision", "")))
@@ -398,9 +383,7 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
             or not requirement_id.startswith("REQ-")
             or requirement_id not in known
         ):
-            errors.append(
-                "current refined requirement requires one known REQ identifier"
-            )
+            errors.append("current refined requirement requires one known REQ identifier")
 
     for name, column in EVIDENCE_LEVEL_COLUMNS.items():
         for row in tables[name]:
@@ -430,9 +413,7 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
             ref for ref in references(row.get("Decision", "")) if ref.startswith("DEC-")
         }
         ac_refs = {
-            ref
-            for ref in references(row.get("Acceptance Criteria", ""))
-            if ref.startswith("AC-")
+            ref for ref in references(row.get("Acceptance Criteria", "")) if ref.startswith("AC-")
         }
         if not requirement_refs:
             errors.append(f"impact {impact_id} requires REQ reference")
@@ -510,21 +491,16 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
         normalized_cell = impact_cell.replace("`", "").strip().lower()
         canonical_ids = [part.strip() for part in impact_cell.replace("`", "").split(",")]
         if normalized_cell != "none" and (
-            not canonical_ids
-            or any(not re.fullmatch(r"IMP-\d{3}", part) for part in canonical_ids)
+            not canonical_ids or any(not re.fullmatch(r"IMP-\d{3}", part) for part in canonical_ids)
         ):
             errors.append(
                 f"impact delta category {category} requires literal none or canonical IMP identifiers"
             )
         id_occurrences = [
-            ref
-            for ref in references(row.get("Impact IDs", ""))
-            if ref.startswith("IMP-")
+            ref for ref in references(row.get("Impact IDs", "")) if ref.startswith("IMP-")
         ]
         raw_occurrences = [
-            ref
-            for ref in ID_PATTERN.findall(row.get("Impact IDs", ""))
-            if ref.startswith("IMP-")
+            ref for ref in ID_PATTERN.findall(row.get("Impact IDs", "")) if ref.startswith("IMP-")
         ]
         ids = set(id_occurrences)
         delta_by_category.setdefault(category, set()).update(ids)
@@ -545,11 +521,10 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
             if category in {"new", "reopened"}:
                 continue
             for impact_id in impact_ids:
-                state = impact_states.get(impact_id)
-                if state is not None and STATE_TO_DELTA.get(state) != category:
+                delta_state = impact_states.get(impact_id)
+                if delta_state is not None and STATE_TO_DELTA.get(delta_state) != category:
                     errors.append(
-                        f"impact {impact_id} state {state} "
-                        f"disagrees with delta category {category}"
+                        f"impact {impact_id} state {delta_state} disagrees with delta category {category}"
                     )
 
     unresolved_counts: dict[str, int] = {}
@@ -557,9 +532,7 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
         impact_id = row.get("Impact ID", "").strip("`")
         state = enum_value(row.get("State", ""))
         if not ID_PATTERN.fullmatch(impact_id) or not impact_id.startswith("IMP-"):
-            errors.append(
-                "unresolved row requires exactly one canonical IMP identifier"
-            )
+            errors.append("unresolved row requires exactly one canonical IMP identifier")
             continue
         if impact_id not in impact_states:
             errors.append(f"unresolved impact {impact_id} is not in ledger")
@@ -577,8 +550,7 @@ def _validate_single_report(text: str, *, require_summary: bool = False) -> list
     for impact_id, state in impact_states.items():
         if state in UNRESOLVED_STATES and unresolved_counts.get(impact_id, 0) == 0:
             errors.append(
-                f"ledger impact {impact_id} in state {state} "
-                "is missing from unresolved items"
+                f"ledger impact {impact_id} in state {state} is missing from unresolved items"
             )
     errors.extend(validate_baseline(parsed_report))
     errors.extend(validate_semantics(parsed_report))
@@ -602,13 +574,8 @@ def validate_report(
             errors.append(f"revision {current.metadata.revision} requires --previous")
         return sorted(set(errors))
     previous, previous_parse_errors = parse_report(previous_text)
-    errors.extend(
-        f"previous report: {error}" for error in previous_parse_errors
-    )
-    errors.extend(
-        f"previous report: {error}"
-        for error in _validate_single_report(previous_text)
-    )
+    errors.extend(f"previous report: {error}" for error in previous_parse_errors)
+    errors.extend(f"previous report: {error}" for error in _validate_single_report(previous_text))
     if previous.metadata is None:
         return sorted(set(errors))
     if previous_bytes is None:
@@ -616,12 +583,10 @@ def validate_report(
         return sorted(set(errors))
     errors.extend(validate_lineage(previous, current, previous_bytes))
     current_states = {
-        enum_value(row.get("State", ""))
-        for row in current.tables.get("Impact Ledger", ())
+        enum_value(row.get("State", "")) for row in current.tables.get("Impact Ledger", ())
     }
     previous_states = {
-        enum_value(row.get("State", ""))
-        for row in previous.tables.get("Impact Ledger", ())
+        enum_value(row.get("State", "")) for row in previous.tables.get("Impact Ledger", ())
     }
     if current_states <= IMPACT_STATES and previous_states <= IMPACT_STATES:
         errors.extend(validate_authored_delta(previous, current))
@@ -633,9 +598,7 @@ def validate_path(path: Path) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Validate a requirements impact report"
-    )
+    parser = argparse.ArgumentParser(description="Validate a requirements impact report")
     parser.add_argument("report", type=Path)
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--print-expected-delta", action="store_true")
@@ -649,9 +612,7 @@ def main(argv: list[str] | None = None) -> int:
         current_bytes = args.report.read_bytes()
         current_text = current_bytes.decode("utf-8")
         previous_bytes = args.previous.read_bytes() if args.previous else None
-        previous_text = (
-            previous_bytes.decode("utf-8") if previous_bytes is not None else None
-        )
+        previous_text = previous_bytes.decode("utf-8") if previous_bytes is not None else None
     except (OSError, UnicodeDecodeError) as error:
         print(f"cannot read report: {error}", file=sys.stderr)
         return 2
@@ -670,8 +631,8 @@ def main(argv: list[str] | None = None) -> int:
         if not current_errors and not previous_errors:
             print(render_delta(calculate_delta(previous_report, current_report)))
     if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
+        for message in errors:
+            print(message, file=sys.stderr)
         return 1
     print("valid impact report")
     return 0

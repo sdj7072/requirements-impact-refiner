@@ -4,9 +4,8 @@ import sys
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-SKILL_SCRIPTS = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
+SKILL_SCRIPTS = ROOT / "scripts"
 
 
 def load_module(name, path):
@@ -23,10 +22,12 @@ CONTROLLER = load_module("rir_controller_bounds", SKILL_SCRIPTS / "rir_controlle
 def big_receipt(node_count=474, path_count=64, frontier_count=40):
     nodes = [
         {
-            "id": f"NODE-{i:03d}", "kind": "file",
+            "id": f"NODE-{i:03d}",
+            "kind": "file",
             "label": f"module_component_label_{i}",
             "location": f"src/package{i % 12}/module_file_{i}.py",
-            "provider": "builtin", "confidence": "lexical",
+            "provider": "builtin",
+            "confidence": "lexical",
             "source_sha256": None,
             "risk_domains": ["operations"] if i % 3 else ["authorization/privacy"],
         }
@@ -34,11 +35,15 @@ def big_receipt(node_count=474, path_count=64, frontier_count=40):
     ]
     edges = [
         {
-            "id": f"EDGE-{i:03d}", "source": f"NODE-{i:03d}",
-            "target": f"NODE-{(i + 1) % node_count:03d}", "kind": "references",
+            "id": f"EDGE-{i:03d}",
+            "source": f"NODE-{i:03d}",
+            "target": f"NODE-{(i + 1) % node_count:03d}",
+            "kind": "references",
             "location": f"src/package{i % 12}/module_file_{i}.py",
-            "evidence": "shared_token", "confidence": "lexical",
-            "provider": "builtin", "source_sha256": None,
+            "evidence": "shared_token",
+            "confidence": "lexical",
+            "provider": "builtin",
+            "source_sha256": None,
         }
         for i in range(node_count)
     ]
@@ -46,24 +51,28 @@ def big_receipt(node_count=474, path_count=64, frontier_count=40):
         {
             "id": f"PATH-{i:03d}",
             "nodes": [f"NODE-{i:03d}", f"NODE-{(i + 1) % node_count:03d}"],
-            "edges": [f"EDGE-{i:03d}"], "distance": 1,
+            "edges": [f"EDGE-{i:03d}"],
+            "distance": 1,
             "risk_domains": ["operations"],
         }
         for i in range(path_count)
     ]
     frontier = [
         {
-            "id": f"FRONTIER-{i:03d}", "node": f"NODE-{i:03d}",
+            "id": f"FRONTIER-{i:03d}",
+            "node": f"NODE-{i:03d}",
             "reason": "graph coverage remains incomplete",
             "risk_domains": ["operations"],
         }
         for i in range(frontier_count)
     ]
     return {
-        "nodes": nodes, "edges": edges, "paths": paths, "frontier": frontier,
+        "nodes": nodes,
+        "edges": edges,
+        "paths": paths,
+        "frontier": frontier,
         "providers": [
-            {"name": "builtin", "status": "ready", "confidence": "lexical",
-             "version": None}
+            {"name": "builtin", "status": "ready", "confidence": "lexical", "version": None}
         ],
         "timings_ms": {"total": 100},
         "budget_status": "provider_limited",
@@ -81,9 +90,7 @@ class CompactGraphBoundsTest(unittest.TestCase):
         self.assertLessEqual(len(payload.encode("utf-8")), 24_000)
         self.assertLessEqual(len(compact["nodes"]), CONTROLLER.COMPACT_MAX_NODES)
         self.assertLessEqual(len(compact["paths"]), CONTROLLER.COMPACT_MAX_PATHS)
-        self.assertLessEqual(
-            len(compact["frontier"]), CONTROLLER.COMPACT_MAX_FRONTIER
-        )
+        self.assertLessEqual(len(compact["frontier"]), CONTROLLER.COMPACT_MAX_FRONTIER)
         truncated = compact["summary"]["truncated"]
         self.assertGreater(truncated["nodes"], 0)
         self.assertGreater(truncated["paths"], 0)
@@ -155,7 +162,9 @@ class CompactGraphBoundsTest(unittest.TestCase):
 
         compact = CONTROLLER._compact_graph(receipt)
         payload = json.dumps(
-            compact, ensure_ascii=False, sort_keys=True,
+            compact,
+            ensure_ascii=False,
+            sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
 
@@ -175,12 +184,16 @@ class CompactGraphBoundsTest(unittest.TestCase):
         ]
         receipt["frontier"] = [
             {
-                "id": "FRONTIER-000", "node": "NODE-048",
-                "reason": "needs another node", "risk_domains": ["operations"],
+                "id": "FRONTIER-000",
+                "node": "NODE-048",
+                "reason": "needs another node",
+                "risk_domains": ["operations"],
             },
             {
-                "id": "FRONTIER-001", "node": "NODE-000",
-                "reason": "selected node risk", "risk_domains": ["operations"],
+                "id": "FRONTIER-001",
+                "node": "NODE-000",
+                "reason": "selected node risk",
+                "risk_domains": ["operations"],
             },
         ]
 
@@ -203,11 +216,14 @@ class CompactGraphBoundsTest(unittest.TestCase):
             }
             for i in range(8)
         ]
-        receipt["frontier"] = [{
-            "id": "FRONTIER-000", "node": "NODE-048",
-            "reason": "authorization boundary unknown",
-            "risk_domains": ["authorization/privacy"],
-        }]
+        receipt["frontier"] = [
+            {
+                "id": "FRONTIER-000",
+                "node": "NODE-048",
+                "reason": "authorization boundary unknown",
+                "risk_domains": ["authorization/privacy"],
+            }
+        ]
 
         compact = CONTROLLER._compact_graph(receipt)
 
@@ -215,9 +231,7 @@ class CompactGraphBoundsTest(unittest.TestCase):
             [row["reason"] for row in compact["frontier"]],
             ["authorization boundary unknown"],
         )
-        self.assertIn(
-            "NODE-048", {row["key"] for row in compact["nodes"]}
-        )
+        self.assertIn("NODE-048", {row["key"] for row in compact["nodes"]})
 
 
 if __name__ == "__main__":

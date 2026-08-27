@@ -8,7 +8,6 @@ import shutil
 import sys
 from pathlib import Path
 
-
 SKILL_NAME = "requirements-impact-refiner"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = REPOSITORY_ROOT / "skills" / SKILL_NAME

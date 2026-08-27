@@ -1,14 +1,16 @@
-import json
 import importlib.util
+import json
 import re
 import shlex
 import shutil
 import struct
+import subprocess
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from tests.test_integration_adapters import McpBootstrapHarness
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_COMPONENTS = {"mcpServers", "apps", "hooks", "agents", "dependencies"}
@@ -25,9 +27,7 @@ def ci_run_commands(workflow_text):
     commands = []
     index = 0
     while index < len(lines):
-        match = re.match(
-            r"^(?P<indent>\s*)(?:-\s+)?run:\s*(?P<content>.*)$", lines[index]
-        )
+        match = re.match(r"^(?P<indent>\s*)(?:-\s+)?run:\s*(?P<content>.*)$", lines[index])
         if match is None:
             index += 1
             continue
@@ -87,9 +87,7 @@ def unsafe_ci_argv(argv):
     command, *arguments = argv
     if Path(command).name == "env":
         for index, argument in enumerate(arguments):
-            if re.fullmatch(
-                r"python(?:\d+(?:\.\d+)*)?", Path(argument).name
-            ):
+            if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", Path(argument).name):
                 command, arguments = argument, arguments[index + 1 :]
                 break
     python_name = Path(command).name
@@ -110,9 +108,7 @@ def unsafe_ci_argv(argv):
         return True
     if any("claude.ai/install.sh" in argument for argument in argv):
         return True
-    if command == "brew" and {"install", "--cask", "claude-code"}.issubset(
-        arguments
-    ):
+    if command == "brew" and {"install", "--cask", "claude-code"}.issubset(arguments):
         return True
     if (
         command == "npm"
@@ -134,7 +130,7 @@ def unsafe_ci_argv(argv):
 def assert_safe_ci_workflow(workflow_text):
     unsafe = unsafe_ci_commands(workflow_text)
     if unsafe:
-        raise AssertionError("unsafe CI run command(s): %r" % (unsafe,))
+        raise AssertionError(f"unsafe CI run command(s): {unsafe!r}")
 
 
 def checkout_step_inputs(workflow_text):
@@ -172,11 +168,19 @@ class PackagingTest(unittest.TestCase):
             "scripts/rir-controller.py",
             "scripts/rir_mcp_server.py",
             "scripts/rir_controller.py",
+            "scripts/rir_contracts.py",
+            "scripts/rir_finalize.py",
+            "scripts/rir_previous.py",
+            "scripts/rir_previous_renderer.py",
+            "scripts/rir_report_context.py",
+            "scripts/rir_lineage.py",
+            "scripts/rir_storage.py",
             "scripts/compact_state.py",
             "scripts/impact_graph.py",
             "scripts/graph_builtin.py",
             "scripts/fast_scan.py",
             "scripts/graph_cache.py",
+            "scripts/rir_graph_delivery.py",
             "scripts/graph_providers.py",
             "scripts/graph_coordinator.py",
             "scripts/graph_adapter_ast_grep.py",
@@ -203,10 +207,33 @@ class PackagingTest(unittest.TestCase):
                 target = copy_root / name
                 original = target.read_bytes()
                 target.write_bytes(original + b"\nmutation")
-                self.assertNotEqual(
-                    PAYLOAD_IDENTITY.payload_sha256(copy_root), baseline, name
-                )
+                self.assertNotEqual(PAYLOAD_IDENTITY.payload_sha256(copy_root), baseline, name)
                 target.write_bytes(original)
+
+    def test_runtime_lock_artifacts_are_neither_tracked_nor_shipped(self):
+        tracked_result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        )
+        tracked = tuple(path.decode("utf-8") for path in tracked_result.stdout.split(b"\0") if path)
+
+        def is_runtime_lock(path):
+            return path == ".requirements-impact-refiner/drafts/.draft-transaction.lock" or (
+                re.fullmatch(
+                    r"\.requirements-impact-refiner/reports/[^/]+/\.controller\.lock",
+                    path,
+                )
+                is not None
+            )
+
+        self.assertEqual(tuple(path for path in tracked if is_runtime_lock(path)), ())
+        shipped = tuple(
+            path.relative_to(ROOT).as_posix() for path in PAYLOAD_IDENTITY.functional_paths(ROOT)
+        )
+        self.assertEqual(tuple(path for path in shipped if is_runtime_lock(path)), ())
+
     def load(self, relative_path):
         return json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
 
@@ -238,15 +265,11 @@ class PackagingTest(unittest.TestCase):
                 version = raw_value.strip().strip("\"'")
 
         self.assertTrue(name, "canonical SKILL.md frontmatter is missing name")
-        self.assertTrue(
-            version, "canonical SKILL.md frontmatter is missing metadata.version"
-        )
+        self.assertTrue(version, "canonical SKILL.md frontmatter is missing metadata.version")
         return name, version
 
     def test_canonical_skill_exists(self):
-        self.assertTrue(
-            (ROOT / "skills/requirements-impact-refiner/SKILL.md").is_file()
-        )
+        self.assertTrue((ROOT / "skills/requirements-impact-refiner/SKILL.md").is_file())
 
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
@@ -255,6 +278,13 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertEqual(manifest["mcpServers"], "./.mcp.json")
         self.assertTrue((FORBIDDEN_COMPONENTS - {"mcpServers"}).isdisjoint(manifest))
+        self.assertIn("previous impact", manifest["interface"]["longDescription"].lower())
+        self.assertTrue(
+            any(
+                "previous impact" in prompt.lower()
+                for prompt in manifest["interface"]["defaultPrompt"]
+            )
+        )
 
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
@@ -271,7 +301,7 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(server["args"], [])
         self.assertEqual(server["cwd"], ".")
         self.assertNotIn("url", server)
-        self.assertEqual(server.get("env_vars", []), [])
+        self.assertNotIn("env_vars", server)
         launcher = ROOT / "scripts/launch-rir-mcp"
         self.assertTrue(launcher.is_file())
         self.assertTrue(launcher.stat().st_mode & 0o111)
@@ -299,12 +329,10 @@ class PackagingTest(unittest.TestCase):
                     self.assertFalse(value.startswith(("http://", "https://", "//")))
 
     def test_automatic_entrypoint_owns_activation_boundaries(self):
-        bootstrap = (
-            ROOT / "skills/using-requirements-impact-refiner/SKILL.md"
-        ).read_text(encoding="utf-8")
-        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
+        bootstrap = (ROOT / "skills/using-requirements-impact-refiner/SKILL.md").read_text(
             encoding="utf-8"
         )
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("already impact-refined requirement or plan", bootstrap)
         self.assertNotIn("or approved plan", bootstrap)
         self.assertIn("bootstrap has selected", core)
@@ -314,12 +342,8 @@ class PackagingTest(unittest.TestCase):
     def test_stage_templates_are_disjoint_and_complete(self):
         assets = ROOT / "skills/requirements-impact-refiner/assets"
         chooser = (assets / "impact-report-template.md").read_text(encoding="utf-8")
-        pre = (assets / "impact-report-pre-decision-template.md").read_text(
-            encoding="utf-8"
-        )
-        post = (assets / "impact-report-post-decision-template.md").read_text(
-            encoding="utf-8"
-        )
+        pre = (assets / "impact-report-pre-decision-template.md").read_text(encoding="utf-8")
+        post = (assets / "impact-report-post-decision-template.md").read_text(encoding="utf-8")
 
         self.assertIn("impact-report-pre-decision-template.md", chooser)
         self.assertIn("impact-report-post-decision-template.md", chooser)
@@ -333,9 +357,7 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("## Decisions and Accepted Risks", post)
         self.assertNotIn("## Decision Needed", post)
         for text in (pre, post):
-            self.assertIn(
-                "| Report ID | Revision | Previous SHA-256 | Phase |", text
-            )
+            self.assertIn("| Report ID | Revision | Previous SHA-256 | Phase |", text)
             self.assertIn("## Impact Delta", text)
             self.assertIn("## Change Impact Summary", text)
             self.assertIn("List only ledger impacts whose state is `deferred` or `blocked`", text)
@@ -387,7 +409,7 @@ class PackagingTest(unittest.TestCase):
     def test_distribution_contains_all_detect_only_graph_adapters(self):
         canonical = ROOT / "skills" / "requirements-impact-refiner" / "scripts"
         for name in ("ast_grep", "codegraph", "scip", "joern"):
-            self.assertTrue((canonical / ("graph_adapter_%s.py" % name)).is_file())
+            self.assertTrue((canonical / (f"graph_adapter_{name}.py")).is_file())
 
     def test_plugin_root_resource_fallback_mirrors_are_complete_and_identical(self):
         """Plugin-root fallbacks must exactly preserve canonical skill resources."""
@@ -399,6 +421,10 @@ class PackagingTest(unittest.TestCase):
                 Path("install-agent-skill.py"),
                 Path("launch-rir-mcp"),
                 Path("rir_mcp_server.py"),
+                Path("fetch-graph-corpora.py"),
+                Path("run-ast-grep-canary.py"),
+                Path("run-quality-gates.py"),
+                Path("score-graph-corpora.py"),
             },
             "schemas": set(),
         }
@@ -408,17 +434,13 @@ class PackagingTest(unittest.TestCase):
             canonical_files = {
                 path.relative_to(canonical_dir)
                 for path in canonical_dir.rglob("*")
-                if path.is_file()
-                and "__pycache__" not in path.parts
-                and path.suffix != ".pyc"
+                if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
             }
             mirror_dir = ROOT / directory
             mirror_files = {
                 path.relative_to(mirror_dir)
                 for path in mirror_dir.rglob("*")
-                if path.is_file()
-                and "__pycache__" not in path.parts
-                and path.suffix != ".pyc"
+                if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
             }
 
             self.assertEqual(mirror_files, canonical_files | root_only_files)
@@ -430,6 +452,10 @@ class PackagingTest(unittest.TestCase):
                 )
 
         self.assertFalse((ROOT / "SKILL.md").exists())
+        self.assertFalse((canonical / "scripts" / "fetch-graph-corpora.py").exists())
+        self.assertFalse((canonical / "scripts" / "run-ast-grep-canary.py").exists())
+        self.assertFalse((canonical / "scripts" / "run-quality-gates.py").exists())
+        self.assertFalse((canonical / "scripts" / "score-graph-corpora.py").exists())
 
     def test_codex_manifest_references_a_standard_root_logo(self):
         manifest = self.load(".codex-plugin/plugin.json")
@@ -452,9 +478,7 @@ class PackagingTest(unittest.TestCase):
         )
 
     def test_core_skill_resolves_resources_from_its_own_directory(self):
-        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
-            encoding="utf-8"
-        )
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("Resolve links from this `SKILL.md` directory", core)
         self.assertIn("references/fast-scan.md", core)
         self.assertIn("references/controller-workflow.md", core)
@@ -462,10 +486,10 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("exactly one adapter", core)
 
     def test_core_skill_defaults_to_compact_with_full_inline_fallback(self):
-        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        workflow = (ROOT / "skills/requirements-impact-refiner/references/controller-workflow.md").read_text(encoding="utf-8")
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(encoding="utf-8")
+        workflow = (
+            ROOT / "skills/requirements-impact-refiner/references/controller-workflow.md"
+        ).read_text(encoding="utf-8")
         self.assertIn("`balanced` + `compact`", workflow)
         self.assertIn("scripts/rir-controller.py", core)
         self.assertIn("renderer-owned display text", workflow)
@@ -473,20 +497,21 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("Every affected behavior gets an impact row", workflow)
 
     def test_distribution_contains_transitive_impact_graph_reference_mirror(self):
-        canonical = ROOT / "skills/requirements-impact-refiner/references/transitive-impact-graph.md"
+        canonical = (
+            ROOT / "skills/requirements-impact-refiner/references/transitive-impact-graph.md"
+        )
         mirror = ROOT / "references/transitive-impact-graph.md"
         self.assertTrue(canonical.is_file())
         self.assertEqual(canonical.read_bytes(), mirror.read_bytes())
 
     def test_core_skill_runs_routing_before_workspace_availability_checks(self):
-        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("`rir_scan`", core)
+        core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("supplied evidence", core.lower())
-        self.assertIn(
-            "Stop; the renderer-owned question already asks whether to refine",
-            core,
+        with tempfile.TemporaryDirectory() as directory:
+            stale = McpBootstrapHarness(directory, status="stale").run()
+        self.assertEqual(
+            [name for name, _ in stale.calls],
+            ["rir_previous", "rir_scan"],
         )
 
     def test_manifest_identity_is_consistent(self):
@@ -548,7 +573,7 @@ class PackagingTest(unittest.TestCase):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as temporary:
                 workflow_path = Path(temporary) / "ci.yml"
                 workflow_path.write_text(
-                    "jobs:\n  test:\n    steps:\n      - run: |\n          %s\n" % command,
+                    f"jobs:\n  test:\n    steps:\n      - run: |\n          {command}\n",
                     encoding="utf-8",
                 )
                 with self.assertRaisesRegex(AssertionError, "unsafe CI run command"):
@@ -556,9 +581,7 @@ class PackagingTest(unittest.TestCase):
 
     def test_ci_safety_ignores_non_executable_claude_mentions(self):
         self.assertEqual(
-            unsafe_ci_commands(
-                "Documentation may discuss `claude auth` outside a CI run step.\n"
-            ),
+            unsafe_ci_commands("Documentation may discuss `claude auth` outside a CI run step.\n"),
             (),
         )
         self.assertEqual(
@@ -598,15 +621,18 @@ class MirrorGuardCoverageTest(unittest.TestCase):
             with self.subTest(script=path.name):
                 mirror = ROOT / "scripts" / path.name
                 self.assertTrue(mirror.is_file(), mirror)
-                self.assertEqual(
-                    mirror.read_bytes(), path.read_bytes(), path.name
-                )
+                self.assertEqual(mirror.read_bytes(), path.read_bytes(), path.name)
 
     def test_untrusted_json_parsers_carry_an_explicit_depth_bound(self):
         consumers = (
-            "rir_mcp_server.py", "rir-controller.py", "fast_scan_store.py",
-            "graph_providers.py", "graph_adapter_joern.py",
+            "rir_mcp_server.py",
+            "rir-controller.py",
+            "fast_scan_store.py",
+            "graph_providers.py",
+            "graph_adapter_joern.py",
             "graph_adapter_ast_grep.py",
+            "impact_graph.py",
+            "graph_cache.py",
         )
         for name in consumers:
             with self.subTest(script=name):

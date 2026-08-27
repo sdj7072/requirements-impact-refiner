@@ -2,7 +2,6 @@ import hashlib
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "evals" / "results" / "with-skill.md"
 EVIDENCE_ROOT = ROOT / "evals" / "results" / "integration-raw"
@@ -12,9 +11,7 @@ EXPECTED_COUNTS = {
     "rerun-1": 15,
     "scoring": 3,
 }
-EVIDENCE_MANIFEST_SHA256 = (
-    "9740064ebd3eb60cae7d95917db99195e765dd84c28d600303c1c6cc0ebbf1fc"
-)
+EVIDENCE_MANIFEST_SHA256 = "9740064ebd3eb60cae7d95917db99195e765dd84c28d600303c1c6cc0ebbf1fc"
 
 
 def evidence_manifest() -> str:

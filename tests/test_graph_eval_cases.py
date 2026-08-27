@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "evals" / "graph-cases.json"
 EXPECTED_IDS = (
@@ -41,10 +40,13 @@ class GraphEvalCasesTest(unittest.TestCase):
             self.assertEqual(case.allowed_providers, ("builtin",))
             self.assertIsInstance(case.unknown_frontier_expected, bool)
             self.assertEqual(
-                case.compact_output_phrases, ("Impact scan:", "Impact paths:"),
+                case.compact_output_phrases,
+                ("Impact scan:", "Impact paths:"),
             )
             self.assertEqual(len(case.fixture_files), 4)
-            self.assertTrue(all(path and not path.startswith("/") for path, _ in case.fixture_files))
+            self.assertTrue(
+                all(path and not path.startswith("/") for path, _ in case.fixture_files)
+            )
         negative = cases[-1]
         self.assertEqual(negative.required_nodes, ())
         self.assertEqual(negative.fixture_files, ())
@@ -68,7 +70,7 @@ class GraphEvalCasesTest(unittest.TestCase):
     def test_each_positive_fixture_mechanically_contains_its_distant_path(self):
         from evals.harness.adapters.codex import CodexAdapter
 
-        path = ROOT / "skills/requirements-impact-refiner/scripts/graph_builtin.py"
+        path = ROOT / "scripts/graph_builtin.py"
         spec = importlib.util.spec_from_file_location("task7_graph_fixture_scan", path)
         scanner = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = scanner
@@ -97,9 +99,7 @@ class GraphEvalCasesTest(unittest.TestCase):
                     observed = by_location[required.location]
                     self.assertEqual(observed.label, required.label)
                     self.assertEqual(observed.kind, required.kind)
-                    self.assertTrue(
-                        set(required.risk_domains).issubset(observed.risk_domains)
-                    )
+                    self.assertTrue(set(required.risk_domains).issubset(observed.risk_domains))
                 found = False
                 for graph_path in result.paths:
                     locations = tuple(nodes[key].location for key in graph_path.nodes)
@@ -107,8 +107,14 @@ class GraphEvalCasesTest(unittest.TestCase):
                     location_iter = iter(locations)
                     edge_iter = iter(edge_types)
                     if (
-                        all(any(value == candidate for candidate in location_iter) for value in required_locations)
-                        and all(any(value == candidate for candidate in edge_iter) for value in case.required_edge_types)
+                        all(
+                            any(value == candidate for candidate in location_iter)
+                            for value in required_locations
+                        )
+                        and all(
+                            any(value == candidate for candidate in edge_iter)
+                            for value in case.required_edge_types
+                        )
                         and graph_path.distance >= case.minimum_path_distance
                     ):
                         found = True

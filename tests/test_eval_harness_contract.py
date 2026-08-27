@@ -8,7 +8,6 @@ from pathlib import Path
 from evals.harness.catalog import CatalogError, load_all, load_catalog, select_suite
 from evals.harness.models import CaseSpec, CaseTurn, RunRequest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "evals" / "cases.json"
 CASE_SCHEMA_PATH = ROOT / "evals" / "harness" / "schemas" / "case.schema.json"
@@ -76,8 +75,7 @@ class EvalHarnessContractTest(unittest.TestCase):
         for name, (original_case, mutated_case, message) in mutations.items():
             with self.subTest(name=name):
                 mutated_cases = tuple(
-                    mutated_case if case is original_case else case
-                    for case in cases
+                    mutated_case if case is original_case else case for case in cases
                 )
 
                 with self.assertRaisesRegex(CatalogError, message):
@@ -123,13 +121,22 @@ class EvalHarnessContractTest(unittest.TestCase):
             "unknown kind": ([dict(valid_case, kind="other")], [valid_lineage]),
             "unknown mode": ([dict(valid_case, modes=["other"])], [valid_lineage]),
             "blank prompt": ([dict(valid_case, request="   ")], [valid_lineage]),
-            "non-list evidence": ([dict(valid_case, repository_evidence="roles.py")], [valid_lineage]),
-            "missing rubric": ([{key: value for key, value in valid_case.items() if key != "must_not_do"}], [valid_lineage]),
+            "non-list evidence": (
+                [dict(valid_case, repository_evidence="roles.py")],
+                [valid_lineage],
+            ),
+            "missing rubric": (
+                [{key: value for key, value in valid_case.items() if key != "must_not_do"}],
+                [valid_lineage],
+            ),
             "duplicate rubric across fields": (
                 [dict(valid_case, must_not_do=["role boundary"])],
                 [valid_lineage],
             ),
-            "incomplete lineage": ([valid_case], [dict(valid_lineage, turns=valid_lineage["turns"][:1])]),
+            "incomplete lineage": (
+                [valid_case],
+                [dict(valid_lineage, turns=valid_lineage["turns"][:1])],
+            ),
         }
 
         for name, (cases, lineage) in invalid_records.items():

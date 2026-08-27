@@ -3,8 +3,7 @@
     "requirements-impact-refiner": {
       "command": "./scripts/launch-rir-mcp",
       "args": [],
-      "cwd": ".",
-      "env_vars": []
+      "cwd": "."
     }
   }
 }

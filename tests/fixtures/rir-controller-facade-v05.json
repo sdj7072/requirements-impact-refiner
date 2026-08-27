@@ -1,0 +1,375 @@
+{
+  "flows": {
+    "begin": {
+      "rejected": {
+        "exception_type": "ValueError",
+        "filesystem": {
+          "after_paths": [],
+          "before_paths": [],
+          "unchanged": true
+        },
+        "message": "invalid adapter: unsupported"
+      },
+      "success": {
+        "draft_canonical_sha256": "6c3d69de12a05b8c584339f284483cdb09cc7f586ed0bb079b856fb2da4b1478",
+        "filesystem": {
+          "modes": {
+            ".requirements-impact-refiner/drafts": "0700",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json": "0600"
+          },
+          "surviving_paths": [
+            ".requirements-impact-refiner",
+            ".requirements-impact-refiner/drafts",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json"
+          ]
+        },
+        "result": {
+          "draft_id": "11111111111111111111111111111111",
+          "draft_path": ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json",
+          "graph_receipt_id": null,
+          "previous_sha256": "none",
+          "prior_key_map": null,
+          "prior_state": null,
+          "report_id": "RPT-001",
+          "revision": 1,
+          "scan_id": null,
+          "settings": {
+            "audience": "balanced",
+            "audience_source": "default",
+            "delivery": "full",
+            "delivery_source": "default",
+            "flow": "report",
+            "flow_source": "default",
+            "impact_graph": {
+              "deep": false,
+              "enabled": false,
+              "install_policy": "never",
+              "max_seconds": 30,
+              "providers": [
+                "builtin"
+              ],
+              "target_seconds": 10
+            }
+          }
+        },
+        "result_canonical_sha256": "bc9913c50903f9f40134f8f7b31c9d14965bcfded13be1a702cfc809aa66c8c0"
+      }
+    },
+    "finalize": {
+      "rejected": {
+        "exception_type": "ValueError",
+        "filesystem": {
+          "after_paths": [
+            ".requirements-impact-refiner",
+            ".requirements-impact-refiner/drafts",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json",
+            ".requirements-impact-refiner/reports",
+            ".requirements-impact-refiner/reports/RPT-001",
+            ".requirements-impact-refiner/reports/RPT-001/.controller.lock"
+          ],
+          "before_paths": [
+            ".requirements-impact-refiner",
+            ".requirements-impact-refiner/drafts",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json"
+          ],
+          "draft_consumed": false,
+          "modes": {
+            ".requirements-impact-refiner/drafts": "0700",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json": "0600",
+            ".requirements-impact-refiner/reports/RPT-001/.controller.lock": "0600"
+          },
+          "preexisting_unchanged": true,
+          "published_paths": []
+        },
+        "message": "invalid analysis phase"
+      },
+      "success": {
+        "analysis_fixture_sha256": "11d3cdc28cbbc3400a67065b373bc78303d2407cea151bf8f8510676afc875ca",
+        "filesystem": {
+          "modes": {
+            ".requirements-impact-refiner/drafts": "0700",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json": "0600",
+            ".requirements-impact-refiner/reports/RPT-001/.controller.lock": "0600",
+            ".requirements-impact-refiner/reports/RPT-001/current.json": "0600",
+            ".requirements-impact-refiner/reports/RPT-001/revision-0001.controller.json": "0600",
+            ".requirements-impact-refiner/reports/RPT-001/revision-0001.json": "0600",
+            ".requirements-impact-refiner/reports/RPT-001/revision-0001.md": "0600"
+          },
+          "surviving_paths": [
+            ".requirements-impact-refiner",
+            ".requirements-impact-refiner/drafts",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json",
+            ".requirements-impact-refiner/reports",
+            ".requirements-impact-refiner/reports/RPT-001",
+            ".requirements-impact-refiner/reports/RPT-001/.controller.lock",
+            ".requirements-impact-refiner/reports/RPT-001/current.json",
+            ".requirements-impact-refiner/reports/RPT-001/revision-0001.controller.json",
+            ".requirements-impact-refiner/reports/RPT-001/revision-0001.json",
+            ".requirements-impact-refiner/reports/RPT-001/revision-0001.md"
+          ]
+        },
+        "markdown_canonical_sha256": "0245b2f3a7af219a62e9887121e6459e467fa737a4502b35f3e343107569d39e",
+        "result": {
+          "delivery": "full",
+          "display_text_sha256": "028d26157dd45efc46c34830bcfb62004f2fef809ed706596ebee40e6bda5699",
+          "markdown_path": ".requirements-impact-refiner/reports/RPT-001/revision-0001.md",
+          "markdown_sha256": "0245b2f3a7af219a62e9887121e6459e467fa737a4502b35f3e343107569d39e",
+          "report_id": "RPT-001",
+          "revision": 1,
+          "state_path": ".requirements-impact-refiner/reports/RPT-001/revision-0001.json",
+          "status": "published"
+        },
+        "result_canonical_sha256": "de8dc59c9155e76faab614c4ebc2885df99e0b34ab4c3a8c431aa9dbd8d4e44b",
+        "state_canonical_sha256": "d1fff0711b635c5c95d8a209b87f0cbed071dd5911a2043a203d270d45a43a5d"
+      }
+    },
+    "trace": {
+      "rejected": {
+        "exception_type": "ValueError",
+        "filesystem": {
+          "after_paths": [
+            ".requirements-impact-refiner",
+            ".requirements-impact-refiner/drafts",
+            ".requirements-impact-refiner/drafts/.draft-transaction.lock",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json"
+          ],
+          "before_paths": [
+            ".requirements-impact-refiner",
+            ".requirements-impact-refiner/drafts",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json"
+          ],
+          "draft_consumed": false,
+          "modes": {
+            ".requirements-impact-refiner/drafts": "0700",
+            ".requirements-impact-refiner/drafts/.draft-transaction.lock": "0600",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json": "0600"
+          },
+          "preexisting_unchanged": true,
+          "published_paths": []
+        },
+        "message": "impact graph is disabled for this draft"
+      },
+      "success": {
+        "filesystem": {
+          "modes": {
+            ".requirements-impact-refiner/drafts": "0700",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json": "0600",
+            ".requirements-impact-refiner/graph": "0700",
+            ".requirements-impact-refiner/graph/11111111111111111111111111111111.json": "0600",
+            ".requirements-impact-refiner/reports/RPT-001/.controller.lock": "0600"
+          },
+          "surviving_paths": [
+            ".requirements-impact-refiner",
+            ".requirements-impact-refiner/cache",
+            ".requirements-impact-refiner/cache/graph",
+            ".requirements-impact-refiner/cache/graph/v1",
+            ".requirements-impact-refiner/cache/graph/v1/<sha256>.json",
+            ".requirements-impact-refiner/cache/graph/v1/current",
+            ".requirements-impact-refiner/drafts",
+            ".requirements-impact-refiner/drafts/.draft-transaction.lock",
+            ".requirements-impact-refiner/drafts/11111111111111111111111111111111.json",
+            ".requirements-impact-refiner/graph",
+            ".requirements-impact-refiner/graph/11111111111111111111111111111111.json",
+            ".requirements-impact-refiner/reports",
+            ".requirements-impact-refiner/reports/RPT-001",
+            ".requirements-impact-refiner/reports/RPT-001/.controller.lock"
+          ]
+        },
+        "receipt_canonical_sha256": "842c0c6fda9c1bb57c33d24f049700711624f6570f7f27a8a2c263d69f93e56d",
+        "result": {
+          "budget_status": "closed",
+          "compact_graph": {
+            "frontier": [],
+            "nodes": [
+              {
+                "confidence": "structural-inferred",
+                "key": "NODE-001",
+                "kind": "api_field",
+                "label": "profile.displayName",
+                "location": "api/profile.py",
+                "risk_domains": [
+                  "interfaces"
+                ]
+              }
+            ],
+            "paths": [],
+            "providers": [
+              {
+                "confidence": "structural-inferred",
+                "name": "builtin",
+                "status": "ready",
+                "version": "builtin-v1"
+              }
+            ],
+            "summary": {
+              "budget_status": "closed",
+              "edges": 0,
+              "nodes": 1,
+              "paths": 0,
+              "timings_ms": {
+                "total": 0
+              },
+              "truncated": {
+                "frontier": 0,
+                "nodes": 0,
+                "paths": 0
+              },
+              "unknown_frontiers": 0
+            }
+          },
+          "receipt_id": "<hex32>",
+          "receipt_path": ".requirements-impact-refiner/graph/11111111111111111111111111111111.json",
+          "receipt_sha256": "<sha256>",
+          "request_sha256": "<sha256>",
+          "seeds": [
+            {
+              "location": "api/profile.py",
+              "term": "profile.displayName"
+            }
+          ]
+        },
+        "result_canonical_sha256": "6b358645110f4c9bc7245399cbfe9346a380600b0985e03ed5455121730feaa3"
+      }
+    }
+  },
+  "entry_points": {
+    "begin_refinement": {
+      "parameters": [
+        ["request", "POSITIONAL_OR_KEYWORD", "<missing>", "BeginRequest"]
+      ],
+      "return": "DraftResult"
+    },
+    "finalize_refinement": {
+      "parameters": [
+        ["request", "POSITIONAL_OR_KEYWORD", "<missing>", "FinalizeRequest"]
+      ],
+      "return": "FinalizeResult"
+    },
+    "load_draft": {
+      "parameters": [
+        ["repo_root", "POSITIONAL_OR_KEYWORD", "<missing>", "Path"],
+        ["draft_id", "POSITIONAL_OR_KEYWORD", "<missing>", "str"]
+      ],
+      "return": "dict[str, object]"
+    },
+    "scan_impact": {
+      "parameters": [
+        ["request", "POSITIONAL_OR_KEYWORD", "<missing>", "ScanRequest"]
+      ],
+      "return": "ScanResult"
+    },
+    "trace_impact": {
+      "parameters": [
+        ["request", "POSITIONAL_OR_KEYWORD", "<missing>", "TraceRequest"]
+      ],
+      "return": "TraceResult"
+    }
+  },
+  "filesystem_mode_exclusions": [
+    ".requirements-impact-refiner",
+    ".requirements-impact-refiner/cache and descendants",
+    ".requirements-impact-refiner/reports and report-ID directories"
+  ],
+  "metadata": {
+    "baseline_commit": "e8599b3ff4b9870b67ed1ea8e08658e938a209ea",
+    "fixture_filename": "rir-controller-facade-v05.json",
+    "provenance": "Characterized at baseline commit e8599b3; the retained v05 filename does not assert that these bytes came from a historical v0.5 release."
+  },
+  "public_names": [
+    "BeginRequest",
+    "DraftResult",
+    "FinalizeRequest",
+    "FinalizeResult",
+    "ScanRequest",
+    "TraceRequest",
+    "TraceResult",
+    "begin_refinement",
+    "finalize_refinement",
+    "load_draft",
+    "scan_impact",
+    "trace_impact"
+  ],
+  "public_dataclasses": {
+    "BeginRequest": {
+      "fields": [
+        ["repo_root", "<missing>", "<missing>"],
+        ["request", "<missing>", "<missing>"],
+        ["repository_evidence", "<missing>", "<missing>"],
+        ["adapter", "<missing>", "<missing>"],
+        ["audience_override", null, "<missing>"],
+        ["delivery_override", null, "<missing>"],
+        ["scan_id", null, "<missing>"]
+      ],
+      "frozen": true
+    },
+    "DraftResult": {
+      "fields": [
+        ["draft_id", "<missing>", "<missing>"],
+        ["draft_path", "<missing>", "<missing>"],
+        ["report_id", "<missing>", "<missing>"],
+        ["revision", "<missing>", "<missing>"],
+        ["previous_sha256", "<missing>", "<missing>"],
+        ["settings", "<missing>", "<missing>"],
+        ["prior_state", "<missing>", "<missing>"],
+        ["prior_key_map", "<missing>", "<missing>"],
+        ["scan_id", null, "<missing>"],
+        ["graph_receipt_id", null, "<missing>"]
+      ],
+      "frozen": true
+    },
+    "FinalizeRequest": {
+      "fields": [
+        ["repo_root", "<missing>", "<missing>"],
+        ["draft_id", "<missing>", "<missing>"],
+        ["analysis", "<missing>", "<missing>"],
+        ["graph_receipt_id", null, "<missing>"]
+      ],
+      "frozen": true
+    },
+    "FinalizeResult": {
+      "fields": [
+        ["status", "<missing>", "<missing>"],
+        ["report_id", "<missing>", "<missing>"],
+        ["revision", "<missing>", "<missing>"],
+        ["delivery", "<missing>", "<missing>"],
+        ["display_text", "<missing>", "<missing>"],
+        ["state_path", "<missing>", "<missing>"],
+        ["markdown_path", "<missing>", "<missing>"],
+        ["markdown_sha256", "<missing>", "<missing>"]
+      ],
+      "frozen": true
+    },
+    "ScanRequest": {
+      "fields": [
+        ["repo_root", "<missing>", "<missing>"],
+        ["change_request", "<missing>", "<missing>"],
+        ["evidence", "<missing>", "<missing>"],
+        ["audience_override", null, "<missing>"],
+        ["previous_report_id", null, "<missing>"],
+        ["previous_revision", null, "<missing>"],
+        ["changed_paths", "<missing>", "<factory:tuple>"]
+      ],
+      "frozen": true
+    },
+    "TraceRequest": {
+      "fields": [
+        ["repo_root", "<missing>", "<missing>"],
+        ["draft_id", "<missing>", "<missing>"],
+        ["seeds", "<missing>", "<missing>"]
+      ],
+      "frozen": true
+    },
+    "TraceResult": {
+      "fields": [
+        ["receipt_id", "<missing>", "<missing>"],
+        ["receipt_path", "<missing>", "<missing>"],
+        ["receipt_sha256", "<missing>", "<missing>"],
+        ["compact_graph", "<missing>", "<missing>"],
+        ["budget_status", "<missing>", "<missing>"],
+        ["request_sha256", "<missing>", "<missing>"],
+        ["seeds", "<missing>", "<missing>"]
+      ],
+      "frozen": true
+    }
+  }
+}

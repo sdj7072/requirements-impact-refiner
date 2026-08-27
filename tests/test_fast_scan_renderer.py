@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "scripts" / "fast_scan_renderer.py"
 FIXTURE = ROOT / "tests" / "fixtures" / "impact-graph-receipt.json"
 
+
 def load_renderer():
     if not MODULE.is_file():
         raise AssertionError("scripts/fast_scan_renderer.py must exist")
@@ -18,16 +19,29 @@ def load_renderer():
     spec.loader.exec_module(value)
     return value
 
+
 def receipt():
     graph = json.loads(FIXTURE.read_text(encoding="utf-8"))
     graph["nodes"][0]["label"] = "<profile|name>"
-    return {"status": "complete", "risk_level": "high", "graph_receipt": graph, "frontier": graph["frontier"], "candidates": [], "elapsed_ms": 17, "cache_status": "miss"}
+    return {
+        "status": "complete",
+        "risk_level": "high",
+        "graph_receipt": graph,
+        "frontier": graph["frontier"],
+        "candidates": [],
+        "elapsed_ms": 17,
+        "cache_status": "miss",
+    }
+
 
 class FastScanRendererTest(unittest.TestCase):
     def test_balanced_output_has_paths_frontier_footer_and_word_limit(self):
         text = load_renderer().render_fast_scan(receipt(), "balanced")
         self.assertIn("→", text)
-        self.assertIn("Possible issue", text)
+        self.assertIn("## Fast impact scan", text)
+        self.assertIn("\n### Possible issue paths\n", text)
+        self.assertIn("\n1. ", text)
+        self.assertIn("\n### Scan information\n", text)
         self.assertEqual(text.count("Coverage:"), 1)
         self.assertEqual(text.count("Do you want detailed refinement?"), 1)
         self.assertLessEqual(len(text.split()), 180)
@@ -42,7 +56,21 @@ class FastScanRendererTest(unittest.TestCase):
 
     def test_needs_input_and_partial_are_honest(self):
         renderer = load_renderer()
-        needs = {"status": "needs_input", "risk_level": "unknown", "graph_receipt": {}, "frontier": [], "elapsed_ms": 1, "cache_status": "bypassed", "candidates": [{"term": "ProfileService", "location": "src/profile.py", "derivation": "repository-match"}]}
+        needs = {
+            "status": "needs_input",
+            "risk_level": "unknown",
+            "graph_receipt": {},
+            "frontier": [],
+            "elapsed_ms": 1,
+            "cache_status": "bypassed",
+            "candidates": [
+                {
+                    "term": "ProfileService",
+                    "location": "src/profile.py",
+                    "derivation": "repository-match",
+                }
+            ],
+        }
         text = renderer.render_fast_scan(needs, "simple")
         self.assertIn("more input", text.lower())
         self.assertIn("ProfileService", text)
@@ -59,10 +87,13 @@ class FastScanRendererTest(unittest.TestCase):
         graph["nodes"][0]["location"] = "docs/POLICY.md"
         graph["nodes"][1]["label"] = "POLICY.md"
         graph["nodes"][1]["location"] = "module0.py"
-        graph["paths"] = [{
-            "nodes": [graph["nodes"][0]["id"], graph["nodes"][1]["id"]],
-            "edges": [], "risk_domains": ["authorization/privacy"],
-        }]
+        graph["paths"] = [
+            {
+                "nodes": [graph["nodes"][0]["id"], graph["nodes"][1]["id"]],
+                "edges": [],
+                "risk_domains": ["authorization/privacy"],
+            }
+        ]
 
         text = load_renderer().render_fast_scan(value, "balanced")
 
@@ -78,12 +109,16 @@ class FastScanRendererTest(unittest.TestCase):
         japanese = renderer.render_fast_scan(partial, "balanced", "ja")
 
         self.assertIn("빠른 영향도 검사", korean)
+        self.assertIn("\n### 발생 가능한 영향 경로\n", korean)
+        self.assertIn("\n### 검사 정보\n", korean)
         self.assertIn("부분 결과", korean)
         self.assertIn("상세 영향도 정제를 진행할까요?", korean)
         self.assertNotIn("Do you want detailed refinement?", korean)
         self.assertIn("高速影響スキャン", japanese)
+        self.assertIn("\n### 発生する可能性のある影響経路\n", japanese)
         self.assertIn("部分的な結果", japanese)
         self.assertIn("詳細な影響分析を続けますか?", japanese)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -116,14 +151,19 @@ class SafetyLinePreservationTest(unittest.TestCase):
     def test_frontier_and_partial_warnings_survive_truncation(self):
         renderer = load_renderer()
         nodes = [
-            {"id": f"NODE-{i:03d}",
-             "label": " ".join(f"segment{i}word{j}" for j in range(18)),
-             "location": f"src/pkg{i}/file{i}.py"}
+            {
+                "id": f"NODE-{i:03d}",
+                "label": " ".join(f"segment{i}word{j}" for j in range(18)),
+                "location": f"src/pkg{i}/file{i}.py",
+            }
             for i in range(20)
         ]
         paths = [
-            {"nodes": [f"NODE-{i:03d}", f"NODE-{(i + 1) % 20:03d}"],
-             "edges": [], "risk_domains": ["operations"]}
+            {
+                "nodes": [f"NODE-{i:03d}", f"NODE-{(i + 1) % 20:03d}"],
+                "edges": [],
+                "risk_domains": ["operations"],
+            }
             for i in range(8)
         ]
         receipt = {
@@ -149,29 +189,32 @@ class WholeLineTrimmingTest(unittest.TestCase):
 
     def build_receipt(self, path_count=10, frontier_words=4):
         nodes = [
-            {"id": f"NODE-{i:03d}",
-             "label": " ".join(f"part{i}w{j}" for j in range(12)),
-             "location": f"src/pkg{i}/module_file_{i}.py",
-             "provider": "builtin", "confidence": "lexical"}
+            {
+                "id": f"NODE-{i:03d}",
+                "label": " ".join(f"part{i}w{j}" for j in range(12)),
+                "location": f"src/pkg{i}/module_file_{i}.py",
+                "provider": "builtin",
+                "confidence": "lexical",
+            }
             for i in range(path_count + 1)
         ]
         edges = [
-            {"id": f"EDGE-{i:03d}", "kind": "references",
-             "confidence": "lexical"}
+            {"id": f"EDGE-{i:03d}", "kind": "references", "confidence": "lexical"}
             for i in range(path_count)
         ]
         paths = [
-            {"nodes": [f"NODE-{i:03d}", f"NODE-{i + 1:03d}"],
-             "edges": [f"EDGE-{i:03d}"], "risk_domains": ["operations"]}
+            {
+                "nodes": [f"NODE-{i:03d}", f"NODE-{i + 1:03d}"],
+                "edges": [f"EDGE-{i:03d}"],
+                "risk_domains": ["operations"],
+            }
             for i in range(path_count)
         ]
         return {
             "status": "partial",
             "risk_level": "high",
             "graph_receipt": {"nodes": nodes, "edges": edges, "paths": paths},
-            "frontier": [
-                {"reason": " ".join(f"gapword{i}" for i in range(frontier_words))}
-            ],
+            "frontier": [{"reason": " ".join(f"gapword{i}" for i in range(frontier_words))}],
             "elapsed_ms": 100,
             "cache_status": "bypassed",
         }

@@ -2,8 +2,8 @@
 
 import subprocess
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from .models import CommandResult
 
@@ -16,9 +16,7 @@ def _decode_output(value: object) -> str:
     return str(value)
 
 
-def run_command(
-    argv: Sequence[str], cwd: Path, timeout_seconds: float
-) -> CommandResult:
+def run_command(argv: Sequence[str], cwd: Path, timeout_seconds: float) -> CommandResult:
     """Run an argv command without a shell and preserve timeout output."""
     command = tuple(str(argument) for argument in argv)
     if not command:
@@ -31,8 +29,7 @@ def run_command(
         completed = subprocess.run(
             command,
             cwd=str(cwd),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=timeout_seconds,
             check=False,
             shell=False,

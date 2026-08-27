@@ -15,8 +15,10 @@ An imperative you could execute immediately is still a behavior change — being
 
 If it does, **requirements-impact-refiner is required** before planning or implementation. Invoke it automatically; do not wait for the user to name it. Respect its selected workflow adapter: with Superpowers, run it after approved brainstorming and before `writing-plans`; otherwise run it before the user's planning method.
 
-The core skill defaults to delivering the complete impact report inline (the scan runs internally to seed it); the ask flow — scan summary plus a refinement question — is a repository or request opt-in. Do not substitute manual searches or graph JSON, and never infer a missing predecessor.
+For a selected change, read [Previous-report bootstrap](../requirements-impact-refiner/references/previous-report.md), call `rir_previous` before any `rir_scan`, and follow its route. Forward stale identity only as the exact delta hint set the tool returned. Return renderer text; never substitute searches, graph JSON, or an invented report. Only a later explicit yes to a non-`needs_input` scan's refinement question enters detailed refinement; original request wording is not confirmation.
 
-Skip it for pure ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan.
+The default report flow returns a fresh previous report directly or uses a stale/none scan to seed immediate detailed refinement. The opt-in ask flow returns the scan summary and waits for a later explicit yes. `needs_input` and `ambiguous` always stop for user input.
+
+For pure ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan, call neither `rir_previous` nor `rir_scan`.
 
 In plugin-capable clients, the plugin's enabled/disabled control is the on/off switch for this automatic check.

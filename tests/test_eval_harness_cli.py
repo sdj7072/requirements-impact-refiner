@@ -1,13 +1,13 @@
-import json
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from evals.harness.catalog import load_all
-from evals.harness.evidence import build_manifest, record_run, verify_manifest
 from evals.harness.controller_evidence import analyze_controller_trace
+from evals.harness.evidence import build_manifest, record_run, verify_manifest
 from evals.harness.graph_scoring import (
     GraphScore,
     canonical_receipt_bytes,
@@ -31,8 +31,8 @@ from evals.harness.run import (
     ScheduledRun,
     _graph_observation,
     _graph_state_parity,
-    _smoke_observation,
     _score_selected_attempt,
+    _smoke_observation,
     build_parser,
     build_schedule,
     create_adapter,
@@ -40,7 +40,6 @@ from evals.harness.run import (
     run_probe,
 )
 from tests.test_report_lineage import next_report, report_with_state
-
 
 _USE_REQUEST_RETRY = object()
 
@@ -80,15 +79,13 @@ class FakeAdapter:
         self.raw_final_output = raw_final_output
         self.raw_previous_bytes = raw_previous_bytes
         self.retry_of_override = retry_of_override
-        self.probe_results = (
-            CommandResult(("fake", "--version"), 0, "fake 1.0", "", 0.0, False),
-        )
+        self.probe_results = (CommandResult(("fake", "--version"), 0, "fake 1.0", "", 0.0, False),)
 
     def run_metadata(self, request):
         if self.result_metadata is not None:
             return self.result_metadata
         plugins = tuple(sorted(self.enabled_plugins))
-        composition = "%s %s plugins=%s" % (
+        composition = "{} {} plugins={}".format(
             self.client,
             self.version,
             ",".join(plugins),
@@ -129,11 +126,7 @@ class FakeAdapter:
             else self.retry_of_override
         )
         if self.record_evidence:
-            raw_final = (
-                final_output
-                if self.raw_final_output is None
-                else self.raw_final_output
-            )
+            raw_final = final_output if self.raw_final_output is None else self.raw_final_output
             artifacts = {
                 "adapter.txt": "synthetic evidence",
                 "metadata.json": json.dumps(
@@ -144,7 +137,9 @@ class FakeAdapter:
                     },
                     sort_keys=True,
                 ),
-                ("second.final.txt" if request.case.kind == "lineage" else "first.final.txt"): raw_final,
+                (
+                    "second.final.txt" if request.case.kind == "lineage" else "first.final.txt"
+                ): raw_final,
             }
             if request.case.kind == "lineage":
                 artifacts["first.final.txt"] = (
@@ -168,7 +163,9 @@ class FakeAdapter:
             status=status,
             reason="synthetic infrastructure issue" if status is RunStatus.INFRA_ERROR else None,
             final_output=final_output,
-            session_id="123e4567-e89b-12d3-a456-426614174000" if len(request.case.turns) > 1 else None,
+            session_id="123e4567-e89b-12d3-a456-426614174000"
+            if len(request.case.turns) > 1
+            else None,
             attempt=request.attempt,
             retry_of=retry_of,
             metadata=self.run_metadata(request),
@@ -178,15 +175,26 @@ class FakeAdapter:
 def controller_observation(raw_root, client, slot, result, score):
     expected = 0 if slot.case.kind == "negative" else len(slot.case.turns)
     return PerformanceObservation(
-        case_id=slot.case.id, repetition=slot.repetition,
-        status=result.status, attempt=result.attempt, retry_of=result.retry_of,
-        prompt_bytes=10, routed_resource_bytes=10, routed_resource_words=10,
-        output_bytes=10, output_words=10, duration_ms=1,
-        input_tokens=None, output_tokens=None,
+        case_id=slot.case.id,
+        repetition=slot.repetition,
+        status=result.status,
+        attempt=result.attempt,
+        retry_of=result.retry_of,
+        prompt_bytes=10,
+        routed_resource_bytes=10,
+        routed_resource_words=10,
+        output_bytes=10,
+        output_words=10,
+        duration_ms=1,
+        input_tokens=None,
+        output_tokens=None,
         impact_ids=() if slot.case.kind == "negative" else ("IMP-001",),
-        state_markdown_match=True, workflow_boundary_passed=True,
-        controller_begin_calls=expected, controller_finalize_calls=expected,
-        controller_draft_ids_match=True, controller_finalize_succeeded=True,
+        state_markdown_match=True,
+        workflow_boundary_passed=True,
+        controller_begin_calls=expected,
+        controller_finalize_calls=expected,
+        controller_draft_ids_match=True,
+        controller_finalize_succeeded=True,
         controller_display_text_exact_match=True,
         controller_display_text_presentation_equivalent=True,
         controller_display_comparison="codex-markdown-v1",
@@ -239,11 +247,7 @@ class LineageEvidenceAdapter(FakeAdapter):
         self.retried = False
 
     def execute(self, request):
-        if (
-            request.case.id == self.retry_lineage_case
-            and request.attempt == 1
-            and not self.retried
-        ):
+        if request.case.id == self.retry_lineage_case and request.attempt == 1 and not self.retried:
             self.retried = True
             self.statuses.insert(0, RunStatus.INFRA_ERROR)
             return super().execute(request)
@@ -309,12 +313,19 @@ class EvalHarnessCliTest(unittest.TestCase):
             root = Path(temporary)
             raw = root / "raw"
             record_run(
-                raw, "codex", case.id, 1,
+                raw,
+                "codex",
+                case.id,
+                1,
                 {
-                    "metadata.json": json.dumps({
-                        "attempt": 1, "client": "codex", "retry_of": None,
-                        "execution_commands": [{"elapsed_seconds": 0.125}],
-                    }),
+                    "metadata.json": json.dumps(
+                        {
+                            "attempt": 1,
+                            "client": "codex",
+                            "retry_of": None,
+                            "execution_commands": [{"elapsed_seconds": 0.125}],
+                        }
+                    ),
                     "first.prompt.txt": "debug prompt",
                     "first.jsonl": '{"type":"item.completed","item":{"type":"agent_message"}}\n',
                     "first.final.txt": "debug response",
@@ -323,7 +334,11 @@ class EvalHarnessCliTest(unittest.TestCase):
                 root / "quarantine",
             )
             result = RunResult(
-                case.id, 1, "codex", RunStatus.PASS, None,
+                case.id,
+                1,
+                "codex",
+                RunStatus.PASS,
+                None,
                 final_output="debug response",
             )
             score = MechanicalScore(case.id, 1, True, ())
@@ -335,30 +350,77 @@ class EvalHarnessCliTest(unittest.TestCase):
         self.assertEqual(observation.controller_begin_calls, 0)
         self.assertTrue(observation.state_markdown_match)
 
+    def test_smoke_observation_rejects_malformed_compact_state_impacts(self):
+        case = next(case for case in load_all() if case.id == "POS-authorization")
+        slot = ScheduledRun(case, 1)
+        result = RunResult(case.id, 1, "codex", RunStatus.PASS, None, final_output="IMP-001")
+        score = MechanicalScore(case.id, 1, True, ())
+        pointer = json.dumps({"state": "revision-0001.json"}).encode("utf-8")
+        common_payloads = {
+            "smoke prompt": b"prompt",
+            "smoke JSONL": b'{"type":"agent_message"}\n',
+            "smoke final output": b"IMP-001",
+            "smoke controller evidence": b"{}",
+            "smoke metadata": b'{"execution_commands":[]}',
+            "smoke current pointer": pointer,
+        }
+
+        for state in (None, {"impacts": "IMP-001"}, {"impacts": [{"id": 1}]}):
+            with self.subTest(state=state):
+                state_payload = json.dumps(state).encode("utf-8")
+
+                def selected_file(raw_root, path, label, state_payload=state_payload):
+                    payload = (
+                        state_payload if label == "smoke compact state" else common_payloads[label]
+                    )
+                    return payload, hashlib.sha256(payload).hexdigest(), path.as_posix()
+
+                with tempfile.TemporaryDirectory() as temporary:
+                    raw = Path(temporary) / "raw"
+                    (raw / "codex" / case.id / "01" / "workspace-reports" / "RPT-001").mkdir(
+                        parents=True
+                    )
+                    with (
+                        patch(
+                            "evals.harness.run._captured_canonical_report",
+                            return_value=(b"report", None, ()),
+                        ),
+                        patch(
+                            "evals.harness.run._read_selected_file",
+                            side_effect=selected_file,
+                        ),
+                        self.assertRaisesRegex(
+                            ValueError, "smoke compact state impacts are invalid"
+                        ),
+                    ):
+                        _smoke_observation(raw, "codex", slot, result, score)
+
     def test_v04_smoke_treats_none_observation_as_extraction_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "output"
-            args = build_parser().parse_args([
-                "--client", "codex", "--suite", "smoke",
-                "--expected-plugin-version", "0.4.0", "--output", str(output),
-            ])
-            with patch(
-                "evals.harness.run._smoke_observation", return_value=None
-            ):
-                exit_code = run_batch(
-                    args, FakeAdapter(plugin_version="0.4.0")
-                )
-
-            payload = json.loads(
-                (output / "performance.json").read_text(encoding="utf-8")
+            args = build_parser().parse_args(
+                [
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "smoke",
+                    "--expected-plugin-version",
+                    "0.4.0",
+                    "--output",
+                    str(output),
+                ]
             )
+            with patch("evals.harness.run._smoke_observation", return_value=None):
+                exit_code = run_batch(args, FakeAdapter(plugin_version="0.4.0"))
+
+            payload = json.loads((output / "performance.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 1)
         self.assertEqual(payload["observations"], [])
-        self.assertTrue(any(
-            "performance evidence invalid" in error
-            for error in payload["gate"]["errors"]
-        ))
+        self.assertTrue(
+            any("performance evidence invalid" in error for error in payload["gate"]["errors"])
+        )
+
     def test_graph_smoke_parser_and_schedule_use_exact_checked_in_six(self):
         args = build_parser().parse_args(
             ["--client", "codex", "--suite", "graph-smoke", "--output", "out"]
@@ -377,9 +439,14 @@ class EvalHarnessCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             args = build_parser().parse_args(
                 [
-                    "--client", "codex", "--suite", "graph-smoke",
-                    "--expected-plugin-version", "0.4.0",
-                    "--output", str(Path(temporary) / "output"),
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "graph-smoke",
+                    "--expected-plugin-version",
+                    "0.4.0",
+                    "--output",
+                    str(Path(temporary) / "output"),
                 ]
             )
             adapter = FakeAdapter(
@@ -398,9 +465,14 @@ class EvalHarnessCliTest(unittest.TestCase):
             output = Path(temporary) / "output"
             args = build_parser().parse_args(
                 [
-                    "--client", "codex", "--suite", "graph-smoke",
-                    "--expected-plugin-version", "0.4.0",
-                    "--output", str(output),
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "graph-smoke",
+                    "--expected-plugin-version",
+                    "0.4.0",
+                    "--output",
+                    str(output),
                 ]
             )
             rejected = GraphSmokeGateResult(
@@ -410,26 +482,21 @@ class EvalHarnessCliTest(unittest.TestCase):
                 median_output_words=10,
                 median_routed_resource_words=10,
             )
-            with patch(
-                "evals.harness.run._graph_observation",
-                side_effect=graph_observation,
-            ), patch(
-                "evals.harness.run.evaluate_graph_smoke",
-                return_value=rejected,
-            ) as gate:
-                exit_code = run_batch(
-                    args, FakeAdapter(plugin_version="0.4.0")
-                )
+            with (
+                patch(
+                    "evals.harness.run._graph_observation",
+                    side_effect=graph_observation,
+                ),
+                patch(
+                    "evals.harness.run.evaluate_graph_smoke",
+                    return_value=rejected,
+                ) as gate,
+            ):
+                exit_code = run_batch(args, FakeAdapter(plugin_version="0.4.0"))
 
-            scores = json.loads(
-                (output / "graph-scores.json").read_text(encoding="utf-8")
-            )
-            performance = json.loads(
-                (output / "performance.json").read_text(encoding="utf-8")
-            )
-            controller = json.loads(
-                (output / "controller.json").read_text(encoding="utf-8")
-            )
+            scores = json.loads((output / "graph-scores.json").read_text(encoding="utf-8"))
+            performance = json.loads((output / "performance.json").read_text(encoding="utf-8"))
+            controller = json.loads((output / "controller.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 1)
         gate.assert_called_once()
@@ -447,9 +514,9 @@ class EvalHarnessCliTest(unittest.TestCase):
         receipt_bytes = canonical_receipt_bytes(receipt)
         receipt_digest = hashlib.sha256(receipt_bytes).hexdigest()
         compact_digest = hashlib.sha256(
-            json.dumps(
-                compact_graph(receipt), sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
+            json.dumps(compact_graph(receipt), sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
         ).hexdigest()
         controller = {
             "valid": True,
@@ -458,26 +525,20 @@ class EvalHarnessCliTest(unittest.TestCase):
             "finalize_calls": 1,
             "draft_ids": [receipt["draft_id"]],
             "receipt_ids": [receipt["receipt_id"]],
-            "receipt_paths": [
-                f".requirements-impact-refiner/graph/{receipt['draft_id']}.json"
-            ],
+            "receipt_paths": [f".requirements-impact-refiner/graph/{receipt['draft_id']}.json"],
             "receipt_sha256": [receipt_digest],
             "trace_compact_graph_sha256": [compact_digest],
             "trace_request_sha256": [receipt["request_sha256"]],
-            "trace_seeds": [[
-                {"term": term, "location": location}
-                for term, location in graph_case.seeds
-            ]],
+            "trace_seeds": [
+                [{"term": term, "location": location} for term, location in graph_case.seeds]
+            ],
             "duplicate_or_error_calls": False,
         }
         graph_policy = {
             "schema_version": 1,
             "settings": receipt["settings"],
             "provider_inventory": ["builtin"],
-            "seeds": [
-                {"term": term, "location": location}
-                for term, location in graph_case.seeds
-            ],
+            "seeds": [{"term": term, "location": location} for term, location in graph_case.seeds],
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -490,7 +551,9 @@ class EvalHarnessCliTest(unittest.TestCase):
                 {
                     "metadata.json": json.dumps(
                         {
-                            "attempt": 1, "client": "codex", "retry_of": None,
+                            "attempt": 1,
+                            "client": "codex",
+                            "retry_of": None,
                             "graph_policy": graph_policy,
                         }
                     ),
@@ -502,7 +565,11 @@ class EvalHarnessCliTest(unittest.TestCase):
                 root / "quarantine",
             )
             result = RunResult(
-                case.id, 1, "codex", RunStatus.PASS, None,
+                case.id,
+                1,
+                "codex",
+                RunStatus.PASS,
+                None,
                 final_output="Impact scan: 8.4 s\nImpact paths: PATH-001",
             )
             mechanical = MechanicalScore(case.id, 1, True, ())
@@ -514,31 +581,33 @@ class EvalHarnessCliTest(unittest.TestCase):
             self.assertTrue(score.passed, score.findings)
             self.assertTrue(observation.receipt_state_provider_parity)
             self.assertEqual(observation.graph_duration_ms, 8400)
-            self.assertTrue(any(path.endswith(f"workspace-graph/{receipt['draft_id']}.json") for path, _ in digests))
-
-            controller_path = (
-                raw / "codex" / case.id / "01" / "controller-evidence.json"
+            self.assertTrue(
+                any(
+                    path.endswith(f"workspace-graph/{receipt['draft_id']}.json")
+                    for path, _ in digests
+                )
             )
-            controller["trace_seeds"] = [[{
-                "term": "totally.unrelated.seed",
-                "location": graph_case.seeds[0][1],
-            }]]
+
+            controller_path = raw / "codex" / case.id / "01" / "controller-evidence.json"
+            controller["trace_seeds"] = [
+                [
+                    {
+                        "term": "totally.unrelated.seed",
+                        "location": graph_case.seeds[0][1],
+                    }
+                ]
+            ]
             controller_path.write_text(json.dumps(controller), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "catalog seeds"):
-                _graph_observation(
-                    raw, "codex", ScheduledRun(case, 1), result, mechanical
-                )
-            controller["trace_seeds"] = [[
-                {"term": term, "location": location}
-                for term, location in graph_case.seeds
-            ]]
+                _graph_observation(raw, "codex", ScheduledRun(case, 1), result, mechanical)
+            controller["trace_seeds"] = [
+                [{"term": term, "location": location} for term, location in graph_case.seeds]
+            ]
 
             controller["trace_request_sha256"] = ["0" * 64]
             controller_path.write_text(json.dumps(controller), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "request identity"):
-                _graph_observation(
-                    raw, "codex", ScheduledRun(case, 1), result, mechanical
-                )
+                _graph_observation(raw, "codex", ScheduledRun(case, 1), result, mechanical)
             controller["trace_request_sha256"] = [receipt["request_sha256"]]
 
             metadata_path = raw / "codex" / case.id / "01" / "metadata.json"
@@ -547,28 +616,28 @@ class EvalHarnessCliTest(unittest.TestCase):
             metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
             controller_path.write_text(json.dumps(controller), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "run policy"):
-                _graph_observation(
-                    raw, "codex", ScheduledRun(case, 1), result, mechanical
-                )
+                _graph_observation(raw, "codex", ScheduledRun(case, 1), result, mechanical)
             metadata["graph_policy"] = graph_policy
             metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
             controller["receipt_sha256"] = ["0" * 64]
             controller_path.write_text(json.dumps(controller), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "digest disagrees"):
-                _graph_observation(
-                    raw, "codex", ScheduledRun(case, 1), result, mechanical
-                )
+                _graph_observation(raw, "codex", ScheduledRun(case, 1), result, mechanical)
 
     def test_graph_state_parity_allows_same_exact_receipt_path_for_two_impacts(self):
         from tests.test_graph_scoring import GraphScoringTest
 
         graph_case = load_graph_cases()[0]
         receipt = GraphScoringTest().receipt(graph_case)
-        score = GraphScoringTest().module().score_graph(
-            graph_case,
-            receipt,
-            "Impact scan: 8.4 s\nImpact paths: PATH-001",
+        score = (
+            GraphScoringTest()
+            .module()
+            .score_graph(
+                graph_case,
+                receipt,
+                "Impact scan: 8.4 s\nImpact paths: PATH-001",
+            )
         )
         structured = {
             "id": "PATH-001",
@@ -579,10 +648,12 @@ class EvalHarnessCliTest(unittest.TestCase):
         }
         digest = hashlib.sha256(canonical_receipt_bytes(receipt)).hexdigest()
         state = {
-            "scope": [{
-                "boundary": "Impact graph coverage",
-                "confidence": f"closed; receipt {receipt['receipt_id']}; sha256 {digest}; frontier none",
-            }],
+            "scope": [
+                {
+                    "boundary": "Impact graph coverage",
+                    "confidence": f"closed; receipt {receipt['receipt_id']}; sha256 {digest}; frontier none",
+                }
+            ],
             "graph_paths": [
                 {"impact": "IMP-001", "paths": [structured]},
                 {"impact": "IMP-002", "paths": [structured]},
@@ -600,27 +671,31 @@ class EvalHarnessCliTest(unittest.TestCase):
                     payload = json.dumps(state).encode("utf-8")
                 return payload, hashlib.sha256(payload).hexdigest(), path.as_posix()
 
-            with patch(
-                "evals.harness.run._captured_canonical_report",
-                return_value=(b"markdown", None, ()),
-            ), patch(
-                "evals.harness.run._read_selected_file",
-                side_effect=selected_file,
+            with (
+                patch(
+                    "evals.harness.run._captured_canonical_report",
+                    return_value=(b"markdown", None, ()),
+                ),
+                patch(
+                    "evals.harness.run._read_selected_file",
+                    side_effect=selected_file,
+                ),
             ):
-                self.assertTrue(
-                    _graph_state_parity(
-                        attempt, attempt, receipt, digest, score
-                    )
-                )
+                self.assertTrue(_graph_state_parity(attempt, attempt, receipt, digest, score))
 
     def test_graph_scoring_digest_binding_rejects_receipt_mutation_before_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "output"
             args = build_parser().parse_args(
                 [
-                    "--client", "codex", "--suite", "graph-smoke",
-                    "--expected-plugin-version", "0.4.0",
-                    "--output", str(output),
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "graph-smoke",
+                    "--expected-plugin-version",
+                    "0.4.0",
+                    "--output",
+                    str(output),
                 ]
             )
 
@@ -628,9 +703,7 @@ class EvalHarnessCliTest(unittest.TestCase):
                 observation, graph_score, _ = graph_observation(
                     raw_root, client, slot, result, score
                 )
-                metadata = (
-                    raw_root / client / slot.case.id / "01" / "metadata.json"
-                )
+                metadata = raw_root / client / slot.case.id / "01" / "metadata.json"
                 original = metadata.read_bytes()
                 digest = hashlib.sha256(original).hexdigest()
                 metadata.write_bytes(original + b" ")
@@ -641,9 +714,7 @@ class EvalHarnessCliTest(unittest.TestCase):
                 "evals.harness.run._graph_observation",
                 side_effect=mutate_after_scoring,
             ):
-                exit_code = run_batch(
-                    args, FakeAdapter(plugin_version="0.4.0")
-                )
+                exit_code = run_batch(args, FakeAdapter(plugin_version="0.4.0"))
 
         self.assertEqual(exit_code, 1)
 
@@ -679,8 +750,13 @@ class EvalHarnessCliTest(unittest.TestCase):
         """Dropping the requested version at the CLI boundary would probe the wrong release."""
         args = build_parser().parse_args(
             [
-                "--client", "codex", "--probe-only", "--output", "out",
-                "--expected-plugin-version", "0.3.1",
+                "--client",
+                "codex",
+                "--probe-only",
+                "--output",
+                "out",
+                "--expected-plugin-version",
+                "0.3.1",
             ]
         )
 
@@ -690,9 +766,7 @@ class EvalHarnessCliTest(unittest.TestCase):
         adapter_class.assert_called_once_with(
             timeout_seconds=300.0,
             expected_plugin_version="0.3.1",
-            expected_rir_plugin_id=(
-                "requirements-impact-refiner@requirements-impact-refiner"
-            ),
+            expected_rir_plugin_id=("requirements-impact-refiner@requirements-impact-refiner"),
         )
 
     def test_codex_adapter_receives_an_explicit_evaluation_alias_id(self):
@@ -700,8 +774,13 @@ class EvalHarnessCliTest(unittest.TestCase):
         alias_id = "requirements-impact-refiner@requirements-impact-refiner-v031-eval"
         args = build_parser().parse_args(
             [
-                "--client", "codex", "--probe-only", "--output", "out",
-                "--expected-rir-plugin-id", alias_id,
+                "--client",
+                "codex",
+                "--probe-only",
+                "--output",
+                "out",
+                "--expected-rir-plugin-id",
+                alias_id,
             ]
         )
 
@@ -716,9 +795,7 @@ class EvalHarnessCliTest(unittest.TestCase):
 
     def test_probe_only_allows_omitting_suite_but_batches_do_not(self):
         """Making suite optional for a behavior batch would make its coverage ambiguous."""
-        probe = build_parser().parse_args(
-            ["--client", "codex", "--probe-only", "--output", "out"]
-        )
+        probe = build_parser().parse_args(["--client", "codex", "--probe-only", "--output", "out"])
 
         self.assertIsNone(probe.suite)
         with self.assertRaises(SystemExit) as error:
@@ -749,8 +826,14 @@ class EvalHarnessCliTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as error:
             build_parser().parse_args(
                 [
-                    "--client", "claude", "--suite", "smoke", "--model", "opus",
-                    "--output", "out",
+                    "--client",
+                    "claude",
+                    "--suite",
+                    "smoke",
+                    "--model",
+                    "opus",
+                    "--output",
+                    "out",
                 ]
             )
 
@@ -817,6 +900,7 @@ class EvalHarnessCliTest(unittest.TestCase):
 
     def test_noncanonical_raw_retry_metadata_is_rejected_before_finalization(self):
         """Raw retry metadata cannot inherit validity from a canonical controller result."""
+
         class MetadataRetryAdapter(FakeAdapter):
             def execute(self, request):
                 result = super().execute(request)
@@ -854,6 +938,7 @@ class EvalHarnessCliTest(unittest.TestCase):
 
     def test_retry_rejects_noncanonical_attempt_one_raw_metadata(self):
         """Selecting attempt 2 must not hide malformed metadata in its attempt-1 backing."""
+
         class FirstAttemptMetadataAdapter(FakeAdapter):
             def execute(self, request):
                 result = super().execute(request)
@@ -945,9 +1030,7 @@ class EvalHarnessCliTest(unittest.TestCase):
                 ["--client", "codex", "--suite", "smoke", "--output", str(output)]
             )
 
-            exit_code = run_batch(
-                args, FakeAdapter(raw_final_output="different sealed bytes")
-            )
+            exit_code = run_batch(args, FakeAdapter(raw_final_output="different sealed bytes"))
 
         self.assertEqual(exit_code, 1)
         self.assertFalse((output / "controller.json").exists())
@@ -960,9 +1043,9 @@ class EvalHarnessCliTest(unittest.TestCase):
         canonical = (
             Path(__file__).parent / "fixtures" / "compact-state-post-decision.md"
         ).read_text(encoding="utf-8")
-        state = (
-            Path(__file__).parent / "fixtures" / "compact-state-post-decision.json"
-        ).read_text(encoding="utf-8")
+        state = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(
+            encoding="utf-8"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             raw = root / "raw"
@@ -973,9 +1056,7 @@ class EvalHarnessCliTest(unittest.TestCase):
                     "revision": 1,
                     "state": "revision-0001.json",
                     "markdown": "revision-0001.md",
-                    "markdown_sha256": hashlib.sha256(
-                        canonical.encode("utf-8")
-                    ).hexdigest(),
+                    "markdown_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
                 },
                 sort_keys=True,
             )
@@ -1018,19 +1099,82 @@ class EvalHarnessCliTest(unittest.TestCase):
     def test_v04_scoring_rejects_controller_evidence_detached_from_jsonl(self):
         case = next(case for case in load_all() if case.id == "POS-authorization")
         compact = "## Change Impact Summary\n\nValidation: passed\n"
-        canonical = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.md").read_text(encoding="utf-8")
-        state = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(encoding="utf-8")
-        pointer = json.dumps({
-            "schema_version": 1, "report_id": "RPT-001", "revision": 1,
-            "state": "revision-0001.json", "markdown": "revision-0001.md",
-            "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
-        }, sort_keys=True)
+        canonical = (
+            Path(__file__).parent / "fixtures" / "compact-state-post-decision.md"
+        ).read_text(encoding="utf-8")
+        state = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(
+            encoding="utf-8"
+        )
+        pointer = json.dumps(
+            {
+                "schema_version": 1,
+                "report_id": "RPT-001",
+                "revision": 1,
+                "state": "revision-0001.json",
+                "markdown": "revision-0001.md",
+                "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+            },
+            sort_keys=True,
+        )
         draft = "0" * 32
         receipt = "f" * 32
         events = (
-            {"type": "item.completed", "item": {"id": "begin", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_begin", "arguments": {}, "result": {"structured_content": {"draft_id": draft, "installed_payload_sha256": "0" * 64}}, "error": None, "status": "completed"}},
-            {"type": "item.completed", "item": {"id": "trace", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_trace_impact", "arguments": {"draft_id": draft, "seeds": []}, "result": {"structured_content": {"receipt_id": receipt, "receipt_path": f".requirements-impact-refiner/graph/{draft}.json", "receipt_sha256": "a" * 64, "compact_graph": {}, "budget_status": "closed", "request_sha256": "c" * 64, "seeds": []}}, "error": None, "status": "completed"}},
-            {"type": "item.completed", "item": {"id": "finalize", "type": "mcp_tool_call", "server": "requirements-impact-refiner", "tool": "rir_finalize", "arguments": {"draft_id": draft, "graph_receipt_id": receipt}, "result": {"structured_content": {"status": "published", "display_text": compact}}, "error": None, "status": "completed"}},
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "begin",
+                    "type": "mcp_tool_call",
+                    "server": "requirements-impact-refiner",
+                    "tool": "rir_begin",
+                    "arguments": {},
+                    "result": {
+                        "structured_content": {
+                            "draft_id": draft,
+                            "installed_payload_sha256": "0" * 64,
+                        }
+                    },
+                    "error": None,
+                    "status": "completed",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "trace",
+                    "type": "mcp_tool_call",
+                    "server": "requirements-impact-refiner",
+                    "tool": "rir_trace_impact",
+                    "arguments": {"draft_id": draft, "seeds": []},
+                    "result": {
+                        "structured_content": {
+                            "receipt_id": receipt,
+                            "receipt_path": f".requirements-impact-refiner/graph/{draft}.json",
+                            "receipt_sha256": "a" * 64,
+                            "compact_graph": {},
+                            "budget_status": "closed",
+                            "request_sha256": "c" * 64,
+                            "seeds": [],
+                        }
+                    },
+                    "error": None,
+                    "status": "completed",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "finalize",
+                    "type": "mcp_tool_call",
+                    "server": "requirements-impact-refiner",
+                    "tool": "rir_finalize",
+                    "arguments": {"draft_id": draft, "graph_receipt_id": receipt},
+                    "result": {
+                        "structured_content": {"status": "published", "display_text": compact}
+                    },
+                    "error": None,
+                    "status": "completed",
+                },
+            },
         )
         jsonl = "\n".join(json.dumps(event) for event in events) + "\n"
         controller = analyze_controller_trace((jsonl,), compact, expected_turns=1)
@@ -1038,15 +1182,29 @@ class EvalHarnessCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             raw = root / "raw"
-            record_run(raw, "codex", case.id, 1, {
-                "metadata.json": json.dumps({"attempt": 1, "client": "codex", "retry_of": None, "plugin_version": "0.4.0"}),
-                "first.final.txt": compact,
-                "first.jsonl": jsonl,
-                "controller-evidence.json": controller.to_json(),
-                "workspace-reports/RPT-001/current.json": pointer,
-                "workspace-reports/RPT-001/revision-0001.json": state,
-                "workspace-reports/RPT-001/revision-0001.md": canonical,
-            }, root / "quarantine")
+            record_run(
+                raw,
+                "codex",
+                case.id,
+                1,
+                {
+                    "metadata.json": json.dumps(
+                        {
+                            "attempt": 1,
+                            "client": "codex",
+                            "retry_of": None,
+                            "plugin_version": "0.4.0",
+                        }
+                    ),
+                    "first.final.txt": compact,
+                    "first.jsonl": jsonl,
+                    "controller-evidence.json": controller.to_json(),
+                    "workspace-reports/RPT-001/current.json": pointer,
+                    "workspace-reports/RPT-001/revision-0001.json": state,
+                    "workspace-reports/RPT-001/revision-0001.md": canonical,
+                },
+                root / "quarantine",
+            )
             result = RunResult(case.id, 1, "codex", RunStatus.PASS, None, final_output=compact)
 
             score, trusted, _ = _score_selected_attempt(raw, "codex", ScheduledRun(case, 1), result)
@@ -1057,24 +1215,47 @@ class EvalHarnessCliTest(unittest.TestCase):
     def test_tampered_compact_state_cannot_claim_markdown_parity(self):
         case = next(case for case in load_all() if case.id == "POS-authorization")
         compact = "## Change Impact Summary\n\n`IMP-001`\n"
-        canonical = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.md").read_text(encoding="utf-8")
-        state = json.loads((Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(encoding="utf-8"))
+        canonical = (
+            Path(__file__).parent / "fixtures" / "compact-state-post-decision.md"
+        ).read_text(encoding="utf-8")
+        state = json.loads(
+            (Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(
+                encoding="utf-8"
+            )
+        )
         state["summary"][0]["possible_issue"] = "tampered summary"
-        pointer = json.dumps({
-            "schema_version": 1, "report_id": "RPT-001", "revision": 1,
-            "state": "revision-0001.json", "markdown": "revision-0001.md",
-            "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
-        }, sort_keys=True)
+        pointer = json.dumps(
+            {
+                "schema_version": 1,
+                "report_id": "RPT-001",
+                "revision": 1,
+                "state": "revision-0001.json",
+                "markdown": "revision-0001.md",
+                "markdown_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+            },
+            sort_keys=True,
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             raw = root / "raw"
-            record_run(raw, "codex", case.id, 1, {
-                "metadata.json": json.dumps({"attempt": 1, "client": "codex", "retry_of": None}),
-                "first.final.txt": compact,
-                "workspace-reports/RPT-001/current.json": pointer,
-                "workspace-reports/RPT-001/revision-0001.json": json.dumps(state, sort_keys=True),
-                "workspace-reports/RPT-001/revision-0001.md": canonical,
-            }, root / "quarantine")
+            record_run(
+                raw,
+                "codex",
+                case.id,
+                1,
+                {
+                    "metadata.json": json.dumps(
+                        {"attempt": 1, "client": "codex", "retry_of": None}
+                    ),
+                    "first.final.txt": compact,
+                    "workspace-reports/RPT-001/current.json": pointer,
+                    "workspace-reports/RPT-001/revision-0001.json": json.dumps(
+                        state, sort_keys=True
+                    ),
+                    "workspace-reports/RPT-001/revision-0001.md": canonical,
+                },
+                root / "quarantine",
+            )
             result = RunResult(case.id, 1, "codex", RunStatus.PASS, None, final_output=compact)
 
             score, trusted, _ = _score_selected_attempt(raw, "codex", ScheduledRun(case, 1), result)
@@ -1090,9 +1271,7 @@ class EvalHarnessCliTest(unittest.TestCase):
                 ["--client", "codex", "--suite", "smoke", "--output", str(output)]
             )
 
-            exit_code = run_batch(
-                args, FakeAdapter(raw_previous_bytes=b"\xff")
-            )
+            exit_code = run_batch(args, FakeAdapter(raw_previous_bytes=b"\xff"))
 
         self.assertEqual(exit_code, 1)
         self.assertFalse((output / "controller.json").exists())
@@ -1101,6 +1280,7 @@ class EvalHarnessCliTest(unittest.TestCase):
 
     def test_selected_final_symlink_invalidates_scoring_evidence(self):
         """Following a selected-output symlink could score bytes outside the attempt."""
+
         class SymlinkAdapter(FakeAdapter):
             def execute(self, request):
                 result = super().execute(request)
@@ -1148,8 +1328,7 @@ class EvalHarnessCliTest(unittest.TestCase):
                 if not mutated:
                     mutated = True
                     target = (
-                        output / "raw" / "codex" / "POS-authorization" / "01"
-                        / "first.final.txt"
+                        output / "raw" / "codex" / "POS-authorization" / "01" / "first.final.txt"
                     )
                     target.write_text("changed after scoring", encoding="utf-8")
                 return build_manifest(root)
@@ -1161,11 +1340,8 @@ class EvalHarnessCliTest(unittest.TestCase):
                 exit_code = run_batch(args, FakeAdapter())
 
             manifest_path = output / "manifest.sha256"
-            manifest_valid = (
-                manifest_path.is_file()
-                and not verify_manifest(
-                    output, manifest_path.read_text(encoding="utf-8")
-                )
+            manifest_valid = manifest_path.is_file() and not verify_manifest(
+                output, manifest_path.read_text(encoding="utf-8")
             )
 
         self.assertTrue(mutated)
@@ -1186,13 +1362,9 @@ class EvalHarnessCliTest(unittest.TestCase):
             )
             ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
 
-        selected = next(
-            row for row in ledger["runs"]
-            if row["case_id"] == "LINEAGE-stable-blocked"
-        )
+        selected = next(row for row in ledger["runs"] if row["case_id"] == "LINEAGE-stable-blocked")
         score = next(
-            row for row in ledger["mechanical_scores"]
-            if row["case_id"] == "LINEAGE-stable-blocked"
+            row for row in ledger["mechanical_scores"] if row["case_id"] == "LINEAGE-stable-blocked"
         )
         self.assertEqual(exit_code, 0)
         self.assertEqual(selected["selected_attempt"], 2)
@@ -1207,8 +1379,14 @@ class EvalHarnessCliTest(unittest.TestCase):
             )
             full = build_parser().parse_args(
                 [
-                    "--client", "codex", "--suite", "installed-superpowers",
-                    "--repetitions", "5", "--output", str(output),
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "installed-superpowers",
+                    "--repetitions",
+                    "5",
+                    "--output",
+                    str(output),
                 ]
             )
 
@@ -1217,8 +1395,7 @@ class EvalHarnessCliTest(unittest.TestCase):
             ledger = json.loads((output / "controller.json").read_text(encoding="utf-8"))
 
         lineage = [
-            row for row in ledger["mechanical_scores"]
-            if row["case_id"].startswith("LINEAGE-")
+            row for row in ledger["mechanical_scores"] if row["case_id"].startswith("LINEAGE-")
         ]
         self.assertEqual(len(lineage), 15)
         self.assertTrue(all(row["passed"] for row in lineage), lineage)
@@ -1232,8 +1409,14 @@ class EvalHarnessCliTest(unittest.TestCase):
             )
             full = build_parser().parse_args(
                 [
-                    "--client", "codex", "--suite", "installed-superpowers",
-                    "--repetitions", "5", "--output", str(output),
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "installed-superpowers",
+                    "--repetitions",
+                    "5",
+                    "--output",
+                    str(output),
                 ]
             )
             smoke_adapter = FakeAdapter()
@@ -1247,7 +1430,10 @@ class EvalHarnessCliTest(unittest.TestCase):
         self.assertEqual(len(full_adapter.requests), 79)
         self.assertEqual(
             {(row["case_id"], row["repetition"]) for row in ledger["runs"]},
-            {(slot.case.id, slot.repetition) for slot in build_schedule(load_all(), "installed-superpowers", 5)},
+            {
+                (slot.case.id, slot.repetition)
+                for slot in build_schedule(load_all(), "installed-superpowers", 5)
+            },
         )
 
     def test_full_expansion_rejects_an_incompatible_existing_batch(self):
@@ -1259,8 +1445,16 @@ class EvalHarnessCliTest(unittest.TestCase):
             )
             incompatible = build_parser().parse_args(
                 [
-                    "--client", "codex", "--suite", "installed-superpowers",
-                    "--repetitions", "5", "--model", "two", "--output", str(output),
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "installed-superpowers",
+                    "--repetitions",
+                    "5",
+                    "--model",
+                    "two",
+                    "--output",
+                    str(output),
                 ]
             )
             self.assertEqual(run_batch(smoke, FakeAdapter()), 0)
@@ -1335,7 +1529,9 @@ class EvalHarnessCliTest(unittest.TestCase):
             "plugin version": {"plugin_version": "0.4.0"},
             "enabled plugin": {
                 "enabled_plugins": (
-                    "requirements-impact-refiner", "superpowers", "extra-plugin",
+                    "requirements-impact-refiner",
+                    "superpowers",
+                    "extra-plugin",
                 )
             },
         }
@@ -1347,8 +1543,14 @@ class EvalHarnessCliTest(unittest.TestCase):
                 )
                 full = build_parser().parse_args(
                     [
-                        "--client", "codex", "--suite", "installed-superpowers",
-                        "--repetitions", "5", "--output", str(output),
+                        "--client",
+                        "codex",
+                        "--suite",
+                        "installed-superpowers",
+                        "--repetitions",
+                        "5",
+                        "--output",
+                        str(output),
                     ]
                 )
                 self.assertEqual(run_batch(smoke, FakeAdapter()), 0)
@@ -1456,9 +1658,14 @@ class EvalHarnessCliTest(unittest.TestCase):
             output = Path(temporary) / "output"
             args = build_parser().parse_args(
                 [
-                    "--client", "codex", "--suite", "smoke",
-                    "--expected-plugin-version", "0.4.0",
-                    "--output", str(output),
+                    "--client",
+                    "codex",
+                    "--suite",
+                    "smoke",
+                    "--expected-plugin-version",
+                    "0.4.0",
+                    "--output",
+                    str(output),
                 ]
             )
             rejected = SmokeGateResult(
@@ -1467,20 +1674,19 @@ class EvalHarnessCliTest(unittest.TestCase):
                 median_output_words=10,
                 median_routed_resource_words=10,
             )
-            with patch(
-                "evals.harness.run._smoke_observation",
-                side_effect=controller_observation,
-            ), patch(
-                "evals.harness.run.evaluate_smoke_gate",
-                return_value=rejected,
-            ) as gate:
-                exit_code = run_batch(
-                    args, FakeAdapter(plugin_version="0.4.0")
-                )
+            with (
+                patch(
+                    "evals.harness.run._smoke_observation",
+                    side_effect=controller_observation,
+                ),
+                patch(
+                    "evals.harness.run.evaluate_smoke_gate",
+                    return_value=rejected,
+                ) as gate,
+            ):
+                exit_code = run_batch(args, FakeAdapter(plugin_version="0.4.0"))
 
-            payload = json.loads(
-                (output / "performance.json").read_text(encoding="utf-8")
-            )
+            payload = json.loads((output / "performance.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 1)
         gate.assert_called_once()

@@ -5,9 +5,9 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
-
+from typing import cast
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -16,11 +16,9 @@ if str(SCRIPT_DIR) not in sys.path:
 import compact_state
 import impact_report
 
-
 VALIDATOR_PATH = SCRIPT_DIR / "validate-impact-report.py"
-VALIDATOR_SPEC = importlib.util.spec_from_file_location(
-    "compact_render_validator", VALIDATOR_PATH
-)
+VALIDATOR_SPEC = importlib.util.spec_from_file_location("compact_render_validator", VALIDATOR_PATH)
+assert VALIDATOR_SPEC is not None and VALIDATOR_SPEC.loader is not None
 VALIDATOR = importlib.util.module_from_spec(VALIDATOR_SPEC)
 VALIDATOR_SPEC.loader.exec_module(VALIDATOR)
 GENERIC_ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
@@ -73,145 +71,295 @@ def _table(title: str, headers: Sequence[str], rows: Sequence[Sequence[str]]) ->
     return "\n".join(lines)
 
 
-def _render_report_state(state):
+def _render_report_state(state: compact_state.State) -> str:
     report = state["report"]
     return _table(
         "Report State",
         ("Report ID", "Revision", "Previous SHA-256", "Phase"),
-        ((_identifier(report["id"]), str(report["revision"]), report["previous_sha256"], report["phase"]),),
+        (
+            (
+                _identifier(report["id"]),
+                str(report["revision"]),
+                report["previous_sha256"],
+                report["phase"],
+            ),
+        ),
     )
 
 
-def _render_summary(state):
+def _render_summary(state: compact_state.State) -> str:
     return _table(
         "Change Impact Summary",
-        ("Impact ID", "Changed feature", "Possible issue", "Affected feature or user", "Trigger", "Severity", "Prevention or check", "Status"),
+        (
+            "Impact ID",
+            "Changed feature",
+            "Possible issue",
+            "Affected feature or user",
+            "Trigger",
+            "Severity",
+            "Prevention or check",
+            "Status",
+        ),
         tuple(
             (
-                _identifier(row["impact_id"]), _text(row["changed_feature"]),
-                _text(row["possible_issue"]), _text(row["affected"]),
-                _text(row["trigger"]), row["severity"],
-                _text(row["prevention"]), row["status"],
+                _identifier(row["impact_id"]),
+                _text(row["changed_feature"]),
+                _text(row["possible_issue"]),
+                _text(row["affected"]),
+                _text(row["trigger"]),
+                row["severity"],
+                _text(row["prevention"]),
+                row["status"],
             )
             for row in state["summary"]
         ),
     )
 
 
-def _render_original_requirement(state):
+def _render_original_requirement(state: compact_state.State) -> str:
     row = state["original_requirement"]
     return _table(
-        "Original Requirement", ("Requirement ID", "Original request", "Source"),
+        "Original Requirement",
+        ("Requirement ID", "Original request", "Source"),
         ((_identifier(row["id"]), _text(row["request"]), _text(row["source"])),),
     )
 
 
-def _render_refined_requirement(state):
+def _render_refined_requirement(state: compact_state.State) -> str:
     row = state["refined_requirement"]
     decision = _identifier(row["decision"]) if row["decision"] else "—"
     return _table(
         "Current Refined Requirement",
         ("Requirement ID", "Revision", "Refined by decision", "Supersedes"),
-        ((_identifier(row["id"]), _text(row["revision"]), decision, _identifiers(row["supersedes"])),),
+        (
+            (
+                _identifier(row["id"]),
+                _text(row["revision"]),
+                decision,
+                _identifiers(row["supersedes"]),
+            ),
+        ),
     )
 
 
-def _render_current_behavior(state):
+def _render_current_behavior(state: compact_state.State) -> str:
     return _table(
-        "Current Behavior", ("Invariant ID", "Current behavior", "Evidence level", "Evidence"),
-        tuple((_identifier(row["id"]), _text(row["behavior"]), row["evidence_level"], _text(row["evidence"])) for row in state["current_behavior"]),
+        "Current Behavior",
+        ("Invariant ID", "Current behavior", "Evidence level", "Evidence"),
+        tuple(
+            (
+                _identifier(row["id"]),
+                _text(row["behavior"]),
+                row["evidence_level"],
+                _text(row["evidence"]),
+            )
+            for row in state["current_behavior"]
+        ),
     )
 
 
-def _render_preserved_invariants(state):
+def _render_preserved_invariants(state: compact_state.State) -> str:
     return _table(
-        "Preserved Invariants", ("Invariant ID", "Must preserve for requirement", "Affected impacts", "Evidence"),
-        tuple((_identifier(row["id"]), _identifier(row["requirement"]), _identifiers(row["impacts"]), _text(row["evidence"])) for row in state["preserved_invariants"]),
+        "Preserved Invariants",
+        ("Invariant ID", "Must preserve for requirement", "Affected impacts", "Evidence"),
+        tuple(
+            (
+                _identifier(row["id"]),
+                _identifier(row["requirement"]),
+                _identifiers(row["impacts"]),
+                _text(row["evidence"]),
+            )
+            for row in state["preserved_invariants"]
+        ),
     )
 
 
-def _render_impacts(state):
+def _render_impacts(state: compact_state.State) -> str:
     pre = state["report"]["phase"] == "pre-decision"
     rows = []
     for row in state["impacts"]:
         decision = _identifiers(row["decisions"])
         if pre and not row["decisions"]:
             decision = "the pending decision"
-        rows.append((
-            _identifier(row["id"]), _identifier(row["requirement"]), row["category"],
-            row["severity"], row["state"], row["evidence_level"], _text(row["evidence"]),
-            _identifiers(row["invariants"]), decision, _identifiers(row["criteria"]),
-        ))
+        rows.append(
+            (
+                _identifier(row["id"]),
+                _identifier(row["requirement"]),
+                row["category"],
+                row["severity"],
+                row["state"],
+                row["evidence_level"],
+                _text(row["evidence"]),
+                _identifiers(row["invariants"]),
+                decision,
+                _identifiers(row["criteria"]),
+            )
+        )
     return _table(
         "Impact Ledger",
-        ("ID", "Requirement", "Category", "Severity", "State", "Evidence Level", "Evidence", "Invariants", "Decision", "Acceptance Criteria"),
+        (
+            "ID",
+            "Requirement",
+            "Category",
+            "Severity",
+            "State",
+            "Evidence Level",
+            "Evidence",
+            "Invariants",
+            "Decision",
+            "Acceptance Criteria",
+        ),
         tuple(rows),
     )
 
 
-def _render_decision(state):
+def _render_decision(state: compact_state.State) -> str:
     if state["report"]["phase"] == "pre-decision":
         needed = state["decision_needed"]
+        assert needed is not None
         return _table(
-            "Decision Needed", ("Question", "Option", "Impact IDs", "Trade-off"),
-            tuple((_text(needed["question"]), _text(option["option"]), _identifiers(option["impacts"]), _text(option["tradeoff"])) for option in needed["options"]),
+            "Decision Needed",
+            ("Question", "Option", "Impact IDs", "Trade-off"),
+            tuple(
+                (
+                    _text(needed["question"]),
+                    _text(option["option"]),
+                    _identifiers(option["impacts"]),
+                    _text(option["tradeoff"]),
+                )
+                for option in needed["options"]
+            ),
         )
     return _table(
         "Decisions and Accepted Risks",
         ("Decision ID", "Choice", "Requirement revision", "Accepted impacts", "Rationale"),
-        tuple((_identifier(row["id"]), _text(row["choice"]), _identifier(row["requirement"]), _identifiers(row["accepted_impacts"]), _text(row["rationale"])) for row in state["decisions"]),
+        tuple(
+            (
+                _identifier(row["id"]),
+                _text(row["choice"]),
+                _identifier(row["requirement"]),
+                _identifiers(row["accepted_impacts"]),
+                _text(row["rationale"]),
+            )
+            for row in state["decisions"]
+        ),
     )
 
 
-def _render_delta(state):
+def _render_delta(state: compact_state.State) -> str:
     return _table(
-        "Impact Delta", ("Category", "Impact IDs"),
-        tuple((category, _identifiers(state["delta"][category])) for category in compact_state.DELTA_CATEGORIES),
+        "Impact Delta",
+        ("Category", "Impact IDs"),
+        tuple(
+            (category, _identifiers(state["delta"][category]))
+            for category in compact_state.DELTA_CATEGORIES
+        ),
     )
 
 
-def _render_history(state):
+def _render_history(state: compact_state.State) -> str:
     pre = state["report"]["phase"] == "pre-decision"
     rows = []
     for row in state["history"]:
-        decision = _identifier(row["decision"]) if row["decision"] else ("the pending decision" if pre else "none")
-        rows.append((_identifier(row["requirement"]), _text(row["revision"]), decision, _identifiers(row["superseded_impacts"]), _text(row["summary"])))
+        decision = (
+            _identifier(row["decision"])
+            if row["decision"]
+            else ("the pending decision" if pre else "none")
+        )
+        rows.append(
+            (
+                _identifier(row["requirement"]),
+                _text(row["revision"]),
+                decision,
+                _identifiers(row["superseded_impacts"]),
+                _text(row["summary"]),
+            )
+        )
     return _table(
-        "Requirement Revision History", ("Requirement ID", "Revision", "Decision", "Superseded impacts", "Change summary"), tuple(rows)
+        "Requirement Revision History",
+        ("Requirement ID", "Revision", "Decision", "Superseded impacts", "Change summary"),
+        tuple(rows),
     )
 
 
-def _render_criteria(state):
+def _render_criteria(state: compact_state.State) -> str:
     return _table(
         "Acceptance and Regression Criteria",
-        ("Criterion ID", "Requirement", "Impact", "Invariant", "Observable criterion", "Evidence/test"),
-        tuple((_identifier(row["id"]), _identifier(row["requirement"]), _identifier(row["impact"]), _identifier(row["invariant"]), _text(row["criterion"]), _text(row["evidence"])) for row in state["criteria"]),
+        (
+            "Criterion ID",
+            "Requirement",
+            "Impact",
+            "Invariant",
+            "Observable criterion",
+            "Evidence/test",
+        ),
+        tuple(
+            (
+                _identifier(row["id"]),
+                _identifier(row["requirement"]),
+                _identifier(row["impact"]),
+                _identifier(row["invariant"]),
+                _text(row["criterion"]),
+                _text(row["evidence"]),
+            )
+            for row in state["criteria"]
+        ),
     )
 
 
-def _render_unresolved(state):
+def _render_unresolved(state: compact_state.State) -> str:
     return _table(
         "Unresolved, Deferred, and Blocked Items",
         ("Impact ID", "State", "Information gap or rationale", "Linked decision", "Next owner"),
-        tuple((_identifier(row["impact"]), row["state"], _text(row["rationale"]), _identifier(row["decision"]) if row["decision"] else "none", _text(row["owner"])) for row in state["unresolved"]),
+        tuple(
+            (
+                _identifier(row["impact"]),
+                row["state"],
+                _text(row["rationale"]),
+                _identifier(row["decision"]) if row["decision"] else "none",
+                _text(row["owner"]),
+            )
+            for row in state["unresolved"]
+        ),
     )
 
 
-def _render_scope(state):
+def _render_scope(state: compact_state.State) -> str:
     return _table(
         "Analysis Scope and Limitations",
         ("Scope or limitation", "Inspected evidence", "Consequence for confidence"),
-        tuple((_text(row["boundary"]), _text(row["evidence"]), _text(row["confidence"])) for row in state["scope"]),
+        tuple(
+            (_text(row["boundary"]), _text(row["evidence"]), _text(row["confidence"]))
+            for row in state["scope"]
+        ),
     )
 
 
-def _render_handoff(state):
+def _render_handoff(state: compact_state.State) -> str:
     row = state["handoff"]
-    refined = _identifier(row["refined_requirement"]) if re.fullmatch(r"REQ-\d{3}", row["refined_requirement"]) else _text(row["refined_requirement"])
+    refined = (
+        _identifier(row["refined_requirement"])
+        if re.fullmatch(r"REQ-\d{3}", row["refined_requirement"])
+        else _text(row["refined_requirement"])
+    )
     return _table(
         "Planning Handoff",
-        ("Refined requirement", "Report IDs", "Remaining risks", "Acceptance criteria", "Selected planning workflow"),
-        ((refined, _identifiers(row["report_ids"]), _identifiers(row["remaining_risks"]), _identifiers(row["criteria"]), _text(row["workflow"])),),
+        (
+            "Refined requirement",
+            "Report IDs",
+            "Remaining risks",
+            "Acceptance criteria",
+            "Selected planning workflow",
+        ),
+        (
+            (
+                refined,
+                _identifiers(row["report_ids"]),
+                _identifiers(row["remaining_risks"]),
+                _identifiers(row["criteria"]),
+                _text(row["workflow"]),
+            ),
+        ),
     )
 
 
@@ -219,19 +367,33 @@ def render_markdown(state: Mapping[str, object]) -> str:
     errors = compact_state.validate_state(state)
     if errors:
         raise ValueError("; ".join(errors))
+    typed_state = cast(
+        compact_state.State, state
+    )  # compact_state.validate_state proves the complete State shape.
     sections = (
-        _render_report_state, _render_summary, _render_original_requirement,
-        _render_refined_requirement, _render_current_behavior,
-        _render_preserved_invariants, _render_impacts, _render_decision,
-        _render_delta, _render_history, _render_criteria, _render_unresolved,
-        _render_scope, _render_handoff,
+        _render_report_state,
+        _render_summary,
+        _render_original_requirement,
+        _render_refined_requirement,
+        _render_current_behavior,
+        _render_preserved_invariants,
+        _render_impacts,
+        _render_decision,
+        _render_delta,
+        _render_history,
+        _render_criteria,
+        _render_unresolved,
+        _render_scope,
+        _render_handoff,
     )
-    return "# Requirements Impact Report\n\n" + "\n\n".join(section(state) for section in sections) + "\n"
+    return (
+        "# Requirements Impact Report\n\n"
+        + "\n\n".join(section(typed_state) for section in sections)
+        + "\n"
+    )
 
 
-def validate_rendered_markdown(
-    text: str, previous_bytes: bytes | None = None
-) -> list[str]:
+def validate_rendered_markdown(text: str, previous_bytes: bytes | None = None) -> list[str]:
     if previous_bytes is None:
         return VALIDATOR.validate_report(text, require_summary=True)
     try:
@@ -246,14 +408,16 @@ def validate_rendered_markdown(
     )
 
 
-def _artifact_path(state, suffix):
+def _artifact_path(state: compact_state.State, suffix: str) -> str:
     report = state["report"]
     return f".requirements-impact-refiner/reports/{report['id']}/revision-{report['revision']:04d}.{suffix}"
 
 
-def _graph_scope(state):
-    paths = {}
-    coverage = None
+def _graph_scope(
+    state: compact_state.State,
+) -> tuple[dict[str, tuple[str, str]], str | None]:
+    paths: dict[str, tuple[str, str]] = {}
+    coverage: str | None = None
     for row in state["scope"]:
         boundary = row["boundary"]
         match = re.fullmatch(r"Graph paths for (IMP-\d{3})", boundary)
@@ -264,22 +428,22 @@ def _graph_scope(state):
     return paths, coverage
 
 
-def _structured_graph_paths(state):
-    return {
-        row["impact"]: row["paths"] for row in state.get("graph_paths", [])
-    }
+def _structured_graph_paths(
+    state: compact_state.State,
+) -> dict[str, list[compact_state.GraphPath]]:
+    return {row["impact"]: row["paths"] for row in state.get("graph_paths", [])}
 
 
-def _short(value, limit):
+def _short(value: object, limit: int) -> str:
     words = str(value).split()
     return " ".join(words[:limit]) + (" …" if len(words) > limit else "")
 
 
-def _word_count(lines):
+def _word_count(lines: Sequence[str]) -> int:
     return len("\n".join(lines).split())
 
 
-def _compact_path(evidence, confidence, audience):
+def _compact_path(evidence: str, confidence: str, audience: str) -> str:
     evidence = evidence.split(" || ", 1)[0]
     confidence = confidence.split(" || ", 1)[0]
     if audience == "simple":
@@ -289,7 +453,7 @@ def _compact_path(evidence, confidence, audience):
     return f"{evidence} ({confidence})"
 
 
-def _structured_compact_path(path, audience):
+def _structured_compact_path(path: compact_state.GraphPath, audience: str) -> str:
     label = _short(" → ".join(path["labels"]), 24)
     if audience == "simple":
         return label
@@ -303,11 +467,11 @@ def _structured_compact_path(path, audience):
     )
 
 
-def _severity_rank(row):
+def _severity_rank(row: compact_state.Summary) -> int:
     return {"critical": 0, "high": 1, "medium": 2, "low": 3}[row["severity"]]
 
 
-def _coverage_text(value):
+def _coverage_text(value: str) -> str:
     match = re.search(r"(Impact scan: [^·]+).*?(\d+ unknown frontiers)", value)
     if match:
         return f"{match.group(1).strip()} · {match.group(2)}"
@@ -318,48 +482,76 @@ def render_compact(state: Mapping[str, object]) -> str:
     errors = compact_state.validate_state(state)
     if errors:
         raise ValueError("; ".join(errors))
-    ranked = sorted(enumerate(state["summary"]), key=lambda item: (_severity_rank(item[1]), item[0]))
+    typed_state = cast(
+        compact_state.State, state
+    )  # compact_state.validate_state proves the complete State shape.
+    ranked = sorted(
+        enumerate(typed_state["summary"]), key=lambda item: (_severity_rank(item[1]), item[0])
+    )
     displayed = [row for _, row in ranked[:COMPACT_SUMMARY_ROWS]]
-    lines = ["## Change Impact Summary", "", "| Impact | Possible issue | Affected | Prevention |", "| --- | --- | --- | --- |"]
+    lines = [
+        "## Change Impact Summary",
+        "",
+        "| Impact | Possible issue | Affected | Prevention |",
+        "| --- | --- | --- | --- |",
+    ]
     for row in displayed:
-        lines.append(f"| {_identifier(row['impact_id'])} | {_text(_short(row['possible_issue'], COMPACT_FIELD_WORDS))} | {_text(_short(row['affected'], COMPACT_FIELD_WORDS))} | {_text(_short(row['prevention'], COMPACT_FIELD_WORDS))} |")
-    omitted = len(state["summary"]) - len(displayed)
+        lines.append(
+            f"| {_identifier(row['impact_id'])} | {_text(_short(row['possible_issue'], COMPACT_FIELD_WORDS))} | {_text(_short(row['affected'], COMPACT_FIELD_WORDS))} | {_text(_short(row['prevention'], COMPACT_FIELD_WORDS))} |"
+        )
+    omitted = len(typed_state["summary"]) - len(displayed)
     if omitted:
         lines.append(f"| — | {omitted} lower-priority impacts remain in the full report. | — | — |")
-    graph_paths, graph_coverage = _graph_scope(state)
-    structured_paths = _structured_graph_paths(state)
-    remaining = [row for row in state["summary"] if row["status"] in {"accepted", "deferred", "blocked"}]
-    tail = []
+    graph_paths, graph_coverage = _graph_scope(typed_state)
+    structured_paths = _structured_graph_paths(typed_state)
+    remaining = [
+        row
+        for row in typed_state["summary"]
+        if row["status"] in {"accepted", "deferred", "blocked"}
+    ]
+    tail: list[str] = []
     if remaining:
         shown_risks = remaining[:3]
-        risk_text = "; ".join(_text(_short(row["possible_issue"], COMPACT_FIELD_WORDS)) for row in shown_risks)
+        risk_text = "; ".join(
+            _text(_short(row["possible_issue"], COMPACT_FIELD_WORDS)) for row in shown_risks
+        )
         if len(remaining) > len(shown_risks):
             risk_text += f"; {len(remaining) - len(shown_risks)} more in the full report"
         tail.extend(("", "**Remaining risks:** " + risk_text))
-    if state["report"]["phase"] == "pre-decision":
-        needed = state["decision_needed"]
+    if typed_state["report"]["phase"] == "pre-decision":
+        needed = typed_state["decision_needed"]
+        assert needed is not None
         tail.extend(("", f"**Decision needed:** {_text(_short(needed['question'], 18))}"))
-        tail.extend(f"- {_text(_short(option['option'], 10))}: {_text(_short(option['tradeoff'], 12))}" for option in needed["options"])
+        tail.extend(
+            f"- {_text(_short(option['option'], 10))}: {_text(_short(option['tradeoff'], 12))}"
+            for option in needed["options"]
+        )
     else:
-        shown_decisions = state["decisions"][:3]
+        shown_decisions = typed_state["decisions"][:3]
         choices = "; ".join(_text(_short(row["choice"], 18)) for row in shown_decisions)
-        if len(state["decisions"]) > len(shown_decisions):
-            choices += f"; {len(state['decisions']) - len(shown_decisions)} more in the full report"
+        if len(typed_state["decisions"]) > len(shown_decisions):
+            choices += (
+                f"; {len(typed_state['decisions']) - len(shown_decisions)} more in the full report"
+            )
         tail.extend(("", f"**Recorded decision:** {choices}"))
-    tail.extend((
-        "", f"Validation: passed · Report {_identifier(state['report']['id'])} revision {state['report']['revision']}",
-        f"State: `{_artifact_path(state, 'json')}`", f"Full report: `{_artifact_path(state, 'md')}`",
-    ))
-    graph_lines = []
+    tail.extend(
+        (
+            "",
+            f"Validation: passed · Report {_identifier(typed_state['report']['id'])} revision {typed_state['report']['revision']}",
+            f"State: `{_artifact_path(typed_state, 'json')}`",
+            f"Full report: `{_artifact_path(typed_state, 'md')}`",
+        )
+    )
+    graph_lines: list[str] = []
     if graph_coverage is not None:
         graph_lines.extend(("", f"**Coverage:** {_text(_coverage_text(graph_coverage))}"))
     if graph_paths or structured_paths:
-        candidates = []
+        candidates: list[str] = []
         for _, row in ranked:
             structured = structured_paths.get(row["impact_id"])
             if structured:
                 rendered = _structured_compact_path(
-                    structured[0], state["settings"]["audience"]
+                    structured[0], typed_state["settings"]["audience"]
                 )
             else:
                 path = graph_paths.get(row["impact_id"])
@@ -367,16 +559,17 @@ def render_compact(state: Mapping[str, object]) -> str:
                     continue
                 evidence, confidence = path
                 rendered = _short(
-                    _compact_path(evidence, confidence, state["settings"]["audience"]), 36
+                    _compact_path(evidence, confidence, typed_state["settings"]["audience"]),
+                    36,
                 )
             candidates.append(f"- {_identifier(row['impact_id'])}: {_text(rendered)}")
-        selected = []
+        selected: list[str] = []
         for candidate in candidates:
-            proposal = lines + ["", "**Impact paths:**"] + selected + [candidate] + graph_lines + tail
+            proposal = [*lines, "", "**Impact paths:**", *selected, candidate, *graph_lines, *tail]
             if _word_count(proposal) <= COMPACT_WORD_LIMIT:
                 selected.append(candidate)
         if selected:
-            graph_lines = ["", "**Impact paths:**"] + selected + graph_lines
+            graph_lines = ["", "**Impact paths:**", *selected, *graph_lines]
     output = lines + graph_lines + tail
     if _word_count(output) > COMPACT_WORD_LIMIT:
         raise ValueError("compact output exceeds word budget")
@@ -408,28 +601,156 @@ def state_from_markdown(text: str) -> tuple[dict[str, object] | None, list[str]]
     refined = tables["Current Refined Requirement"][0]
     state = {
         "schema_version": 1,
-        "report": {"id": metadata.report_id, "revision": metadata.revision, "previous_sha256": metadata.previous_sha256, "phase": metadata.phase},
-        "settings": {"audience": "balanced", "audience_source": "default", "delivery": "compact", "delivery_source": "default"},
-        "original_requirement": {"id": _unquote(original["Requirement ID"]), "request": _unquote(original["Original request"]), "source": _unquote(original["Source"])},
-        "refined_requirement": {"id": _unquote(refined["Requirement ID"]), "revision": _unquote(refined["Revision"]), "decision": next(iter(_ids(refined["Refined by decision"], "DEC-")), None), "supersedes": _ids(refined["Supersedes"], "REQ-")},
-        "current_behavior": [{"id": _unquote(row["Invariant ID"]), "behavior": _unquote(row["Current behavior"]), "evidence_level": _unquote(row["Evidence level"]), "evidence": _unquote(row["Evidence"])} for row in tables["Current Behavior"]],
-        "preserved_invariants": [{"id": _unquote(row["Invariant ID"]), "requirement": _ids(row["Must preserve for requirement"], "REQ-")[0], "impacts": _ids(row["Affected impacts"], "IMP-"), "evidence": _unquote(row["Evidence"])} for row in tables["Preserved Invariants"]],
-        "impacts": [{"id": _unquote(row["ID"]), "requirement": _ids(row["Requirement"], "REQ-")[0], "category": _unquote(row["Category"]), "severity": _unquote(row["Severity"]), "state": _unquote(row["State"]), "evidence_level": _unquote(row["Evidence Level"]), "evidence": _unquote(row["Evidence"]), "invariants": _ids(row["Invariants"], "INV-"), "decisions": _ids(row["Decision"], "DEC-"), "criteria": _ids(row["Acceptance Criteria"], "AC-")} for row in tables["Impact Ledger"]],
-        "decisions": [], "decision_needed": None,
-        "delta": {row["Category"].strip("`"): _ids(row["Impact IDs"], "IMP-") for row in tables["Impact Delta"]},
-        "history": [{"requirement": _ids(row["Requirement ID"], "REQ-")[0], "revision": _unquote(row["Revision"]), "decision": next(iter(_ids(row["Decision"], "DEC-")), None), "superseded_impacts": _ids(row["Superseded impacts"], "IMP-"), "summary": _unquote(row["Change summary"])} for row in tables["Requirement Revision History"]],
-        "criteria": [{"id": _unquote(row["Criterion ID"]), "requirement": _ids(row["Requirement"], "REQ-")[0], "impact": _ids(row["Impact"], "IMP-")[0], "invariant": _ids(row["Invariant"], "INV-")[0], "criterion": _unquote(row["Observable criterion"]), "evidence": _unquote(row["Evidence/test"])} for row in tables["Acceptance and Regression Criteria"]],
-        "unresolved": [{"impact": _ids(row["Impact ID"], "IMP-")[0], "state": _unquote(row["State"]), "rationale": _unquote(row["Information gap or rationale"]), "decision": next(iter(_ids(row["Linked decision"], "DEC-")), None), "owner": _unquote(row["Next owner"])} for row in tables["Unresolved, Deferred, and Blocked Items"]],
-        "scope": [{"boundary": _unquote(row["Scope or limitation"]), "evidence": _unquote(row["Inspected evidence"]), "confidence": _unquote(row["Consequence for confidence"])} for row in tables["Analysis Scope and Limitations"]],
-        "summary": [{"impact_id": _unquote(row["Impact ID"]), "changed_feature": _unquote(row["Changed feature"]), "possible_issue": _unquote(row["Possible issue"]), "affected": _unquote(row["Affected feature or user"]), "trigger": _unquote(row["Trigger"]), "severity": _unquote(row["Severity"]), "prevention": _unquote(row["Prevention or check"]), "status": _unquote(row["Status"])} for row in tables["Change Impact Summary"]],
+        "report": {
+            "id": metadata.report_id,
+            "revision": metadata.revision,
+            "previous_sha256": metadata.previous_sha256,
+            "phase": metadata.phase,
+        },
+        "settings": {
+            "audience": "balanced",
+            "audience_source": "default",
+            "delivery": "compact",
+            "delivery_source": "default",
+        },
+        "original_requirement": {
+            "id": _unquote(original["Requirement ID"]),
+            "request": _unquote(original["Original request"]),
+            "source": _unquote(original["Source"]),
+        },
+        "refined_requirement": {
+            "id": _unquote(refined["Requirement ID"]),
+            "revision": _unquote(refined["Revision"]),
+            "decision": next(iter(_ids(refined["Refined by decision"], "DEC-")), None),
+            "supersedes": _ids(refined["Supersedes"], "REQ-"),
+        },
+        "current_behavior": [
+            {
+                "id": _unquote(row["Invariant ID"]),
+                "behavior": _unquote(row["Current behavior"]),
+                "evidence_level": _unquote(row["Evidence level"]),
+                "evidence": _unquote(row["Evidence"]),
+            }
+            for row in tables["Current Behavior"]
+        ],
+        "preserved_invariants": [
+            {
+                "id": _unquote(row["Invariant ID"]),
+                "requirement": _ids(row["Must preserve for requirement"], "REQ-")[0],
+                "impacts": _ids(row["Affected impacts"], "IMP-"),
+                "evidence": _unquote(row["Evidence"]),
+            }
+            for row in tables["Preserved Invariants"]
+        ],
+        "impacts": [
+            {
+                "id": _unquote(row["ID"]),
+                "requirement": _ids(row["Requirement"], "REQ-")[0],
+                "category": _unquote(row["Category"]),
+                "severity": _unquote(row["Severity"]),
+                "state": _unquote(row["State"]),
+                "evidence_level": _unquote(row["Evidence Level"]),
+                "evidence": _unquote(row["Evidence"]),
+                "invariants": _ids(row["Invariants"], "INV-"),
+                "decisions": _ids(row["Decision"], "DEC-"),
+                "criteria": _ids(row["Acceptance Criteria"], "AC-"),
+            }
+            for row in tables["Impact Ledger"]
+        ],
+        "decisions": [],
+        "decision_needed": None,
+        "delta": {
+            row["Category"].strip("`"): _ids(row["Impact IDs"], "IMP-")
+            for row in tables["Impact Delta"]
+        },
+        "history": [
+            {
+                "requirement": _ids(row["Requirement ID"], "REQ-")[0],
+                "revision": _unquote(row["Revision"]),
+                "decision": next(iter(_ids(row["Decision"], "DEC-")), None),
+                "superseded_impacts": _ids(row["Superseded impacts"], "IMP-"),
+                "summary": _unquote(row["Change summary"]),
+            }
+            for row in tables["Requirement Revision History"]
+        ],
+        "criteria": [
+            {
+                "id": _unquote(row["Criterion ID"]),
+                "requirement": _ids(row["Requirement"], "REQ-")[0],
+                "impact": _ids(row["Impact"], "IMP-")[0],
+                "invariant": _ids(row["Invariant"], "INV-")[0],
+                "criterion": _unquote(row["Observable criterion"]),
+                "evidence": _unquote(row["Evidence/test"]),
+            }
+            for row in tables["Acceptance and Regression Criteria"]
+        ],
+        "unresolved": [
+            {
+                "impact": _ids(row["Impact ID"], "IMP-")[0],
+                "state": _unquote(row["State"]),
+                "rationale": _unquote(row["Information gap or rationale"]),
+                "decision": next(iter(_ids(row["Linked decision"], "DEC-")), None),
+                "owner": _unquote(row["Next owner"]),
+            }
+            for row in tables["Unresolved, Deferred, and Blocked Items"]
+        ],
+        "scope": [
+            {
+                "boundary": _unquote(row["Scope or limitation"]),
+                "evidence": _unquote(row["Inspected evidence"]),
+                "confidence": _unquote(row["Consequence for confidence"]),
+            }
+            for row in tables["Analysis Scope and Limitations"]
+        ],
+        "summary": [
+            {
+                "impact_id": _unquote(row["Impact ID"]),
+                "changed_feature": _unquote(row["Changed feature"]),
+                "possible_issue": _unquote(row["Possible issue"]),
+                "affected": _unquote(row["Affected feature or user"]),
+                "trigger": _unquote(row["Trigger"]),
+                "severity": _unquote(row["Severity"]),
+                "prevention": _unquote(row["Prevention or check"]),
+                "status": _unquote(row["Status"]),
+            }
+            for row in tables["Change Impact Summary"]
+        ],
     }
     handoff = tables["Planning Handoff"][0]
     refined_handoff_ids = _ids(handoff["Refined requirement"], "REQ-")
-    state["handoff"] = {"refined_requirement": refined_handoff_ids[0] if len(refined_handoff_ids) == 1 and _unquote(handoff["Refined requirement"]) == refined_handoff_ids[0] else _unquote(handoff["Refined requirement"]), "report_ids": _ids(handoff["Report IDs"]), "remaining_risks": _ids(handoff["Remaining risks"], "IMP-"), "criteria": _ids(handoff["Acceptance criteria"], "AC-"), "workflow": _unquote(handoff["Selected planning workflow"])}
+    state["handoff"] = {
+        "refined_requirement": refined_handoff_ids[0]
+        if len(refined_handoff_ids) == 1
+        and _unquote(handoff["Refined requirement"]) == refined_handoff_ids[0]
+        else _unquote(handoff["Refined requirement"]),
+        "report_ids": _ids(handoff["Report IDs"]),
+        "remaining_risks": _ids(handoff["Remaining risks"], "IMP-"),
+        "criteria": _ids(handoff["Acceptance criteria"], "AC-"),
+        "workflow": _unquote(handoff["Selected planning workflow"]),
+    }
     if metadata.phase == "pre-decision":
         rows = tables["Decision Needed"]
-        state["decision_needed"] = {"question": _unquote(rows[0]["Question"]), "options": [{"option": _unquote(row["Option"]), "impacts": _ids(row["Impact IDs"], "IMP-"), "tradeoff": _unquote(row["Trade-off"])} for row in rows]}
+        state["decision_needed"] = {
+            "question": _unquote(rows[0]["Question"]),
+            "options": [
+                {
+                    "option": _unquote(row["Option"]),
+                    "impacts": _ids(row["Impact IDs"], "IMP-"),
+                    "tradeoff": _unquote(row["Trade-off"]),
+                }
+                for row in rows
+            ],
+        }
     else:
-        state["decisions"] = [{"id": _unquote(row["Decision ID"]), "choice": _unquote(row["Choice"]), "requirement": _ids(row["Requirement revision"], "REQ-")[0], "accepted_impacts": _ids(row["Accepted impacts"], "IMP-"), "rationale": _unquote(row["Rationale"])} for row in tables["Decisions and Accepted Risks"]]
+        state["decisions"] = [
+            {
+                "id": _unquote(row["Decision ID"]),
+                "choice": _unquote(row["Choice"]),
+                "requirement": _ids(row["Requirement revision"], "REQ-")[0],
+                "accepted_impacts": _ids(row["Accepted impacts"], "IMP-"),
+                "rationale": _unquote(row["Rationale"]),
+            }
+            for row in tables["Decisions and Accepted Risks"]
+        ]
     state_errors = compact_state.validate_state(state)
     return (None, state_errors) if state_errors else (state, [])

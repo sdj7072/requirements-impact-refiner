@@ -1,21 +1,14 @@
 import hashlib
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
-from tests.test_validate_impact_report import VALIDATOR, VALID_REPORT
-
+from tests.test_validate_impact_report import VALID_REPORT, VALIDATOR
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = (
-    ROOT
-    / "skills"
-    / "requirements-impact-refiner"
-    / "scripts"
-    / "validate-impact-report.py"
-)
+SCRIPT = ROOT / "scripts" / "validate-impact-report.py"
 
 
 IMPACT_ROW = (
@@ -32,9 +25,7 @@ def report_with_state(state, delta="new"):
     )
     if delta != "new":
         report = report.replace("| new | IMP-001 |", "| new | none |", 1)
-        report = report.replace(
-            f"| {delta} | none |", f"| {delta} | IMP-001 |", 1
-        )
+        report = report.replace(f"| {delta} | none |", f"| {delta} | IMP-001 |", 1)
     if state in {"blocked", "deferred"}:
         report = report.replace(
             "| --- | --- | --- | --- | --- |\n\n## Analysis Scope and Limitations",
@@ -69,9 +60,7 @@ class ReportLineageTest(unittest.TestCase):
 
     def test_same_blocked_state_is_unchanged(self):
         previous = report_with_state("blocked")
-        current = next_report(
-            previous, report_with_state("blocked", delta="unchanged")
-        )
+        current = next_report(previous, report_with_state("blocked", delta="unchanged"))
 
         self.assertEqual(
             VALIDATOR.validate_report(
@@ -91,9 +80,7 @@ class ReportLineageCliTest(unittest.TestCase):
 
     def test_comparison_prints_expected_delta_without_modifying_reports(self):
         previous_text = VALID_REPORT
-        current_text = next_report(
-            previous_text, report_with_state("accepted", "unchanged")
-        )
+        current_text = next_report(previous_text, report_with_state("accepted", "unchanged"))
         with tempfile.TemporaryDirectory() as directory:
             previous = Path(directory) / "previous.md"
             current = Path(directory) / "current.md"
@@ -129,9 +116,9 @@ class ReportLineageCliTest(unittest.TestCase):
             wrong_sha = root / "wrong-sha.md"
             previous.write_text(VALID_REPORT, encoding="utf-8")
             wrong_sha.write_text(
-                next_report(
-                    VALID_REPORT, report_with_state("accepted", "unchanged")
-                ).replace(hashlib.sha256(VALID_REPORT.encode()).hexdigest(), "0" * 64),
+                next_report(VALID_REPORT, report_with_state("accepted", "unchanged")).replace(
+                    hashlib.sha256(VALID_REPORT.encode()).hexdigest(), "0" * 64
+                ),
                 encoding="utf-8",
             )
             report_error = subprocess.run(
@@ -207,13 +194,9 @@ class ReportLineageCliTest(unittest.TestCase):
 
     def test_terminal_impact_returning_active_is_reopened(self):
         previous = report_with_state("resolved")
-        current = next_report(
-            previous, report_with_state("refining", delta="reopened")
-        )
+        current = next_report(previous, report_with_state("refining", delta="reopened"))
 
-        delta = VALIDATOR.calculate_delta(
-            self.parsed(previous), self.parsed(current)
-        )
+        delta = VALIDATOR.calculate_delta(self.parsed(previous), self.parsed(current))
         self.assertEqual(delta["reopened"], ["IMP-001"])
 
     def test_changed_states_use_the_current_state_category(self):
@@ -227,23 +210,15 @@ class ReportLineageCliTest(unittest.TestCase):
         ):
             with self.subTest(state=state):
                 previous = report_with_state("refining")
-                current = next_report(
-                    previous, report_with_state(state, delta=state)
-                )
-                delta = VALIDATOR.calculate_delta(
-                    self.parsed(previous), self.parsed(current)
-                )
+                current = next_report(previous, report_with_state(state, delta=state))
+                delta = VALIDATOR.calculate_delta(self.parsed(previous), self.parsed(current))
                 self.assertEqual(delta[state], ["IMP-001"])
 
     def test_detected_and_refining_remain_active_unchanged_categories(self):
         previous = report_with_state("detected")
-        current = next_report(
-            previous, report_with_state("refining", delta="unchanged")
-        )
+        current = next_report(previous, report_with_state("refining", delta="unchanged"))
 
-        delta = VALIDATOR.calculate_delta(
-            self.parsed(previous), self.parsed(current)
-        )
+        delta = VALIDATOR.calculate_delta(self.parsed(previous), self.parsed(current))
         self.assertEqual(delta["unchanged"], ["IMP-001"])
 
     def test_lineage_requires_same_id_next_revision_and_exact_sha(self):
@@ -253,9 +228,7 @@ class ReportLineageCliTest(unittest.TestCase):
         previous_parsed = self.parsed(previous)
 
         self.assertEqual(
-            VALIDATOR.validate_lineage(
-                previous_parsed, valid_parsed, previous.encode("utf-8")
-            ),
+            VALIDATOR.validate_lineage(previous_parsed, valid_parsed, previous.encode("utf-8")),
             [],
         )
         wrong_id = valid.replace("| RPT-001 | 2 |", "| RPT-002 | 2 |", 1)
@@ -265,21 +238,15 @@ class ReportLineageCliTest(unittest.TestCase):
             hashlib.sha256(previous.encode()).hexdigest().upper(),
             1,
         )
-        wrong_sha = valid.replace(
-            hashlib.sha256(previous.encode()).hexdigest(), "0" * 64, 1
-        )
+        wrong_sha = valid.replace(hashlib.sha256(previous.encode()).hexdigest(), "0" * 64, 1)
 
         self.assertIn(
             "current Report ID must match previous Report ID",
-            VALIDATOR.validate_lineage(
-                previous_parsed, self.parsed(wrong_id), previous.encode()
-            ),
+            VALIDATOR.validate_lineage(previous_parsed, self.parsed(wrong_id), previous.encode()),
         )
         self.assertIn(
             "current revision 3 must follow previous revision 1 exactly",
-            VALIDATOR.validate_lineage(
-                previous_parsed, self.parsed(skipped), previous.encode()
-            ),
+            VALIDATOR.validate_lineage(previous_parsed, self.parsed(skipped), previous.encode()),
         )
         _, uppercase_errors = VALIDATOR.parse_report(uppercase_sha)
         self.assertIn(
@@ -288,15 +255,11 @@ class ReportLineageCliTest(unittest.TestCase):
         )
         self.assertIn(
             "Previous SHA-256 does not match predecessor bytes",
-            VALIDATOR.validate_lineage(
-                previous_parsed, self.parsed(wrong_sha), previous.encode()
-            ),
+            VALIDATOR.validate_lineage(previous_parsed, self.parsed(wrong_sha), previous.encode()),
         )
 
     def test_later_revision_requires_previous_report(self):
-        current = next_report(
-            VALID_REPORT, report_with_state("accepted", "unchanged")
-        )
+        current = next_report(VALID_REPORT, report_with_state("accepted", "unchanged"))
 
         self.assertIn(
             "revision 2 requires --previous",

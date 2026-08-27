@@ -2,277 +2,1311 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from contextlib import contextmanager
-import ctypes
-import errno
 import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import secrets
+import selectors
+import signal
 import stat
+import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Mapping, Optional, Tuple
+from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Callable, Protocol, SupportsInt, TypedDict, cast
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - non-POSIX fallback is serialized per process
-    fcntl = None
+if TYPE_CHECKING:
+    from fast_scan import FastScanResult as ScanResult
+    from graph_builtin import ScanSeed as ScanSeedType
+    from graph_coordinator import SourceInventory as SourceInventoryType
+    from graph_providers import Deadline as DeadlineType
+    from impact_graph import GraphReceipt as GraphReceiptType
+    from impact_graph import GraphSettings as GraphSettingsType
+    from impact_graph import ProviderStatus as ProviderStatusType
+    from rir_contracts import (
+        BeginRequest,
+        DraftResult,
+        FinalizeRequest,
+        FinalizeResult,
+        ScanRequest,
+        TraceRequest,
+        TraceResult,
+    )
+    from rir_previous import PreviousLookupRequest, PreviousReportCandidate, PreviousReportResult
+    from typing_extensions import TypeGuard
+
+
+class _FcntlContract(Protocol):
+    LOCK_EX: int
+    LOCK_NB: int
+    LOCK_UN: int
+
+    def flock(self, fd: int, operation: int) -> None: ...
+
+
+class _ControllerContractsContract(Protocol):
+    MAX_BEGIN_BYTES: int
+    MAX_FINALIZE_BYTES: int
+    MAX_STRING_BYTES: int
+    MAX_TRACE_BYTES: int
+    BeginRequest: type
+    DraftResult: type
+    FinalizeRequest: type
+    FinalizeResult: type
+    ScanRequest: type
+    TraceRequest: type
+    TraceResult: type
+
+    def _local_key(self, value: object, label: str) -> str: ...
+
+    def bounded_bytes(self, value: object, maximum: int, label: str) -> bytes: ...
+
+    def canonical_bytes(self, value: object) -> bytes: ...
+
+    def validate_analysis(self, analysis: Mapping[str, object]) -> None: ...
+
+
+class _ControllerStorageContract(Protocol):
+    MAX_DRAFT_BYTES: int
+    DRAFT_ID_PATTERN: re.Pattern[str]
+    fcntl: _FcntlContract | None
+    COMPACT_STATE: object
+    IMPACT_RENDERER: object
+    REPORT_STORE: object
+    report_store: object
+
+    def root_path(self, path: Path) -> Path: ...
+
+    def write_private_draft(self, root: Path, draft_id: str, payload: bytes) -> Path: ...
+
+    def load_private_draft(self, repo_root: Path, draft_id: str) -> dict[str, object]: ...
+
+    def replace_private_draft(
+        self, root: Path, draft_id: str, value: Mapping[str, object]
+    ) -> None: ...
+
+    def draft_path(self, root: Path, draft_id: str) -> Path: ...
+
+    def controller_metadata_path(self, report_id: str, revision: int, root: Path) -> Path: ...
+
+    def load_controller_metadata(self, current: object) -> dict[str, object] | None: ...
+
+    def load_controller_completion_metadata(self, current: object) -> dict[str, object] | None: ...
+
+    def cas_replace_private_draft(
+        self, root: Path, draft_id: str, expected: bytes, replacement: bytes
+    ) -> None: ...
+
+    def recover_private_draft_transaction(self, root: Path, draft_id: str) -> None: ...
+
+    def report_lock(self, root: Path, report_id: str, deadline: object = None): ...
+
+    def write_controller_metadata(
+        self,
+        root: Path,
+        draft: Mapping[str, object],
+        state_bytes: bytes,
+        key_map: Mapping[str, object],
+        graph_receipt: Mapping[str, object] | None = None,
+        analysis_sha256: str | None = None,
+        context_identity: Mapping[str, object] | None = None,
+    ) -> None: ...
+
+    def consume_draft(self, path: Path, draft: dict[str, object], published, key_map) -> None: ...
+
+    def _read_bounded_descriptor(self, descriptor: int, maximum: int, label: str) -> bytes: ...
+
+    def _open_optional_transaction_component(
+        self, directory_fd: int, name: str, maximum: int, label: str
+    ): ...
+
+    def _open_transaction_component_for_cleanup(
+        self, directory_fd: int, name: str, maximum: int, label: str
+    ): ...
+
+    def _same_inode(self, first, second) -> bool: ...
+
+    def _rename_noreplace(self, directory_fd: int, source: str, destination: str) -> None: ...
+
+    def _unlink_transaction_component(self, *args, **kwargs) -> None: ...
+
+    def _write_private_transaction_component(self, *args, **kwargs): ...
+
+
+def _is_fcntl_contract(value: object) -> TypeGuard[_FcntlContract]:
+    return all(
+        isinstance(getattr(value, name, None), int) for name in ("LOCK_EX", "LOCK_NB", "LOCK_UN")
+    ) and callable(getattr(value, "flock", None))
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import compact_state
-import fast_scan
-import fast_scan_store
-import impact_renderer
-import payload_identity
-import report_store
+
+def _regular_module_path(path: Path) -> Path | None:
+    try:
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        return None
+    return resolved
 
 
-MAX_BEGIN_BYTES = 256 * 1024
-MAX_TRACE_BYTES = 256 * 1024
-MAX_FINALIZE_BYTES = 2 * 1024 * 1024
-MAX_STRING_BYTES = 64 * 1024
-MAX_DRAFT_BYTES = 4 * 1024 * 1024
+def _is_controller_contracts_contract(value: object) -> TypeGuard[_ControllerContractsContract]:
+    integer_names = (
+        "MAX_BEGIN_BYTES",
+        "MAX_FINALIZE_BYTES",
+        "MAX_STRING_BYTES",
+        "MAX_TRACE_BYTES",
+    )
+    class_names = (
+        "BeginRequest",
+        "DraftResult",
+        "FinalizeRequest",
+        "FinalizeResult",
+        "ScanRequest",
+        "TraceRequest",
+        "TraceResult",
+    )
+    callable_names = ("_local_key", "bounded_bytes", "canonical_bytes", "validate_analysis")
+    return (
+        all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in integer_names
+        )
+        and all(isinstance(getattr(value, name, None), type) for name in class_names)
+        and all(callable(getattr(value, name, None)) for name in callable_names)
+    )
+
+
+def _module_uses_sibling(value: object, expected: Path) -> bool:
+    module_file = getattr(value, "__file__", None)
+    return isinstance(module_file, str) and _regular_module_path(Path(module_file)) == expected
+
+
+def _load_registered_contracts(module_name: str, expected: Path) -> _ControllerContractsContract:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed controller contracts sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed controller contracts sibling") from error
+    if not _is_controller_contracts_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("controller contracts sibling contract is incomplete")
+    return module
+
+
+def _load_controller_contracts() -> _ControllerContractsContract:
+    sibling = SCRIPT_DIR / "rir_contracts.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("controller contracts sibling is unsafe")
+    module_name = (
+        "_rir_controller_contracts_"
+        + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    )
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    if "rir_contracts" not in sys.modules:
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError("controller contracts sibling is unsafe")
+            if not _is_controller_contracts_contract(hashed):
+                raise ImportError("controller contracts sibling contract is incomplete")
+            sys.modules["rir_contracts"] = cast(ModuleType, hashed)
+            return hashed
+        return _load_registered_contracts("rir_contracts", expected)
+    canonical = sys.modules.get("rir_contracts")
+    if _module_uses_sibling(canonical, expected):
+        if not _is_controller_contracts_contract(canonical):
+            raise ImportError("controller contracts sibling contract is incomplete")
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("controller contracts sibling is unsafe")
+        if not _is_controller_contracts_contract(hashed):
+            raise ImportError("controller contracts sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("controller contracts sibling is unsafe")
+        if not _is_controller_contracts_contract(hashed):
+            raise ImportError("controller contracts sibling contract is incomplete")
+        return hashed
+    return _load_registered_contracts(module_name, expected)
+
+
+def _is_controller_storage_contract(value: object) -> TypeGuard[_ControllerStorageContract]:
+    maximum_name = "MAX_DRAFT_BYTES"
+    maximum = getattr(value, maximum_name, None)
+    fcntl_name = "fcntl"
+    storage_fcntl = getattr(value, fcntl_name, None)
+    compact_state = getattr(value, "COMPACT_STATE", None)
+    renderer = getattr(value, "IMPACT_RENDERER", None)
+    report_store = getattr(value, "REPORT_STORE", None)
+    callable_names = (
+        "root_path",
+        "write_private_draft",
+        "load_private_draft",
+        "replace_private_draft",
+        "draft_path",
+        "controller_metadata_path",
+        "load_controller_metadata",
+        "load_controller_completion_metadata",
+        "cas_replace_private_draft",
+        "recover_private_draft_transaction",
+        "report_lock",
+        "write_controller_metadata",
+        "consume_draft",
+        "_read_bounded_descriptor",
+        "_open_optional_transaction_component",
+        "_open_transaction_component_for_cleanup",
+        "_same_inode",
+        "_rename_noreplace",
+        "_unlink_transaction_component",
+        "_write_private_transaction_component",
+    )
+    return (
+        type(maximum) is int
+        and maximum > 0
+        and isinstance(getattr(value, "DRAFT_ID_PATTERN", None), re.Pattern)
+        and hasattr(value, "fcntl")
+        and (storage_fcntl is None or _is_fcntl_contract(storage_fcntl))
+        and _module_uses_sibling(compact_state, SCRIPT_DIR / "compact_state.py")
+        and _module_uses_sibling(renderer, SCRIPT_DIR / "impact_renderer.py")
+        and _module_uses_sibling(
+            getattr(renderer, "impact_report", None), SCRIPT_DIR / "impact_report.py"
+        )
+        and _module_uses_sibling(report_store, SCRIPT_DIR / "report_store.py")
+        and getattr(value, "report_store", None) is report_store
+        and getattr(report_store, "compact_state", None) is compact_state
+        and getattr(report_store, "impact_renderer", None) is renderer
+        and getattr(renderer, "compact_state", None) is compact_state
+        and all(
+            callable(getattr(compact_state, name, None))
+            for name in ("load_state_bytes", "validate_state")
+        )
+        and all(
+            callable(getattr(renderer, name, None))
+            for name in ("render_markdown", "render_compact", "validate_rendered_markdown")
+        )
+        and isinstance(getattr(report_store, "ReportStoreError", None), type)
+        and isinstance(getattr(report_store, "CurrentRevision", None), type)
+        and all(
+            callable(getattr(report_store, name, None))
+            for name in ("load_current", "publish_revision", "report_directory")
+        )
+        and all(callable(getattr(value, name, None)) for name in callable_names)
+    )
+
+
+def _load_registered_storage(module_name: str, expected: Path) -> _ControllerStorageContract:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed controller storage sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed controller storage sibling") from error
+    if not _is_controller_storage_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("controller storage sibling contract is incomplete")
+    return module
+
+
+def _load_controller_storage() -> _ControllerStorageContract:
+    sibling = SCRIPT_DIR / "rir_storage.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("controller storage sibling is unsafe")
+    module_name = (
+        "_rir_controller_storage_" + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    )
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    if "rir_storage" not in sys.modules:
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError("controller storage sibling is unsafe")
+            if not _is_controller_storage_contract(hashed):
+                raise ImportError("controller storage sibling contract is incomplete")
+            sys.modules["rir_storage"] = cast(ModuleType, hashed)
+            return hashed
+        return _load_registered_storage("rir_storage", expected)
+    canonical = sys.modules.get("rir_storage")
+    if _module_uses_sibling(canonical, expected):
+        if not _is_controller_storage_contract(canonical):
+            raise ImportError("controller storage sibling contract is incomplete")
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("controller storage sibling is unsafe")
+        if not _is_controller_storage_contract(hashed):
+            raise ImportError("controller storage sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("controller storage sibling is unsafe")
+        if not _is_controller_storage_contract(hashed):
+            raise ImportError("controller storage sibling contract is incomplete")
+        return hashed
+    return _load_registered_storage(module_name, expected)
+
+
+CONTRACTS = _load_controller_contracts()
+STORAGE = _load_controller_storage()
+MAX_BEGIN_BYTES = CONTRACTS.MAX_BEGIN_BYTES
+MAX_FINALIZE_BYTES = CONTRACTS.MAX_FINALIZE_BYTES
+MAX_STRING_BYTES = CONTRACTS.MAX_STRING_BYTES
+MAX_TRACE_BYTES = CONTRACTS.MAX_TRACE_BYTES
+if not TYPE_CHECKING:
+    BeginRequest = CONTRACTS.BeginRequest
+    DraftResult = CONTRACTS.DraftResult
+    FinalizeRequest = CONTRACTS.FinalizeRequest
+    FinalizeResult = CONTRACTS.FinalizeResult
+    ScanRequest = CONTRACTS.ScanRequest
+    TraceRequest = CONTRACTS.TraceRequest
+    TraceResult = CONTRACTS.TraceResult
+_local_key = CONTRACTS._local_key
+bounded_bytes = CONTRACTS.bounded_bytes
+canonical_bytes = CONTRACTS.canonical_bytes
+validate_analysis = CONTRACTS.validate_analysis
+
+MAX_DRAFT_BYTES = STORAGE.MAX_DRAFT_BYTES
+DRAFT_ID_PATTERN = STORAGE.DRAFT_ID_PATTERN
+fcntl = STORAGE.fcntl
+_root = STORAGE.root_path
+_write_private_draft = STORAGE.write_private_draft
+_controller_metadata_path = STORAGE.controller_metadata_path
+_load_controller_metadata = STORAGE.load_controller_metadata
+_load_controller_completion_metadata = STORAGE.load_controller_completion_metadata
+_draft_path = STORAGE.draft_path
+load_draft = STORAGE.load_private_draft
+_replace_private_draft = STORAGE.replace_private_draft
+_read_bounded_descriptor = STORAGE._read_bounded_descriptor
+_open_optional_transaction_component = STORAGE._open_optional_transaction_component
+_open_transaction_component_for_cleanup = STORAGE._open_transaction_component_for_cleanup
+_same_inode = STORAGE._same_inode
+_rename_noreplace = STORAGE._rename_noreplace
+_unlink_transaction_component = STORAGE._unlink_transaction_component
+_write_private_transaction_component = STORAGE._write_private_transaction_component
+_recover_private_draft_transaction = STORAGE.recover_private_draft_transaction
+_consume = STORAGE.consume_draft
+_report_lock = STORAGE.report_lock
+_write_controller_metadata = STORAGE.write_controller_metadata
+
+
+def _cas_replace_private_draft(
+    root: Path,
+    draft_id: str,
+    expected: Mapping[str, object],
+    replacement: Mapping[str, object],
+) -> None:
+    STORAGE.cas_replace_private_draft(
+        root,
+        draft_id,
+        canonical_bytes(expected),
+        canonical_bytes(replacement),
+    )
+
+
 MAX_TRACE_SEEDS = 128
-DRAFT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
-LOCAL_KEY_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 ADAPTERS = {"generic", "superpowers", "claude-feature-dev", "spec-kit"}
 SUPERPOWERS_HANDOFF_MARKER = (
-    "superpowers:after-approved-brainstorming;impact-refinement;"
-    "manual-handoff-before-writing-plans"
+    "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans"
 )
-ANALYSIS_KEYS = {
-    "phase", "refined_requirement", "invariants", "impacts",
-    "decision_needed", "decisions", "criteria", "unresolved", "scope",
-    "workflow",
-}
-ROW_KEYS = {
-    "invariants": {"key", "behavior", "evidence_level", "evidence"},
-    "impacts": {"key", "category", "severity", "state", "evidence_level", "evidence", "invariant_keys", "decision_keys", "criterion_keys", "summary"},
-    "decisions": {"key", "choice", "accepted_impact_keys", "rationale"},
-    "criteria": {"key", "impact_key", "invariant_key", "criterion", "evidence"},
-    "unresolved": {"impact_key", "state", "rationale", "decision_key", "owner"},
-    "scope": {"boundary", "evidence", "confidence"},
-}
-IMPACT_OPTIONAL_KEYS = {"graph_path_keys", "coverage_rationale"}
-SUMMARY_KEYS = {"changed_feature", "possible_issue", "affected", "trigger", "prevention"}
 HIGH_RISK_DOMAINS = {
-    "authorization/privacy", "legal/policy", "data", "interfaces", "operations",
+    "authorization/privacy",
+    "legal/policy",
+    "data",
+    "interfaces",
+    "operations",
     "state/concurrency",
 }
 EVIDENCE_RANK = {"verified": 0, "inferred": 1, "unknown": 2}
 GRAPH_CONFIDENCE_RANK = {
-    "verified-provider": 0, "verified-source": 1,
-    "structural-inferred": 2, "lexical": 3,
+    "verified-provider": 0,
+    "verified-source": 1,
+    "structural-inferred": 2,
+    "lexical": 3,
 }
 
 
-def _load_settings_module():
+class GraphSettingsPayload(TypedDict):
+    enabled: bool
+    max_seconds: int
+    target_seconds: int
+    providers: list[str]
+    install_policy: str
+    deep: bool
+
+
+class SettingsPayload(TypedDict):
+    audience: str
+    delivery: str
+    impact_graph: GraphSettingsPayload
+
+
+class ProviderPayload(TypedDict):
+    name: str
+    status: str
+    confidence: str
+    version: str | None
+    executable_sha256: str | None
+
+
+class NodePayload(TypedDict):
+    id: str
+    kind: str
+    label: str
+    location: str | None
+    provider: str
+    confidence: str
+    source_sha256: str | None
+    risk_domains: list[str]
+
+
+class EdgePayload(TypedDict):
+    id: str
+    source: str
+    target: str
+    kind: str
+    location: str | None
+    evidence: str
+    confidence: str
+    provider: str
+    source_sha256: str | None
+
+
+class PathPayload(TypedDict):
+    id: str
+    nodes: list[str]
+    edges: list[str]
+    distance: int
+    risk_domains: list[str]
+
+
+class FrontierPayload(TypedDict):
+    id: str
+    node: str
+    reason: str
+    risk_domains: list[str]
+
+
+class CachePayload(TypedDict):
+    status: str
+    key: str
+    invalidated_nodes: list[str]
+
+
+class ReceiptPayload(TypedDict):
+    schema_version: int
+    receipt_id: str
+    draft_id: str
+    repo_root_sha256: str
+    request_sha256: str
+    settings: GraphSettingsPayload
+    providers: list[ProviderPayload]
+    nodes: list[NodePayload]
+    edges: list[EdgePayload]
+    paths: list[PathPayload]
+    frontier: list[FrontierPayload]
+    timings_ms: dict[str, int]
+    budget_status: str
+    cache: CachePayload
+
+
+class CompactNodePayload(TypedDict):
+    key: str
+    kind: str
+    label: str
+    location: str | None
+    confidence: str
+    risk_domains: list[str]
+
+
+class CompactPathNodePayload(TypedDict):
+    key: str
+    label: str
+    location: str | None
+
+
+class CompactPathEdgePayload(TypedDict):
+    key: str
+    kind: str
+    confidence: str
+
+
+class CompactPathPayload(TypedDict):
+    key: str
+    nodes: list[CompactPathNodePayload]
+    edges: list[CompactPathEdgePayload]
+    distance: int
+    risk_domains: list[str]
+
+
+class CompactFrontierPayload(TypedDict):
+    key: str
+    node_key: str
+    reason: str
+    risk_domains: list[str]
+
+
+class CompactTruncatedPayload(TypedDict):
+    nodes: int
+    paths: int
+    frontier: int
+
+
+class CompactSummaryPayload(TypedDict):
+    nodes: int
+    edges: int
+    paths: int
+    unknown_frontiers: int
+    timings_ms: dict[str, int]
+    budget_status: str
+    truncated: CompactTruncatedPayload
+
+
+class CompactGraphPayload(TypedDict):
+    providers: list[dict[str, str | None]]
+    nodes: list[CompactNodePayload]
+    paths: list[CompactPathPayload]
+    frontier: list[CompactFrontierPayload]
+    summary: CompactSummaryPayload
+
+
+class GraphContext(TypedDict, total=False):
+    receipt: ReceiptPayload
+    sha256: str
+    binding: dict[str, object]
+    source_inventory: dict[str, object]
+    impact_paths: dict[str, list[str]]
+    rationales: dict[str, str | None]
+    impact_confidences: dict[str, str]
+
+
+class _SettingsContract(Protocol):
+    def resolve(
+        self,
+        repo_root: Path,
+        audience_override: str | None,
+        delivery_override: str | None,
+    ) -> SettingsPayload: ...
+
+    def resolve_delta_max_seconds(self, repo_root: Path) -> int: ...
+
+
+class _GraphContract(Protocol):
+    ProviderStatus: type[ProviderStatusType]
+    MAX_RECEIPT_BYTES: int
+
+    def _safe_path(self, value: object) -> bool: ...
+
+    def validate_receipt(self, value: object) -> tuple[str, ...]: ...
+
+    def canonical_receipt_bytes(self, value: Mapping[str, object] | GraphReceiptType) -> bytes: ...
+
+    def load_receipt_bytes(
+        self, payload: bytes
+    ) -> tuple[dict[str, object] | None, tuple[str, ...]]: ...
+
+
+class _CacheContract(Protocol):
+    _IDENTITY_FIELDS: frozenset[str]
+
+    def _cache_directory(self, root: Path, create: bool) -> Path | None: ...
+
+    def _read_artifact(self, path: Path) -> Mapping[str, object] | None: ...
+
+    def _source_digests(self, value: Mapping[str, str]) -> dict[str, str]: ...
+
+    def _canonical_json(self, value: object) -> bytes: ...
+
+    def _normalize_receipt(self, value: object) -> tuple[dict[str, object], bytes]: ...
+
+
+class _GraphCoordinatorContract(Protocol):
+    GRAPH: _GraphContract
+    CACHE: _CacheContract
+    ScanSeed: type[ScanSeedType]
+    Deadline: type[DeadlineType]
+
+    def _settings(self, value: Mapping[str, object]) -> GraphSettingsType: ...
+
+    def _request_sha256(
+        self,
+        draft: Mapping[str, object],
+        seeds: tuple[ScanSeedType, ...],
+        settings: GraphSettingsType,
+    ) -> str: ...
+
+    def _seed_key(self, seed: ScanSeedType) -> tuple[int, str, str]: ...
+
+    def _trace_identity(
+        self,
+        root: Path,
+        draft_id: str,
+        request_sha256: str,
+        seeds: tuple[ScanSeedType, ...],
+        settings: GraphSettingsType,
+        probes: tuple[ProviderStatusType, ...],
+    ) -> str: ...
+
+    def _collect_source_digests(
+        self, root: Path, deadline: DeadlineType
+    ) -> SourceInventoryType: ...
+
+    def trace_impact(
+        self,
+        repo_root: Path,
+        draft: Mapping[str, object],
+        seeds: tuple[ScanSeedType, ...],
+        settings: Mapping[str, object],
+        clock: object,
+        runner: object = None,
+        deadline: DeadlineType | None = None,
+        source_inventory: SourceInventoryType | None = None,
+    ) -> GraphReceiptType: ...
+
+
+def _classes(value: object, names: tuple[str, ...]) -> bool:
+    return all(isinstance(getattr(value, name, None), type) for name in names)
+
+
+def _callables(value: object, names: tuple[str, ...]) -> bool:
+    return all(callable(getattr(value, name, None)) for name in names)
+
+
+def _execute_controller_sibling(
+    module_name: str,
+    expected: Path,
+    validator: Callable[[object], bool],
+    label: str,
+    aliases: Mapping[str, ModuleType] | None = None,
+) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError(f"cannot load fixed controller {label} sibling")
+    module = importlib.util.module_from_spec(specification)
+    previous = {name: (name in sys.modules, sys.modules.get(name)) for name in (aliases or {})}
+    sys.modules[module_name] = module
+    try:
+        if aliases:
+            sys.modules.update(aliases)
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"cannot load fixed controller {label} sibling") from error
+    finally:
+        for name, (present, value) in previous.items():
+            if name == module_name:
+                continue
+            if present:
+                sys.modules[name] = cast(ModuleType, value)
+            else:
+                sys.modules.pop(name, None)
+    if not validator(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError(f"controller {label} sibling contract is incomplete")
+    return module
+
+
+def _load_controller_sibling(
+    filename: str,
+    canonical_name: str,
+    prefix: str,
+    validator: Callable[[object], bool],
+    label: str,
+    aliases: Mapping[str, ModuleType] | None = None,
+    rewire_validator: Callable[[object], bool] | None = None,
+) -> object:
+    sibling = SCRIPT_DIR / filename
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError(f"controller {label} sibling is unsafe")
+    hashed_name = prefix + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    hashed_present = hashed_name in sys.modules
+    hashed = sys.modules.get(hashed_name)
+
+    def rewired() -> object:
+        if aliases is None:
+            raise ImportError(f"controller {label} sibling contract is incomplete")
+        identity = []
+        for alias, module in sorted(aliases.items()):
+            registrations = sorted(name for name, value in sys.modules.items() if value is module)
+            identity.append(
+                (
+                    alias,
+                    getattr(module, "__name__", ""),
+                    getattr(module, "__file__", ""),
+                    registrations,
+                )
+            )
+        suffix = hashlib.sha256(repr(identity).encode("utf-8")).hexdigest()[:16]
+        rewired_name = f"{hashed_name}_{suffix}"
+        existing = sys.modules.get(rewired_name)
+        if existing is not None:
+            if not _module_uses_sibling(existing, expected):
+                raise ImportError(f"controller {label} sibling is unsafe")
+            if not validator(existing):
+                raise ImportError(f"controller {label} sibling contract is incomplete")
+            return existing
+        return _execute_controller_sibling(
+            rewired_name,
+            expected,
+            validator,
+            label,
+            aliases=aliases,
+        )
+
+    if canonical_name not in sys.modules:
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError(f"controller {label} sibling is unsafe")
+            if not validator(hashed):
+                raise ImportError(f"controller {label} sibling contract is incomplete")
+            sys.modules[canonical_name] = cast(ModuleType, hashed)
+            return hashed
+        return _execute_controller_sibling(
+            canonical_name, expected, validator, label, aliases=aliases
+        )
+    canonical = sys.modules.get(canonical_name)
+    if _module_uses_sibling(canonical, expected):
+        if validator(canonical) and not hashed_present:
+            return canonical
+        if hashed_present:
+            if not _module_uses_sibling(hashed, expected):
+                raise ImportError(f"controller {label} sibling is unsafe")
+            if validator(hashed):
+                return hashed
+            if rewire_validator is not None and rewire_validator(hashed):
+                return rewired()
+            raise ImportError(f"controller {label} sibling contract is incomplete")
+        if rewire_validator is not None and rewire_validator(canonical):
+            return _execute_controller_sibling(
+                hashed_name, expected, validator, label, aliases=aliases
+            )
+        raise ImportError(f"controller {label} sibling contract is incomplete")
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError(f"controller {label} sibling is unsafe")
+        if validator(hashed):
+            return hashed
+        if rewire_validator is not None and rewire_validator(hashed):
+            return rewired()
+        raise ImportError(f"controller {label} sibling contract is incomplete")
+    return _execute_controller_sibling(hashed_name, expected, validator, label, aliases=aliases)
+
+
+def _is_fast_scan_renderer_contract(value: object) -> bool:
+    word_limit = getattr(value, "WORD_LIMIT", None)
+    return (
+        type(word_limit) is int
+        and word_limit > 0
+        and isinstance(getattr(value, "AUDIENCES", None), set)
+        and isinstance(getattr(value, "LOCALES", None), set)
+        and callable(getattr(value, "render_fast_scan", None))
+    )
+
+
+def _is_fast_scan_store_contract(value: object) -> bool:
+    return (
+        isinstance(getattr(value, "_ID", None), re.Pattern)
+        and all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in ("_MAX", "_MAX_JSON_DEPTH")
+        )
+        and _callables(
+            value,
+            ("_configure_delta_worker", "publish_scan_receipt", "load_scan_receipt_bytes"),
+        )
+    )
+
+
+def _is_fast_scan_coordinator_graph(value: object) -> bool:
+    graph = getattr(value, "GRAPH", None)
+    builtin = getattr(value, "BUILTIN", None)
+    cache = getattr(value, "CACHE", None)
+    providers = getattr(value, "PROVIDERS", None)
+    priority = getattr(providers, "PROVIDER_PRIORITY", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "graph_coordinator.py")
+        and _module_uses_sibling(graph, SCRIPT_DIR / "impact_graph.py")
+        and _module_uses_sibling(builtin, SCRIPT_DIR / "graph_builtin.py")
+        and _module_uses_sibling(cache, SCRIPT_DIR / "graph_cache.py")
+        and _module_uses_sibling(providers, SCRIPT_DIR / "graph_providers.py")
+        and getattr(builtin, "GRAPH", None) is graph
+        and getattr(cache, "GRAPH", None) is graph
+        and isinstance(priority, tuple)
+        and all(isinstance(item, str) for item in priority)
+        and _classes(
+            graph,
+            (
+                "GraphSettings",
+                "ProviderStatus",
+                "GraphNode",
+                "GraphEdge",
+                "GraphPath",
+                "FrontierEntry",
+                "GraphReceipt",
+            ),
+        )
+        and _classes(builtin, ("ScanSeed", "ScanLimits", "BuiltInScanResult"))
+        and _classes(cache, ("CacheResult",))
+        and _classes(
+            providers,
+            ("Deadline", "ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec"),
+        )
+        and getattr(value, "GraphSettings", None) is getattr(graph, "GraphSettings", None)
+        and getattr(value, "Deadline", None) is getattr(providers, "Deadline", None)
+        and getattr(value, "ScanSeed", None) is getattr(builtin, "ScanSeed", None)
+        and getattr(value, "ScanLimits", None) is getattr(builtin, "ScanLimits", None)
+        and all(
+            getattr(value, name, None) is getattr(providers, name, None)
+            for name in ("ProviderProbe", "ProviderQuery", "ProviderResult", "ProviderSpec")
+        )
+        and getattr(value, "discover_providers", None)
+        is getattr(providers, "discover_providers", None)
+        and getattr(value, "run_provider", None) is getattr(providers, "run_provider", None)
+        and _classes(value, ("SourceInventory",))
+        and _callables(
+            value,
+            (
+                "_settings",
+                "_request_sha256",
+                "_seed_key",
+                "_trace_identity",
+                "_collect_source_digests",
+                "_configure_delta_worker",
+                "trace_impact",
+            ),
+        )
+    )
+
+
+def _is_fast_scan_shape(value: object) -> bool:
+    renderer = getattr(value, "fast_scan_renderer", None)
+    store = getattr(value, "fast_scan_store", None)
+    builtin = getattr(value, "graph_builtin", None)
+    coordinator = getattr(value, "graph_coordinator", None)
+    performance = getattr(value, "rir_performance", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "fast_scan.py")
+        and _module_uses_sibling(renderer, SCRIPT_DIR / "fast_scan_renderer.py")
+        and _is_fast_scan_renderer_contract(renderer)
+        and _module_uses_sibling(store, SCRIPT_DIR / "fast_scan_store.py")
+        and _is_fast_scan_store_contract(store)
+        and _module_uses_sibling(builtin, SCRIPT_DIR / "graph_builtin.py")
+        and _is_fast_scan_coordinator_graph(coordinator)
+        and _module_uses_sibling(performance, SCRIPT_DIR / "rir_performance.py")
+        and _classes(performance, ("PhaseMetric", "PerformanceMetrics"))
+        and getattr(builtin, "GRAPH", None) is getattr(coordinator, "GRAPH", None)
+        and _classes(
+            value,
+            (
+                "DerivedSeed",
+                "FastScanRequest",
+                "FastScanReceipt",
+                "FastScanResult",
+                "PreparedFastScan",
+            ),
+        )
+        and all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in (
+                "MAX_CHANGE_BYTES",
+                "MAX_EVIDENCE_ROWS",
+                "MAX_EVIDENCE_BYTES",
+                "MAX_SEEDS",
+                "MAX_SOURCE_BYTES",
+                "MAX_FRONTIER",
+                "MAX_CANDIDATES",
+            )
+        )
+        and _callables(
+            value,
+            (
+                "derive_seeds",
+                "execute_fast_scan",
+                "prepare_fast_scan_identity",
+                "validate_fast_scan_receipt",
+                "canonical_fast_scan_bytes",
+            ),
+        )
+    )
+
+
+def _is_delta_contract(value: object) -> bool:
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_delta.py")
+        and _classes(
+            value,
+            ("DeltaScanContext", "DeltaSeed", "DeltaSeedSelection", "DeltaSourceInventory"),
+        )
+        and type(getattr(value, "MAX_DELTA_SECONDS", None)) is int
+        and _callables(
+            value,
+            (
+                "bind_delta_context",
+                "collect_sources",
+                "derive_delta_seeds",
+                "derive_delta_seed_selection",
+                "delta_timeout_fallback",
+                "load_trusted_previous_artifacts",
+                "validate_delta_hints",
+            ),
+        )
+    )
+
+
+def _is_payload_identity_contract(value: object) -> bool:
+    root_files = getattr(value, "ROOT_FILES", None)
+    return (
+        isinstance(root_files, tuple)
+        and all(isinstance(item, str) for item in root_files)
+        and {
+            "scripts/fast_scan.py",
+            "scripts/fast_scan_renderer.py",
+            "scripts/fast_scan_store.py",
+            "scripts/rir_previous.py",
+            "scripts/rir_previous_renderer.py",
+            "scripts/rir_performance.py",
+            "scripts/rir_controller.py",
+            "scripts/rir_delta.py",
+            "scripts/rir_delta_worker.py",
+        }
+        <= set(root_files)
+        and _callables(value, ("functional_paths", "payload_sha256"))
+    )
+
+
+def _is_settings_contract(value: object) -> TypeGuard[_SettingsContract]:
+    return _callables(value, ("resolve", "resolve_delta_max_seconds"))
+
+
+def _is_graph_contract(value: object) -> TypeGuard[_GraphContract]:
+    return (
+        _classes(value, ("ProviderStatus",))
+        and isinstance(getattr(value, "MAX_RECEIPT_BYTES", None), int)
+        and _callables(
+            value,
+            ("_safe_path", "validate_receipt", "canonical_receipt_bytes", "load_receipt_bytes"),
+        )
+    )
+
+
+def _is_cache_contract(value: object) -> TypeGuard[_CacheContract]:
+    return isinstance(getattr(value, "_IDENTITY_FIELDS", None), frozenset) and _callables(
+        value,
+        (
+            "_cache_directory",
+            "_read_artifact",
+            "_source_digests",
+            "_canonical_json",
+            "_normalize_receipt",
+        ),
+    )
+
+
+def _is_graph_coordinator_contract(value: object) -> TypeGuard[_GraphCoordinatorContract]:
+    return (
+        _is_graph_contract(getattr(value, "GRAPH", None))
+        and _is_cache_contract(getattr(value, "CACHE", None))
+        and _classes(value, ("ScanSeed", "Deadline"))
+        and _callables(
+            value,
+            (
+                "_settings",
+                "_request_sha256",
+                "_seed_key",
+                "_trace_identity",
+                "_collect_source_digests",
+                "trace_impact",
+            ),
+        )
+    )
+
+
+def _load_settings_module() -> object:
     path = SCRIPT_DIR / "resolve-settings.py"
     spec = importlib.util.spec_from_file_location("rir_resolve_settings", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-SETTINGS = _load_settings_module()
-
-
-def _load_graph_coordinator():
-    path = SCRIPT_DIR / "graph_coordinator.py"
-    module_name = "_rir_controller_graph_coordinator_" + hashlib.sha256(
-        str(path).encode("utf-8")
-    ).hexdigest()[:16]
-    loaded = sys.modules.get(module_name)
-    if loaded is not None:
-        return loaded
-    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise ImportError("cannot load fixed graph coordinator")
+        raise ImportError("cannot load fixed settings resolver")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-GRAPH_COORDINATOR = _load_graph_coordinator()
-GRAPH = GRAPH_COORDINATOR.GRAPH
-TraceSeed = GRAPH_COORDINATOR.ScanSeed
+_loaded_settings = _load_settings_module()
+if not _is_settings_contract(_loaded_settings):
+    raise ImportError("settings sibling contract is incomplete")
+SETTINGS = _loaded_settings
 
 
-@dataclass(frozen=True)
-class BeginRequest:
-    repo_root: Path
-    request: str
-    repository_evidence: Tuple[str, ...]
-    adapter: str
-    audience_override: Optional[str] = None
-    delivery_override: Optional[str] = None
-    scan_id: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class DraftResult:
-    draft_id: str
-    draft_path: Path
-    report_id: str
-    revision: int
-    previous_sha256: str
-    settings: Mapping[str, str]
-    prior_state: Optional[Mapping[str, object]]
-    prior_key_map: Optional[Mapping[str, object]]
-    scan_id: Optional[str] = None
-    graph_receipt_id: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class ScanRequest:
-    repo_root: Path
-    change_request: str
-    evidence: Tuple[str, ...]
-    audience_override: Optional[str] = None
-
-
-ScanResult = fast_scan.FastScanResult
-
-
-@dataclass(frozen=True)
-class TraceRequest:
-    repo_root: Path
-    draft_id: str
-    seeds: Tuple[TraceSeed, ...]
-
-
-@dataclass(frozen=True)
-class TraceResult:
-    receipt_id: str
-    receipt_path: Path
-    receipt_sha256: str
-    compact_graph: Mapping[str, object]
-    budget_status: str
-    request_sha256: str
-    seeds: Tuple[TraceSeed, ...]
-
-
-@dataclass(frozen=True)
-class FinalizeRequest:
-    repo_root: Path
-    draft_id: str
-    analysis: Mapping[str, object]
-    graph_receipt_id: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class FinalizeResult:
-    status: str
-    report_id: str
-    revision: int
-    delivery: str
-    display_text: str
-    state_path: Path
-    markdown_path: Path
-    markdown_sha256: str
-
-
-def _canonical_bytes(value: object) -> bytes:
+def _is_graph_delivery_contract(value: object) -> bool:
+    coordinator = getattr(value, "GRAPH_COORDINATOR", None)
+    delivery_contracts = getattr(value, "CONTRACTS", None)
+    delivery_storage = getattr(value, "STORAGE", None)
     return (
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        + "\n"
-    ).encode("utf-8")
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_graph_delivery.py")
+        and _module_uses_sibling(delivery_contracts, SCRIPT_DIR / "rir_contracts.py")
+        and _is_controller_contracts_contract(delivery_contracts)
+        and _module_uses_sibling(delivery_storage, SCRIPT_DIR / "rir_storage.py")
+        and _is_controller_storage_contract(delivery_storage)
+        and _is_graph_coordinator_contract(coordinator)
+        and _module_uses_sibling(coordinator, SCRIPT_DIR / "graph_coordinator.py")
+        and _module_uses_sibling(coordinator.GRAPH, SCRIPT_DIR / "impact_graph.py")
+        and _module_uses_sibling(coordinator.CACHE, SCRIPT_DIR / "graph_cache.py")
+        and getattr(value, "GRAPH", None) is getattr(coordinator, "GRAPH", None)
+        and getattr(value, "os", None) is os
+        and _classes(
+            value,
+            (
+                "TraceSeed",
+                "ReceiptPayload",
+                "CompactGraphPayload",
+                "GraphContext",
+            ),
+        )
+        and all(
+            type(getattr(value, name, None)) is int and getattr(value, name) > 0
+            for name in (
+                "MAX_TRACE_SEEDS",
+                "COMPACT_MAX_NODES",
+                "COMPACT_MAX_PATHS",
+                "COMPACT_MAX_FRONTIER",
+                "COMPACT_MAX_BYTES",
+            )
+        )
+        and _callables(
+            value,
+            (
+                "graph_draft_identity",
+                "compact_graph",
+                "source_inventory_sha256",
+                "new_trace_intent",
+                "validate_trace_intent",
+                "load_graph_context",
+                "validate_graph_coverage",
+                "trace_impact",
+            ),
+        )
+    )
 
 
-def _root(path: Path) -> Path:
+def _load_registered_graph_delivery(module_name: str, expected: Path) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed graph delivery sibling")
+    module = importlib.util.module_from_spec(specification)
+    previous_contracts = sys.modules.get("rir_contracts")
+    contracts_present = "rir_contracts" in sys.modules
+    previous_storage = sys.modules.get("rir_storage")
+    storage_present = "rir_storage" in sys.modules
+    sys.modules[module_name] = module
     try:
-        root = Path(path).resolve(strict=True)
-    except OSError as error:
-        raise ValueError(f"repository root is unavailable: {error}") from error
-    if not root.is_dir():
-        raise ValueError("repository root must be an existing directory")
-    return root
-
-
-def _open_directory_at(parent_fd: int, name: str, mode: int) -> int:
-    try:
-        os.mkdir(name, mode=mode, dir_fd=parent_fd)
-    except FileExistsError:
-        pass
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        return os.open(name, flags, dir_fd=parent_fd)
-    except OSError as error:
-        raise ValueError(f"controller directory is unsafe: {name}: {error}") from error
-
-
-def _private_draft_directory_fd(root: Path) -> int:
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    root_fd = os.open(root, flags)
-    base_fd = None
-    try:
-        base_fd = _open_directory_at(root_fd, ".requirements-impact-refiner", 0o755)
-        draft_fd = _open_directory_at(base_fd, "drafts", 0o700)
-        os.fchmod(draft_fd, 0o700)
-        return draft_fd
+        sys.modules["rir_contracts"] = cast(ModuleType, CONTRACTS)
+        sys.modules["rir_storage"] = cast(ModuleType, STORAGE)
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed graph delivery sibling") from error
     finally:
-        if base_fd is not None:
-            os.close(base_fd)
-        os.close(root_fd)
+        if contracts_present:
+            sys.modules["rir_contracts"] = cast(ModuleType, previous_contracts)
+        else:
+            sys.modules.pop("rir_contracts", None)
+        if storage_present:
+            sys.modules["rir_storage"] = cast(ModuleType, previous_storage)
+        else:
+            sys.modules.pop("rir_storage", None)
+    if not _is_graph_delivery_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("graph delivery sibling contract is incomplete")
+    return module
 
 
-def _write_private_draft(root: Path, draft_id: str, payload: bytes) -> Path:
-    directory_fd = _private_draft_directory_fd(root)
-    file_fd = None
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        file_fd = os.open(f"{draft_id}.json", flags, 0o600, dir_fd=directory_fd)
-        offset = 0
-        while offset < len(payload):
-            offset += os.write(file_fd, payload[offset:])
-        os.fsync(file_fd)
-    except OSError as error:
-        raise ValueError(f"cannot create draft: {error}") from error
-    finally:
-        if file_fd is not None:
-            os.close(file_fd)
-        os.close(directory_fd)
-    return root / ".requirements-impact-refiner" / "drafts" / f"{draft_id}.json"
+def _load_graph_delivery() -> object:
+    sibling = SCRIPT_DIR / "rir_graph_delivery.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("graph delivery sibling is unsafe")
+    coordinator_path = SCRIPT_DIR / "graph_coordinator.py"
+    legacy_coordinator_name = (
+        "_rir_controller_graph_coordinator_"
+        + hashlib.sha256(str(coordinator_path).encode("utf-8")).hexdigest()[:16]
+    )
+    if legacy_coordinator_name in sys.modules and not _is_graph_coordinator_contract(
+        sys.modules.get(legacy_coordinator_name)
+    ):
+        raise ImportError("graph coordinator sibling contract is incomplete")
+    module_name = (
+        "_rir_controller_graph_delivery_"
+        + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    )
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    canonical = sys.modules.get("rir_graph_delivery")
+    if canonical is not None and _is_graph_delivery_contract(canonical):
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("graph delivery sibling is unsafe")
+        if not _is_graph_delivery_contract(hashed):
+            raise ImportError("graph delivery sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("graph delivery sibling is unsafe")
+        if not _is_graph_delivery_contract(hashed):
+            raise ImportError("graph delivery sibling contract is incomplete")
+        if "rir_graph_delivery" not in sys.modules:
+            sys.modules["rir_graph_delivery"] = cast(ModuleType, hashed)
+        return hashed
+    target_name = "rir_graph_delivery" if canonical is None else module_name
+    return _load_registered_graph_delivery(target_name, expected)
 
 
-def _all_strings(value: object):
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            yield str(key)
-            yield from _all_strings(item)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            yield from _all_strings(item)
+GRAPH_DELIVERY = cast(Any, _load_graph_delivery())
+GRAPH_COORDINATOR = GRAPH_DELIVERY.GRAPH_COORDINATOR
+GRAPH = GRAPH_DELIVERY.GRAPH
+TraceSeed = GRAPH_DELIVERY.TraceSeed
 
 
-def _bounded(value: object, maximum: int, label: str) -> bytes:
-    payload = _canonical_bytes(value)
-    if len(payload) > maximum:
-        unit = "256 KiB" if maximum in {MAX_BEGIN_BYTES, MAX_TRACE_BYTES} else "2 MiB"
-        raise ValueError(f"{label} exceeds {unit}")
-    if any(len(text.encode("utf-8")) > MAX_STRING_BYTES for text in _all_strings(value)):
-        raise ValueError(f"{label} contains a string larger than 64 KiB")
-    return payload
+def _load_controller_fast_scan_graph():
+    if not _is_fast_scan_coordinator_graph(GRAPH_COORDINATOR):
+        raise ImportError("controller Fast Scan coordinator graph is incomplete")
+    renderer = _load_controller_sibling(
+        "fast_scan_renderer.py",
+        "fast_scan_renderer",
+        "_rir_controller_fast_scan_renderer_",
+        _is_fast_scan_renderer_contract,
+        "Fast Scan renderer",
+    )
+    store = _load_controller_sibling(
+        "fast_scan_store.py",
+        "fast_scan_store",
+        "_rir_controller_fast_scan_store_",
+        _is_fast_scan_store_contract,
+        "Fast Scan store",
+    )
+    delta = _load_controller_sibling(
+        "rir_delta.py",
+        "rir_delta",
+        "_rir_controller_delta_",
+        _is_delta_contract,
+        "delta scan",
+    )
+    performance = _load_controller_sibling(
+        "rir_performance.py",
+        "rir_performance",
+        "_rir_controller_performance_",
+        lambda value: (
+            _module_uses_sibling(value, SCRIPT_DIR / "rir_performance.py")
+            and _classes(value, ("PhaseMetric", "PerformanceMetrics"))
+            and _callables(value, ("estimate_tokens", "measure", "with_actual_usage"))
+        ),
+        "performance metrics",
+    )
+
+    def valid(value: object) -> bool:
+        return (
+            _is_fast_scan_shape(value)
+            and getattr(value, "fast_scan_renderer", None) is renderer
+            and getattr(value, "fast_scan_store", None) is store
+            and getattr(value, "graph_builtin", None) is GRAPH_COORDINATOR.BUILTIN
+            and getattr(value, "graph_coordinator", None) is GRAPH_COORDINATOR
+            and getattr(value, "rir_performance", None) is performance
+        )
+
+    fast_scan_module = _load_controller_sibling(
+        "fast_scan.py",
+        "fast_scan",
+        "_rir_controller_fast_scan_",
+        valid,
+        "Fast Scan",
+        aliases={
+            "fast_scan_renderer": cast(ModuleType, renderer),
+            "fast_scan_store": cast(ModuleType, store),
+            "graph_builtin": cast(ModuleType, GRAPH_COORDINATOR.BUILTIN),
+            "graph_coordinator": cast(ModuleType, GRAPH_COORDINATOR),
+            "rir_performance": cast(ModuleType, performance),
+        },
+        rewire_validator=_is_fast_scan_shape,
+    )
+    payload_identity_module = _load_controller_sibling(
+        "payload_identity.py",
+        "payload_identity",
+        "_rir_controller_payload_identity_",
+        _is_payload_identity_contract,
+        "payload identity",
+    )
+    return renderer, store, fast_scan_module, payload_identity_module, delta, performance
+
+
+(
+    FAST_SCAN_RENDERER,
+    FAST_SCAN_STORE,
+    FAST_SCAN,
+    PAYLOAD_IDENTITY,
+    DELTA,
+    PERFORMANCE,
+) = _load_controller_fast_scan_graph()
+fast_scan_renderer = FAST_SCAN_RENDERER
+fast_scan_store = FAST_SCAN_STORE
+fast_scan = FAST_SCAN
+payload_identity = PAYLOAD_IDENTITY
+rir_delta = DELTA
+
+
+def _is_receipt_payload(value: object) -> TypeGuard[ReceiptPayload]:
+    return isinstance(value, dict) and not GRAPH.validate_receipt(value)
+
+
+def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, str]]:
+    return isinstance(value, Mapping) and all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
+
+
+def _is_int_input(value: object) -> TypeGuard[str | bytes | bytearray | SupportsInt]:
+    return isinstance(value, (str, bytes, bytearray)) or callable(getattr(value, "__int__", None))
+
+
+def _int_value(value: object) -> int:
+    if not _is_int_input(value):
+        raise TypeError(
+            "int() argument must be a string, a bytes-like object or a real number, "
+            f"not '{type(value).__name__}'"
+        )
+    return int(value)
+
+
+if not TYPE_CHECKING:
+    ScanResult = FAST_SCAN.FastScanResult
+
+
+_canonical_bytes = canonical_bytes
+_bounded = bounded_bytes
+_validate_analysis = validate_analysis
 
 
 def _next_report_id(root: Path) -> str:
@@ -280,7 +1314,8 @@ def _next_report_id(root: Path) -> str:
     existing = set()
     if reports.is_dir() and not reports.is_symlink():
         existing = {
-            path.name for path in reports.iterdir()
+            path.name
+            for path in reports.iterdir()
             if path.is_dir() and re.fullmatch(r"RPT-\d{3}", path.name)
         }
     for number in range(1, 1000):
@@ -290,112 +1325,1124 @@ def _next_report_id(root: Path) -> str:
     raise ValueError("no report IDs remain")
 
 
-def _current_lineage(root: Path):
-    reports = root / ".requirements-impact-refiner" / "reports"
-    if not reports.exists():
-        return None
-    if reports.is_symlink() or not reports.is_dir():
-        raise ValueError("report root must be a real directory")
-    report_ids = sorted(
-        path.name
-        for path in reports.iterdir()
-        if path.is_dir()
-        and not path.is_symlink()
-        and re.fullmatch(r"RPT-\d{3}", path.name)
-        and (path / "current.json").is_file()
+def _is_lineage_contract(value: object) -> bool:
+    lineage_storage = getattr(value, "STORAGE", None)
+    lineage_report_store = getattr(value, "REPORT_STORE", None)
+    lineage_compact_state = getattr(value, "COMPACT_STATE", None)
+    lineage_renderer = getattr(value, "IMPACT_RENDERER", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_lineage.py")
+        and _module_uses_sibling(getattr(value, "CONTRACTS", None), SCRIPT_DIR / "rir_contracts.py")
+        and _is_controller_contracts_contract(getattr(value, "CONTRACTS", None))
+        and _module_uses_sibling(lineage_storage, SCRIPT_DIR / "rir_storage.py")
+        and _is_controller_storage_contract(lineage_storage)
+        and _module_uses_sibling(lineage_compact_state, SCRIPT_DIR / "compact_state.py")
+        and _module_uses_sibling(lineage_renderer, SCRIPT_DIR / "impact_renderer.py")
+        and _module_uses_sibling(lineage_report_store, SCRIPT_DIR / "report_store.py")
+        and getattr(lineage_storage, "report_store", None) is lineage_report_store
+        and getattr(lineage_report_store, "compact_state", None) is lineage_compact_state
+        and getattr(lineage_report_store, "impact_renderer", None) is lineage_renderer
+        and getattr(value, "BeginRequest", None)
+        is getattr(getattr(value, "CONTRACTS", None), "BeginRequest", None)
+        and _callables(
+            value,
+            ("current_lineage", "legacy_key_map", "allocate_ids", "map_keys", "build_state"),
+        )
     )
-    if not report_ids:
-        return None
-    if len(report_ids) != 1:
-        raise ValueError("multiple current reports require an explicit report ID")
-    current = report_store.load_current(root, report_ids[0])
-    if current is None:
-        return None
-    prior_state, errors = compact_state.load_state_bytes(current.state_path.read_bytes())
-    if errors or prior_state is None:
-        raise ValueError("current report state is invalid")
-    key_map = _load_controller_metadata(current)
-    if key_map is None:
-        key_map = _legacy_key_map(prior_state)
-    return current, prior_state, key_map
 
 
-def _legacy_key_map(state: Mapping[str, object]) -> dict[str, dict[str, str]]:
-    sections = {
-        "invariants": (state.get("current_behavior", []), "inv"),
-        "impacts": (state.get("impacts", []), "imp"),
-        "decisions": (state.get("decisions", []), "dec"),
-        "criteria": (state.get("criteria", []), "ac"),
-    }
-    result = {}
-    for name, (rows, prefix) in sections.items():
-        mapping = {}
-        for row in rows:
-            identifier = row.get("id") if isinstance(row, dict) else None
-            if not isinstance(identifier, str):
-                raise ValueError("current report cannot derive controller key lineage")
-            mapping[f"legacy-{prefix}-{identifier.rsplit('-', 1)[-1].lower()}"] = identifier
-        result[name] = mapping
-    return result
-
-
-def _controller_metadata_path(report_id: str, revision: int, root: Path) -> Path:
-    report_dir = report_store.report_directory(root, report_id, create=True)
-    return report_dir / f"revision-{revision:04d}.controller.json"
-
-
-def _load_controller_metadata(current) -> Optional[dict[str, object]]:
-    path = current.state_path.with_name(
-        f"revision-{current.revision:04d}.controller.json"
-    )
-    if not path.exists():
-        return None
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("controller lineage metadata is unsafe")
+def _load_registered_lineage(module_name: str, expected: Path) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed lineage sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        current_state_sha256 = hashlib.sha256(
-            current.state_path.read_bytes()
-        ).hexdigest()
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"controller lineage metadata is invalid: {error}") from error
-    if (
-        not isinstance(payload, dict)
-        or payload.get("report_id") != current.report_id
-        or payload.get("revision") != current.revision
-        or payload.get("state_sha256")
-        != current_state_sha256
-        or not isinstance(payload.get("key_map"), dict)
-    ):
-        raise ValueError("controller lineage metadata identity is invalid")
-    return payload["key_map"]
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed lineage sibling") from error
+    if not _is_lineage_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("lineage sibling contract is incomplete")
+    return module
 
 
-def _draft_path(root: Path, draft_id: str) -> Path:
-    if DRAFT_ID_PATTERN.fullmatch(draft_id) is None:
-        raise ValueError("invalid draft ID")
-    return root / ".requirements-impact-refiner" / "drafts" / f"{draft_id}.json"
+def _load_lineage() -> object:
+    sibling = SCRIPT_DIR / "rir_lineage.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("lineage sibling is unsafe")
+    module_name = (
+        "_rir_controller_lineage_" + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
+    )
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    canonical = sys.modules.get("rir_lineage")
+    if canonical is not None and _is_lineage_contract(canonical):
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("lineage sibling is unsafe")
+        if not _is_lineage_contract(hashed):
+            raise ImportError("lineage sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("lineage sibling is unsafe")
+        if not _is_lineage_contract(hashed):
+            raise ImportError("lineage sibling contract is incomplete")
+        if "rir_lineage" not in sys.modules:
+            sys.modules["rir_lineage"] = cast(ModuleType, hashed)
+        return hashed
+    target_name = "rir_lineage" if canonical is None else module_name
+    return _load_registered_lineage(target_name, expected)
+
+
+LINEAGE = cast(Any, _load_lineage())
+_current_lineage = LINEAGE.current_lineage
+_legacy_key_map = LINEAGE.legacy_key_map
 
 
 def _payload_sha256() -> str:
     candidate = SCRIPT_DIR.parent
     if not (candidate / ".codex-plugin" / "plugin.json").is_file():
         candidate = SCRIPT_DIR.parents[2]
-    return payload_identity.payload_sha256(candidate)
+    return PAYLOAD_IDENTITY.payload_sha256(candidate)
 
 
-def scan_impact(request: ScanRequest) -> ScanResult:
+def _previous_delta_identity(value: object) -> tuple[object, ...]:
+    return tuple(
+        getattr(value, name, None)
+        for name in (
+            "status",
+            "report_id",
+            "revision",
+            "markdown_sha256",
+            "changed_paths",
+            "changed_count",
+            "requirement_sha256",
+            "source_inventory_sha256",
+            "display_text",
+        )
+    )
+
+
+def _configured_delta_max_seconds(root: Path, settings: Mapping[str, object]) -> int:
+    configured = settings.get("delta_max_seconds")
+    if configured is None:
+        configured = SETTINGS.resolve_delta_max_seconds(root)
+    if type(configured) is not int or configured < 1:
+        raise ValueError("delta_max_seconds must be a positive integer")
+    return configured
+
+
+def _trusted_delta_context(root: Path, request: ScanRequest, settings: Mapping[str, object]):
+    changed_paths = tuple(request.changed_paths)
+    hints_present = (
+        request.previous_report_id is not None
+        or request.previous_revision is not None
+        or bool(changed_paths)
+    )
+    if not hints_present:
+        return None
+    if request.previous_report_id is None or request.previous_revision is None:
+        raise ValueError("delta hints require previous_report_id and previous_revision")
+    lookup_request = PreviousLookupRequest(
+        root,
+        request.change_request,
+        request.evidence,
+        request.previous_report_id,
+    )
+    trusted = lookup_previous(lookup_request)
+    DELTA.validate_delta_hints(
+        trusted,
+        request.previous_report_id,
+        request.previous_revision,
+        changed_paths,
+    )
+    state, graph, prior_graph_status, prior_graph_receipt_id, prior_graph_sha256 = (
+        DELTA.load_trusted_previous_artifacts(
+            root,
+            trusted,
+            state_loader=cast(Any, STORAGE.COMPACT_STATE).load_state_bytes,
+            receipt_loader=GRAPH.load_receipt_bytes,
+            canonical_receipt_bytes=GRAPH.canonical_receipt_bytes,
+            max_receipt_bytes=GRAPH.MAX_RECEIPT_BYTES,
+            expected_payload_sha256=_payload_sha256(),
+            expected_repository_evidence_sha256=(
+                FINALIZE.REPORT_CONTEXT.canonical_repository_evidence_sha256(request.evidence)
+            ),
+        )
+    )
+    verified = lookup_previous(lookup_request)
+    if _previous_delta_identity(verified) != _previous_delta_identity(trusted):
+        raise ValueError("trusted stale previous identity changed during delta binding")
+    configured = _configured_delta_max_seconds(root, settings)
+    return DELTA.bind_delta_context(
+        root,
+        verified,
+        state,
+        graph,
+        previous_report_id=request.previous_report_id,
+        previous_revision=request.previous_revision,
+        changed_paths=changed_paths,
+        configured_max_seconds=configured,
+        prior_graph_status=prior_graph_status,
+        previous_graph_receipt_id=prior_graph_receipt_id,
+        previous_graph_sha256=prior_graph_sha256,
+    )
+
+
+_DELTA_WORKER_MAX_INPUT = 512 * 1024
+_DELTA_WORKER_MAX_CONTROL_FRAME = 1024
+_DELTA_WORKER_MAX_FALLBACK_FRAME = 4 * 1024 * 1024
+_DELTA_WORKER_MAX_RESULT_FRAME = 4 * 1024 * 1024
+_DELTA_WORKER_MAX_FRAME = max(
+    _DELTA_WORKER_MAX_CONTROL_FRAME,
+    _DELTA_WORKER_MAX_FALLBACK_FRAME,
+    _DELTA_WORKER_MAX_RESULT_FRAME,
+)
+_DELTA_WORKER_MAX_OUTPUT = (
+    _DELTA_WORKER_MAX_CONTROL_FRAME
+    + _DELTA_WORKER_MAX_FALLBACK_FRAME
+    + _DELTA_WORKER_MAX_RESULT_FRAME
+    + 27
+)
+_DELTA_WORKER_MAX_ERROR = 64 * 1024
+_DELTA_WORKER_MIN_SECONDS = 1.0
+_DELTA_WORKER_CLEANUP_GRACE_SECONDS = 0.1
+_DELTA_WORKER_CLEANUP_SCAN_SECONDS = 0.025
+_DELTA_WORKER_MAX_CLEANUP_ENTRIES = 4096
+_DELTA_WORKER_MAX_PRIVATE_TEMP_ENTRIES = 128
+_DELTA_HINT_PATH = re.compile(r"^(?!/)(?!.*(?:^|/)\.{1,2}(?:/|$))(?!.*\\).+$")
+
+
+def _configure_delta_worker_runtime(token: str) -> None:
+    if re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        raise ValueError("delta worker token is invalid")
+    cast(Any, FAST_SCAN_STORE)._configure_delta_worker(token)
+    cast(Any, GRAPH_COORDINATOR)._configure_delta_worker(token)
+    cast(Any, PREVIOUS)._configure_delta_worker(True)
+    cast(Any, FINALIZE.REPORT_CONTEXT)._configure_delta_worker(True)
+
+
+def _worker_json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _worker_json_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_worker_json_value(item) for item in value]
+    return value
+
+
+def _scan_result_mapping(result: object) -> dict[str, object]:
+    typed = cast(Any, result)
+    mapping = {
+        "status": typed.status,
+        "scan_id": typed.scan_id,
+        "receipt_id": typed.receipt_id,
+        "receipt_sha256": typed.receipt_sha256,
+        "display_text": typed.display_text,
+        "risk_level": typed.risk_level,
+        "paths": _worker_json_value(typed.paths),
+        "frontier": _worker_json_value(typed.frontier),
+        "candidates": _worker_json_value(typed.candidates),
+        "elapsed_ms": typed.elapsed_ms,
+        "cache_status": typed.cache_status,
+        "can_promote": typed.can_promote,
+        "previous_report_id": getattr(typed, "previous_report_id", None),
+        "previous_revision": getattr(typed, "previous_revision", None),
+        "changed_paths": list(getattr(typed, "changed_paths", ())),
+        "changed_count": getattr(typed, "changed_count", None),
+        "previous_display_text": getattr(typed, "previous_display_text", None),
+    }
+    performance_metrics = getattr(typed, "performance_metrics", None)
+    if isinstance(performance_metrics, PERFORMANCE.PerformanceMetrics):
+        mapping["performance_metrics"] = performance_metrics.to_mapping()
+    return mapping
+
+
+_DELTA_WORKER_RESULT_KEYS = frozenset(
+    {
+        "status",
+        "scan_id",
+        "receipt_id",
+        "receipt_sha256",
+        "display_text",
+        "risk_level",
+        "paths",
+        "frontier",
+        "candidates",
+        "elapsed_ms",
+        "cache_status",
+        "can_promote",
+        "previous_report_id",
+        "previous_revision",
+        "changed_paths",
+        "changed_count",
+        "previous_display_text",
+        "performance_metrics",
+    }
+)
+
+
+def _scan_result_from_mapping(value: object, elapsed_ms: int):
+    if not isinstance(value, Mapping) or set(value) not in {
+        _DELTA_WORKER_RESULT_KEYS,
+        _DELTA_WORKER_RESULT_KEYS - {"performance_metrics"},
+    }:
+        raise ValueError("delta worker result shape is invalid")
+    status = value["status"]
+    can_promote = value["can_promote"]
+    if (
+        status not in {"complete", "partial", "needs_input"}
+        or not isinstance(can_promote, bool)
+        or (status == "partial" and can_promote)
+        or not isinstance(value["scan_id"], str)
+        or DRAFT_ID_PATTERN.fullmatch(value["scan_id"]) is None
+        or not isinstance(value["receipt_id"], str)
+        or DRAFT_ID_PATTERN.fullmatch(value["receipt_id"]) is None
+        or not isinstance(value["receipt_sha256"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", value["receipt_sha256"]) is None
+        or not isinstance(value["display_text"], str)
+        or not value["display_text"].strip()
+        or not isinstance(value["risk_level"], str)
+        or not isinstance(value["cache_status"], str)
+        or any(not isinstance(value[name], list) for name in ("paths", "frontier", "candidates"))
+        or any(
+            not isinstance(row, Mapping)
+            for name in ("paths", "frontier", "candidates")
+            for row in cast(list[object], value[name])
+        )
+        or not isinstance(value["changed_paths"], list)
+        or any(not isinstance(path, str) for path in value["changed_paths"])
+    ):
+        raise ValueError("delta worker result contract is invalid")
+    previous_report_id = value["previous_report_id"]
+    previous_revision = value["previous_revision"]
+    previous_display = value["previous_display_text"]
+    if previous_report_id is not None and (
+        not isinstance(previous_report_id, str)
+        or re.fullmatch(r"RPT-\d{3}", previous_report_id) is None
+        or type(previous_revision) is not int
+        or not isinstance(previous_display, str)
+        or not previous_display.strip()
+    ):
+        raise ValueError("delta worker previous result identity is invalid")
+    performance_value = value.get("performance_metrics")
+    if performance_value is None:
+        reused_bytes = (
+            len(previous_display.encode("utf-8")) if isinstance(previous_display, str) else 0
+        )
+        performance_metrics = PERFORMANCE.PerformanceMetrics(
+            accounted_reused_bytes=reused_bytes,
+            accounted_new_evidence_bytes=None,
+            accounting_exclusions=(
+                "parent cannot observe trusted worker state graph and source bytes",
+                "worker phase timing unavailable from trusted timeout fallback",
+            ),
+            estimated_serialized_input_tokens=None,
+            estimated_serialized_output_tokens=PERFORMANCE.estimate_tokens(
+                value["display_text"].encode("utf-8")
+            ),
+            cache_status=value["cache_status"],
+            analysis_elapsed_ms=value["elapsed_ms"],
+            operation_elapsed_ms=None if elapsed_ms == 0 else elapsed_ms,
+        )
+    else:
+        performance_mapping = (
+            dict(performance_value) if isinstance(performance_value, Mapping) else {}
+        )
+        if elapsed_ms != 0:
+            performance_mapping["operation_elapsed_ms"] = elapsed_ms
+        try:
+            performance_metrics = PERFORMANCE.PerformanceMetrics.from_mapping(performance_mapping)
+        except (TypeError, ValueError) as error:
+            raise ValueError("delta worker performance metrics are invalid") from error
+    return FAST_SCAN.FastScanResult(
+        status,
+        value["scan_id"],
+        value["receipt_id"],
+        value["receipt_sha256"],
+        value["display_text"],
+        value["risk_level"],
+        tuple(value["paths"]),
+        tuple(value["frontier"]),
+        tuple(value["candidates"]),
+        elapsed_ms,
+        value["cache_status"],
+        can_promote,
+        previous_report_id,
+        previous_revision,
+        tuple(value["changed_paths"]),
+        value["changed_count"],
+        previous_display,
+        performance_metrics,
+    )
+
+
+def _validate_delta_request_syntax(request: ScanRequest) -> None:
+    if not isinstance(request.change_request, str) or not request.change_request.strip():
+        raise ValueError("delta change request must be nonblank")
+    if len(request.change_request.encode("utf-8")) > 4 * 1024:
+        raise ValueError("delta change request exceeds 4 KiB")
+    if (
+        not isinstance(request.evidence, tuple)
+        or len(request.evidence) > 32
+        or any(
+            not isinstance(row, str) or not row.strip() or len(row.encode("utf-8")) > 4 * 1024
+            for row in request.evidence
+        )
+    ):
+        raise ValueError("delta evidence syntax is invalid")
+    if request.audience_override is not None and not isinstance(request.audience_override, str):
+        raise ValueError("delta audience syntax is invalid")
+    has_report = request.previous_report_id is not None
+    has_revision = request.previous_revision is not None
+    has_paths = bool(request.changed_paths)
+    if not has_report or not has_revision or (has_paths and not (has_report and has_revision)):
+        raise ValueError("delta hints must be an all-or-none report, revision, and path set")
+    if (
+        not isinstance(request.previous_report_id, str)
+        or re.fullmatch(r"RPT-\d{3}", request.previous_report_id) is None
+        or type(request.previous_revision) is not int
+        or request.previous_revision < 1
+        or not isinstance(request.changed_paths, tuple)
+        or len(request.changed_paths) > 4096
+        or any(not isinstance(path, str) for path in request.changed_paths)
+        or list(request.changed_paths) != sorted(set(request.changed_paths))
+    ):
+        raise ValueError("delta hint syntax is invalid")
+    for path in request.changed_paths:
+        if (
+            not isinstance(path, str)
+            or len(path.encode("utf-8")) > 4096
+            or _DELTA_HINT_PATH.fullmatch(path) is None
+        ):
+            raise ValueError("delta changed path syntax is invalid")
+    try:
+        root_text = os.fspath(request.repo_root)
+    except TypeError as error:
+        raise ValueError("delta repository path syntax is invalid") from error
+    if (
+        not isinstance(root_text, str)
+        or not root_text.strip()
+        or "\x00" in root_text
+        or len(root_text.encode("utf-8")) > 4096
+    ):
+        raise ValueError("delta repository path syntax is invalid")
+
+
+def _generic_delta_preflight_fallback(request: ScanRequest, elapsed_ms: int, reason: str):
+    identity = canonical_bytes(
+        {
+            "change_request": request.change_request,
+            "evidence": list(request.evidence),
+            "reason": reason,
+        }
+    )
+    scan_id = hashlib.sha256(identity).hexdigest()[:32]
+    receipt_id = hashlib.sha256(identity + b":preflight").hexdigest()[:32]
+    receipt_sha256 = hashlib.sha256(identity + b":partial").hexdigest()
+    return FAST_SCAN.FastScanResult(
+        "partial",
+        scan_id,
+        receipt_id,
+        receipt_sha256,
+        reason,
+        "unknown",
+        (),
+        (
+            {
+                "id": "DELTA-FRONTIER-001",
+                "node": "delta-worker-preflight",
+                "reason": reason,
+                "risk_domains": ["regression"],
+                "provenance": "delta-worker-preflight",
+            },
+        ),
+        (),
+        elapsed_ms,
+        "bypassed",
+        False,
+        performance_metrics=PERFORMANCE.PerformanceMetrics(
+            accounted_new_evidence_bytes=None,
+            accounting_exclusions=("preflight worker bytes and phase timing unavailable",),
+            estimated_serialized_input_tokens=None,
+            estimated_serialized_output_tokens=PERFORMANCE.estimate_tokens(reason.encode("utf-8")),
+            cache_status="bypassed",
+            operation_elapsed_ms=elapsed_ms,
+        ),
+    )
+
+
+def _terminate_delta_worker(process: subprocess.Popen[bytes]) -> bool:
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except OSError:
+            pass
+    elif process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=_DELTA_WORKER_CLEANUP_GRACE_SECONDS / 4)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    elif process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=_DELTA_WORKER_CLEANUP_GRACE_SECONDS / 2)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return process.poll() is not None
+
+
+def _cleanup_delta_worker_temps(root: Path, token: str, deadline: float | None = None) -> bool:
+    directories = (
+        (".requirements-impact-refiner", "scans"),
+        (".requirements-impact-refiner", "graph"),
+        (".requirements-impact-refiner", "cache", "graph", "v1"),
+    )
+    marker = f".{token}."
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    complete = True
+    for parts in directories:
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
+        opened = []
+        try:
+            parent = os.open(root, directory_flags)
+            opened.append(parent)
+            for part in parts:
+                parent = os.open(part, directory_flags, dir_fd=parent)
+                opened.append(parent)
+        except (FileNotFoundError, NotADirectoryError):
+            for descriptor in reversed(opened):
+                os.close(descriptor)
+            continue
+        except OSError:
+            complete = False
+            for descriptor in reversed(opened):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    complete = False
+            continue
+        try:
+            with os.scandir(parent) as entries:
+                for index, entry in enumerate(entries, start=1):
+                    if index > _DELTA_WORKER_MAX_CLEANUP_ENTRIES:
+                        complete = False
+                        break
+                    if deadline is not None and time.monotonic() >= deadline:
+                        complete = False
+                        break
+                    if marker not in entry.name or not entry.name.endswith(".tmp"):
+                        continue
+                    try:
+                        removable = not entry.is_symlink() and entry.is_file(follow_symlinks=False)
+                    except OSError:
+                        complete = False
+                        continue
+                    if not removable:
+                        complete = False
+                        continue
+                    try:
+                        os.unlink(entry.name, dir_fd=parent)
+                    except OSError:
+                        complete = False
+        except OSError:
+            complete = False
+        finally:
+            for descriptor in reversed(opened):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    complete = False
+    return complete
+
+
+def _cleanup_delta_worker_directory(
+    worker_temp: Path,
+    input_path: Path,
+    deadline: float,
+) -> bool:
+    if input_path.parent != worker_temp or input_path.name != "input.json":
+        return False
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    parent_descriptor = -1
+    directory_descriptor = -1
+    complete = True
+    removed = False
+    try:
+        parent_descriptor = os.open(worker_temp.parent, directory_flags)
+        directory_descriptor = os.open(
+            worker_temp.name,
+            directory_flags,
+            dir_fd=parent_descriptor,
+        )
+    except FileNotFoundError:
+        for descriptor in (directory_descriptor, parent_descriptor):
+            if descriptor >= 0:
+                os.close(descriptor)
+        return False
+    except OSError:
+        for descriptor in (directory_descriptor, parent_descriptor):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        return False
+    try:
+        try:
+            os.unlink(input_path.name, dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            complete = False
+        if time.monotonic() >= deadline:
+            complete = False
+        else:
+            try:
+                with os.scandir(directory_descriptor) as entries:
+                    for index, entry in enumerate(entries, start=1):
+                        if index > _DELTA_WORKER_MAX_PRIVATE_TEMP_ENTRIES:
+                            complete = False
+                            break
+                        if time.monotonic() >= deadline:
+                            complete = False
+                            break
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                os.rmdir(entry.name, dir_fd=directory_descriptor)
+                            else:
+                                os.unlink(entry.name, dir_fd=directory_descriptor)
+                        except OSError:
+                            complete = False
+            except OSError:
+                complete = False
+        try:
+            opened = os.fstat(directory_descriptor)
+            current = os.stat(
+                worker_temp.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or opened.st_dev != current.st_dev
+                or opened.st_ino != current.st_ino
+            ):
+                complete = False
+            else:
+                os.rmdir(worker_temp.name, dir_fd=parent_descriptor)
+                removed = True
+        except OSError:
+            complete = False
+    finally:
+        for descriptor in (directory_descriptor, parent_descriptor):
+            try:
+                os.close(descriptor)
+            except OSError:
+                complete = False
+    return complete and removed
+
+
+def _delta_worker_body(payload: bytes, token: str) -> tuple[str, Mapping[str, object]]:
+    if not payload or len(payload) > _DELTA_WORKER_MAX_FRAME:
+        raise ValueError("delta worker frame body size is invalid")
+    try:
+        value = json.loads(payload.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        raise ValueError("delta worker frame payload is invalid") from error
+    try:
+        canonical = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except (RecursionError, TypeError, UnicodeEncodeError, ValueError) as error:
+        raise ValueError("delta worker frame payload is invalid") from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"kind", "payload", "token"}
+        or value.get("token") != token
+        or canonical != payload
+    ):
+        raise ValueError("delta worker frame authentication is invalid")
+    kind = value.get("kind")
+    frame_payload = value.get("payload")
+    if not isinstance(kind, str):
+        raise ValueError("delta worker frame type is invalid")
+    maximum = {
+        "control": _DELTA_WORKER_MAX_CONTROL_FRAME,
+        "trusted_fallback": _DELTA_WORKER_MAX_FALLBACK_FRAME,
+        "result": _DELTA_WORKER_MAX_RESULT_FRAME,
+    }.get(kind)
+    if maximum is None or len(payload) > maximum or not isinstance(frame_payload, Mapping):
+        raise ValueError("delta worker frame type or bound is invalid")
+    return str(kind), frame_payload
+
+
+def _delta_worker_frame(payload: bytes, token: str) -> tuple[str, Mapping[str, object]]:
+    if len(payload) < 9 or len(payload) > _DELTA_WORKER_MAX_FRAME + 9:
+        raise ValueError("delta worker frame size is invalid")
+    header = payload[:9]
+    if re.fullmatch(rb"[0-9a-f]{8}\n", header) is None:
+        raise ValueError("delta worker frame header is invalid")
+    declared = int(header[:8], 16)
+    body = payload[9:]
+    if declared != len(body):
+        raise ValueError("delta worker frame length is invalid")
+    return _delta_worker_body(body, token)
+
+
+class _DeltaWorkerFrameParser:
+    def __init__(self, token: str, request: ScanRequest):
+        self.token = token
+        self.request = request
+        self.buffer = bytearray()
+        self.expected: int | None = None
+        self.total = 0
+        self.invalid = False
+        self.effective_max_seconds: int | None = None
+        self.trusted_fallback: Mapping[str, object] | None = None
+        self.result: Mapping[str, object] | None = None
+
+    def _accept(self, kind: str, payload: Mapping[str, object]) -> None:
+        if kind == "control":
+            effective = payload.get("effective_max_seconds")
+            if (
+                set(payload) != {"effective_max_seconds"}
+                or type(effective) is not int
+                or not 1 <= effective <= 3
+                or self.effective_max_seconds is not None
+                or self.trusted_fallback is not None
+                or self.result is not None
+            ):
+                raise ValueError("delta worker control frame is invalid")
+            self.effective_max_seconds = effective
+            return
+        if self.effective_max_seconds is None:
+            raise ValueError("delta worker control frame must be first")
+        if kind == "trusted_fallback":
+            parsed = _scan_result_from_mapping(payload, 0)
+            if (
+                self.trusted_fallback is not None
+                or self.result is not None
+                or parsed.status != "partial"
+                or parsed.can_promote
+                or parsed.previous_report_id != self.request.previous_report_id
+                or parsed.previous_revision != self.request.previous_revision
+                or parsed.changed_paths != self.request.changed_paths
+                or parsed.previous_display_text is None
+            ):
+                raise ValueError("delta worker trusted fallback frame is invalid")
+            self.trusted_fallback = dict(payload)
+            return
+        if kind != "result" or self.trusted_fallback is None or self.result is not None:
+            raise ValueError("delta worker result frame order is invalid")
+        parsed = _scan_result_from_mapping(payload, 0)
+        fallback = _scan_result_from_mapping(self.trusted_fallback, 0)
+        if (
+            parsed.previous_report_id != fallback.previous_report_id
+            or parsed.previous_revision != fallback.previous_revision
+            or parsed.changed_paths != fallback.changed_paths
+            or parsed.previous_display_text != fallback.previous_display_text
+        ):
+            raise ValueError("delta worker result identity is invalid")
+        self.result = dict(payload)
+
+    def feed(self, chunk: bytes) -> bool:
+        if self.invalid or not isinstance(chunk, bytes) or not chunk:
+            self.invalid = True
+            return False
+        self.total += len(chunk)
+        if self.total > _DELTA_WORKER_MAX_OUTPUT:
+            self.invalid = True
+            return False
+        self.buffer.extend(chunk)
+        try:
+            while True:
+                if self.expected is None:
+                    if len(self.buffer) < 9:
+                        return True
+                    header = bytes(self.buffer[:9])
+                    if re.fullmatch(rb"[0-9a-f]{8}\n", header) is None:
+                        raise ValueError("delta worker frame header is invalid")
+                    self.expected = int(header[:8], 16)
+                    if not 0 < self.expected <= _DELTA_WORKER_MAX_FRAME:
+                        raise ValueError("delta worker frame length is invalid")
+                    del self.buffer[:9]
+                if len(self.buffer) < self.expected:
+                    return True
+                body = bytes(self.buffer[: self.expected])
+                del self.buffer[: self.expected]
+                self.expected = None
+                kind, payload = _delta_worker_body(body, self.token)
+                self._accept(kind, payload)
+        except (TypeError, ValueError):
+            self.invalid = True
+            return False
+
+    def complete(self) -> bool:
+        return (
+            not self.invalid
+            and self.expected is None
+            and not self.buffer
+            and self.effective_max_seconds is not None
+            and self.trusted_fallback is not None
+            and self.result is not None
+        )
+
+
+def _read_delta_worker_output(
+    process: subprocess.Popen[bytes],
+    operation_started: float,
+    hard_max_seconds: float,
+    token: str,
+    request: ScanRequest,
+) -> tuple[Mapping[str, object] | None, Mapping[str, object] | None, bool]:
+    if process.stdout is None or process.stderr is None:
+        return None, None, False
+    parser = _DeltaWorkerFrameParser(token, request)
+    selector = selectors.DefaultSelector()
+    stderr = bytearray()
+    for stream in (process.stdout, process.stderr):
+        selector.register(stream, selectors.EVENT_READ)
+    failed = False
+    timed_out = False
+    absolute_deadline = operation_started + hard_max_seconds
+    provisional_deadline = operation_started + _DELTA_WORKER_MIN_SECONDS
+    effective_deadline = provisional_deadline
+    worker_clean = False
+    try:
+        while selector.get_map():
+            now = time.monotonic()
+            if now >= effective_deadline:
+                timed_out = True
+                break
+            events = selector.select(max(0.0, min(effective_deadline - now, 0.025)))
+            for key, _mask in events:
+                stream = cast(Any, key.fileobj)
+                if not hasattr(stream, "fileno"):
+                    failed = True
+                    break
+                try:
+                    chunk = os.read(stream.fileno(), 65_536)
+                except OSError:
+                    failed = True
+                    break
+                if not chunk:
+                    selector.unregister(stream)
+                    continue
+                if stream is process.stdout:
+                    awaiting_control = parser.effective_max_seconds is None
+                    if awaiting_control and time.monotonic() >= provisional_deadline:
+                        timed_out = True
+                        break
+                    if not parser.feed(chunk):
+                        failed = True
+                        break
+                    if awaiting_control and parser.effective_max_seconds is not None:
+                        if time.monotonic() >= provisional_deadline:
+                            parser.invalid = True
+                            parser.trusted_fallback = None
+                            parser.result = None
+                            timed_out = True
+                            break
+                        effective_deadline = min(
+                            absolute_deadline,
+                            operation_started + parser.effective_max_seconds,
+                        )
+                elif len(stderr) + len(chunk) > _DELTA_WORKER_MAX_ERROR:
+                    failed = True
+                    break
+                else:
+                    stderr.extend(chunk)
+                    failed = True
+                    break
+            if failed:
+                break
+        if timed_out or failed:
+            worker_clean = _terminate_delta_worker(process)
+        else:
+            try:
+                process.wait(timeout=max(0.001, effective_deadline - time.monotonic()))
+                worker_clean = process.poll() is not None
+            except (OSError, subprocess.TimeoutExpired):
+                timed_out = True
+                worker_clean = _terminate_delta_worker(process)
+        clean = (
+            not timed_out
+            and not failed
+            and not stderr
+            and process.returncode == 0
+            and parser.complete()
+            and worker_clean
+        )
+        return parser.trusted_fallback, parser.result if clean else None, worker_clean
+    finally:
+        selector.close()
+        process.stdout.close()
+        process.stderr.close()
+
+
+def _run_delta_worker(
+    worker: Path,
+    input_path: Path,
+    input_sha256: str,
+    token: str,
+    environment: Mapping[str, str],
+    operation_started: float,
+    hard_max_seconds: float,
+    request: ScanRequest,
+) -> tuple[Mapping[str, object] | None, Mapping[str, object] | None, bool]:
+    try:
+        process = subprocess.Popen(
+            (
+                sys.executable,
+                str(worker),
+                "--input",
+                str(input_path),
+                "--sha256",
+                input_sha256,
+                "--token",
+                token,
+                "--parent-pid",
+                str(os.getpid()),
+            ),
+            cwd=str(worker.parent),
+            env=dict(environment),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError:
+        return None, None, True
+    fallback = None
+    result = None
+    worker_clean = False
+    try:
+        try:
+            fallback, result, worker_clean = _read_delta_worker_output(
+                process,
+                operation_started,
+                hard_max_seconds,
+                token,
+                request,
+            )
+        except (OSError, TypeError, ValueError):
+            fallback = None
+            result = None
+        if process.poll() is not None and hasattr(os, "killpg"):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                worker_clean = False
+    finally:
+        if process.poll() is None:
+            worker_clean = _terminate_delta_worker(process)
+    return fallback, result, worker_clean
+
+
+def _execute_delta_worker(
+    request: ScanRequest,
+    max_seconds: float,
+    operation_started: float,
+    *,
+    worker_path: Path | None = None,
+    worker_environment: Mapping[str, str] | None = None,
+):
+    if (
+        not isinstance(max_seconds, (int, float))
+        or isinstance(max_seconds, bool)
+        or max_seconds < _DELTA_WORKER_MIN_SECONDS
+        or max_seconds > 3
+    ):
+        raise ValueError("delta worker deadline must be between one and three seconds")
+    _validate_delta_request_syntax(request)
+    root_hint = Path(os.path.abspath(os.fspath(request.repo_root)))
+    selected_worker = (
+        SCRIPT_DIR / "rir_delta_worker.py" if worker_path is None else Path(worker_path)
+    )
+    if worker_path is None and _regular_module_path(selected_worker) != selected_worker:
+        raise ImportError("delta worker sibling is unsafe")
+    if not selected_worker.is_file() or selected_worker.is_symlink():
+        raise ValueError("delta worker path is unsafe")
+    work_deadline = operation_started + _DELTA_WORKER_MIN_SECONDS
+    request_value = {
+        "schema_version": 1,
+        "repo_root": str(root_hint),
+        "change_request": request.change_request,
+        "evidence": list(request.evidence),
+        "audience_override": request.audience_override,
+        "previous_report_id": request.previous_report_id,
+        "previous_revision": request.previous_revision,
+        "changed_paths": list(request.changed_paths),
+        "operation_started": operation_started,
+        "max_seconds": max_seconds,
+        "worker_token": None,
+        "parent_pid": os.getpid(),
+    }
+    token = secrets.token_hex(16)
+    request_value["worker_token"] = token
+    request_payload = canonical_bytes(request_value)
+    if len(request_payload) > _DELTA_WORKER_MAX_INPUT:
+        raise ValueError("delta worker input exceeds its byte limit")
+    worker_temp = Path(tempfile.mkdtemp(prefix="rir-delta-worker-"))
+    worker_temp.chmod(0o700)
+    input_path = worker_temp / "input.json"
+    descriptor = -1
+    fallback_mapping = None
+    result_mapping = None
+    worker_clean = True
+    cleanup_complete = True
+    generic_reason = (
+        "delta worker preflight timed out or failed before trusted previous report binding"
+    )
+    try:
+        descriptor = os.open(input_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.fchmod(descriptor, 0o600)
+        offset = 0
+        while offset < len(request_payload):
+            offset += os.write(descriptor, request_payload[offset:])
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        environment = {
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": os.environ.get("PATH", ""),
+            "TMPDIR": str(worker_temp),
+            "TMP": str(worker_temp),
+            "TEMP": str(worker_temp),
+        }
+        system_root = os.environ.get("SYSTEMROOT")
+        if system_root:
+            environment["SYSTEMROOT"] = system_root
+        if worker_environment:
+            for name, value in worker_environment.items():
+                if not name.startswith("RIR_DELTA_TEST_") or not isinstance(value, str):
+                    raise ValueError("delta worker test environment is invalid")
+                environment[name] = value
+        if time.monotonic() >= work_deadline:
+            generic_reason = "delta worker preflight timed out before process start"
+        else:
+            request_sha256 = hashlib.sha256(request_payload).hexdigest()
+            fallback_mapping, result_mapping, worker_clean = _run_delta_worker(
+                selected_worker,
+                input_path,
+                request_sha256,
+                token,
+                environment,
+                operation_started,
+                max_seconds,
+                request,
+            )
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_complete = False
+        cleanup_deadline = time.monotonic() + _DELTA_WORKER_CLEANUP_SCAN_SECONDS
+        cleanup_complete = (
+            _cleanup_delta_worker_directory(worker_temp, input_path, cleanup_deadline)
+            and cleanup_complete
+        )
+        cleanup_complete = (
+            _cleanup_delta_worker_temps(root_hint, token, cleanup_deadline) and cleanup_complete
+        )
+    elapsed_ms = round((time.monotonic() - operation_started) * 1000)
+    if not worker_clean or not cleanup_complete:
+        result_mapping = None
+        generic_reason = "delta worker cleanup failed before a safe result could be returned"
+    selected_mapping = result_mapping if result_mapping is not None else fallback_mapping
+    if selected_mapping is not None:
+        return _scan_result_from_mapping(selected_mapping, elapsed_ms)
+    return _generic_delta_preflight_fallback(request, elapsed_ms, generic_reason)
+
+
+def _scan_impact_in_process(
+    request: ScanRequest,
+    *,
+    operation_started: float | None = None,
+    _worker_control_callback: Callable[[int], None] | None = None,
+    _worker_fallback_callback: Callable[[Mapping[str, object]], None] | None = None,
+):
     root = _root(request.repo_root)
     if not isinstance(request.evidence, tuple):
         raise ValueError("scan evidence must be a tuple")
     settings = SETTINGS.resolve(root, request.audience_override, None)
-    return fast_scan.execute_fast_scan(
-        fast_scan.FastScanRequest(
-            root, request.change_request, request.evidence, settings["audience"]
+    if (_worker_control_callback is None) != (_worker_fallback_callback is None):
+        raise ValueError("delta worker callbacks must be supplied together")
+    delta_requested = (
+        request.previous_report_id is not None
+        or request.previous_revision is not None
+        or bool(request.changed_paths)
+    )
+    configured_delta_max = 3
+    effective_settings: Mapping[str, object] = settings
+    if delta_requested:
+        configured_delta_max = min(_configured_delta_max_seconds(root, settings), 3)
+        delta_settings: dict[str, object] = dict(settings)
+        delta_settings["delta_max_seconds"] = configured_delta_max
+        effective_settings = delta_settings
+    if _worker_control_callback is not None:
+        _worker_control_callback(configured_delta_max)
+    delta_context = _trusted_delta_context(root, request, effective_settings)
+    if _worker_fallback_callback is not None:
+        if delta_context is None or operation_started is None:
+            raise ValueError("delta worker fallback requires trusted context and start time")
+        elapsed_ms = max(0, round((time.monotonic() - operation_started) * 1000))
+        _worker_fallback_callback(DELTA.delta_timeout_fallback(delta_context, elapsed_ms))
+    return FAST_SCAN.execute_fast_scan(
+        FAST_SCAN.FastScanRequest(
+            root,
+            request.change_request,
+            request.evidence,
+            settings["audience"],
+            previous_report_id=request.previous_report_id,
+            previous_revision=request.previous_revision,
+            changed_paths=tuple(request.changed_paths),
+            delta_max_seconds=configured_delta_max if delta_context is not None else 3,
         ),
         settings["impact_graph"],
         _payload_sha256(),
+        delta_context=delta_context,
+        operation_started=operation_started,
     )
+
+
+def scan_impact(request: ScanRequest) -> ScanResult:
+    operation_started = time.monotonic()
+    delta_requested = (
+        request.previous_report_id is not None
+        or request.previous_revision is not None
+        or bool(request.changed_paths)
+    )
+    if delta_requested:
+        _validate_delta_request_syntax(request)
+        return _execute_delta_worker(request, 3, operation_started)
+    return _scan_impact_in_process(request)
 
 
 def _promoted_scan(root, request, settings):
@@ -403,13 +2450,55 @@ def _promoted_scan(root, request, settings):
         return None
     if DRAFT_ID_PATTERN.fullmatch(request.scan_id) is None:
         raise ValueError("invalid Fast Scan ID")
-    prepared = fast_scan.prepare_fast_scan_identity(
-        fast_scan.FastScanRequest(
-            root, request.request, request.repository_evidence,
+    payload = FAST_SCAN_STORE.load_scan_receipt_bytes(root, request.scan_id)
+    value = json.loads(payload)
+    errors = FAST_SCAN.validate_fast_scan_receipt(value)
+    if errors or FAST_SCAN.canonical_fast_scan_bytes(value) != payload:
+        raise ValueError("Fast Scan receipt is invalid")
+    delta_value = value.get("delta_context")
+    delta_context = None
+    if isinstance(delta_value, Mapping):
+        report_id = delta_value.get("previous_report_id")
+        revision = delta_value.get("previous_revision")
+        changed_paths = delta_value.get("changed_paths")
+        if (
+            not isinstance(report_id, str)
+            or type(revision) is not int
+            or not isinstance(changed_paths, list)
+        ):
+            raise ValueError("Fast Scan delta context is invalid")
+        scan_request = ScanRequest(
+            root,
+            request.request,
+            request.repository_evidence,
             settings["audience"],
-        ),
+            report_id,
+            revision,
+            tuple(changed_paths),
+        )
+        delta_context = _trusted_delta_context(root, scan_request, settings)
+        fast_request = FAST_SCAN.FastScanRequest(
+            root,
+            request.request,
+            request.repository_evidence,
+            settings["audience"],
+            previous_report_id=report_id,
+            previous_revision=revision,
+            changed_paths=tuple(changed_paths),
+            delta_max_seconds=_configured_delta_max_seconds(root, settings),
+        )
+    else:
+        fast_request = FAST_SCAN.FastScanRequest(
+            root,
+            request.request,
+            request.repository_evidence,
+            settings["audience"],
+        )
+    prepared = FAST_SCAN.prepare_fast_scan_identity(
+        fast_request,
         settings["impact_graph"],
         _payload_sha256(),
+        delta_context,
     )
     if prepared.scan_id != request.scan_id:
         raise ValueError(
@@ -417,11 +2506,6 @@ def _promoted_scan(root, request, settings):
             "text, repository evidence rows, audience, graph settings, and "
             "repository contents must all equal the original rir_scan call"
         )
-    payload = fast_scan_store.load_scan_receipt_bytes(root, request.scan_id)
-    value = json.loads(payload)
-    errors = fast_scan.validate_fast_scan_receipt(value)
-    if errors or fast_scan.canonical_fast_scan_bytes(value) != payload:
-        raise ValueError("Fast Scan receipt is invalid")
     if value["status"] != "complete" or value["can_promote"] is not True:
         raise ValueError("Fast Scan receipt is not promotable")
     if (
@@ -431,6 +2515,8 @@ def _promoted_scan(root, request, settings):
         or value["settings"] != prepared.settings.to_mapping()
         or value["source_inventory"] != dict(prepared.inventory_mapping)
         or value["seeds"] != [row.to_mapping() for row in prepared.seeds]
+        or value.get("delta_context")
+        != (None if prepared.delta_context is None else dict(prepared.delta_context))
     ):
         raise ValueError("Fast Scan source or identity is stale")
     graph = value["graph_receipt"]
@@ -453,18 +2539,16 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
     if not isinstance(request.request, str) or not request.request.strip():
         raise ValueError("request must be nonempty")
     if not isinstance(request.repository_evidence, tuple) or any(
-        not isinstance(item, str) or not item.strip()
-        for item in request.repository_evidence
+        not isinstance(item, str) or not item.strip() for item in request.repository_evidence
     ):
         raise ValueError("repository_evidence must contain nonempty strings")
+    normalized_request = FINALIZE.REPORT_CONTEXT.canonical_requirement_text(request.request)
     _bounded(
-        {"request": request.request, "repository_evidence": request.repository_evidence},
+        {"request": normalized_request, "repository_evidence": request.repository_evidence},
         MAX_BEGIN_BYTES,
         "begin input",
     )
-    settings = SETTINGS.resolve(
-        root, request.audience_override, request.delivery_override
-    )
+    settings = SETTINGS.resolve(root, request.audience_override, request.delivery_override)
     promotion = _promoted_scan(root, request, settings)
     current_lineage = _current_lineage(root)
     if current_lineage is None:
@@ -511,1755 +2595,74 @@ def begin_refinement(request: BeginRequest) -> DraftResult:
         prior_state=prior_state,
         prior_key_map=prior_key_map,
         scan_id=None if promotion is None else promotion["scan_id"],
-        graph_receipt_id=(
-            None if promotion is None else promotion["receipt_id"]
-        ),
+        graph_receipt_id=(None if promotion is None else promotion["receipt_id"]),
     )
 
 
-def load_draft(repo_root: Path, draft_id: str) -> dict[str, object]:
-    root = _root(repo_root)
-    if DRAFT_ID_PATTERN.fullmatch(draft_id) is None:
-        raise ValueError("invalid draft ID")
-    directory_fd = _private_draft_directory_fd(root)
-    file_fd = None
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        file_fd = os.open(f"{draft_id}.json", flags, dir_fd=directory_fd)
-        chunks = []
-        total = 0
-        while True:
-            chunk = os.read(file_fd, 1024 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > MAX_DRAFT_BYTES:
-                raise ValueError("draft exceeds 4 MiB")
-            chunks.append(chunk)
-        value = json.loads(b"".join(chunks).decode("utf-8", errors="strict"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"draft is invalid: {error}") from error
-    finally:
-        if file_fd is not None:
-            os.close(file_fd)
-        os.close(directory_fd)
-    if not isinstance(value, dict) or value.get("draft_id") != draft_id:
-        raise ValueError("draft identity is invalid")
-    if value.get("repo_root") != str(root):
-        raise ValueError("draft repository root does not match")
-    return value
-
-
-def _graph_draft_identity(draft: Mapping[str, object]) -> dict[str, object]:
-    keys = (
-        "schema_version", "draft_id", "repo_root", "request", "request_sha256",
-        "repository_evidence", "adapter", "settings", "report_id", "revision",
-        "previous_sha256", "prior_state", "prior_key_map", "created_at",
-    )
-    try:
-        identity = {key: draft[key] for key in keys}
-    except KeyError as error:
-        raise ValueError(f"draft graph identity is missing {error.args[0]}") from error
-    request = identity["request"]
-    if (
-        not isinstance(request, str)
-        or identity["request_sha256"]
-        != hashlib.sha256(request.encode("utf-8")).hexdigest()
-    ):
-        raise ValueError("draft request identity is invalid")
-    return identity
-
-
-def _replace_private_draft(
-    root: Path, draft_id: str, value: Mapping[str, object]
-) -> None:
-    directory_fd = _private_draft_directory_fd(root)
-    temporary_name = f".{draft_id}.{secrets.token_hex(8)}.tmp"
-    descriptor = None
-    try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        descriptor = os.open(temporary_name, flags, 0o600, dir_fd=directory_fd)
-        payload = _canonical_bytes(value)
-        offset = 0
-        while offset < len(payload):
-            offset += os.write(descriptor, payload[offset:])
-        os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = None
-        os.replace(
-            temporary_name, f"{draft_id}.json",
-            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-        )
-        os.fsync(directory_fd)
-    except OSError as error:
-        raise ValueError(f"cannot bind graph receipt to draft: {error}") from error
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-        try:
-            os.unlink(temporary_name, dir_fd=directory_fd)
-        except FileNotFoundError:
-            pass
-        os.close(directory_fd)
-
-
-def _read_bounded_descriptor(descriptor: int, maximum: int, label: str) -> bytes:
-    os.lseek(descriptor, 0, os.SEEK_SET)
-    payload = bytearray()
-    while len(payload) <= maximum:
-        chunk = os.read(
-            descriptor, min(64 * 1024, maximum + 1 - len(payload))
-        )
-        if not chunk:
-            break
-        payload.extend(chunk)
-    if len(payload) > maximum:
-        raise ValueError(f"{label} exceeds maximum byte size")
-    return bytes(payload)
-
-
-_DRAFT_TRANSACTION_KEYS = {
-    "schema_version", "draft_id", "repo_root_sha256", "transaction_id",
-    "expected_sha256", "expected_dev", "expected_ino",
-    "replacement_sha256", "replacement_dev", "replacement_ino",
-}
-_DRAFT_TRANSACTION_MAX_BYTES = 16 * 1024
-
-
-@contextmanager
-def _draft_transaction_lock(directory_fd: int):
-    descriptor = None
-    locked = False
-    flags = os.O_RDWR | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(".draft-transaction.lock", flags, 0o600, dir_fd=directory_fd)
-    except OSError as error:
-        raise ValueError(f"draft transaction lock is unavailable: {error}") from error
-    try:
-        metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-            or metadata.st_nlink != 1
-        ):
-            raise ValueError("draft transaction lock is unsafe")
-        if fcntl is not None:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as error:
-                raise ValueError("draft transaction recovery is busy; retry") from error
-            locked = True
-        yield
-    finally:
-        if descriptor is not None:
-            if locked:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
-
-
-def _write_private_transaction_component(
-    directory_fd: int, name: str, payload: bytes, label: str
-):
-    descriptor = None
-    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(name, flags, 0o600, dir_fd=directory_fd)
-        offset = 0
-        while offset < len(payload):
-            offset += os.write(descriptor, payload[offset:])
-        os.fsync(descriptor)
-        metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-            or metadata.st_nlink != 1
-        ):
-            raise ValueError(f"{label} is unsafe")
-        return descriptor, metadata
-    except BaseException as error:
-        cleanup_error = None
-        if descriptor is not None:
-            try:
-                metadata = os.fstat(descriptor)
-                actual_payload = _read_bounded_descriptor(
-                    descriptor, max(len(payload), 1), label
-                )
-                _unlink_transaction_component(
-                    directory_fd,
-                    name,
-                    (descriptor, metadata, actual_payload),
-                    payload,
-                    max(len(payload), 1),
-                    label,
-                )
-            except (OSError, ValueError) as cleanup_failure:
-                cleanup_error = cleanup_failure
-            os.close(descriptor)
-        if cleanup_error is not None:
-            raise ValueError(
-                f"cannot persist {label}; cleanup is uncertain: {cleanup_error}"
-            ) from error
-        if isinstance(error, OSError):
-            raise ValueError(f"cannot persist {label}: {error}") from error
-        raise
-
-
-def _open_optional_transaction_component(
-    directory_fd: int, name: str, maximum: int, label: str
-):
-    descriptor = None
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        descriptor = os.open(name, flags, dir_fd=directory_fd)
-    except FileNotFoundError:
-        return None
-    except OSError as error:
-        raise ValueError(f"{label} is unavailable or unsafe: {error}") from error
-    try:
-        metadata = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-        ):
-            raise ValueError(f"{label} is not a private regular file")
-        payload = _read_bounded_descriptor(descriptor, maximum, label)
-        return descriptor, metadata, payload
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _transaction_removing_name(name: str) -> str:
-    return f"{name}.removing"
-
-
-def _open_transaction_component_for_cleanup(
-    directory_fd: int, name: str, maximum: int, label: str
-):
-    removing_name = _transaction_removing_name(name)
-    original = _open_optional_transaction_component(
-        directory_fd, name, maximum, label
-    )
-    try:
-        removing = _open_optional_transaction_component(
-            directory_fd,
-            removing_name,
-            maximum,
-            f"{label} removal quarantine",
-        )
-    except BaseException:
-        if original is not None:
-            os.close(original[0])
-        raise
-    if original is not None and removing is not None:
-        os.close(original[0])
-        os.close(removing[0])
-        raise ValueError(
-            f"{label} and its removal quarantine both exist; recovery is uncertain"
-        )
-    if removing is not None:
-        return removing, removing_name
-    return original, name
-
-
-def _draft_transaction_phase_payload(
-    draft_id: str, transaction_id: str, phase: str, manifest_sha256: str
-) -> bytes:
-    return _canonical_bytes({
-        "draft_id": draft_id,
-        "manifest_sha256": manifest_sha256,
-        "phase": phase,
-        "schema_version": 1,
-        "transaction_id": transaction_id,
-    })
-
-
-_DRAFT_CLEANUP_KEYS = {
-    "draft_id", "kind", "manifest_sha256", "replacement_dev",
-    "replacement_ino", "replacement_sha256", "repo_root_sha256",
-    "schema_version", "transaction_id",
-}
-
-
-def _draft_transaction_cleanup_payload(
-    root: Path,
-    draft_id: str,
-    manifest: Mapping[str, object],
-    manifest_payload: bytes,
-) -> bytes:
-    return _canonical_bytes({
-        "draft_id": draft_id,
-        "kind": "draft-transaction-cleanup",
-        "manifest_sha256": hashlib.sha256(manifest_payload).hexdigest(),
-        "replacement_dev": manifest["replacement_dev"],
-        "replacement_ino": manifest["replacement_ino"],
-        "replacement_sha256": manifest["replacement_sha256"],
-        "repo_root_sha256": hashlib.sha256(
-            str(root).encode("utf-8")
-        ).hexdigest(),
-        "schema_version": 1,
-        "transaction_id": manifest["transaction_id"],
-    })
-
-
-def _validate_draft_transaction_cleanup(
-    root: Path,
-    draft_id: str,
-    cleanup_component,
-    canonical_component,
-    *,
-    manifest: Optional[Mapping[str, object]] = None,
-    manifest_payload: Optional[bytes] = None,
-) -> Mapping[str, object]:
-    try:
-        cleanup = json.loads(
-            cleanup_component[2].decode("utf-8", errors="strict")
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"draft transaction cleanup phase is invalid: {error}") from error
-    if (
-        not isinstance(cleanup, dict)
-        or set(cleanup) != _DRAFT_CLEANUP_KEYS
-        or cleanup.get("schema_version") != 1
-        or cleanup.get("kind") != "draft-transaction-cleanup"
-        or cleanup.get("draft_id") != draft_id
-        or cleanup.get("repo_root_sha256")
-        != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-        or not isinstance(cleanup.get("transaction_id"), str)
-        or DRAFT_ID_PATTERN.fullmatch(cleanup["transaction_id"]) is None
-        or any(
-            not isinstance(cleanup.get(key), int) or cleanup[key] < 0
-            for key in ("replacement_dev", "replacement_ino")
-        )
-        or any(
-            not isinstance(cleanup.get(key), str)
-            or re.fullmatch(r"[0-9a-f]{64}", cleanup[key]) is None
-            for key in ("manifest_sha256", "replacement_sha256")
-        )
-        or _canonical_bytes(cleanup) != cleanup_component[2]
-        or cleanup_component[1].st_nlink != 1
-    ):
-        raise ValueError("draft transaction cleanup phase identity is invalid")
-    if manifest is not None:
-        if manifest_payload is None or cleanup_component[2] != (
-            _draft_transaction_cleanup_payload(
-                root, draft_id, manifest, manifest_payload
-            )
-        ):
-            raise ValueError(
-                "draft transaction cleanup phase does not match its manifest"
-            )
-    if canonical_component is None:
-        raise ValueError("draft transaction cleanup phase lost canonical draft")
-    canonical_info = canonical_component[1]
-    canonical_payload = canonical_component[2]
-    if (
-        not stat.S_ISREG(canonical_info.st_mode)
-        or stat.S_IMODE(canonical_info.st_mode) != 0o600
-        or canonical_info.st_nlink != 1
-        or (canonical_info.st_dev, canonical_info.st_ino)
-        != (cleanup["replacement_dev"], cleanup["replacement_ino"])
-        or hashlib.sha256(canonical_payload).hexdigest()
-        != cleanup["replacement_sha256"]
-    ):
-        raise ValueError(
-            "draft transaction cleanup canonical identity is invalid"
-        )
-    _validate_transaction_draft_payload(
-        canonical_payload,
-        root,
-        draft_id,
-        "draft transaction cleanup canonical",
-    )
-    return cleanup
-
-
-def _validate_transaction_draft_payload(
-    payload: bytes, root: Path, draft_id: str, label: str
-) -> None:
-    try:
-        value = json.loads(payload.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(f"{label} is not a valid draft: {error}") from error
-    if (
-        not isinstance(value, dict)
-        or value.get("draft_id") != draft_id
-        or value.get("repo_root") != str(root)
-        or _canonical_bytes(value) != payload
-    ):
-        raise ValueError(f"{label} draft identity is invalid")
-
-
-def _same_inode(first, second) -> bool:
-    return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
-
-
-def _rename_noreplace(directory_fd: int, source: str, destination: str) -> None:
-    """Atomically move one parent-fd-relative name without clobbering another."""
-    library = ctypes.CDLL(None, use_errno=True)
-    source_bytes = os.fsencode(source)
-    destination_bytes = os.fsencode(destination)
-    if sys.platform == "darwin":
-        operation = library.renameatx_np
-        operation.argtypes = (
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        )
-        operation.restype = ctypes.c_int
-        result = operation(
-            directory_fd,
-            source_bytes,
-            directory_fd,
-            destination_bytes,
-            0x00000004,  # RENAME_EXCL
-        )
-    elif sys.platform.startswith("linux"):
-        try:
-            operation = library.renameat2
-        except AttributeError as error:
-            raise OSError(
-                errno.ENOTSUP, "atomic no-replace rename is unavailable"
-            ) from error
-        operation.argtypes = (
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        )
-        operation.restype = ctypes.c_int
-        result = operation(
-            directory_fd,
-            source_bytes,
-            directory_fd,
-            destination_bytes,
-            0x00000001,  # RENAME_NOREPLACE
-        )
-    else:
-        raise OSError(errno.ENOTSUP, "atomic no-replace rename is unavailable")
-    if result == 0:
-        return
-    error_number = ctypes.get_errno()
-    if error_number == errno.EEXIST:
-        raise FileExistsError(error_number, os.strerror(error_number), destination)
-    raise OSError(error_number, os.strerror(error_number), source)
-
-
-def _restore_quarantined_path(
-    directory_fd: int, quarantine_name: str, original_name: str
-) -> bool:
-    try:
-        os.link(
-            quarantine_name,
-            original_name,
-            src_dir_fd=directory_fd,
-            dst_dir_fd=directory_fd,
-            follow_symlinks=False,
-        )
-    except (FileExistsError, OSError):
-        return False
-    try:
-        quarantine_info = os.stat(
-            quarantine_name, dir_fd=directory_fd, follow_symlinks=False
-        )
-        restored_info = os.stat(
-            original_name, dir_fd=directory_fd, follow_symlinks=False
-        )
-        if not _same_inode(quarantine_info, restored_info):
-            return False
-        os.unlink(quarantine_name, dir_fd=directory_fd)
-        return True
-    except OSError:
-        return False
-
-
-def _unlink_transaction_component(
-    directory_fd: int,
-    name: str,
-    component,
-    expected_payload: bytes,
-    maximum: int,
-    label: str,
-    *,
-    selected_name: Optional[str] = None,
-) -> None:
-    if component is None:
-        return
-    descriptor, metadata, payload = component
-    selected = name if selected_name is None else selected_name
-    removing_name = _transaction_removing_name(name)
-    if selected not in {name, removing_name}:
-        raise ValueError(f"{label} cleanup path is invalid")
-    if payload != expected_payload:
-        raise ValueError(f"{label} changed before cleanup")
-    try:
-        current = os.stat(
-            selected, dir_fd=directory_fd, follow_symlinks=False
-        )
-    except OSError as error:
-        raise ValueError(f"{label} is unavailable before cleanup: {error}") from error
-    if (
-        not _same_inode(current, metadata)
-        or _read_bounded_descriptor(descriptor, maximum, label)
-        != expected_payload
-    ):
-        raise ValueError(f"{label} identity changed before cleanup")
-
-    if selected == name:
-        try:
-            _rename_noreplace(directory_fd, name, removing_name)
-        except FileExistsError as error:
-            raise ValueError(
-                f"{label} removal quarantine already exists; recovery is uncertain"
-            ) from error
-        except OSError as error:
-            raise ValueError(f"{label} cannot be quarantined: {error}") from error
-        selected = removing_name
-
-    try:
-        quarantined = _open_optional_transaction_component(
-            directory_fd,
-            selected,
-            maximum,
-            f"{label} removal quarantine",
-        )
-    except ValueError as error:
-        restored = _restore_quarantined_path(directory_fd, selected, name)
-        qualifier = "restored" if restored else "restoration is uncertain"
-        raise ValueError(
-            f"{label} replacement was quarantined and {qualifier}"
-        ) from error
-    if quarantined is None:
-        raise ValueError(f"{label} removal quarantine disappeared")
-    quarantine_fd = quarantined[0]
-    try:
-        if (
-            not _same_inode(quarantined[1], metadata)
-            or quarantined[2] != expected_payload
-            or _read_bounded_descriptor(descriptor, maximum, label)
-            != expected_payload
-        ):
-            restored = _restore_quarantined_path(directory_fd, selected, name)
-            qualifier = "restored" if restored else "restoration is uncertain"
-            raise ValueError(
-                f"{label} replacement was quarantined and {qualifier}"
-            )
-        try:
-            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            raise ValueError(
-                f"{label} canonical cleanup namespace is unsafe: {error}"
-            ) from error
-        else:
-            raise ValueError(
-                f"{label} replacement preserved; recovery is uncertain"
-            )
-        os.unlink(selected, dir_fd=directory_fd)
-        try:
-            os.stat(selected, dir_fd=directory_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise ValueError(
-                f"{label} quarantine replacement preserved; recovery is uncertain"
-            )
-        try:
-            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise ValueError(
-                f"{label} late replacement preserved; recovery is uncertain"
-            )
-        os.fsync(directory_fd)
-    finally:
-        os.close(quarantine_fd)
-
-
-def _recover_private_draft_transaction_at(
-    root: Path, draft_id: str, directory_fd: int
-) -> None:
-    manifest_name = f".{draft_id}.transaction"
-    cleanup_name = f".{draft_id}.cleanup"
-    manifest_component, manifest_selected_name = (
-        _open_transaction_component_for_cleanup(
-            directory_fd,
-            manifest_name,
-            _DRAFT_TRANSACTION_MAX_BYTES,
-            "draft transaction manifest",
-        )
-    )
-    try:
-        cleanup_component, cleanup_selected_name = (
-            _open_transaction_component_for_cleanup(
-                directory_fd,
-                cleanup_name,
-                _DRAFT_TRANSACTION_MAX_BYTES,
-                "draft transaction cleanup phase",
-            )
-        )
-    except BaseException:
-        if manifest_component is not None:
-            os.close(manifest_component[0])
-        raise
-    opened = []
-    if manifest_component is None:
-        if cleanup_component is None:
-            return
-        opened.append(cleanup_component[0])
-        canonical = _open_optional_transaction_component(
-            directory_fd,
-            f"{draft_id}.json",
-            MAX_DRAFT_BYTES,
-            "draft transaction cleanup canonical draft",
-        )
-        if canonical is not None:
-            opened.append(canonical[0])
-        try:
-            _validate_draft_transaction_cleanup(
-                root, draft_id, cleanup_component, canonical
-            )
-            _unlink_transaction_component(
-                directory_fd,
-                cleanup_name,
-                cleanup_component,
-                cleanup_component[2],
-                _DRAFT_TRANSACTION_MAX_BYTES,
-                "draft transaction cleanup phase",
-                selected_name=cleanup_selected_name,
-            )
-            os.fsync(directory_fd)
-            return
-        finally:
-            for descriptor in reversed(opened):
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-    opened = [manifest_component[0]]
-    if cleanup_component is not None:
-        opened.append(cleanup_component[0])
-    try:
-        manifest_payload = manifest_component[2]
-        try:
-            manifest = json.loads(manifest_payload.decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError(f"draft transaction manifest is invalid: {error}") from error
-        if (
-            not isinstance(manifest, dict)
-            or set(manifest) != _DRAFT_TRANSACTION_KEYS
-            or manifest.get("schema_version") != 1
-            or manifest.get("draft_id") != draft_id
-            or manifest.get("repo_root_sha256")
-            != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-            or not isinstance(manifest.get("transaction_id"), str)
-            or DRAFT_ID_PATTERN.fullmatch(manifest["transaction_id"]) is None
-            or any(
-                not isinstance(manifest.get(key), int) or manifest[key] < 0
-                for key in (
-                    "expected_dev", "expected_ino",
-                    "replacement_dev", "replacement_ino",
-                )
-            )
-            or any(
-                not isinstance(manifest.get(key), str)
-                or re.fullmatch(r"[0-9a-f]{64}", manifest[key]) is None
-                for key in ("expected_sha256", "replacement_sha256")
-            )
-            or _canonical_bytes(manifest) != manifest_payload
-            or manifest_component[1].st_nlink != 1
-        ):
-            raise ValueError("draft transaction manifest identity is invalid")
-
-        transaction_id = manifest["transaction_id"]
-        manifest_sha256 = hashlib.sha256(manifest_payload).hexdigest()
-        filename = f"{draft_id}.json"
-        names = {
-            "anchor": f".{draft_id}.{transaction_id}.anchor",
-            "replacement": f".{draft_id}.{transaction_id}.new",
-            "quarantine": f".{draft_id}.{transaction_id}.quarantine",
-            "swap": f".{draft_id}.{transaction_id}.swap",
-            "commit": f".{draft_id}.{transaction_id}.commit",
-        }
-        swap_payload = _draft_transaction_phase_payload(
-            draft_id, transaction_id, "swap", manifest_sha256
-        )
-        commit_payload = _draft_transaction_phase_payload(
-            draft_id, transaction_id, "commit", manifest_sha256
-        )
-        components = {
-            "canonical": _open_optional_transaction_component(
-                directory_fd, filename, MAX_DRAFT_BYTES,
-                "draft transaction canonical draft",
-            )
-        }
-        component_paths = {"canonical": filename}
-        if components["canonical"] is not None:
-            opened.append(components["canonical"][0])
-        for component_name, maximum, label in (
-            ("anchor", MAX_DRAFT_BYTES, "draft transaction expected anchor"),
-            ("replacement", MAX_DRAFT_BYTES, "draft transaction replacement"),
-            ("quarantine", MAX_DRAFT_BYTES, "draft transaction quarantine"),
-            ("swap", 1024, "draft transaction swap phase"),
-            ("commit", 1024, "draft transaction commit phase"),
-        ):
-            component, selected_name = _open_transaction_component_for_cleanup(
-                directory_fd,
-                names[component_name],
-                maximum,
-                label,
-            )
-            components[component_name] = component
-            component_paths[component_name] = selected_name
-            if component is not None:
-                opened.append(component[0])
-        if components["swap"] is not None and (
-            components["swap"][2] != swap_payload
-            or components["swap"][1].st_nlink != 1
-        ):
-            raise ValueError("draft transaction swap phase identity is invalid")
-        if components["commit"] is not None and (
-            components["commit"][2] != commit_payload
-            or components["commit"][1].st_nlink != 1
-        ):
-            raise ValueError("draft transaction commit phase identity is invalid")
-        if (
-            cleanup_component is None
-            and components["commit"] is not None
-            and components["swap"] is None
-        ):
-            raise ValueError("draft transaction commit phase has no durable swap phase")
-
-        expected_inode = (manifest["expected_dev"], manifest["expected_ino"])
-        replacement_inode = (
-            manifest["replacement_dev"], manifest["replacement_ino"]
-        )
-        expected_payload = replacement_payload = None
-        canonical_kind = None
-        for name in ("canonical", "anchor", "replacement", "quarantine"):
-            component = components[name]
-            if component is None:
-                continue
-            inode = (component[1].st_dev, component[1].st_ino)
-            digest = hashlib.sha256(component[2]).hexdigest()
-            if inode == expected_inode and digest == manifest["expected_sha256"]:
-                kind = "expected"
-                if expected_payload is None:
-                    expected_payload = component[2]
-                elif expected_payload != component[2]:
-                    raise ValueError("draft transaction expected bytes disagree")
-            elif (
-                inode == replacement_inode
-                and digest == manifest["replacement_sha256"]
-            ):
-                kind = "replacement"
-                if replacement_payload is None:
-                    replacement_payload = component[2]
-                elif replacement_payload != component[2]:
-                    raise ValueError("draft transaction replacement bytes disagree")
-            else:
-                raise ValueError(f"draft transaction {name} identity is invalid")
-            if name in {"anchor", "quarantine"} and kind != "expected":
-                raise ValueError(f"draft transaction {name} is cross-transaction")
-            if name == "replacement" and kind != "replacement":
-                raise ValueError("draft transaction replacement is cross-transaction")
-            if name == "canonical":
-                canonical_kind = kind
-
-        for payload, label in (
-            (expected_payload, "draft transaction expected artifact"),
-            (replacement_payload, "draft transaction replacement artifact"),
-        ):
-            if payload is not None:
-                _validate_transaction_draft_payload(payload, root, draft_id, label)
-
-        expected_links = sum(
-            1
-            for name in ("canonical", "anchor", "quarantine")
-            if components[name] is not None
-            and (components[name][1].st_dev, components[name][1].st_ino)
-            == expected_inode
-        )
-        replacement_links = sum(
-            1
-            for name in ("canonical", "replacement")
-            if components[name] is not None
-            and (components[name][1].st_dev, components[name][1].st_ino)
-            == replacement_inode
-        )
-        for name in ("canonical", "anchor", "replacement", "quarantine"):
-            component = components[name]
-            if component is None:
-                continue
-            inode = (component[1].st_dev, component[1].st_ino)
-            expected_count = (
-                expected_links if inode == expected_inode else replacement_links
-            )
-            if component[1].st_nlink != expected_count:
-                raise ValueError(
-                    f"draft transaction {name} has an unbound hard-link identity"
-                )
-
-        def remove(name: str, payload: bytes, maximum: int, label: str) -> None:
-            _unlink_transaction_component(
-                directory_fd,
-                names[name],
-                components[name],
-                payload,
-                maximum,
-                label,
-                selected_name=component_paths[name],
-            )
-            components[name] = None
-
-        def remove_manifest() -> None:
-            _unlink_transaction_component(
-                directory_fd, manifest_name, manifest_component,
-                manifest_payload, _DRAFT_TRANSACTION_MAX_BYTES,
-                "draft transaction manifest",
-                selected_name=manifest_selected_name,
-            )
-
-        def remove_cleanup() -> None:
-            if cleanup_component is None:
-                return
-            _unlink_transaction_component(
-                directory_fd,
-                cleanup_name,
-                cleanup_component,
-                cleanup_component[2],
-                _DRAFT_TRANSACTION_MAX_BYTES,
-                "draft transaction cleanup phase",
-                selected_name=cleanup_selected_name,
-            )
-
-        def finish_rollback() -> None:
-            if components["replacement"] is not None:
-                remove(
-                    "replacement", components["replacement"][2], MAX_DRAFT_BYTES,
-                    "draft transaction replacement",
-                )
-            if components["quarantine"] is not None:
-                remove(
-                    "quarantine", components["quarantine"][2], MAX_DRAFT_BYTES,
-                    "draft transaction quarantine",
-                )
-            if components["anchor"] is not None:
-                remove(
-                    "anchor", components["anchor"][2], MAX_DRAFT_BYTES,
-                    "draft transaction expected anchor",
-                )
-            if components["commit"] is not None:
-                remove(
-                    "commit", commit_payload, 1024,
-                    "draft transaction commit phase",
-                )
-            if components["swap"] is not None:
-                remove(
-                    "swap", swap_payload, 1024,
-                    "draft transaction swap phase",
-                )
-            canonical = _open_optional_transaction_component(
-                directory_fd, filename, MAX_DRAFT_BYTES,
-                "restored canonical draft",
-            )
-            if canonical is None:
-                raise ValueError("draft transaction rollback lost canonical draft")
-            opened.append(canonical[0])
-            if (
-                (canonical[1].st_dev, canonical[1].st_ino) != expected_inode
-                or hashlib.sha256(canonical[2]).hexdigest()
-                != manifest["expected_sha256"]
-                or canonical[1].st_nlink != 1
-            ):
-                raise ValueError("draft transaction rollback identity is uncertain")
-            remove_manifest()
-            os.fsync(directory_fd)
-
-        if cleanup_component is not None:
-            _validate_draft_transaction_cleanup(
-                root,
-                draft_id,
-                cleanup_component,
-                components["canonical"],
-                manifest=manifest,
-                manifest_payload=manifest_payload,
-            )
-            if canonical_kind != "replacement" or any(
-                components[name] is not None
-                for name in ("replacement", "quarantine", "anchor")
-            ):
-                raise ValueError(
-                    "draft transaction cleanup phase artifacts are inconsistent"
-                )
-            if components["commit"] is not None:
-                remove(
-                    "commit", commit_payload, 1024,
-                    "draft transaction commit phase",
-                )
-            if components["swap"] is not None:
-                remove(
-                    "swap", swap_payload, 1024,
-                    "draft transaction swap phase",
-                )
-            remove_manifest()
-            remove_cleanup()
-            os.fsync(directory_fd)
-            return
-
-        if components["swap"] is None:
-            if canonical_kind != "expected" or components["quarantine"] is not None:
-                raise ValueError("draft transaction prepared phase is inconsistent")
-            finish_rollback()
-            return
-
-        if canonical_kind == "expected":
-            finish_rollback()
-            return
-
-        if canonical_kind is None:
-            if components["replacement"] is not None:
-                replacement = components["replacement"]
-                current = os.stat(
-                    component_paths["replacement"], dir_fd=directory_fd,
-                    follow_symlinks=False,
-                )
-                if not _same_inode(current, replacement[1]):
-                    raise ValueError("draft transaction replacement changed before recovery")
-                try:
-                    os.link(
-                        component_paths["replacement"], filename,
-                        src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-                        follow_symlinks=False,
-                    )
-                except FileExistsError as error:
-                    raise ValueError(
-                        "competing canonical draft preserved; recovery is uncertain"
-                    ) from error
-                canonical = _open_optional_transaction_component(
-                    directory_fd, filename, MAX_DRAFT_BYTES,
-                    "recovered canonical draft",
-                )
-                if canonical is None:
-                    raise ValueError("replacement publication recovery failed")
-                opened.append(canonical[0])
-                if (
-                    not _same_inode(canonical[1], replacement[1])
-                    or canonical[2] != replacement[2]
-                ):
-                    raise ValueError("replacement publication recovery is uncertain")
-                components["canonical"] = canonical
-                canonical_kind = "replacement"
-                os.fsync(directory_fd)
-            else:
-                source_name = (
-                    "quarantine" if components["quarantine"] is not None
-                    else "anchor" if components["anchor"] is not None
-                    else None
-                )
-                if source_name is None:
-                    raise ValueError("draft transaction has no exact recovery artifact")
-                source = components[source_name]
-                try:
-                    os.link(
-                        component_paths[source_name], filename,
-                        src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-                        follow_symlinks=False,
-                    )
-                except FileExistsError as error:
-                    raise ValueError(
-                        "competing canonical draft preserved; recovery is uncertain"
-                    ) from error
-                restored = _open_optional_transaction_component(
-                    directory_fd, filename, MAX_DRAFT_BYTES,
-                    "restored canonical draft",
-                )
-                if restored is None or not _same_inode(restored[1], source[1]):
-                    raise ValueError("canonical draft restoration is uncertain")
-                opened.append(restored[0])
-                components["canonical"] = restored
-                canonical_kind = "expected"
-                os.fsync(directory_fd)
-                finish_rollback()
-                return
-
-        if canonical_kind != "replacement":
-            raise ValueError("draft transaction canonical phase is invalid")
-        canonical = components["canonical"]
-        if replacement_payload is None:
-            replacement_payload = canonical[2]
-            _validate_transaction_draft_payload(
-                replacement_payload, root, draft_id,
-                "draft transaction replacement artifact",
-            )
-        if components["commit"] is None:
-            commit_fd, commit_info = _write_private_transaction_component(
-                directory_fd, names["commit"], commit_payload,
-                "draft transaction commit phase",
-            )
-            opened.append(commit_fd)
-            components["commit"] = (commit_fd, commit_info, commit_payload)
-            os.fsync(directory_fd)
-        for name, payload, maximum, label in (
-            (
-                "replacement",
-                components["replacement"][2]
-                if components["replacement"] is not None else b"",
-                MAX_DRAFT_BYTES,
-                "draft transaction replacement",
-            ),
-            (
-                "quarantine",
-                components["quarantine"][2]
-                if components["quarantine"] is not None else b"",
-                MAX_DRAFT_BYTES,
-                "draft transaction quarantine",
-            ),
-            (
-                "anchor",
-                components["anchor"][2]
-                if components["anchor"] is not None else b"",
-                MAX_DRAFT_BYTES,
-                "draft transaction expected anchor",
-            ),
-        ):
-            if components[name] is not None:
-                remove(name, payload, maximum, label)
-        final_canonical = _open_optional_transaction_component(
-            directory_fd, filename, MAX_DRAFT_BYTES,
-            "committed canonical draft",
-        )
-        if final_canonical is None:
-            raise ValueError("draft transaction commit lost canonical draft")
-        opened.append(final_canonical[0])
-        if (
-            (final_canonical[1].st_dev, final_canonical[1].st_ino)
-            != replacement_inode
-            or hashlib.sha256(final_canonical[2]).hexdigest()
-            != manifest["replacement_sha256"]
-            or final_canonical[1].st_nlink != 1
-        ):
-            raise ValueError("draft transaction committed identity is uncertain")
-        cleanup_payload = _draft_transaction_cleanup_payload(
-            root, draft_id, manifest, manifest_payload
-        )
-        cleanup_fd, cleanup_info = _write_private_transaction_component(
-            directory_fd,
-            cleanup_name,
-            cleanup_payload,
-            "draft transaction cleanup phase",
-        )
-        opened.append(cleanup_fd)
-        cleanup_component = (cleanup_fd, cleanup_info, cleanup_payload)
-        cleanup_selected_name = cleanup_name
-        os.fsync(directory_fd)
-        remove("commit", commit_payload, 1024, "draft transaction commit phase")
-        remove("swap", swap_payload, 1024, "draft transaction swap phase")
-        remove_manifest()
-        remove_cleanup()
-        os.fsync(directory_fd)
-    finally:
-        for descriptor in reversed(opened):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
-
-
-def _recover_private_draft_transaction(root: Path, draft_id: str) -> None:
-    directory_fd = _private_draft_directory_fd(root)
-    try:
-        with _draft_transaction_lock(directory_fd):
-            _recover_private_draft_transaction_at(root, draft_id, directory_fd)
-    finally:
-        os.close(directory_fd)
-
-
-def _cas_replace_private_draft(
-    root: Path,
-    draft_id: str,
-    expected: Mapping[str, object],
-    replacement: Mapping[str, object],
-) -> None:
-    directory_fd = _private_draft_directory_fd(root)
-    token = secrets.token_hex(16)
-    filename = f"{draft_id}.json"
-    temporary_name = f".{draft_id}.{token}.new"
-    anchor_name = f".{draft_id}.{token}.anchor"
-    quarantine_name = f".{draft_id}.{token}.quarantine"
-    manifest_name = f".{draft_id}.transaction"
-    swap_name = f".{draft_id}.{token}.swap"
-    current_fd = temporary_fd = anchor_fd = quarantine_fd = None
-    manifest_fd = swap_fd = None
-    anchor_info = None
-    transaction_durable = False
-    try:
-        with _draft_transaction_lock(directory_fd):
-            _recover_private_draft_transaction_at(root, draft_id, directory_fd)
-            read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            current_fd = os.open(filename, read_flags, dir_fd=directory_fd)
-            current_info = os.fstat(current_fd)
-            expected_payload = _canonical_bytes(expected)
-            replacement_payload = _canonical_bytes(replacement)
-            if (
-                not stat.S_ISREG(current_info.st_mode)
-                or stat.S_IMODE(current_info.st_mode) != 0o600
-                or current_info.st_nlink != 1
-                or _read_bounded_descriptor(
-                    current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-                ) != expected_payload
-            ):
-                raise ValueError("trace transaction changed before receipt binding")
-            _validate_transaction_draft_payload(
-                expected_payload, root, draft_id, "trace transaction expected"
-            )
-            _validate_transaction_draft_payload(
-                replacement_payload, root, draft_id,
-                "trace transaction replacement",
-            )
-
-            temporary_fd, temporary_info = _write_private_transaction_component(
-                directory_fd, temporary_name, replacement_payload,
-                "draft transaction replacement",
-            )
-            os.link(
-                filename, anchor_name,
-                src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-                follow_symlinks=False,
-            )
-            anchor = _open_optional_transaction_component(
-                directory_fd, anchor_name, MAX_DRAFT_BYTES,
-                "draft transaction expected anchor",
-            )
-            if (
-                anchor is None
-                or not _same_inode(anchor[1], current_info)
-                or anchor[2] != expected_payload
-            ):
-                raise ValueError("trace transaction changed before receipt binding")
-            anchor_fd, anchor_info = anchor[0], anchor[1]
-            manifest = {
-                "schema_version": 1,
-                "draft_id": draft_id,
-                "repo_root_sha256": hashlib.sha256(
-                    str(root).encode("utf-8")
-                ).hexdigest(),
-                "transaction_id": token,
-                "expected_sha256": hashlib.sha256(expected_payload).hexdigest(),
-                "expected_dev": current_info.st_dev,
-                "expected_ino": current_info.st_ino,
-                "replacement_sha256": hashlib.sha256(
-                    replacement_payload
-                ).hexdigest(),
-                "replacement_dev": temporary_info.st_dev,
-                "replacement_ino": temporary_info.st_ino,
-            }
-            manifest_payload = _canonical_bytes(manifest)
-            manifest_fd, _ = _write_private_transaction_component(
-                directory_fd, manifest_name, manifest_payload,
-                "draft transaction manifest",
-            )
-            os.fsync(directory_fd)
-            transaction_durable = True
-            swap_payload = _draft_transaction_phase_payload(
-                draft_id, token, "swap",
-                hashlib.sha256(manifest_payload).hexdigest(),
-            )
-            swap_fd, _ = _write_private_transaction_component(
-                directory_fd, swap_name, swap_payload,
-                "draft transaction swap phase",
-            )
-            os.fsync(directory_fd)
-
-            current_path_info = os.stat(
-                filename, dir_fd=directory_fd, follow_symlinks=False
-            )
-            if (
-                not _same_inode(current_path_info, current_info)
-                or _read_bounded_descriptor(
-                    current_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-                ) != expected_payload
-            ):
-                raise ValueError("trace transaction changed before receipt binding")
-            _rename_noreplace(directory_fd, filename, quarantine_name)
-            quarantine_fd = os.open(
-                quarantine_name, read_flags, dir_fd=directory_fd
-            )
-            quarantine_info = os.fstat(quarantine_fd)
-            if (
-                not _same_inode(quarantine_info, current_info)
-                or _read_bounded_descriptor(
-                    quarantine_fd, MAX_DRAFT_BYTES, "trace transaction draft"
-                ) != expected_payload
-            ):
-                raise ValueError(
-                    "trace transaction changed after durable quarantine"
-                )
-            replacement_path_info = os.stat(
-                temporary_name, dir_fd=directory_fd, follow_symlinks=False
-            )
-            if (
-                not _same_inode(replacement_path_info, temporary_info)
-                or _read_bounded_descriptor(
-                    temporary_fd, MAX_DRAFT_BYTES,
-                    "draft transaction replacement",
-                ) != replacement_payload
-            ):
-                raise ValueError("draft transaction replacement changed")
-            try:
-                os.link(
-                    temporary_name, filename,
-                    src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
-                    follow_symlinks=False,
-                )
-            except FileExistsError as error:
-                raise ValueError(
-                    "competing trace transaction preserved; recovery is uncertain"
-                ) from error
-            published = _open_optional_transaction_component(
-                directory_fd, filename, MAX_DRAFT_BYTES,
-                "published transaction draft",
-            )
-            if (
-                published is None
-                or not _same_inode(published[1], temporary_info)
-                or published[2] != replacement_payload
-            ):
-                raise ValueError("published transaction draft identity is uncertain")
-            os.close(published[0])
-            os.fsync(directory_fd)
-            _recover_private_draft_transaction_at(root, draft_id, directory_fd)
-            transaction_durable = False
-    except OSError as error:
-        raise ValueError(f"cannot compare-and-swap trace transaction: {error}") from error
-    finally:
-        cleanup_error = None
-        if not transaction_durable:
-            for name, descriptor, metadata, payload, label in (
-                (
-                    temporary_name,
-                    temporary_fd,
-                    temporary_info if temporary_fd is not None else None,
-                    replacement_payload if temporary_fd is not None else b"",
-                    "draft transaction replacement",
-                ),
-                (
-                    anchor_name,
-                    anchor_fd,
-                    anchor_info,
-                    expected_payload if anchor_fd is not None else b"",
-                    "draft transaction expected anchor",
-                ),
-            ):
-                if descriptor is None or metadata is None:
-                    continue
-                selected_name = name
-                try:
-                    os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    selected_name = _transaction_removing_name(name)
-                    try:
-                        os.stat(
-                            selected_name,
-                            dir_fd=directory_fd,
-                            follow_symlinks=False,
-                        )
-                    except FileNotFoundError:
-                        continue
-                try:
-                    _unlink_transaction_component(
-                        directory_fd,
-                        name,
-                        (descriptor, metadata, payload),
-                        payload,
-                        MAX_DRAFT_BYTES,
-                        label,
-                        selected_name=selected_name,
-                    )
-                except (OSError, ValueError) as failure:
-                    cleanup_error = failure
-                    break
-        for descriptor in (
-            swap_fd,
-            manifest_fd,
-            quarantine_fd,
-            anchor_fd,
-            temporary_fd,
-            current_fd,
-        ):
-            if descriptor is not None:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-        os.close(directory_fd)
-        if cleanup_error is not None:
-            raise ValueError(
-                f"pre-manifest draft transaction cleanup is uncertain: "
-                f"{cleanup_error}"
-            )
-
-
-# Compact delivery exists to fit a model turn: bound every list and
-# disclose exactly what was dropped — a silent cap would read as full
-# coverage when it is not.
-COMPACT_MAX_NODES = 48
-COMPACT_MAX_PATHS = 16
-COMPACT_MAX_FRONTIER = 16
-COMPACT_MAX_BYTES = 24_000
-_COMPACT_RISK_ORDER = (
-    "authorization/privacy", "interfaces", "data", "state/concurrency",
-    "compatibility", "operations", "regression", "functionality",
-    "legal/policy",
-)
-_COMPACT_RISK_RANK = {name: index for index, name in enumerate(_COMPACT_RISK_ORDER)}
-
-
-def _compact_node_rank(row: Mapping[str, object]) -> tuple[int, str]:
-    domains = row.get("risk_domains", ())
-    best = min(
-        (_COMPACT_RISK_RANK.get(domain, 99) for domain in domains), default=99
-    )
-    return (best, str(row["id"]))
-
-
-def _compact_selection(receipt: Mapping[str, object]) -> tuple[list, list, list, dict]:
-    # Admit paths and frontier entries only while their nodes fit the node
-    # cap, so every delivered reference stays resolvable and the cap holds
-    # even when deep paths alone would demand more nodes than the budget.
-    required: set = set()
-    frontier = []
-    for row in receipt["frontier"]:
-        if len(frontier) >= COMPACT_MAX_FRONTIER:
-            break
-        candidate = required | {row["node"]}
-        if len(candidate) > COMPACT_MAX_NODES:
-            continue
-        required = candidate
-        frontier.append(row)
-    paths = []
-    for row in receipt["paths"]:
-        if len(paths) >= COMPACT_MAX_PATHS:
-            break
-        candidate = required | set(row["nodes"])
-        if len(candidate) > COMPACT_MAX_NODES:
-            continue
-        required = candidate
-        paths.append(row)
-    selected = [row for row in receipt["nodes"] if row["id"] in required]
-    if len(selected) < COMPACT_MAX_NODES:
-        remaining = sorted(
-            (row for row in receipt["nodes"] if row["id"] not in required),
-            key=_compact_node_rank,
-        )
-        selected.extend(remaining[: COMPACT_MAX_NODES - len(selected)])
-    selected.sort(key=lambda row: str(row["id"]))
-    truncated = {
-        "nodes": max(0, len(receipt["nodes"]) - len(selected)),
-        "paths": max(0, len(receipt["paths"]) - len(paths)),
-        "frontier": max(0, len(receipt["frontier"]) - len(frontier)),
-    }
-    return selected, paths, frontier, truncated
-
-
-def _compact_size(value: Mapping[str, object]) -> int:
-    return len(json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode("utf-8"))
-
-
-def _enforce_compact_byte_budget(compact: dict[str, object]) -> None:
-    """Shrink a compact delivery against its serialized byte budget.
-
-    Actionable frontier entries out-rank paths. Nodes not referenced by a
-    surviving path/frontier are removed first; then the lowest-priority path
-    or frontier is dropped. Every removal is reflected in the disclosure.
-    """
-    summary = compact["summary"]
-    truncated = summary["truncated"]
-    while _compact_size(compact) > COMPACT_MAX_BYTES:
-        referenced = {
-            node["key"]
-            for path in compact["paths"]
-            for node in path["nodes"]
-        }
-        referenced.update(row["node_key"] for row in compact["frontier"])
-        removable = next((
-            index for index in range(len(compact["nodes"]) - 1, -1, -1)
-            if compact["nodes"][index]["key"] not in referenced
-        ), None)
-        if removable is not None:
-            compact["nodes"].pop(removable)
-            truncated["nodes"] += 1
-            continue
-        if compact["paths"]:
-            compact["paths"].pop()
-            truncated["paths"] += 1
-            continue
-        if compact["frontier"]:
-            compact["frontier"].pop()
-            truncated["frontier"] += 1
-            continue
-        if compact["nodes"]:
-            compact["nodes"].pop()
-            truncated["nodes"] += 1
-            continue
-        raise ValueError("compact graph metadata exceeds byte budget")
-
-
-def _compact_graph(receipt: Mapping[str, object]) -> dict[str, object]:
-    nodes = {row["id"]: row for row in receipt["nodes"]}
-    edges = {row["id"]: row for row in receipt["edges"]}
-    selected_nodes, selected_paths, selected_frontier, truncated = (
-        _compact_selection(receipt)
-    )
-    compact = {
-        "providers": [
-            {
-                "name": row["name"], "status": row["status"],
-                "confidence": row["confidence"], "version": row["version"],
-            }
-            for row in receipt["providers"]
-        ],
-        "nodes": [
-            {
-                "key": row["id"], "kind": row["kind"], "label": row["label"],
-                "location": row["location"], "confidence": row["confidence"],
-                "risk_domains": list(row["risk_domains"]),
-            }
-            for row in selected_nodes
-        ],
-        "paths": [
-            {
-                "key": row["id"],
-                "nodes": [
-                    {
-                        "key": node_id, "label": nodes[node_id]["label"],
-                        "location": nodes[node_id]["location"],
-                    }
-                    for node_id in row["nodes"]
-                ],
-                "edges": [
-                    {
-                        "key": edge_id, "kind": edges[edge_id]["kind"],
-                        "confidence": edges[edge_id]["confidence"],
-                    }
-                    for edge_id in row["edges"]
-                ],
-                "distance": row["distance"],
-                "risk_domains": list(row["risk_domains"]),
-            }
-            for row in selected_paths
-        ],
-        "frontier": [
-            {
-                "key": row["id"], "node_key": row["node"],
-                "reason": row["reason"],
-                "risk_domains": list(row["risk_domains"]),
-            }
-            for row in selected_frontier
-        ],
-        "summary": {
-            "nodes": len(receipt["nodes"]), "edges": len(receipt["edges"]),
-            "paths": len(receipt["paths"]),
-            "unknown_frontiers": len(receipt["frontier"]),
-            "timings_ms": dict(receipt["timings_ms"]),
-            "budget_status": receipt["budget_status"],
-            "truncated": truncated,
-        },
-    }
-    _enforce_compact_byte_budget(compact)
-    return compact
-
-
-def _source_inventory_sha256(source_digests: Mapping[str, str]) -> str:
-    payload = json.dumps(
-        dict(source_digests), ensure_ascii=False, sort_keys=True,
-        separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _receipt_source_inventory(
-    root: Path, receipt: Mapping[str, object]
-) -> tuple[str, dict[str, str], str, bool, Optional[str]]:
-    key = receipt.get("cache", {}).get("key")
-    if (
-        not isinstance(key, str)
-        or re.fullmatch(r"[0-9a-f]{64}", key) is None
-        or key == "0" * 64
-    ):
-        raise ValueError("graph receipt has no verifiable source inventory cache")
-    cache_dir = GRAPH_COORDINATOR.CACHE._cache_directory(root, False)
-    if cache_dir is None:
-        raise ValueError("graph source inventory cache is unavailable")
-    artifact = GRAPH_COORDINATOR.CACHE._read_artifact(cache_dir / f"{key}.json")
-    if artifact is None:
-        raise ValueError("graph source inventory cache is invalid")
-    try:
-        source_digests = GRAPH_COORDINATOR.CACHE._source_digests(
-            artifact["source_digests"]
-        )
-        identity = artifact["identity"]
-        cached_receipt, _ = GRAPH_COORDINATOR.CACHE._normalize_receipt(
-            artifact["receipt"]
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("graph source inventory cache is invalid") from error
-    if (
-        not isinstance(identity, dict)
-        or set(identity) != GRAPH_COORDINATOR.CACHE._IDENTITY_FIELDS
-        or identity.get("source_digests") != source_digests
-        or hashlib.sha256(
-            GRAPH_COORDINATOR.CACHE._canonical_json(identity)
-        ).hexdigest() != key
-    ):
-        raise ValueError("graph source inventory cache identity is invalid")
-    complete = identity.get("source_inventory_complete")
-    reason = identity.get("source_inventory_reason")
-    if (
-        not isinstance(complete, bool)
-        or (complete and reason is not None)
-        or (
-            not complete
-            and reason not in {"deadline", "collection-limit", "traversal", "unreadable-source"}
-        )
-        or identity.get("repo_root_sha256")
-        != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-        or identity.get("settings") != receipt.get("settings")
-        or identity.get("providers") != receipt.get("providers")
-        or any(
-            identity.get(name) != receipt.get(name)
-            for name in ("receipt_id", "draft_id", "request_sha256")
-        )
-    ):
-        raise ValueError("graph source inventory cache identity is invalid")
-    stable_fields = (
-        "receipt_id", "draft_id", "repo_root_sha256", "request_sha256",
-        "settings", "providers", "nodes", "edges", "paths", "frontier",
-        "budget_status",
-    )
-    if any(cached_receipt.get(name) != receipt.get(name) for name in stable_fields):
-        raise ValueError("graph source inventory cache does not match receipt")
-    return (
-        key, source_digests, _source_inventory_sha256(source_digests),
-        complete, reason,
-    )
-
-
-def _verify_source_inventory(
-    root: Path,
-    graph_settings: Mapping[str, object],
-    expected_digests: Mapping[str, str],
-    expected_complete: bool,
-    expected_reason: Optional[str],
-    receipt: Mapping[str, object],
-    *,
-    deadline=None,
-    stale_message="graph receipt source inventory is stale",
-) -> None:
-    expected = GRAPH_COORDINATOR.CACHE._source_digests(expected_digests)
-    if deadline is None:
-        deadline = GRAPH_COORDINATOR.Deadline(
-            time, int(graph_settings["max_seconds"])
-        )
-    current = GRAPH_COORDINATOR._collect_source_digests(root, deadline)
-    if expected_complete:
-        stale = not current.complete or dict(current.digests) != expected
-    else:
-        if receipt.get("budget_status") == "closed" or not receipt.get("frontier"):
-            raise ValueError(
-                "incomplete source inventory requires a visible unknown frontier"
-            )
-        stale = any(
-            current.digests.get(path) != digest
-            for path, digest in expected.items()
-        )
-    if stale:
-        raise ValueError(stale_message)
-
-
-TRACE_INTENT_KEYS = {
-    "schema_version", "intent_id", "draft_id", "repo_root_sha256",
-    "request_sha256", "settings", "seeds", "source_inventory_sha256",
-    "source_inventory_complete", "source_inventory_reason",
-}
-
-
-def _graph_trace_draft_identity(
-    draft: Mapping[str, object], transaction: Mapping[str, object]
-) -> dict[str, object]:
-    identity = _graph_draft_identity(draft)
-    identity["graph_trace_intent"] = {
-        "intent_id": transaction["intent_id"],
-        "source_inventory_sha256": transaction["source_inventory_sha256"],
-        "source_inventory_complete": transaction["source_inventory_complete"],
-        "source_inventory_reason": transaction["source_inventory_reason"],
-    }
-    return identity
-
-
-def _trace_intent_sha256(intent: Mapping[str, object]) -> str:
-    return hashlib.sha256(_canonical_bytes(intent)).hexdigest()
-
-
-def _new_trace_intent(
-    root: Path,
-    draft: Mapping[str, object],
-    seeds: Tuple[TraceSeed, ...],
-    graph_settings: Mapping[str, object],
-    source_inventory,
-) -> dict[str, object]:
-    intent = {
-        "schema_version": 1,
-        "intent_id": secrets.token_hex(16),
-        "draft_id": draft["draft_id"],
-        "repo_root_sha256": hashlib.sha256(
-            str(root).encode("utf-8")
-        ).hexdigest(),
-        "settings": dict(graph_settings),
-        "seeds": [
-            {"term": seed.term, "location": seed.location} for seed in seeds
-        ],
-        "source_inventory_sha256": _source_inventory_sha256(
-            source_inventory.digests
-        ),
-        "source_inventory_complete": source_inventory.complete,
-        "source_inventory_reason": source_inventory.reason,
-    }
-    intent["request_sha256"] = GRAPH_COORDINATOR._request_sha256(
-        _graph_trace_draft_identity(draft, intent), seeds,
-        GRAPH_COORDINATOR._settings(graph_settings),
-    )
-    return intent
-
-
-def _validate_trace_intent(
-    root: Path,
-    draft: Mapping[str, object],
-    seeds: Tuple[TraceSeed, ...],
-    graph_settings: Mapping[str, object],
-    intent: object,
-) -> dict[str, object]:
-    if not isinstance(intent, dict) or set(intent) != TRACE_INTENT_KEYS:
-        raise ValueError("pre-publication trace intent is invalid")
-    expected_seeds = [
-        {"term": seed.term, "location": seed.location} for seed in seeds
-    ]
-    if (
-        intent.get("schema_version") != 1
-        or not isinstance(intent.get("intent_id"), str)
-        or DRAFT_ID_PATTERN.fullmatch(intent["intent_id"]) is None
-        or intent.get("draft_id") != draft.get("draft_id")
-        or intent.get("repo_root_sha256")
-        != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-        or intent.get("settings") != graph_settings
-        or intent.get("seeds") != expected_seeds
-        or not isinstance(intent.get("source_inventory_complete"), bool)
-        or (
-            intent.get("source_inventory_complete")
-            and intent.get("source_inventory_reason") is not None
-        )
-        or (
-            not intent.get("source_inventory_complete")
-            and intent.get("source_inventory_reason")
-            not in {"deadline", "collection-limit", "traversal", "unreadable-source"}
-        )
-        or not isinstance(intent.get("source_inventory_sha256"), str)
-        or re.fullmatch(
-            r"[0-9a-f]{64}", intent["source_inventory_sha256"]
-        ) is None
-    ):
-        raise ValueError("pre-publication trace intent identity is invalid")
-    expected_request = GRAPH_COORDINATOR._request_sha256(
-        _graph_trace_draft_identity(draft, intent), seeds,
-        GRAPH_COORDINATOR._settings(graph_settings),
-    )
-    if intent.get("request_sha256") != expected_request:
-        raise ValueError("pre-publication trace intent request is invalid")
-    return intent
-
-
-def _intent_from_binding(
-    root: Path, draft: Mapping[str, object], binding: Mapping[str, object]
-) -> dict[str, object]:
+MAX_TRACE_SEEDS = GRAPH_DELIVERY.MAX_TRACE_SEEDS
+COMPACT_MAX_NODES = GRAPH_DELIVERY.COMPACT_MAX_NODES
+COMPACT_MAX_PATHS = GRAPH_DELIVERY.COMPACT_MAX_PATHS
+COMPACT_MAX_FRONTIER = GRAPH_DELIVERY.COMPACT_MAX_FRONTIER
+COMPACT_MAX_BYTES = GRAPH_DELIVERY.COMPACT_MAX_BYTES
+TRACE_INTENT_KEYS = GRAPH_DELIVERY.TRACE_INTENT_KEYS
+_STALE_CLEANUP_GUARD_KEYS = GRAPH_DELIVERY._STALE_CLEANUP_GUARD_KEYS
+
+_graph_draft_identity = GRAPH_DELIVERY.graph_draft_identity
+_compact_node_rank = GRAPH_DELIVERY._compact_node_rank
+_compact_selection = GRAPH_DELIVERY._compact_selection
+_compact_size = GRAPH_DELIVERY._compact_size
+_enforce_compact_byte_budget = GRAPH_DELIVERY._enforce_compact_byte_budget
+_compact_graph = GRAPH_DELIVERY.compact_graph
+_source_inventory_sha256 = GRAPH_DELIVERY.source_inventory_sha256
+_receipt_source_inventory = GRAPH_DELIVERY._receipt_source_inventory
+_verify_source_inventory = GRAPH_DELIVERY._verify_source_inventory
+_graph_trace_draft_identity = GRAPH_DELIVERY._graph_trace_draft_identity
+_trace_intent_sha256 = GRAPH_DELIVERY._trace_intent_sha256
+_new_trace_intent = GRAPH_DELIVERY.new_trace_intent
+_validate_trace_intent = GRAPH_DELIVERY.validate_trace_intent
+_intent_from_binding = GRAPH_DELIVERY._intent_from_binding
+_open_existing_directory_at = GRAPH_DELIVERY._open_existing_directory_at
+_read_bound_receipt_bytes = GRAPH_DELIVERY._read_bound_receipt_bytes
+_repository_file_sha256 = GRAPH_DELIVERY._repository_file_sha256
+_verify_receipt_sources = GRAPH_DELIVERY._verify_receipt_sources
+_path_confidence = GRAPH_DELIVERY._path_confidence
+_path_provenance = GRAPH_DELIVERY._path_provenance
+_structured_path = GRAPH_DELIVERY._structured_path
+
+
+def _graph_delivery_runtime() -> dict[str, object]:
     return {
-        "schema_version": 1,
-        "intent_id": binding["trace_intent_id"],
-        "draft_id": draft["draft_id"],
-        "repo_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
-        "request_sha256": binding["request_sha256"],
-        "settings": binding["settings"],
-        "seeds": binding["seeds"],
-        "source_inventory_sha256": binding["source_inventory_sha256"],
-        "source_inventory_complete": binding["source_inventory_complete"],
-        "source_inventory_reason": binding["source_inventory_reason"],
+        "clock": time,
+        "trace_result": TraceResult,
+        "root_path": _root,
+        "bounded_bytes": _bounded,
+        "load_draft": load_draft,
+        "cas_replace_private_draft": _cas_replace_private_draft,
+        "recover_private_draft_transaction": _recover_private_draft_transaction,
+        "report_lock": _report_lock,
+        "read_bounded_descriptor": _read_bounded_descriptor,
+        "open_optional_transaction_component": _open_optional_transaction_component,
+        "open_transaction_component_for_cleanup": _open_transaction_component_for_cleanup,
+        "same_inode": _same_inode,
+        "rename_noreplace": _rename_noreplace,
+        "unlink_transaction_component": _unlink_transaction_component,
+        "write_private_transaction_component": _write_private_transaction_component,
+        "graph_draft_identity": _graph_draft_identity,
+        "compact_graph": _compact_graph,
+        "source_inventory_sha256": _source_inventory_sha256,
+        "receipt_source_inventory": _receipt_source_inventory,
+        "verify_source_inventory": _verify_source_inventory,
+        "trace_intent_sha256": _trace_intent_sha256,
+        "new_trace_intent": _new_trace_intent,
+        "validate_trace_intent": _validate_trace_intent,
+        "read_bound_receipt_bytes": _read_bound_receipt_bytes,
+        "remove_exact_trace_receipt": _remove_exact_trace_receipt,
+        "recover_stale_cleanup_guard": _recover_stale_cleanup_guard,
+        "clear_trace_intent": _clear_trace_intent,
+        "load_graph_context": _load_graph_context,
+        "validate_persisted_trace_receipt": _validate_persisted_trace_receipt,
+        "bind_trace_receipt": _bind_trace_receipt,
     }
-
-
-def _open_existing_directory_at(parent_fd: int, name: str) -> int:
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        return os.open(name, flags, dir_fd=parent_fd)
-    except OSError as error:
-        raise ValueError(f"graph receipt directory is unsafe: {name}: {error}") from error
-
-
-def _read_bound_receipt_bytes(root: Path, draft_id: str) -> bytes:
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    root_fd = os.open(root, flags)
-    base_fd = graph_fd = receipt_fd = None
-    try:
-        base_fd = _open_existing_directory_at(root_fd, ".requirements-impact-refiner")
-        graph_fd = _open_existing_directory_at(base_fd, "graph")
-        file_flags = os.O_RDONLY
-        if hasattr(os, "O_NOFOLLOW"):
-            file_flags |= os.O_NOFOLLOW
-        receipt_fd = os.open(f"{draft_id}.json", file_flags, dir_fd=graph_fd)
-        metadata = os.fstat(receipt_fd)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-            or metadata.st_nlink != 1
-        ):
-            raise ValueError("graph receipt must be one private regular file")
-        if metadata.st_size > GRAPH.MAX_RECEIPT_BYTES:
-            raise ValueError("graph receipt exceeds maximum byte size")
-        payload = bytearray()
-        while len(payload) <= GRAPH.MAX_RECEIPT_BYTES:
-            chunk = os.read(
-                receipt_fd,
-                min(64 * 1024, GRAPH.MAX_RECEIPT_BYTES + 1 - len(payload)),
-            )
-            if not chunk:
-                break
-            payload.extend(chunk)
-        if len(payload) > GRAPH.MAX_RECEIPT_BYTES:
-            raise ValueError("graph receipt exceeds maximum byte size")
-        return bytes(payload)
-    except OSError as error:
-        raise ValueError(f"graph receipt is unavailable or unsafe: {error}") from error
-    finally:
-        for descriptor in (receipt_fd, graph_fd, base_fd, root_fd):
-            if descriptor is not None:
-                os.close(descriptor)
 
 
 def _remove_exact_trace_receipt(
@@ -2270,511 +2673,102 @@ def _remove_exact_trace_receipt(
     commit=None,
     guard_intent_sha256=None,
 ) -> None:
-    if _read_bound_receipt_bytes(root, draft_id) != expected_payload:
-        raise ValueError("stale cleanup target changed before quarantine")
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    root_fd = os.open(root, flags)
-    base_fd = graph_fd = receipt_fd = quarantine_fd = guard_fd = None
-    filename = f"{draft_id}.json"
-    cleanup_id = secrets.token_hex(16)
-    quarantine_name = f".{draft_id}.{cleanup_id}.stale"
-    quarantined = False
-    quarantine_info = None
-    guard_claimed = False
-    guard_info = None
-    guard_payload = _canonical_bytes({
-        "draft_id": draft_id,
-        "kind": "stale-receipt-cleanup-guard",
-        "repo_root_sha256": hashlib.sha256(
-            str(root).encode("utf-8")
-        ).hexdigest(),
-        "receipt_sha256": hashlib.sha256(expected_payload).hexdigest(),
-        "schema_version": 1,
-        "trace_intent_sha256": guard_intent_sha256,
-        "transaction_id": cleanup_id,
-    })
-
-    def restore_quarantine() -> bool:
-        nonlocal quarantined
-        if not quarantined:
-            return True
-        opened_here = None
-        component = None
-        try:
-            if quarantine_fd is not None and quarantine_info is not None:
-                component = (quarantine_fd, quarantine_info, expected_payload)
-            else:
-                component = _open_optional_transaction_component(
-                    graph_fd,
-                    quarantine_name,
-                    GRAPH.MAX_RECEIPT_BYTES,
-                    "stale cleanup quarantine restoration",
-                )
-                if component is None or component[2] != expected_payload:
-                    return False
-                opened_here = component[0]
-            os.link(
-                quarantine_name, filename,
-                src_dir_fd=graph_fd, dst_dir_fd=graph_fd,
-                follow_symlinks=False,
-            )
-        except FileExistsError:
-            return False
-        try:
-            _unlink_transaction_component(
-                graph_fd,
-                quarantine_name,
-                component,
-                expected_payload,
-                GRAPH.MAX_RECEIPT_BYTES,
-                "stale cleanup quarantine restoration",
-            )
-        except ValueError:
-            return False
-        finally:
-            if opened_here is not None:
-                os.close(opened_here)
-        quarantined = False
-        return True
-
-    def release_guard() -> bool:
-        nonlocal guard_claimed
-        if not guard_claimed:
-            return True
-        try:
-            current = os.stat(
-                filename, dir_fd=graph_fd, follow_symlinks=False
-            )
-        except FileNotFoundError:
-            return False
-        if (
-            guard_info is None
-            or not _same_inode(current, guard_info)
-            or _read_bounded_descriptor(
-                guard_fd, 1024, "stale cleanup namespace guard"
-            ) != guard_payload
-        ):
-            return False
-        try:
-            _unlink_transaction_component(
-                graph_fd,
-                filename,
-                (guard_fd, guard_info, guard_payload),
-                guard_payload,
-                1024,
-                "stale cleanup namespace guard",
-            )
-        except ValueError:
-            return False
-        guard_claimed = False
-        return True
-
-    try:
-        base_fd = _open_existing_directory_at(
-            root_fd, ".requirements-impact-refiner"
-        )
-        graph_fd = _open_existing_directory_at(base_fd, "graph")
-        read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        receipt_fd = os.open(filename, read_flags, dir_fd=graph_fd)
-        receipt_info = os.fstat(receipt_fd)
-        if (
-            not stat.S_ISREG(receipt_info.st_mode)
-            or stat.S_IMODE(receipt_info.st_mode) != 0o600
-            or receipt_info.st_nlink != 1
-            or _read_bounded_descriptor(
-                receipt_fd, GRAPH.MAX_RECEIPT_BYTES, "stale cleanup receipt"
-            ) != expected_payload
-        ):
-            raise ValueError("stale cleanup target changed or is unsafe")
-
-        _rename_noreplace(graph_fd, filename, quarantine_name)
-        quarantined = True
-        quarantine_fd = os.open(quarantine_name, read_flags, dir_fd=graph_fd)
-        quarantine_info = os.fstat(quarantine_fd)
-        if (
-            (quarantine_info.st_dev, quarantine_info.st_ino)
-            != (receipt_info.st_dev, receipt_info.st_ino)
-            or _read_bounded_descriptor(
-                quarantine_fd, GRAPH.MAX_RECEIPT_BYTES,
-                "stale cleanup quarantine",
-            ) != expected_payload
-        ):
-            if not restore_quarantine():
-                raise ValueError(
-                    "stale cleanup quarantine changed; restoration is uncertain"
-                )
-            raise ValueError("stale cleanup quarantine changed before removal")
-
-        try:
-            os.stat(filename, dir_fd=graph_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise ValueError(
-                "stale cleanup replacement preserved; removal is uncertain"
-            )
-        guard_fd, guard_info = _write_private_transaction_component(
-            graph_fd, filename, guard_payload,
-            "stale cleanup namespace guard",
-        )
-        guard_claimed = True
-        os.fsync(graph_fd)
-        final_info = os.stat(
-            quarantine_name, dir_fd=graph_fd, follow_symlinks=False
-        )
-        if (
-            (final_info.st_dev, final_info.st_ino)
-            != (receipt_info.st_dev, receipt_info.st_ino)
-        ):
-            raise ValueError(
-                "stale cleanup quarantine identity is uncertain"
-            )
-        _unlink_transaction_component(
-            graph_fd,
-            quarantine_name,
-            (quarantine_fd, quarantine_info, expected_payload),
-            expected_payload,
-            GRAPH.MAX_RECEIPT_BYTES,
-            "stale cleanup quarantine",
-        )
-        quarantined = False
-        os.fsync(graph_fd)
-        if not release_guard():
-            raise ValueError(
-                "stale cleanup late replacement preserved; cleanup is uncertain"
-            )
-        os.fsync(graph_fd)
-        if commit is not None:
-            commit()
-    except ValueError as error:
-        if guard_claimed and not release_guard():
-            raise ValueError(
-                "stale cleanup replacement preserved; cleanup is uncertain"
-            ) from error
-        if quarantined and not restore_quarantine():
-            raise ValueError(
-                "stale cleanup failed; quarantine restoration is uncertain"
-            )
-        raise
-    except OSError as error:
-        if guard_claimed and not release_guard():
-            raise ValueError(
-                "stale cleanup replacement preserved; cleanup is uncertain"
-            ) from error
-        if quarantined and not restore_quarantine():
-            raise ValueError(
-                "stale cleanup failed; quarantine restoration is uncertain"
-            ) from error
-        raise ValueError(f"stale cleanup target is unsafe: {error}") from error
-    finally:
-        for descriptor in (
-            guard_fd, quarantine_fd, receipt_fd, graph_fd, base_fd, root_fd
-        ):
-            if descriptor is not None:
-                os.close(descriptor)
+    GRAPH_DELIVERY._remove_exact_trace_receipt(
+        root,
+        draft_id,
+        expected_payload,
+        commit=commit,
+        guard_intent_sha256=guard_intent_sha256,
+        _runtime=_graph_delivery_runtime(),
+    )
 
 
-_STALE_CLEANUP_GUARD_KEYS = {
-    "draft_id", "kind", "repo_root_sha256", "receipt_sha256",
-    "schema_version", "trace_intent_sha256", "transaction_id",
-}
-
-
-def _recover_stale_cleanup_guard(
-    root: Path,
-    draft_id: str,
-    intent: Mapping[str, object],
-) -> bool:
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    root_fd = os.open(root, flags)
-    base_fd = graph_fd = None
-    opened = []
-    try:
-        base_fd = _open_existing_directory_at(
-            root_fd, ".requirements-impact-refiner"
-        )
-        try:
-            graph_fd = _open_existing_directory_at(base_fd, "graph")
-        except ValueError as error:
-            if isinstance(error.__cause__, FileNotFoundError):
-                return False
-            raise
-        filename = f"{draft_id}.json"
-        guard, guard_selected_name = _open_transaction_component_for_cleanup(
-            graph_fd,
-            filename,
-            GRAPH.MAX_RECEIPT_BYTES,
-            "stale cleanup namespace guard",
-        )
-        if guard is None:
-            return False
-        opened.append(guard[0])
-        try:
-            value = json.loads(guard[2].decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return False
-        if not isinstance(value, dict) or value.get("kind") != (
-            "stale-receipt-cleanup-guard"
-        ):
-            return False
-        if (
-            set(value) != _STALE_CLEANUP_GUARD_KEYS
-            or value.get("schema_version") != 1
-            or value.get("draft_id") != draft_id
-            or value.get("repo_root_sha256")
-            != hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-            or value.get("trace_intent_sha256")
-            != _trace_intent_sha256(intent)
-            or not isinstance(value.get("transaction_id"), str)
-            or DRAFT_ID_PATTERN.fullmatch(value["transaction_id"]) is None
-            or not isinstance(value.get("receipt_sha256"), str)
-            or re.fullmatch(r"[0-9a-f]{64}", value["receipt_sha256"])
-            is None
-            or _canonical_bytes(value) != guard[2]
-            or guard[1].st_nlink != 1
-        ):
-            raise ValueError("stale cleanup namespace guard identity is invalid")
-        quarantine_name = (
-            f".{draft_id}.{value['transaction_id']}.stale"
-        )
-        quarantine, quarantine_selected_name = (
-            _open_transaction_component_for_cleanup(
-            graph_fd,
-            quarantine_name,
-            GRAPH.MAX_RECEIPT_BYTES,
-            "stale cleanup recovery quarantine",
-            )
-        )
-        if quarantine is not None:
-            opened.append(quarantine[0])
-            if (
-                hashlib.sha256(quarantine[2]).hexdigest()
-                != value["receipt_sha256"]
-                or quarantine[1].st_nlink != 1
-            ):
-                raise ValueError(
-                    "stale cleanup recovery quarantine identity is invalid"
-                )
-            _unlink_transaction_component(
-                graph_fd,
-                quarantine_name,
-                quarantine,
-                quarantine[2],
-                GRAPH.MAX_RECEIPT_BYTES,
-                "stale cleanup recovery quarantine",
-                selected_name=quarantine_selected_name,
-            )
-        _unlink_transaction_component(
-            graph_fd,
-            filename,
-            guard,
-            guard[2],
-            1024,
-            "stale cleanup namespace guard",
-            selected_name=guard_selected_name,
-        )
-        os.fsync(graph_fd)
-        return True
-    finally:
-        for descriptor in reversed(opened):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
-        for descriptor in (graph_fd, base_fd, root_fd):
-            if descriptor is not None:
-                os.close(descriptor)
+def _recover_stale_cleanup_guard(root: Path, draft_id: str, intent: Mapping[str, object]) -> bool:
+    return GRAPH_DELIVERY._recover_stale_cleanup_guard(
+        root,
+        draft_id,
+        intent,
+        _runtime=_graph_delivery_runtime(),
+    )
 
 
 def _clear_trace_intent(
     root: Path, draft: Mapping[str, object], intent: Mapping[str, object]
 ) -> dict[str, object]:
-    current = load_draft(root, str(draft["draft_id"]))
-    if current.get("graph_trace_intent") != intent:
-        raise ValueError("trace intent changed before cleanup")
-    updated = dict(current)
-    updated.pop("graph_trace_intent", None)
-    _cas_replace_private_draft(
-        root, str(draft["draft_id"]), current, updated
+    return GRAPH_DELIVERY._clear_trace_intent(
+        root,
+        draft,
+        intent,
+        _runtime=_graph_delivery_runtime(),
     )
-    return updated
-
-
-def _repository_file_sha256(root: Path, relative: str) -> str:
-    parts = relative.split("/")
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(root, flags)
-    opened = [descriptor]
-    try:
-        for part in parts[:-1]:
-            descriptor = os.open(part, flags, dir_fd=descriptor)
-            opened.append(descriptor)
-        file_flags = os.O_RDONLY
-        if hasattr(os, "O_NOFOLLOW"):
-            file_flags |= os.O_NOFOLLOW
-        file_fd = os.open(parts[-1], file_flags, dir_fd=descriptor)
-        opened.append(file_fd)
-        metadata = os.fstat(file_fd)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ValueError("receipt source is not a regular file")
-        digest = hashlib.sha256()
-        total = 0
-        while True:
-            chunk = os.read(file_fd, 64 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > 8 * 1024 * 1024:
-                raise ValueError("receipt source exceeds verification limit")
-            digest.update(chunk)
-        return digest.hexdigest()
-    except OSError as error:
-        raise ValueError(f"graph receipt source is stale or unsafe: {error}") from error
-    finally:
-        for current in reversed(opened):
-            os.close(current)
-
-
-def _verify_receipt_sources(root: Path, receipt: Mapping[str, object]) -> None:
-    observed = {}
-    for row in list(receipt["nodes"]) + list(receipt["edges"]):
-        location, expected = row.get("location"), row.get("source_sha256")
-        if location is None or expected is None:
-            continue
-        actual = observed.get(location)
-        if actual is None:
-            actual = _repository_file_sha256(root, location)
-            observed[location] = actual
-        if actual != expected:
-            raise ValueError(f"graph receipt is stale for source {location}")
 
 
 def _load_graph_context(
     root: Path,
     draft: Mapping[str, object],
-    selected_receipt_id: Optional[str],
+    selected_receipt_id: str | None,
     *,
     deadline=None,
-) -> dict[str, object]:
-    binding = draft.get("graph_receipt")
-    if not isinstance(binding, dict) or set(binding) != {
-        "receipt_id", "sha256", "request_sha256", "settings", "seeds",
-        "cache_key", "source_inventory_sha256",
-        "source_inventory_complete", "source_inventory_reason",
-        "trace_intent_id", "trace_intent_sha256",
-    }:
-        raise ValueError("graph receipt is required for this draft")
-    if (
-        not isinstance(selected_receipt_id, str)
-        or DRAFT_ID_PATTERN.fullmatch(selected_receipt_id) is None
-    ):
-        raise ValueError("valid graph_receipt_id is required")
-    if selected_receipt_id != binding.get("receipt_id"):
-        raise ValueError("graph receipt does not match selected draft receipt")
-    graph_settings = draft["settings"].get("impact_graph")
-    if binding.get("settings") != graph_settings:
-        raise ValueError("graph receipt settings do not match draft")
-    seed_rows = binding.get("seeds")
-    if not isinstance(seed_rows, list) or not seed_rows:
-        raise ValueError("graph receipt seed identity is invalid")
-    seeds = []
-    for row in seed_rows:
-        if not isinstance(row, dict) or set(row) != {"term", "location"}:
-            raise ValueError("graph receipt seed identity is invalid")
-        try:
-            seeds.append(TraceSeed(row["term"], row["location"]))
-        except (TypeError, ValueError) as error:
-            raise ValueError("graph receipt seed identity is invalid") from error
-    intent = _intent_from_binding(root, draft, binding)
-    _validate_trace_intent(
-        root, draft, tuple(seeds), graph_settings, intent
+):
+    return GRAPH_DELIVERY.load_graph_context(
+        root,
+        draft,
+        selected_receipt_id,
+        deadline=deadline,
+        _runtime=_graph_delivery_runtime(),
     )
-    if binding.get("trace_intent_sha256") != _trace_intent_sha256(intent):
-        raise ValueError("graph receipt trace intent digest is invalid")
-    payload = _read_bound_receipt_bytes(root, str(draft["draft_id"]))
-    receipt, errors = GRAPH.load_receipt_bytes(payload)
-    if receipt is None or errors:
-        raise ValueError("graph receipt is invalid or tampered")
-    if GRAPH.canonical_receipt_bytes(receipt) != payload:
-        raise ValueError("graph receipt is not canonical")
-    digest = hashlib.sha256(payload).hexdigest()
-    if digest != binding.get("sha256"):
-        raise ValueError("graph receipt digest is tampered")
-    expected_root = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-    expected_request = GRAPH_COORDINATOR._request_sha256(
-        _graph_trace_draft_identity(draft, intent), tuple(seeds),
-        GRAPH_COORDINATOR._settings(graph_settings),
-    )
-    identity_providers = tuple(
-        GRAPH.ProviderStatus(
-            row["name"], row["status"], row["confidence"],
-            row["version"], row["executable_sha256"],
-        )
-        for row in receipt["providers"] if row["name"] != "builtin"
-    )
-    expected_receipt_id = GRAPH_COORDINATOR._trace_identity(
-        root, str(draft["draft_id"]), expected_request, tuple(seeds),
-        GRAPH_COORDINATOR._settings(graph_settings), identity_providers,
-    )
-    if (
-        receipt["receipt_id"] != selected_receipt_id
-        or receipt["receipt_id"] != expected_receipt_id
-        or receipt["draft_id"] != draft["draft_id"]
-        or receipt["repo_root_sha256"] != expected_root
-        or receipt["request_sha256"] != expected_request
-        or binding.get("request_sha256") != expected_request
-        or receipt["settings"] != graph_settings
-        or receipt["cache"]["key"] != binding.get("cache_key")
-    ):
-        raise ValueError("graph receipt identity does not match draft request and settings")
-    (
-        cache_key, source_digests, source_inventory_sha256,
-        source_inventory_complete, source_inventory_reason,
-    ) = _receipt_source_inventory(root, receipt)
-    if (
-        binding.get("cache_key") != cache_key
-        or binding.get("source_inventory_sha256") != source_inventory_sha256
-        or binding.get("source_inventory_complete") != source_inventory_complete
-        or binding.get("source_inventory_reason") != source_inventory_reason
-    ):
-        raise ValueError("graph source inventory cache does not match binding")
-    _verify_receipt_sources(root, receipt)
-    _verify_source_inventory(
-        root, graph_settings, source_digests, source_inventory_complete,
-        source_inventory_reason, receipt, deadline=deadline,
-    )
-    return {"receipt": receipt, "sha256": digest, "binding": binding}
 
 
 def _load_promoted_scan_context(
-    root: Path, draft: Mapping[str, object], selected_receipt_id: Optional[str]
-) -> dict[str, object]:
+    root: Path, draft: Mapping[str, object], selected_receipt_id: str | None
+):
     binding = draft.get("promoted_scan")
     if not isinstance(binding, dict) or set(binding) != {
-        "scan_id", "sha256", "receipt_id", "receipt_sha256",
+        "scan_id",
+        "sha256",
+        "receipt_id",
+        "receipt_sha256",
     }:
         raise ValueError("promoted Fast Scan binding is invalid")
     if selected_receipt_id != binding["receipt_id"]:
         raise ValueError("Fast Scan graph receipt does not match draft")
+    request_value = draft.get("request")
+    evidence_value = draft.get("repository_evidence")
+    adapter_value = draft.get("adapter")
+    settings_value = draft.get("settings")
+    if (
+        not isinstance(request_value, str)
+        or not isinstance(evidence_value, list)
+        or not all(isinstance(item, str) for item in evidence_value)
+        or not isinstance(adapter_value, str)
+        or not isinstance(settings_value, dict)
+        or not isinstance(settings_value.get("audience"), str)
+        or not isinstance(settings_value.get("delivery"), str)
+    ):
+        raise ValueError("promoted Fast Scan binding is invalid")
+    audience = settings_value["audience"]
+    delivery = settings_value["delivery"]
     request = BeginRequest(
-        root, draft["request"], tuple(draft["repository_evidence"]),
-        draft["adapter"], draft["settings"]["audience"],
-        draft["settings"]["delivery"], binding["scan_id"],
+        root,
+        request_value,
+        tuple(evidence_value),
+        adapter_value,
+        audience,
+        delivery,
+        binding["scan_id"],
     )
     promotion = _promoted_scan(root, request, draft["settings"])
     if promotion != binding:
         raise ValueError("promoted Fast Scan binding is stale")
-    payload = fast_scan_store.load_scan_receipt_bytes(root, binding["scan_id"])
+    payload = FAST_SCAN_STORE.load_scan_receipt_bytes(root, binding["scan_id"])
     if hashlib.sha256(payload).hexdigest() != binding["sha256"]:
         raise ValueError("promoted Fast Scan digest is stale")
     wrapper = json.loads(payload)
+    if not isinstance(wrapper, dict):
+        raise ValueError("promoted Fast Scan binding is invalid")
     receipt = wrapper["graph_receipt"]
+    if not _is_receipt_payload(receipt):
+        raise ValueError("promoted Fast Scan binding is invalid")
     graph_payload = GRAPH.canonical_receipt_bytes(receipt)
     if hashlib.sha256(graph_payload).hexdigest() != binding["receipt_sha256"]:
         raise ValueError("promoted graph receipt digest is stale")
@@ -2782,929 +2776,314 @@ def _load_promoted_scan_context(
     return {"receipt": receipt, "sha256": binding["receipt_sha256"], "binding": binding}
 
 
-def _path_confidence(path, nodes, edges) -> str:
-    values = [nodes[node]["confidence"] for node in path["nodes"]]
-    values.extend(edges[edge]["confidence"] for edge in path["edges"])
-    return max(values, key=lambda value: GRAPH_CONFIDENCE_RANK[value])
-
-
-def _path_provenance(path, nodes, edges) -> str:
-    records = [nodes[node] for node in path["nodes"]]
-    records.extend(edges[edge] for edge in path["edges"])
-    providers = list(dict.fromkeys(
-        row.get("provider") for row in records if row.get("provider")
-    ))
-    locations = list(dict.fromkeys(
-        row.get("location") for row in records if row.get("location")
-    ))
-    provider = " + ".join(providers) if providers else "unavailable"
-    location = " + ".join(locations) if locations else "unavailable"
-    return (
-        f"provider {provider}; confidence {_path_confidence(path, nodes, edges)}; "
-        f"location {location}"
-    )
-
-
-def _structured_path(path, nodes, edges) -> dict[str, object]:
-    records = [nodes[node] for node in path["nodes"]]
-    records.extend(edges[edge] for edge in path["edges"])
-    return {
-        "id": path["id"],
-        "labels": [nodes[node]["label"] for node in path["nodes"]],
-        "providers": list(dict.fromkeys(
-            row["provider"] for row in records if row.get("provider")
-        )) or ["unavailable"],
-        "confidence": _path_confidence(path, nodes, edges),
-        "locations": list(dict.fromkeys(
-            row["location"] for row in records if row.get("location")
-        )),
-    }
-
-
-def _validate_graph_coverage(
-    analysis: Mapping[str, object], context: dict[str, object]
-) -> None:
-    receipt = context["receipt"]
-    nodes = {row["id"]: row for row in receipt["nodes"]}
-    edges = {row["id"]: row for row in receipt["edges"]}
-    paths = {row["id"]: row for row in receipt["paths"]}
-    frontier_nodes = {row["node"] for row in receipt["frontier"]}
-    covered_nodes = set()
-    impact_confidences = {}
-    for impact in analysis["impacts"]:
-        if "graph_path_keys" not in impact:
-            raise ValueError("graph_path_keys is required for every graph-enabled impact")
-        selected = impact["graph_path_keys"]
-        if (
-            not isinstance(selected, list)
-            or len(selected) > 128
-            or len(selected) != len(set(selected))
-        ):
-            raise ValueError("impact graph_path_keys must be a unique bounded array")
-        selected_paths = []
-        for key in selected:
-            if not isinstance(key, str) or re.fullmatch(r"PATH-\d{3}", key) is None:
-                raise ValueError("invalid graph path key")
-            if key not in paths:
-                raise ValueError(f"unknown graph path key {key}")
-            selected_paths.append(paths[key])
-            covered_nodes.update(paths[key]["nodes"])
-        rationale = impact.get("coverage_rationale")
-        if rationale is not None and (
-            not isinstance(rationale, str)
-            or not rationale.strip()
-            or len(rationale.encode("utf-8")) > MAX_STRING_BYTES
-        ):
-            raise ValueError("coverage_rationale must be bounded nonempty text")
-        if not selected_paths:
-            if rationale is None or impact.get("evidence_level") != "unknown":
-                raise ValueError(
-                    "supplied-only or unknown graph coverage requires rationale and unknown evidence"
-                )
-            if impact.get("state") == "resolved":
-                raise ValueError("resolved impact cannot rely on unknown graph evidence")
-            impact_confidences[impact["key"]] = "unknown"
-            continue
-        confidences = [
-            _path_confidence(path, nodes, edges) for path in selected_paths
-        ]
-        strongest = min(confidences, key=lambda value: GRAPH_CONFIDENCE_RANK[value])
-        allowed_evidence = (
-            "verified" if GRAPH_CONFIDENCE_RANK[strongest] <= 1
-            else "inferred" if strongest == "structural-inferred"
-            else "unknown"
-        )
-        if EVIDENCE_RANK.get(impact.get("evidence_level"), -1) < EVIDENCE_RANK[allowed_evidence]:
-            raise ValueError("impact evidence confidence upgrades graph path evidence")
-        if impact.get("state") == "resolved" and all(
-            confidence == "lexical" for confidence in confidences
-        ):
-            raise ValueError("resolved impact cannot rely solely on lexical graph evidence")
-        impact_confidences[impact["key"]] = strongest
-    invariant_text = "\n".join(
-        f"{row.get('behavior', '')}\n{row.get('evidence', '')}"
-        for row in analysis["invariants"]
-        if row.get("evidence_level") == "verified"
-    )
-    invariant_tokens = set(re.findall(r"[A-Za-z0-9_./-]+", invariant_text))
-    invariant_nodes = {
-        identifier
-        for identifier, node in nodes.items()
-        if node.get("source_sha256") is not None
-        and any(
-            isinstance(value, str) and len(value) >= 8 and value in invariant_tokens
-            for value in (node.get("label"), node.get("location"))
-        )
-    }
-    for identifier, node in sorted(nodes.items()):
-        if (
-            set(node["risk_domains"]) & HIGH_RISK_DOMAINS
-            and identifier not in covered_nodes
-            and identifier not in invariant_nodes
-            and identifier not in frontier_nodes
-        ):
-            raise ValueError(f"uncovered high-risk graph node {identifier}")
-    context["impact_paths"] = {
-        row["key"]: list(row["graph_path_keys"]) for row in analysis["impacts"]
-    }
-    context["rationales"] = {
-        row["key"]: row.get("coverage_rationale") for row in analysis["impacts"]
-    }
-    context["impact_confidences"] = impact_confidences
+def _validate_graph_coverage(analysis: Mapping[str, object], context) -> None:
+    GRAPH_DELIVERY.validate_graph_coverage(analysis, context)
 
 
 def _validate_persisted_trace_receipt(
     root: Path,
     draft: Mapping[str, object],
-    normalized_seeds: Tuple[TraceSeed, ...],
+    normalized_seeds,
     graph_settings: Mapping[str, object],
     intent: Mapping[str, object],
-    expected_payload: Optional[bytes] = None,
+    expected_payload: bytes | None = None,
 ):
-    stored = _read_bound_receipt_bytes(root, str(draft["draft_id"]))
-    if expected_payload is not None and stored != expected_payload:
-        raise ValueError("persisted graph receipt does not match coordinator result")
-    receipt_value, errors = GRAPH.load_receipt_bytes(stored)
-    if receipt_value is None or errors:
-        raise ValueError("persisted graph receipt is invalid")
-    if GRAPH.canonical_receipt_bytes(receipt_value) != stored:
-        raise ValueError("persisted graph receipt is not canonical")
-    graph_draft = _graph_trace_draft_identity(draft, intent)
-    settings = GRAPH_COORDINATOR._settings(graph_settings)
-    expected_request_sha256 = GRAPH_COORDINATOR._request_sha256(
-        graph_draft, normalized_seeds, settings
-    )
-    expected_root_sha256 = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
-    identity_providers = tuple(
-        GRAPH.ProviderStatus(
-            row["name"], row["status"], row["confidence"],
-            row["version"], row["executable_sha256"],
-        )
-        for row in receipt_value["providers"] if row["name"] != "builtin"
-    )
-    expected_receipt_id = GRAPH_COORDINATOR._trace_identity(
-        root, str(draft["draft_id"]), expected_request_sha256,
-        normalized_seeds, settings, identity_providers,
-    )
-    if (
-        receipt_value["draft_id"] != draft["draft_id"]
-        or receipt_value["receipt_id"] != expected_receipt_id
-        or receipt_value["repo_root_sha256"] != expected_root_sha256
-        or receipt_value["request_sha256"] != expected_request_sha256
-        or receipt_value["settings"] != graph_settings
-    ):
-        raise ValueError("graph receipt identity does not match draft request and settings")
-    inventory = _receipt_source_inventory(root, receipt_value)
-    if (
-        intent.get("source_inventory_sha256") != inventory[2]
-        or intent.get("source_inventory_complete") != inventory[3]
-        or intent.get("source_inventory_reason") != inventory[4]
-    ):
-        raise ValueError("trace intent does not match receipt source inventory")
-    return (
-        receipt_value, stored, expected_request_sha256, *inventory,
+    return GRAPH_DELIVERY._validate_persisted_trace_receipt(
+        root,
+        draft,
+        normalized_seeds,
+        graph_settings,
+        intent,
+        expected_payload,
+        _runtime=_graph_delivery_runtime(),
     )
 
 
 def _bind_trace_receipt(
     root: Path,
     draft: Mapping[str, object],
-    normalized_seeds: Tuple[TraceSeed, ...],
+    normalized_seeds,
     graph_settings: Mapping[str, object],
     intent: Mapping[str, object],
-    receipt_value: Mapping[str, object],
+    receipt_value,
     stored: bytes,
     expected_request_sha256: str,
     cache_key: str,
     source_digests: Mapping[str, str],
     source_inventory_sha256: str,
     source_inventory_complete: bool,
-    source_inventory_reason: Optional[str],
-) -> TraceResult:
-    updated = dict(draft)
-    digest = hashlib.sha256(stored).hexdigest()
-    updated.pop("graph_trace_intent", None)
-    updated["graph_receipt"] = {
-        "receipt_id": receipt_value["receipt_id"],
-        "sha256": digest,
-        "request_sha256": expected_request_sha256,
-        "settings": graph_settings,
-        "cache_key": cache_key,
-        "source_inventory_sha256": source_inventory_sha256,
-        "source_inventory_complete": source_inventory_complete,
-        "source_inventory_reason": source_inventory_reason,
-        "trace_intent_id": intent["intent_id"],
-        "trace_intent_sha256": _trace_intent_sha256(intent),
-        "seeds": [
-            {"term": seed.term, "location": seed.location}
-            for seed in normalized_seeds
-        ],
-    }
-    _cas_replace_private_draft(
-        root, str(draft["draft_id"]), draft, updated
-    )
-    receipt_path = (
-        root / ".requirements-impact-refiner" / "graph"
-        / f"{draft['draft_id']}.json"
-    )
-    return TraceResult(
-        receipt_id=str(receipt_value["receipt_id"]), receipt_path=receipt_path,
-        receipt_sha256=digest, compact_graph=_compact_graph(receipt_value),
-        budget_status=str(receipt_value["budget_status"]),
-        request_sha256=expected_request_sha256,
-        seeds=normalized_seeds,
+    source_inventory_reason: str | None,
+):
+    return GRAPH_DELIVERY._bind_trace_receipt(
+        root,
+        draft,
+        normalized_seeds,
+        graph_settings,
+        intent,
+        receipt_value,
+        stored,
+        expected_request_sha256,
+        cache_key,
+        source_digests,
+        source_inventory_sha256,
+        source_inventory_complete,
+        source_inventory_reason,
+        _runtime=_graph_delivery_runtime(),
     )
 
 
 def trace_impact(request: TraceRequest) -> TraceResult:
-    original_root = Path(request.repo_root)
-    if original_root.is_symlink():
-        raise ValueError("repository root symlink is unsafe for graph tracing")
-    root = _root(original_root)
-    if not isinstance(request.seeds, tuple):
-        raise ValueError("trace seeds must be a tuple")
-    if not request.seeds or len(request.seeds) > MAX_TRACE_SEEDS:
-        raise ValueError("trace seeds must contain between 1 and 128 items")
-    for seed in request.seeds:
-        if not isinstance(seed, TraceSeed):
-            raise ValueError("trace seeds must contain TraceSeed values")
-        if not isinstance(seed.term, str) or not seed.term.strip():
-            raise ValueError("trace seed term must be nonempty")
-        if seed.location is not None and not GRAPH._safe_path(seed.location):
-            raise ValueError("trace seed location must be a safe repository-relative path")
-    normalized_seeds = tuple(
-        sorted(set(request.seeds), key=GRAPH_COORDINATOR._seed_key)
+    return GRAPH_DELIVERY.trace_impact(request, _runtime=_graph_delivery_runtime())
+
+
+_ids = LINEAGE.allocate_ids
+_map_keys = LINEAGE.map_keys
+_build_state = LINEAGE.build_state
+
+
+def _is_finalize_contract(value: object) -> bool:
+    finalize_lineage = getattr(value, "LINEAGE", None)
+    finalize_storage = getattr(value, "STORAGE", None)
+    finalize_report_store = getattr(value, "REPORT_STORE", None)
+    finalize_graph_delivery = getattr(value, "GRAPH_DELIVERY", None)
+    finalize_context = getattr(value, "REPORT_CONTEXT", None)
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_finalize.py")
+        and _module_uses_sibling(finalize_lineage, SCRIPT_DIR / "rir_lineage.py")
+        and _is_lineage_contract(finalize_lineage)
+        and _module_uses_sibling(getattr(value, "CONTRACTS", None), SCRIPT_DIR / "rir_contracts.py")
+        and _is_controller_contracts_contract(getattr(value, "CONTRACTS", None))
+        and _module_uses_sibling(finalize_storage, SCRIPT_DIR / "rir_storage.py")
+        and _is_controller_storage_contract(finalize_storage)
+        and _module_uses_sibling(finalize_report_store, SCRIPT_DIR / "report_store.py")
+        and getattr(finalize_storage, "report_store", None) is finalize_report_store
+        and _module_uses_sibling(finalize_graph_delivery, SCRIPT_DIR / "rir_graph_delivery.py")
+        and _is_graph_delivery_contract(finalize_graph_delivery)
+        and _module_uses_sibling(finalize_context, SCRIPT_DIR / "rir_report_context.py")
+        and callable(getattr(finalize_context, "canonical_requirement_text", None))
+        and callable(getattr(finalize_context, "load_report_context", None))
+        and callable(getattr(finalize_context, "publish_report_context", None))
+        and callable(getattr(value, "finalize_refinement", None))
+        and callable(getattr(value, "default_runtime", None))
     )
-    _bounded(
-        {"seeds": [
-            {"term": seed.term, "location": seed.location}
-            for seed in normalized_seeds
-        ]},
-        MAX_TRACE_BYTES,
-        "trace input",
+
+
+def _load_registered_finalize(module_name: str, expected: Path) -> object:
+    specification = importlib.util.spec_from_file_location(module_name, expected)
+    if specification is None or specification.loader is None:
+        raise ImportError("cannot load fixed finalize sibling")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(module_name, None)
+        raise ImportError("cannot load fixed finalize sibling") from error
+    if not _is_finalize_contract(module):
+        sys.modules.pop(module_name, None)
+        raise ImportError("finalize sibling contract is incomplete")
+    try:
+        runtime = module.default_runtime()
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    if not isinstance(runtime, Mapping):
+        sys.modules.pop(module_name, None)
+        raise ImportError("finalize default runtime contract is incomplete")
+    return module
+
+
+def _load_finalize() -> object:
+    sibling = SCRIPT_DIR / "rir_finalize.py"
+    expected = _regular_module_path(sibling)
+    if expected is None or expected != sibling:
+        raise ImportError("finalize sibling is unsafe")
+    module_name = (
+        "_rir_controller_finalize_" + hashlib.sha256(str(expected).encode("utf-8")).hexdigest()[:16]
     )
-    if DRAFT_ID_PATTERN.fullmatch(request.draft_id) is None:
-        raise ValueError("invalid draft ID")
-    _recover_private_draft_transaction(root, request.draft_id)
-    draft = load_draft(root, request.draft_id)
-    settings = draft.get("settings")
-    graph_settings = settings.get("impact_graph") if isinstance(settings, dict) else None
-    if not isinstance(graph_settings, dict):
-        raise ValueError("draft graph settings are invalid")
-    if graph_settings.get("enabled") is not True:
-        raise ValueError("impact graph is disabled for this draft")
-    deadline = GRAPH_COORDINATOR.Deadline(
-        time, int(graph_settings["max_seconds"])
-    )
-    receipt_path = (
-        root / ".requirements-impact-refiner" / "graph" / f"{request.draft_id}.json"
-    )
-    with _report_lock(root, str(draft["report_id"]), deadline=deadline):
-        _recover_private_draft_transaction(root, request.draft_id)
-        draft = load_draft(root, request.draft_id)
-        if draft.get("consumed") is True:
-            raise ValueError("draft is already consumed")
-        if draft.get("promoted_scan") is not None:
-            raise ValueError("promoted Fast Scan draft must not be traced again")
-        if draft.get("graph_receipt") is not None:
-            binding = draft["graph_receipt"]
-            requested_seeds = [
-                {"term": seed.term, "location": seed.location}
-                for seed in normalized_seeds
-            ]
-            if not isinstance(binding, dict) or binding.get("seeds") != requested_seeds:
-                raise ValueError("draft graph receipt belongs to a different trace request")
-            context = _load_graph_context(
-                root, draft, binding.get("receipt_id"), deadline=deadline
-            )
-            receipt_value = context["receipt"]
-            return TraceResult(
-                receipt_id=str(receipt_value["receipt_id"]),
-                receipt_path=receipt_path,
-                receipt_sha256=str(context["sha256"]),
-                compact_graph=_compact_graph(receipt_value),
-                budget_status=str(receipt_value["budget_status"]),
-                request_sha256=str(binding["request_sha256"]),
-                seeds=normalized_seeds,
-            )
-        intent = draft.get("graph_trace_intent")
-        if intent is not None:
-            intent = _validate_trace_intent(
-                root, draft, normalized_seeds, graph_settings, intent
-            )
-            _recover_stale_cleanup_guard(
-                root, request.draft_id, intent
-            )
-        receipt_exists = receipt_path.exists() or receipt_path.is_symlink()
-        source_inventory = None
-        if intent is None:
-            if receipt_exists:
-                raise ValueError(
-                    "graph receipt has no durable pre-publication trace intent"
-                )
-            source_inventory = GRAPH_COORDINATOR._collect_source_digests(
-                root, deadline
-            )
-            intent = _new_trace_intent(
-                root, draft, normalized_seeds, graph_settings, source_inventory
-            )
-            updated = dict(draft)
-            updated["graph_trace_intent"] = intent
-            _cas_replace_private_draft(
-                root, request.draft_id, draft, updated
-            )
-            draft = updated
-        if receipt_exists:
-            validated = _validate_persisted_trace_receipt(
-                root, draft, normalized_seeds, graph_settings, intent
-            )
-            try:
-                _verify_source_inventory(
-                    root, graph_settings, validated[4], validated[6],
-                    validated[7], validated[0], deadline=deadline,
-                    stale_message="recovery source inventory is stale",
-                )
-            except ValueError as error:
-                if "recovery source inventory is stale" not in str(error):
-                    raise
-                _remove_exact_trace_receipt(
-                    root,
-                    request.draft_id,
-                    validated[1],
-                    commit=lambda: _clear_trace_intent(root, draft, intent),
-                    guard_intent_sha256=_trace_intent_sha256(intent),
-                )
-                raise
-            return _bind_trace_receipt(
-                root, draft, normalized_seeds, graph_settings, intent, *validated
-            )
-        if source_inventory is None:
-            source_inventory = GRAPH_COORDINATOR._collect_source_digests(
-                root, deadline
-            )
-            if (
-                _source_inventory_sha256(source_inventory.digests)
-                != intent["source_inventory_sha256"]
-                or source_inventory.complete
-                != intent["source_inventory_complete"]
-                or source_inventory.reason != intent["source_inventory_reason"]
-            ):
-                _clear_trace_intent(root, draft, intent)
-                raise ValueError("trace intent source inventory is stale")
-        graph_draft = _graph_trace_draft_identity(draft, intent)
-        receipt = GRAPH_COORDINATOR.trace_impact(
-            root, graph_draft, normalized_seeds, graph_settings,
-            clock=time, deadline=deadline, source_inventory=source_inventory,
+    hashed_present = module_name in sys.modules
+    hashed = sys.modules.get(module_name)
+    canonical = sys.modules.get("rir_finalize")
+    if canonical is not None and _is_finalize_contract(canonical):
+        if not hashed_present:
+            return canonical
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("finalize sibling is unsafe")
+        if not _is_finalize_contract(hashed):
+            raise ImportError("finalize sibling contract is incomplete")
+        return hashed
+    if hashed_present:
+        if not _module_uses_sibling(hashed, expected):
+            raise ImportError("finalize sibling is unsafe")
+        if not _is_finalize_contract(hashed):
+            raise ImportError("finalize sibling contract is incomplete")
+        if "rir_finalize" not in sys.modules:
+            sys.modules["rir_finalize"] = cast(ModuleType, hashed)
+        return hashed
+    target_name = "rir_finalize" if canonical is None else module_name
+    return _load_registered_finalize(target_name, expected)
+
+
+FINALIZE = cast(Any, _load_finalize())
+
+compact_state = FINALIZE.COMPACT_STATE
+impact_renderer = FINALIZE.IMPACT_RENDERER
+report_store = FINALIZE.REPORT_STORE
+
+
+def _is_previous_renderer_shape(value: object) -> bool:
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_previous_renderer.py")
+        and _module_uses_sibling(
+            getattr(value, "COMPACT_STATE", None), SCRIPT_DIR / "compact_state.py"
         )
-        payload = GRAPH.canonical_receipt_bytes(receipt)
-        if not receipt_path.is_file() or receipt_path.is_symlink():
-            raise ValueError("graph receipt publication failed")
-        validated = _validate_persisted_trace_receipt(
-            root, draft, normalized_seeds, graph_settings, intent, payload
+        and _module_uses_sibling(
+            getattr(value, "IMPACT_RENDERER", None), SCRIPT_DIR / "impact_renderer.py"
         )
-        return _bind_trace_receipt(
-            root, draft, normalized_seeds, graph_settings, intent, *validated
-        )
-
-
-def _check_keys(label: str, value: object, expected: set[str]) -> None:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be an object")
-    unknown = sorted(set(value) - expected)
-    missing = sorted(expected - set(value))
-    if unknown:
-        raise ValueError(f"unknown {label} key {unknown[0]}")
-    if missing:
-        raise ValueError(f"missing {label} key {missing[0]}")
-
-
-def _local_key(value: object, label: str) -> str:
-    if not isinstance(value, str) or LOCAL_KEY_PATTERN.fullmatch(value) is None:
-        raise ValueError(f"invalid {label} local key")
-    return value
-
-
-def _validate_analysis(analysis: Mapping[str, object]) -> None:
-    _check_keys("analysis", analysis, ANALYSIS_KEYS)
-    if analysis["phase"] not in {"pre-decision", "post-decision"}:
-        raise ValueError("invalid analysis phase")
-    if not isinstance(analysis["refined_requirement"], str) or not analysis["refined_requirement"].strip():
-        raise ValueError("refined_requirement must be nonempty")
-    for section, expected in ROW_KEYS.items():
-        rows = analysis[section]
-        if not isinstance(rows, list):
-            raise ValueError(f"{section} must be an array")
-        if len(rows) > 128:
-            raise ValueError(f"{section} has too many rows")
-        keys = []
-        for row in rows:
-            if section == "impacts":
-                if not isinstance(row, dict):
-                    raise ValueError("impact must be an object")
-                unknown = sorted(set(row) - expected - IMPACT_OPTIONAL_KEYS)
-                missing = sorted(expected - set(row))
-                if unknown:
-                    raise ValueError(f"unknown impact key {unknown[0]}")
-                if missing:
-                    raise ValueError(f"missing impact key {missing[0]}")
-            else:
-                _check_keys(section[:-1], row, expected)
-            if "key" in row:
-                keys.append(_local_key(row["key"], section[:-1]))
-            if section == "impacts":
-                _check_keys("impact summary", row["summary"], SUMMARY_KEYS)
-                for name in ("invariant_keys", "decision_keys", "criterion_keys"):
-                    if not isinstance(row[name], list) or len(row[name]) > 128:
-                        raise ValueError(f"impact {name} has too many items")
-            if section == "decisions" and (
-                not isinstance(row["accepted_impact_keys"], list)
-                or len(row["accepted_impact_keys"]) > 128
-            ):
-                raise ValueError("decision accepted_impact_keys has too many items")
-        if len(keys) != len(set(keys)):
-            raise ValueError(f"duplicate {section} local key")
-    if analysis["phase"] == "pre-decision":
-        _check_keys("decision_needed", analysis["decision_needed"], {"question", "options"})
-        options = analysis["decision_needed"]["options"]
-        if not isinstance(options, list) or not 2 <= len(options) <= 3:
-            raise ValueError("decision_needed requires two or three options")
-        for option in options:
-            _check_keys("decision option", option, {"option", "impact_keys", "tradeoff"})
-            if not isinstance(option["impact_keys"], list) or len(option["impact_keys"]) > 128:
-                raise ValueError("decision option impact_keys has too many items")
-        if analysis["decisions"]:
-            raise ValueError("pre-decision analysis forbids decisions")
-    else:
-        if analysis["decision_needed"] is not None or not analysis["decisions"]:
-            raise ValueError("post-decision analysis requires decisions only")
-    if not isinstance(analysis["scope"], list) or not analysis["scope"]:
-        raise ValueError("scope requires at least one row")
-    if not isinstance(analysis["workflow"], str) or not analysis["workflow"].strip():
-        raise ValueError("workflow must be nonempty")
-
-
-def _ids(rows, prefix, prior=None):
-    prior = {} if prior is None else dict(prior)
-    result = {}
-    used_numbers = {
-        int(identifier.rsplit("-", 1)[1])
-        for identifier in prior.values()
-        if isinstance(identifier, str) and re.fullmatch(rf"{prefix}-\d{{3}}", identifier)
-    }
-    next_number = 1
-    for row in rows:
-        key = row["key"]
-        if key in prior:
-            result[key] = prior[key]
-            continue
-        while next_number in used_numbers:
-            next_number += 1
-        result[key] = f"{prefix}-{next_number:03d}"
-        used_numbers.add(next_number)
-        next_number += 1
-    return result
-
-
-def _map_keys(values, mapping, label):
-    result = []
-    for value in values:
-        key = _local_key(value, label)
-        if key not in mapping:
-            raise ValueError(f"unknown {label} key {key}")
-        result.append(mapping[key])
-    return result
-
-
-def _build_state(draft, analysis, graph_context=None):
-    _validate_analysis(analysis)
-    prior_state = draft.get("prior_state")
-    prior_key_map = draft.get("prior_key_map") or {}
-    requirement_id = (
-        prior_state["original_requirement"]["id"]
-        if isinstance(prior_state, dict)
-        else "REQ-001"
+        and callable(getattr(value, "render_previous", None))
     )
-    if prior_key_map:
-        missing_impacts = sorted(
-            set(prior_key_map.get("impacts", {}))
-            - {row["key"] for row in analysis["impacts"]}
-        )
-        if missing_impacts:
-            raise ValueError(f"impact key disappeared: {missing_impacts[0]}")
-    invariant_ids = _ids(analysis["invariants"], "INV", prior_key_map.get("invariants"))
-    impact_ids = _ids(analysis["impacts"], "IMP", prior_key_map.get("impacts"))
-    decision_ids = _ids(analysis["decisions"], "DEC", prior_key_map.get("decisions"))
-    criterion_ids = _ids(analysis["criteria"], "AC", prior_key_map.get("criteria"))
-    key_map = {
-        "invariants": invariant_ids,
-        "impacts": impact_ids,
-        "decisions": decision_ids,
-        "criteria": criterion_ids,
-    }
-    impacts = []
-    for row in analysis["impacts"]:
-        impacts.append({
-            "id": impact_ids[row["key"]],
-            "requirement": requirement_id,
-            "category": row["category"],
-            "severity": row["severity"],
-            "state": row["state"],
-            "evidence_level": row["evidence_level"],
-            "evidence": row["evidence"],
-            "invariants": _map_keys(row["invariant_keys"], invariant_ids, "invariant"),
-            "decisions": _map_keys(row["decision_keys"], decision_ids, "decision"),
-            "criteria": _map_keys(row["criterion_keys"], criterion_ids, "criterion"),
-        })
-    current_behavior = [{
-        "id": invariant_ids[row["key"]], "behavior": row["behavior"],
-        "evidence_level": row["evidence_level"], "evidence": row["evidence"],
-    } for row in analysis["invariants"]]
-    preserved = []
-    for row in analysis["invariants"]:
-        affected = [
-            impact_ids[impact["key"]] for impact in analysis["impacts"]
-            if row["key"] in impact["invariant_keys"]
-        ]
-        preserved.append({
-            "id": invariant_ids[row["key"]], "requirement": requirement_id,
-            "impacts": affected, "evidence": row["evidence"],
-        })
-    decisions = [{
-        "id": decision_ids[row["key"]], "choice": row["choice"],
-        "requirement": requirement_id,
-        "accepted_impacts": _map_keys(row["accepted_impact_keys"], impact_ids, "impact"),
-        "rationale": row["rationale"],
-    } for row in analysis["decisions"]]
-    criteria = [{
-        "id": criterion_ids[row["key"]], "requirement": requirement_id,
-        "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
-        "invariant": _map_keys([row["invariant_key"]], invariant_ids, "invariant")[0],
-        "criterion": row["criterion"], "evidence": row["evidence"],
-    } for row in analysis["criteria"]]
-    decision_needed = None
-    if analysis["phase"] == "pre-decision":
-        decision_needed = {
-            "question": analysis["decision_needed"]["question"],
-            "options": [{
-                "option": row["option"],
-                "impacts": _map_keys(row["impact_keys"], impact_ids, "impact"),
-                "tradeoff": row["tradeoff"],
-            } for row in analysis["decision_needed"]["options"]],
-        }
-    unresolved = [{
-        "impact": _map_keys([row["impact_key"]], impact_ids, "impact")[0],
-        "state": row["state"], "rationale": row["rationale"],
-        "decision": None if row["decision_key"] is None else _map_keys([row["decision_key"]], decision_ids, "decision")[0],
-        "owner": row["owner"],
-    } for row in analysis["unresolved"]]
-    remaining = [row["id"] for row in impacts if row["state"] in {"accepted", "deferred", "blocked"}]
-    if not remaining:
-        remaining = [row["id"] for row in impacts]
-    all_report_ids = [requirement_id] + list(invariant_ids.values()) + list(impact_ids.values()) + list(decision_ids.values())
-    summary = [{
-        "impact_id": impact_ids[row["key"]],
-        **row["summary"], "severity": row["severity"], "status": row["state"],
-    } for row in analysis["impacts"]]
-    first_decision = decisions[0]["id"] if decisions else None
-    delta = {category: [] for category in compact_state.DELTA_CATEGORIES}
-    if prior_state is None:
-        delta["new"] = list(impact_ids.values())
-    else:
-        previous_states = {row["id"]: row["state"] for row in prior_state["impacts"]}
-        terminal = {"resolved", "accepted", "superseded"}
-        active = {"detected", "refining", "mitigated", "deferred", "blocked"}
-        state_category = {
-            "detected": "unchanged", "refining": "unchanged",
-            "mitigated": "mitigated", "resolved": "resolved",
-            "accepted": "accepted", "deferred": "deferred",
-            "blocked": "blocked", "superseded": "superseded",
-        }
-        for impact in impacts:
-            previous = previous_states.get(impact["id"])
-            if previous is None:
-                category = "new"
-            elif previous == impact["state"]:
-                category = "unchanged"
-            elif previous in terminal and impact["state"] in active:
-                category = "reopened"
-            else:
-                category = state_category[impact["state"]]
-            delta[category].append(impact["id"])
-    prior_history = []
-    if prior_state is not None:
-        current_decision_ids = set(decision_ids.values())
-        for prior_row in prior_state["history"]:
-            history_row = dict(prior_row)
-            historical_decision = history_row.get("decision")
-            if (
-                analysis["phase"] == "pre-decision"
-                and isinstance(historical_decision, str)
-                and historical_decision not in current_decision_ids
-            ):
-                history_row["decision"] = None
-                history_row["summary"] = (
-                    f"{history_row['summary']} The historical decision remains "
-                    "authoritative in the prior immutable revision."
-                )
-            prior_history.append(history_row)
-    original_requirement = (
-        {"id": requirement_id, "request": draft["request"], "source": "User request and supplied repository evidence."}
-        if prior_state is None
-        else prior_state["original_requirement"]
+
+
+def _is_previous_renderer_contract(value: object) -> bool:
+    return (
+        _is_previous_renderer_shape(value)
+        and getattr(value, "COMPACT_STATE", None) is compact_state
+        and getattr(value, "IMPACT_RENDERER", None) is impact_renderer
     )
-    if draft.get("adapter") == "superpowers":
-        handoff_workflow = SUPERPOWERS_HANDOFF_MARKER
-    elif analysis["phase"] == "pre-decision" or any(
-        row["state"] == "blocked" for row in impacts
-    ):
-        handoff_workflow = "Not ready"
-    else:
-        handoff_workflow = analysis["workflow"]
-    scope = list(analysis["scope"])
-    structured_paths = []
-    if graph_context is not None:
-        receipt = graph_context["receipt"]
-        receipt_nodes = {row["id"]: row for row in receipt["nodes"]}
-        receipt_edges = {row["id"]: row for row in receipt["edges"]}
-        receipt_paths = {row["id"]: row for row in receipt["paths"]}
-        for row in analysis["impacts"]:
-            path_descriptions = []
-            path_provenance = []
-            impact_paths = []
-            for path_key in graph_context["impact_paths"][row["key"]]:
-                path = receipt_paths[path_key]
-                labels = [receipt_nodes[node]["label"] for node in path["nodes"]]
-                path_descriptions.append(f"{path_key}: " + " → ".join(labels))
-                path_provenance.append(
-                    f"{path_key}: {_path_provenance(path, receipt_nodes, receipt_edges)}"
-                )
-                impact_paths.append(
-                    _structured_path(path, receipt_nodes, receipt_edges)
-                )
-            if impact_paths:
-                structured_paths.append({
-                    "impact": impact_ids[row["key"]], "paths": impact_paths,
-                })
-            rationale = graph_context["rationales"].get(row["key"])
-            scope.append({
-                "boundary": f"Graph paths for {impact_ids[row['key']]}",
-                "evidence": " || ".join(path_descriptions) if path_descriptions else str(rationale),
-                "confidence": (
-                    " || ".join(path_provenance) if path_provenance else
-                    "provider unavailable; confidence unknown; location unavailable"
-                ),
-            })
-        provider_summary = [
-            f"{row['name']} ({row['status']})" for row in receipt["providers"]
-        ]
-        elapsed = int(receipt["timings_ms"].get("total", 0))
-        frontier_ids = ",".join(row["id"] for row in receipt["frontier"]) or "none"
-        scope.append({
-            "boundary": "Impact graph coverage",
-            "evidence": (
-                f"Impact scan: {elapsed / 1000:.1f} s · "
-                f"{' + '.join(provider_summary) or 'no provider'} · "
-                f"{len(receipt['nodes'])} nodes / {len(receipt['edges'])} edges · "
-                f"{len(receipt['frontier'])} unknown frontiers"
-            ),
-            "confidence": (
-                f"{receipt['budget_status']}; receipt {receipt['receipt_id']}; "
-                f"sha256 {graph_context['sha256']}; frontier {frontier_ids}"
-            ),
-        })
-        if len(scope) > 128:
-            raise ValueError("scope has too many rows after graph coverage injection")
-        if any(
-            len(value.encode("utf-8")) > MAX_STRING_BYTES
-            for row in scope for value in row.values() if isinstance(value, str)
-        ):
-            raise ValueError("graph coverage scope exceeds string limit")
-    state = {
-        "schema_version": 1,
-        "report": {"id": draft["report_id"], "revision": draft["revision"], "previous_sha256": draft["previous_sha256"], "phase": analysis["phase"]},
-        "settings": draft["settings"],
-        "original_requirement": original_requirement,
-        "refined_requirement": {"id": requirement_id, "revision": analysis["refined_requirement"], "decision": first_decision, "supersedes": []},
-        "current_behavior": current_behavior,
-        "preserved_invariants": preserved,
-        "impacts": impacts,
-        "decision_needed": decision_needed,
-        "decisions": decisions,
-        "delta": delta,
-        "history": prior_history + [{"requirement": requirement_id, "revision": analysis["refined_requirement"], "decision": first_decision, "superseded_impacts": [], "summary": "Controller-created refinement revision."}],
-        "criteria": criteria,
-        "unresolved": unresolved,
-        "scope": scope,
-        "handoff": {
-            "refined_requirement": requirement_id if analysis["phase"] == "post-decision" else "Not ready until the pending decision is selected.",
-            "report_ids": all_report_ids,
-            "remaining_risks": remaining,
-            "criteria": list(criterion_ids.values()),
-            "workflow": handoff_workflow,
+
+
+PREVIOUS_RENDERER = _load_controller_sibling(
+    "rir_previous_renderer.py",
+    "rir_previous_renderer",
+    "_rir_controller_previous_renderer_",
+    _is_previous_renderer_contract,
+    "previous renderer",
+    aliases={
+        "compact_state": cast(ModuleType, compact_state),
+        "impact_report": cast(ModuleType, impact_renderer.impact_report),
+        "impact_renderer": cast(ModuleType, impact_renderer),
+    },
+    rewire_validator=_is_previous_renderer_shape,
+)
+
+
+def _is_previous_shape(value: object) -> bool:
+    return (
+        _module_uses_sibling(value, SCRIPT_DIR / "rir_previous.py")
+        and _module_uses_sibling(
+            getattr(value, "REPORT_CONTEXT", None), SCRIPT_DIR / "rir_report_context.py"
+        )
+        and _module_uses_sibling(
+            getattr(value, "PAYLOAD_IDENTITY", None), SCRIPT_DIR / "payload_identity.py"
+        )
+        and _module_uses_sibling(
+            getattr(value, "RENDERER", None), SCRIPT_DIR / "rir_previous_renderer.py"
+        )
+        and getattr(value, "PERFORMANCE", None) is PERFORMANCE
+        and _classes(
+            value,
+            ("PreviousLookupRequest", "PreviousReportCandidate", "PreviousReportResult"),
+        )
+        and callable(getattr(value, "lookup_previous", None))
+    )
+
+
+def _is_previous_contract(value: object) -> bool:
+    return (
+        _is_previous_shape(value)
+        and getattr(value, "REPORT_CONTEXT", None) is FINALIZE.REPORT_CONTEXT
+        and getattr(value, "PAYLOAD_IDENTITY", None) is PAYLOAD_IDENTITY
+        and getattr(value, "RENDERER", None) is PREVIOUS_RENDERER
+    )
+
+
+PREVIOUS = cast(
+    Any,
+    _load_controller_sibling(
+        "rir_previous.py",
+        "rir_previous",
+        "_rir_controller_previous_",
+        _is_previous_contract,
+        "previous lookup",
+        aliases={
+            "rir_report_context": cast(ModuleType, FINALIZE.REPORT_CONTEXT),
+            "payload_identity": cast(ModuleType, PAYLOAD_IDENTITY),
+            "rir_previous_renderer": cast(ModuleType, PREVIOUS_RENDERER),
+            "rir_performance": cast(ModuleType, PERFORMANCE),
         },
-        "summary": summary,
-    }
-    if structured_paths:
-        state["graph_paths"] = structured_paths
-    errors = compact_state.validate_state(state)
-    if errors:
-        raise ValueError("; ".join(errors))
-    return state, key_map
+        rewire_validator=_is_previous_shape,
+    ),
+)
+if not TYPE_CHECKING:
+    PreviousLookupRequest = PREVIOUS.PreviousLookupRequest
+    PreviousReportCandidate = PREVIOUS.PreviousReportCandidate
+    PreviousReportResult = PREVIOUS.PreviousReportResult
 
 
-def _consume(path: Path, draft: dict[str, object], published, key_map) -> None:
-    updated = dict(draft)
-    updated["consumed"] = True
-    updated["published"] = {
-        "report_id": published.report_id,
-        "revision": published.revision,
-        "markdown_sha256": published.markdown_sha256,
-    }
-    updated["key_map"] = key_map
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile("wb", dir=path.parent, prefix=".draft-", delete=False) as stream:
-            temporary = Path(stream.name)
-            stream.write(_canonical_bytes(updated))
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
-    except OSError as error:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-        raise ValueError(f"cannot consume draft: {error}") from error
+def lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
+    return PREVIOUS.lookup_previous(request)
 
 
-@contextmanager
-def _report_lock(root: Path, report_id: str, deadline=None):
-    report_dir = report_store.report_directory(root, report_id, create=True)
-    lock_path = report_dir / ".controller.lock"
-    flags = os.O_RDWR | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(lock_path, flags, 0o600)
-    except OSError as error:
-        raise ValueError(f"cannot open controller lock: {error}") from error
-    locked = False
-    try:
-        if fcntl is not None:
-            if deadline is None:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-                locked = True
-            else:
-                while True:
-                    if deadline.expired():
-                        raise ValueError(
-                            "graph trace deadline exhausted waiting for controller lock"
-                        )
-                    try:
-                        fcntl.flock(
-                            descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB
-                        )
-                        locked = True
-                        break
-                    except BlockingIOError:
-                        time.sleep(min(0.01, deadline.remaining()))
-        if deadline is not None and deadline.expired():
-            raise ValueError(
-                "graph trace deadline exhausted waiting for controller lock"
-            )
-        yield
-    finally:
-        if fcntl is not None and locked:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+_FACADE_BUILD_STATE = _build_state
+_FACADE_LOAD_GRAPH_CONTEXT = _load_graph_context
+_FACADE_VALIDATE_ANALYSIS = _validate_analysis
+_FACADE_VALIDATE_GRAPH_COVERAGE = _validate_graph_coverage
+_FACADE_CONSUME = _consume
 
 
-def _write_controller_metadata(
-    root: Path,
-    draft: Mapping[str, object],
-    state_bytes: bytes,
-    key_map: Mapping[str, object],
-    graph_receipt: Optional[Mapping[str, object]] = None,
+def _overlay_finalize_hook(
+    runtime: dict[str, object], name: str, current: object, original: object
 ) -> None:
-    path = _controller_metadata_path(
-        str(draft["report_id"]), int(draft["revision"]), root
+    if current is original:
+        return
+    if not callable(current):
+        raise TypeError(f"finalize facade hook is invalid: {name}")
+    runtime[name] = current
+
+
+def _validate_finalize_hooks() -> None:
+    if (
+        _FACADE_BUILD_STATE is not LINEAGE.build_state
+        or _FACADE_VALIDATE_ANALYSIS is not CONTRACTS.validate_analysis
+        or _FACADE_CONSUME is not STORAGE.consume_draft
+        or not _module_uses_sibling(STORAGE, SCRIPT_DIR / "rir_storage.py")
+        or getattr(_FACADE_LOAD_GRAPH_CONTEXT, "__module__", None) != __name__
+        or getattr(_FACADE_VALIDATE_GRAPH_COVERAGE, "__module__", None) != __name__
+    ):
+        raise ImportError("finalize facade hook contract is invalid")
+
+
+def _finalize_runtime() -> dict[str, object]:
+    _validate_finalize_hooks()
+    runtime = dict(FINALIZE.default_runtime())
+    _overlay_finalize_hook(runtime, "build_state", _build_state, _FACADE_BUILD_STATE)
+    _overlay_finalize_hook(
+        runtime,
+        "load_graph_context",
+        _load_graph_context,
+        _FACADE_LOAD_GRAPH_CONTEXT,
     )
-    metadata = {
-            "schema_version": 1,
-            "draft_id": draft["draft_id"],
-            "report_id": draft["report_id"],
-            "revision": draft["revision"],
-            "state_sha256": hashlib.sha256(state_bytes).hexdigest(),
-            "key_map": key_map,
-    }
-    if graph_receipt is not None:
-        metadata["graph_receipt"] = dict(graph_receipt)
-    payload = _canonical_bytes(metadata)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "wb", dir=path.parent, prefix=f".{path.name}-", delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.link(temporary, path)
-    except FileExistsError:
-        try:
-            existing_bytes = path.read_bytes() if not path.is_symlink() else b""
-            if existing_bytes != payload:
-                existing = json.loads(existing_bytes.decode("utf-8", errors="strict"))
-                same_draft = (
-                    isinstance(existing, dict)
-                    and existing.get("draft_id") == draft["draft_id"]
-                    and existing.get("report_id") == draft["report_id"]
-                    and existing.get("revision") == draft["revision"]
-                )
-                report_dir = path.parent
-                revision = int(draft["revision"])
-                artifacts_exist = any(
-                    (report_dir / f"revision-{revision:04d}.{suffix}").exists()
-                    for suffix in ("json", "md")
-                )
-                current = report_store.load_current(root, str(draft["report_id"]))
-                if not same_draft or artifacts_exist or (
-                    current is not None and current.revision >= revision
-                ):
-                    raise ValueError("controller revision belongs to another draft")
-                os.replace(temporary, path)
-                temporary = None
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError(f"cannot verify controller lineage: {error}") from error
-    except OSError as error:
-        raise ValueError(f"cannot write controller lineage: {error}") from error
-    finally:
-        if temporary is not None:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
+    _overlay_finalize_hook(
+        runtime,
+        "validate_analysis",
+        _validate_analysis,
+        _FACADE_VALIDATE_ANALYSIS,
+    )
+    _overlay_finalize_hook(
+        runtime,
+        "validate_graph_coverage",
+        _validate_graph_coverage,
+        _FACADE_VALIDATE_GRAPH_COVERAGE,
+    )
+    _overlay_finalize_hook(runtime, "consume_draft", _consume, _FACADE_CONSUME)
+    if (
+        not _module_uses_sibling(CONTRACTS, SCRIPT_DIR / "rir_contracts.py")
+        or FinalizeResult is not CONTRACTS.FinalizeResult
+    ):
+        raise ImportError("finalize facade result contract is invalid")
+    runtime["result_type"] = FinalizeResult
+    return runtime
 
 
 def finalize_refinement(request: FinalizeRequest) -> FinalizeResult:
-    root = _root(request.repo_root)
-    _bounded(request.analysis, MAX_FINALIZE_BYTES, "finalize input")
-    draft = load_draft(root, request.draft_id)
-    if draft.get("consumed") is True:
-        raise ValueError("draft is already consumed")
-    with _report_lock(root, str(draft["report_id"])):
-        draft = load_draft(root, request.draft_id)
-        if draft.get("consumed") is True:
-            raise ValueError("draft is already consumed")
-        graph_settings = draft.get("settings", {}).get("impact_graph", {})
-        graph_context = None
-        if graph_settings.get("enabled") is True:
-            graph_context = (
-                _load_promoted_scan_context(
-                    root, draft, request.graph_receipt_id
-                )
-                if draft.get("promoted_scan") is not None
-                else _load_graph_context(root, draft, request.graph_receipt_id)
-            )
-            _validate_analysis(request.analysis)
-            _validate_graph_coverage(request.analysis, graph_context)
-        elif request.graph_receipt_id is not None:
-            raise ValueError("graph_receipt_id is not allowed when impact graph is disabled")
-        state, key_map = _build_state(draft, request.analysis, graph_context)
-        state_bytes = _canonical_bytes(state)
-        _write_controller_metadata(
-            root, draft, state_bytes, key_map,
-            None if graph_context is None else {
-                "receipt_id": graph_context["receipt"]["receipt_id"],
-                "sha256": graph_context["sha256"],
-            },
-        )
-        try:
-            published = report_store.publish_revision(
-                root, state_bytes, resume_partial=True
-            )
-        except (FileExistsError, report_store.ReportStoreError) as error:
-            raise ValueError(f"controller publication failed: {error}") from error
-        stored_state, errors = compact_state.load_state_bytes(
-            published.state_path.read_bytes()
-        )
-        if errors or stored_state is None:
-            raise ValueError("published state could not be verified")
-        delivery = stored_state["settings"]["delivery"]
-        display = (
-            impact_renderer.render_compact(stored_state)
-            if delivery == "compact"
-            else impact_renderer.render_markdown(stored_state)
-        )
-        if display.endswith("\n"):
-            display = display[:-1]
-        _consume(_draft_path(root, request.draft_id), draft, published, key_map)
-    return FinalizeResult(
-        status="published",
-        report_id=published.report_id,
-        revision=published.revision,
-        delivery=delivery,
-        display_text=display,
-        state_path=published.state_path,
-        markdown_path=published.markdown_path,
-        markdown_sha256=published.markdown_sha256,
-    )
+    return FINALIZE.finalize_refinement(request, _runtime=_finalize_runtime())

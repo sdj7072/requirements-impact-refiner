@@ -37,13 +37,75 @@ def _json_depth(text: str) -> int:
 
 _MAX_JSON_DEPTH = 64
 import os
-from pathlib import Path
 import re
 import stat
 import sys
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+
+if TYPE_CHECKING:
+    from graph_providers import (
+        Deadline,
+        ProviderProbe,
+        ProviderQuery,
+        ProviderResult,
+        ProviderSpec,
+    )
+    from graph_providers import (
+        ProviderSpec as ProviderSpecType,
+    )
+    from typing_extensions import TypeGuard
 
 
-def _load(filename, name):
+class _ProviderContract(Protocol):
+    ProviderProbe: type[ProviderProbe]
+    ProviderResult: type[ProviderResult]
+    ProviderSpec: type[ProviderSpec]
+
+    def run_provider(
+        self,
+        spec: ProviderSpecType,
+        arguments: Sequence[str],
+        repo_root: Path | str,
+        deadline: Deadline,
+        *,
+        runner: object = None,
+        expect_json: bool = False,
+    ) -> ProviderQuery: ...
+
+
+class _CommonContract(Protocol):
+    def source_fingerprint(self, root: Path) -> str | None: ...
+
+
+class _CandidateNode(TypedDict):
+    key: str
+    kind: str
+    label: str
+    location: str | None
+    confidence: str
+    source_sha256: str
+    risk_domains: tuple[str, ...]
+
+
+class _CandidateEdge(TypedDict):
+    source: str
+    target: str
+    kind: str
+    location: str | None
+    evidence: str
+    confidence: str
+    source_sha256: str
+
+
+class _CodeGraphContract(Protocol):
+    def _parse_explore(
+        self, value: object, root: Path, fingerprint: str
+    ) -> tuple[tuple[_CandidateNode, ...], tuple[_CandidateEdge, ...]]: ...
+
+
+def _load(filename: str, name: str) -> object:
     loaded = sys.modules.get(name)
     if loaded is not None:
         return loaded
@@ -57,12 +119,39 @@ def _load(filename, name):
     return module
 
 
-PROVIDERS = _load("graph_providers.py", "_rir_graph_providers")
-COMMON = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
-CODEGRAPH = _load("graph_adapter_codegraph.py", "_rir_graph_adapter_codegraph")
-ProviderProbe = PROVIDERS.ProviderProbe
-ProviderResult = PROVIDERS.ProviderResult
-ProviderSpec = PROVIDERS.ProviderSpec
+_loaded_providers = _load("graph_providers.py", "_rir_graph_providers")
+_loaded_common = _load("graph_adapter_ast_grep.py", "_rir_graph_adapter_ast_grep")
+_loaded_codegraph = _load("graph_adapter_codegraph.py", "_rir_graph_adapter_codegraph")
+
+
+def _is_provider_contract(value: object) -> TypeGuard[_ProviderContract]:
+    return all(
+        isinstance(getattr(value, name, None), type)
+        for name in ("ProviderProbe", "ProviderResult", "ProviderSpec")
+    ) and callable(getattr(value, "run_provider", None))
+
+
+def _is_common_contract(value: object) -> TypeGuard[_CommonContract]:
+    return callable(getattr(value, "source_fingerprint", None))
+
+
+def _is_codegraph_contract(value: object) -> TypeGuard[_CodeGraphContract]:
+    return callable(getattr(value, "_parse_explore", None))
+
+
+if not _is_provider_contract(_loaded_providers):
+    raise ImportError("graph provider contract is incomplete")
+if not _is_common_contract(_loaded_common):
+    raise ImportError("ast-grep adapter contract is incomplete")
+if not _is_codegraph_contract(_loaded_codegraph):
+    raise ImportError("CodeGraph adapter contract is incomplete")
+PROVIDERS = cast(_ProviderContract, _loaded_providers)
+COMMON = cast(_CommonContract, _loaded_common)
+CODEGRAPH = cast(_CodeGraphContract, _loaded_codegraph)
+if not TYPE_CHECKING:
+    ProviderProbe = PROVIDERS.ProviderProbe
+    ProviderResult = PROVIDERS.ProviderResult
+    ProviderSpec = PROVIDERS.ProviderSpec
 
 _VERSION = re.compile(r"(?i)^joern\s+(?P<version>4\.\d+\.\d+(?:[-+][^\s]+)?)$")
 _CREATOR_VERSION = re.compile(r"4\.\d+\.\d+(?:[-+][^\s]+)?")
@@ -72,7 +161,9 @@ _MAX_METADATA_BYTES = 64 * 1024
 
 
 def _failure(status, detail, digests=()):
-    return ProviderResult("joern", status, "verified-provider", raw_receipt_sha256=digests, detail=str(detail)[:512])
+    return ProviderResult(
+        "joern", status, "verified-provider", raw_receipt_sha256=digests, detail=str(detail)[:512]
+    )
 
 
 def _file_bytes(path, maximum):
@@ -120,7 +211,12 @@ def _regular_graph(root):
             return "stale", "existing Joern graph metadata is incomplete", None
         except OSError as error:
             return "unsafe", str(error), None
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > maximum:
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_size <= 0
+            or info.st_size > maximum
+        ):
             return "unsafe", "Joern graph files must be bounded regular non-symlink files", None
     digest = _file_sha256(graph, _MAX_GRAPH_BYTES)
     if digest is None:
@@ -137,10 +233,13 @@ def _metadata(root):
         if _json_depth(_decoded) > _MAX_JSON_DEPTH:
             raise ValueError("json nesting depth exceeded")
         value = json.loads(_decoded)
-    except (UnicodeDecodeError, json.JSONDecodeError,
-            RecursionError, ValueError) as error:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as error:
         raise ValueError("Joern graph metadata must be UTF-8 JSON") from error
-    if not isinstance(value, dict) or set(value) != {"schemaVersion", "projectRoot", "sourceFingerprint", "createdBy"} or value["schemaVersion"] != 1:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schemaVersion", "projectRoot", "sourceFingerprint", "createdBy"}
+        or value["schemaVersion"] != 1
+    ):
         raise ValueError("Joern graph metadata shape is unsupported")
     created = value["createdBy"]
     if not isinstance(created, dict) or set(created) != {"name", "version"}:
@@ -151,7 +250,10 @@ def _metadata(root):
         or _CREATOR_VERSION.fullmatch(created["version"]) is None
     ):
         raise ValueError("Joern graph creator is unsupported")
-    if not isinstance(value["sourceFingerprint"], str) or _HEX64.fullmatch(value["sourceFingerprint"]) is None:
+    if (
+        not isinstance(value["sourceFingerprint"], str)
+        or _HEX64.fullmatch(value["sourceFingerprint"]) is None
+    ):
         raise ValueError("Joern source fingerprint is invalid")
     return value
 
@@ -163,44 +265,148 @@ def probe(spec, root, deadline, runner) -> ProviderProbe:
     resolved = base.resolve() if not base.is_symlink() and base.is_dir() else base.absolute()
     graph_status, graph_detail, graph_digest = _regular_graph(resolved)
     if graph_status != "ready":
-        return ProviderProbe("joern", graph_status, "verified-provider", spec.executable, detail=graph_detail, repo_root=resolved)
+        return ProviderProbe(
+            "joern",
+            graph_status,
+            "verified-provider",
+            spec.executable,
+            detail=graph_detail,
+            repo_root=resolved,
+        )
     fingerprint = COMMON.source_fingerprint(resolved)
     if fingerprint is None:
-        return ProviderProbe("joern", "unsafe", "verified-provider", spec.executable, detail="repository source identity is unsafe or exceeds bounds", repo_root=resolved)
+        return ProviderProbe(
+            "joern",
+            "unsafe",
+            "verified-provider",
+            spec.executable,
+            detail="repository source identity is unsafe or exceeds bounds",
+            repo_root=resolved,
+        )
     try:
         metadata = _metadata(resolved)
     except ValueError as error:
-        return ProviderProbe("joern", "failed", "verified-provider", spec.executable, detail=error, repo_root=resolved)
+        return ProviderProbe(
+            "joern",
+            "failed",
+            "verified-provider",
+            spec.executable,
+            detail=str(error),
+            repo_root=resolved,
+        )
     if metadata["projectRoot"] != str(resolved):
-        return ProviderProbe("joern", "unsupported", "verified-provider", spec.executable, detail="Joern graph project root does not exactly match repository", repo_root=resolved)
+        return ProviderProbe(
+            "joern",
+            "unsupported",
+            "verified-provider",
+            spec.executable,
+            detail="Joern graph project root does not exactly match repository",
+            repo_root=resolved,
+        )
     if metadata["sourceFingerprint"] != fingerprint:
-        return ProviderProbe("joern", "stale", "verified-provider", spec.executable, detail="Joern graph is stale for repository sources", repo_root=resolved)
+        return ProviderProbe(
+            "joern",
+            "stale",
+            "verified-provider",
+            spec.executable,
+            detail="Joern graph is stale for repository sources",
+            repo_root=resolved,
+        )
     version_result = PROVIDERS.run_provider(spec, ("--version",), resolved, deadline, runner=runner)
     if version_result.status != "ready":
-        return ProviderProbe("joern", version_result.status, "verified-provider", spec.executable, executable_sha256=version_result.executable_sha256, detail=version_result.detail, repo_root=resolved)
-    version = next((line.strip() for line in version_result.stdout.splitlines() if line.strip()), "")
+        return ProviderProbe(
+            "joern",
+            version_result.status,
+            "verified-provider",
+            spec.executable,
+            executable_sha256=version_result.executable_sha256,
+            detail=version_result.detail,
+            repo_root=resolved,
+        )
+    version = next(
+        (line.strip() for line in version_result.stdout.splitlines() if line.strip()), ""
+    )
     version_match = _VERSION.fullmatch(version)
     if version_match is None:
-        return ProviderProbe("joern", "unsupported", "verified-provider", spec.executable, version[:256] or None, version_result.executable_sha256, detail="Joern 4.x JSON query CLI is required", repo_root=resolved)
+        return ProviderProbe(
+            "joern",
+            "unsupported",
+            "verified-provider",
+            spec.executable,
+            version[:256] or None,
+            version_result.executable_sha256,
+            detail="Joern 4.x JSON query CLI is required",
+            repo_root=resolved,
+        )
     if metadata["createdBy"]["version"] != version_match.group("version"):
-        return ProviderProbe("joern", "unsupported", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="Joern graph creator version does not match installed reader", repo_root=resolved)
+        return ProviderProbe(
+            "joern",
+            "unsupported",
+            "verified-provider",
+            spec.executable,
+            version,
+            version_result.executable_sha256,
+            detail="Joern graph creator version does not match installed reader",
+            repo_root=resolved,
+        )
     for arguments in (("--help",), ("query", "--help")):
         help_result = PROVIDERS.run_provider(spec, arguments, resolved, deadline, runner=runner)
         if help_result.status != "ready":
-            status = help_result.status if help_result.status in {"unsafe", "timed_out"} else "unsupported"
-            return ProviderProbe("joern", status, "verified-provider", spec.executable, version, version_result.executable_sha256, detail=help_result.detail or "Joern query help unavailable", repo_root=resolved)
+            status = (
+                help_result.status
+                if help_result.status in {"unsafe", "timed_out"}
+                else "unsupported"
+            )
+            return ProviderProbe(
+                "joern",
+                status,
+                "verified-provider",
+                spec.executable,
+                version,
+                version_result.executable_sha256,
+                detail=help_result.detail or "Joern query help unavailable",
+                repo_root=resolved,
+            )
         if help_result.executable_sha256 != version_result.executable_sha256:
-            return ProviderProbe("joern", "unsafe", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="provider executable changed between probes", repo_root=resolved)
-        if re.fullmatch(
-            r"Usage:\s+joern query --json --graph <GRAPH> --seed <TEXT>\s*",
-            help_result.stdout,
-        ) is None:
-            return ProviderProbe("joern", "unsupported", "verified-provider", spec.executable, version, version_result.executable_sha256, detail="Joern help does not confirm non-interactive JSON graph queries", repo_root=resolved)
+            return ProviderProbe(
+                "joern",
+                "unsafe",
+                "verified-provider",
+                spec.executable,
+                version,
+                version_result.executable_sha256,
+                detail="provider executable changed between probes",
+                repo_root=resolved,
+            )
+        if (
+            re.fullmatch(
+                r"Usage:\s+joern query --json --graph <GRAPH> --seed <TEXT>\s*",
+                help_result.stdout,
+            )
+            is None
+        ):
+            return ProviderProbe(
+                "joern",
+                "unsupported",
+                "verified-provider",
+                spec.executable,
+                version,
+                version_result.executable_sha256,
+                detail="Joern help does not confirm non-interactive JSON graph queries",
+                repo_root=resolved,
+            )
     return ProviderProbe(
-        "joern", "ready", "verified-provider", spec.executable, version,
-        version_result.executable_sha256, ("query-json", "existing-graph"),
-        repo_root=resolved, metadata={
-            "graph": ".joern/cpg.bin", "graph_sha256": graph_digest,
+        "joern",
+        "ready",
+        "verified-provider",
+        spec.executable,
+        version,
+        version_result.executable_sha256,
+        ("query-json", "existing-graph"),
+        repo_root=resolved,
+        metadata={
+            "graph": ".joern/cpg.bin",
+            "graph_sha256": graph_digest,
             "source_fingerprint": fingerprint,
         },
     )
@@ -216,37 +422,56 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
     if graph_status != "ready":
         return _failure(graph_status, graph_detail)
     fingerprint = COMMON.source_fingerprint(root)
-    if fingerprint != probe.metadata.get("source_fingerprint") or graph_digest != probe.metadata.get("graph_sha256"):
+    if fingerprint != probe.metadata.get(
+        "source_fingerprint"
+    ) or graph_digest != probe.metadata.get("graph_sha256"):
         return _failure("stale", "repository or Joern graph changed after probe")
     spec = ProviderSpec("joern", probe.executable)
-    nodes = {}
-    edges = {}
-    digests = []
+    nodes: dict[object, Mapping[str, object]] = {}
+    edges: dict[tuple[object, ...], Mapping[str, object]] = {}
+    digests: list[str] = []
     for seed in tuple(seeds)[:16]:
         term = getattr(seed, "term", None)
         if not isinstance(term, str) or not term or len(term) > 256:
             continue
         result = PROVIDERS.run_provider(
-            spec, ("query", "--json", "--graph", ".joern/cpg.bin", "--seed", term),
-            root, deadline, runner=runner, expect_json=True,
+            spec,
+            ("query", "--json", "--graph", ".joern/cpg.bin", "--seed", term),
+            root,
+            deadline,
+            runner=runner,
+            expect_json=True,
         )
         if result.status != "ready":
-            return _failure(result.status, result.detail or "Joern graph query failed", tuple(digests))
-        if probe.executable_sha256 is not None and result.executable_sha256 != probe.executable_sha256:
+            return _failure(
+                result.status, result.detail or "Joern graph query failed", tuple(digests)
+            )
+        if (
+            probe.executable_sha256 is not None
+            and result.executable_sha256 != probe.executable_sha256
+        ):
             return _failure("unsafe", "Joern executable changed after probe", tuple(digests))
         digest = hashlib.sha256(result.stdout.encode("utf-8")).hexdigest()
         digests.append(digest)
         try:
-            parsed_nodes, parsed_edges = CODEGRAPH._parse_explore(result.parsed_json, root, fingerprint)
+            parsed_nodes, parsed_edges = CODEGRAPH._parse_explore(
+                result.parsed_json, root, fingerprint
+            )
             for row in parsed_nodes:
                 prior = nodes.get(row["key"])
                 if prior is not None and prior != row:
                     raise ValueError("Joern node id changed across seed queries")
                 nodes[row["key"]] = row
-            for row in parsed_edges:
-                rewritten = dict(row)
-                rewritten["evidence"] = row["evidence"].replace("CodeGraph ", "Joern ", 1)
-                signature = (rewritten["source"], rewritten["target"], rewritten["kind"], rewritten["location"], rewritten["evidence"])
+            for edge_row in parsed_edges:
+                rewritten = dict(edge_row)
+                rewritten["evidence"] = edge_row["evidence"].replace("CodeGraph ", "Joern ", 1)
+                signature = (
+                    rewritten["source"],
+                    rewritten["target"],
+                    rewritten["kind"],
+                    rewritten["location"],
+                    rewritten["evidence"],
+                )
                 edges[signature] = rewritten
         except (TypeError, ValueError) as error:
             return _failure("failed", error, tuple(digests))
@@ -254,8 +479,12 @@ def query(probe, seeds, deadline, runner) -> ProviderResult:
     if COMMON.source_fingerprint(root) != fingerprint or final_graph != graph_digest:
         return _failure("stale", "repository or Joern graph changed during query", tuple(digests))
     return ProviderResult(
-        "joern", "ready", "verified-provider", tuple(nodes.values()),
-        tuple(edges.values()), raw_receipt_sha256=tuple(digests),
+        "joern",
+        "ready",
+        "verified-provider",
+        tuple(nodes.values()),
+        tuple(edges.values()),
+        raw_receipt_sha256=tuple(digests),
         metadata={"queries": len(digests), "graph_sha256": graph_digest},
     )
 

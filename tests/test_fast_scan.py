@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "fast_scan.py"
 SCHEMA_PATH = ROOT / "schemas" / "fast-impact-scan.schema.json"
@@ -134,15 +133,11 @@ class FastScanTest(unittest.TestCase):
         self.write("app.py", "def run(): pass\n")
 
         self.assertEqual(
-            fast_scan.derive_seeds(
-                self.root, "make the experience nicer", (), FakeDeadline()
-            ),
+            fast_scan.derive_seeds(self.root, "make the experience nicer", (), FakeDeadline()),
             (),
         )
         self.assertEqual(
-            fast_scan.derive_seeds(
-                self.root, "Change run", (), FakeDeadline(expired=True)
-            ),
+            fast_scan.derive_seeds(self.root, "Change run", (), FakeDeadline(expired=True)),
             (),
         )
 
@@ -211,21 +206,39 @@ class FastScanTest(unittest.TestCase):
             [("api/profile.py", "api/profile.py", "request-path-only")],
         )
 
+    def test_explicit_path_candidates_include_known_bare_root_files_only(self):
+        fast_scan = load_fast_scan()
+
+        candidates = fast_scan.explicit_path_candidates(
+            "Create ignored.py and update package.json, not arbitrary.prose or example.com.",
+            (),
+        )
+
+        self.assertEqual(candidates, ("ignored.py", "package.json"))
+
+    def test_bare_root_candidate_does_not_duplicate_a_dotted_path_directory(self):
+        fast_scan = load_fast_scan()
+
+        candidates = fast_scan.explicit_path_candidates(
+            "Change package.json/scripts/build and root.py",
+            (),
+        )
+
+        self.assertEqual(candidates, ("package.json/scripts/build", "root.py"))
+
     def test_request_evidence_and_maximum_bounds_are_enforced(self):
         fast_scan = load_fast_scan()
         with self.assertRaisesRegex(ValueError, "4 KiB"):
-            fast_scan.derive_seeds(
-                self.root, "x" * 4097, (), FakeDeadline()
-            )
+            fast_scan.derive_seeds(self.root, "x" * 4097, (), FakeDeadline())
         with self.assertRaisesRegex(ValueError, "32"):
             fast_scan.derive_seeds(
-                self.root, "Change field.name", tuple("row" for _ in range(33)),
+                self.root,
+                "Change field.name",
+                tuple("row" for _ in range(33)),
                 FakeDeadline(),
             )
         with self.assertRaisesRegex(ValueError, "maximum"):
-            fast_scan.derive_seeds(
-                self.root, "Change field.name", (), FakeDeadline(), maximum=0
-            )
+            fast_scan.derive_seeds(self.root, "Change field.name", (), FakeDeadline(), maximum=0)
         with self.assertRaisesRegex(ValueError, "credential"):
             fast_scan.derive_seeds(
                 self.root,
@@ -250,7 +263,9 @@ class FastScanTest(unittest.TestCase):
 
         inconsistent = self.receipt()
         inconsistent["source_inventory"] = {
-            "digests": {}, "complete": False, "reason": None,
+            "digests": {},
+            "complete": False,
+            "reason": None,
         }
         self.assertIn(
             "incomplete source_inventory requires a reason",
@@ -271,6 +286,91 @@ class FastScanTest(unittest.TestCase):
         complete["cache_status"] = "miss"
         self.assertEqual(fast_scan.validate_fast_scan_receipt(complete), ())
 
+    def test_stored_performance_metrics_reject_schema_bound_mutations(self):
+        fast_scan = load_fast_scan()
+        valid = self.receipt()
+        valid["performance_metrics"] = fast_scan.rir_performance.PerformanceMetrics().to_mapping()
+        self.assertEqual(fast_scan.validate_fast_scan_receipt(valid), ())
+
+        mutations = (
+            ("model_calls", None),
+            ("model_calls", True),
+            ("model_calls", -1),
+            ("accounting_exclusions", [f"row-{index}" for index in range(17)]),
+            ("accounting_exclusions", ["😀" * 257]),
+            ("accounting_exclusions", ["same", "same"]),
+            (
+                "accounting_exclusions",
+                ["😀" * 255 + chr(ord("a") + index) for index in range(16)],
+            ),
+        )
+        for field, malformed in mutations:
+            with self.subTest(field=field, malformed=malformed):
+                value = copy.deepcopy(valid)
+                value["performance_metrics"][field] = malformed
+                if field == "model_calls" and malformed is None:
+                    value["performance_metrics"]["actual_input_tokens"] = 1
+                    value["performance_metrics"]["actual_output_tokens"] = 1
+
+                self.assertIn(
+                    "performance_metrics is invalid",
+                    fast_scan.validate_fast_scan_receipt(value),
+                )
+                with self.assertRaisesRegex(ValueError, "invalid fast scan receipt"):
+                    fast_scan.canonical_fast_scan_bytes(value)
+
+    def test_unhashable_status_risk_cache_inventory_and_seed_identity_fail_closed(self):
+        fast_scan = load_fast_scan()
+        cases = (
+            (("status",), [], "status is invalid"),
+            (("risk_level",), {}, "risk_level is invalid"),
+            (("cache_status",), [], "cache_status is invalid"),
+            (
+                ("source_inventory", "reason"),
+                {},
+                "source_inventory reason must be null or nonblank text",
+            ),
+            (("seeds", 0, "term"), [], "seed row 1 term must be nonblank"),
+            (("seeds", 0, "location"), {}, "seed row 1 location is unsafe"),
+        )
+        for path, malformed, expected in cases:
+            with self.subTest(path=path, malformed=malformed):
+                value = self.receipt()
+                if path[0] == "seeds":
+                    value["seeds"] = [
+                        {
+                            "term": "profile.displayName",
+                            "location": "api/profile.py",
+                            "derivation": "repository-match",
+                            "source_sha256": "5" * 64,
+                        }
+                    ]
+                target = value
+                for component in path[:-1]:
+                    target = target[component]
+                target[path[-1]] = malformed
+
+                errors = fast_scan.validate_fast_scan_receipt(value)
+
+                self.assertIn(expected, errors)
+
+    def test_schema_version_requires_the_exact_integer_one(self):
+        fast_scan = load_fast_scan()
+        for sentinel, valid in ((True, False), (1.0, False), ("1", False), (1, True)):
+            with self.subTest(sentinel=sentinel):
+                value = self.receipt()
+                value["schema_version"] = sentinel
+
+                errors = fast_scan.validate_fast_scan_receipt(value)
+
+                if valid:
+                    self.assertEqual(errors, ())
+                    self.assertEqual(json.loads(fast_scan.canonical_fast_scan_bytes(value)), value)
+                else:
+                    self.assertIn("schema_version must be 1", errors)
+                    with self.assertRaisesRegex(ValueError, "invalid fast scan receipt"):
+                        fast_scan.canonical_fast_scan_bytes(value)
+
     def test_canonical_receipt_bytes_are_stable_utf8_and_no_terminal_newline(self):
         fast_scan = load_fast_scan()
         value = self.receipt()
@@ -289,8 +389,10 @@ class FastScanTest(unittest.TestCase):
     def test_domain_values_are_immutable_and_schema_matches_contract(self):
         fast_scan = load_fast_scan()
         seed = fast_scan.DerivedSeed(
-            "profile.displayName", "api/profile.py",
-            "request-path-symbol", "a" * 64,
+            "profile.displayName",
+            "api/profile.py",
+            "request-path-symbol",
+            "a" * 64,
         )
         with self.assertRaises((AttributeError, TypeError)):
             seed.term = "changed"
@@ -299,23 +401,36 @@ class FastScanTest(unittest.TestCase):
             self.fail("schemas/fast-impact-scan.schema.json must exist")
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
         expected = {
-            "schema_version", "status", "scan_id", "receipt_id",
-            "repo_root_sha256", "request_sha256", "payload_sha256",
-            "settings", "source_inventory", "seeds", "graph_receipt",
-            "risk_level", "frontier", "candidates", "elapsed_ms",
-            "cache_status", "can_promote", "created_at",
+            "schema_version",
+            "status",
+            "scan_id",
+            "receipt_id",
+            "repo_root_sha256",
+            "request_sha256",
+            "payload_sha256",
+            "settings",
+            "source_inventory",
+            "seeds",
+            "graph_receipt",
+            "risk_level",
+            "frontier",
+            "candidates",
+            "elapsed_ms",
+            "cache_status",
+            "can_promote",
+            "created_at",
         }
         self.assertEqual(set(schema["required"]), expected)
-        self.assertEqual(set(schema["properties"]), expected)
+        self.assertEqual(
+            set(schema["properties"]), expected | {"delta_context", "performance_metrics"}
+        )
         self.assertFalse(schema["additionalProperties"])
 
     def test_execute_calls_graph_once_persists_and_renders(self):
         fast_scan = load_fast_scan()
         self.write("api/profile.py", 'FIELD = "profile.displayName"\n')
         graph = json.loads(
-            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(encoding="utf-8")
         )
         graph["budget_status"] = "closed"
         graph["frontier"] = []
@@ -326,9 +441,7 @@ class FastScanTest(unittest.TestCase):
             return graph
 
         result = fast_scan.execute_fast_scan(
-            fast_scan.FastScanRequest(
-                self.root, "Rename profile.displayName", (), "balanced"
-            ),
+            fast_scan.FastScanRequest(self.root, "Rename profile.displayName", (), "balanced"),
             graph["settings"],
             payload_sha256="a" * 64,
             coordinator=coordinator,
@@ -338,8 +451,9 @@ class FastScanTest(unittest.TestCase):
         self.assertTrue(result.can_promote)
         self.assertLessEqual(len(result.display_text.split()), 180)
         self.assertTrue(
-            (self.root / ".requirements-impact-refiner/scans" /
-             (result.scan_id + ".json")).is_file()
+            (
+                self.root / ".requirements-impact-refiner/scans" / (result.scan_id + ".json")
+            ).is_file()
         )
 
     def test_execute_needs_input_without_graph_call(self):
@@ -351,8 +465,11 @@ class FastScanTest(unittest.TestCase):
         result = fast_scan.execute_fast_scan(
             fast_scan.FastScanRequest(self.root, "make it nicer", (), "simple"),
             {
-                "enabled": True, "max_seconds": 30, "target_seconds": 10,
-                "providers": ["builtin"], "install_policy": "never",
+                "enabled": True,
+                "max_seconds": 30,
+                "target_seconds": 10,
+                "providers": ["builtin"],
+                "install_policy": "never",
                 "deep": False,
             },
             payload_sha256="a" * 64,
@@ -361,13 +478,31 @@ class FastScanTest(unittest.TestCase):
         self.assertEqual(result.status, "needs_input")
         self.assertFalse(result.can_promote)
 
+    def test_prepare_identity_validates_list_providers_and_normalizes_to_tuple(self):
+        fast_scan = load_fast_scan()
+        settings = {
+            "enabled": True,
+            "max_seconds": 30,
+            "target_seconds": 10,
+            "providers": ["builtin"],
+            "install_policy": "never",
+            "deep": False,
+        }
+        request = fast_scan.FastScanRequest(self.root, "make it nicer", (), "simple")
+
+        prepared = fast_scan.prepare_fast_scan_identity(request, settings, "a" * 64)
+
+        self.assertEqual(prepared.settings.providers, ("builtin",))
+        invalid = copy.deepcopy(settings)
+        invalid["providers"] = [{}]
+        with self.assertRaisesRegex(ValueError, "invalid graph settings"):
+            fast_scan.prepare_fast_scan_identity(request, invalid, "a" * 64)
+
     def test_execute_reuses_exact_scan_and_source_mutation_invalidates_it(self):
         fast_scan = load_fast_scan()
         source = self.write("api/profile.py", 'FIELD = "profile.displayName"\n')
         graph = json.loads(
-            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(encoding="utf-8")
         )
         graph["budget_status"] = "closed"
         graph["frontier"] = []
@@ -376,12 +511,10 @@ class FastScanTest(unittest.TestCase):
         def coordinator(*args, **kwargs):
             calls.append(1)
             value = copy.deepcopy(graph)
-            value["receipt_id"] = ("%032x" % len(calls))
+            value["receipt_id"] = f"{len(calls):032x}"
             return value
 
-        request = fast_scan.FastScanRequest(
-            self.root, "Rename profile.displayName", (), "balanced"
-        )
+        request = fast_scan.FastScanRequest(self.root, "Rename profile.displayName", (), "balanced")
         first = fast_scan.execute_fast_scan(
             request, graph["settings"], "a" * 64, coordinator=coordinator
         )
@@ -391,6 +524,24 @@ class FastScanTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(second.scan_id, first.scan_id)
         self.assertEqual(second.cache_status, "hit")
+        self.assertEqual(second.performance_metrics.cache_status, "hit")
+        self.assertEqual(second.performance_metrics.compact_graph.serialized_bytes, 0)
+        self.assertEqual(second.performance_metrics.accounted_new_evidence_bytes, 0)
+        self.assertEqual(second.performance_metrics.estimated_serialized_input_tokens, 0)
+        self.assertGreater(second.performance_metrics.accounted_reused_bytes, 0)
+        self.assertIsNone(second.performance_metrics.estimated_model_input_tokens)
+        self.assertEqual(second.performance_metrics.model_calls, 0)
+        self.assertGreaterEqual(
+            second.performance_metrics.operation_elapsed_ms,
+            second.performance_metrics.analysis_elapsed_ms,
+        )
+        stored = json.loads(
+            (
+                self.root / ".requirements-impact-refiner/scans" / (first.scan_id + ".json")
+            ).read_text(encoding="utf-8")
+        )
+        self.assertIsNone(stored["performance_metrics"]["operation_elapsed_ms"])
+        self.assertIsNotNone(stored["performance_metrics"]["analysis_elapsed_ms"])
 
         source.write_text('FIELD = "profile.displayName"\n# changed\n', encoding="utf-8")
         third = fast_scan.execute_fast_scan(
@@ -398,6 +549,40 @@ class FastScanTest(unittest.TestCase):
         )
         self.assertEqual(len(calls), 2)
         self.assertNotEqual(third.scan_id, first.scan_id)
+
+    def test_malformed_cached_frontier_fails_closed_before_a_cache_hit_is_returned(self):
+        fast_scan = load_fast_scan()
+        self.write("api/profile.py", 'FIELD = "profile.displayName"\n')
+        graph = json.loads(
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(encoding="utf-8")
+        )
+        graph["budget_status"] = "closed"
+        graph["frontier"] = []
+        request = fast_scan.FastScanRequest(self.root, "Rename profile.displayName", (), "balanced")
+        first = fast_scan.execute_fast_scan(
+            request, graph["settings"], "a" * 64, coordinator=lambda *args, **kwargs: graph
+        )
+        cache_path = self.root / ".requirements-impact-refiner/scans" / (first.scan_id + ".json")
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        cached["frontier"] = [1]
+        cache_path.write_text(
+            json.dumps(cached, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            fast_scan.validate_fast_scan_receipt(cached),
+            ("frontier row 1 must be an object",),
+        )
+        with self.assertRaisesRegex(ValueError, "existing fast scan receipt is invalid"):
+            fast_scan.execute_fast_scan(
+                request,
+                graph["settings"],
+                "a" * 64,
+                coordinator=lambda *args, **kwargs: self.fail(
+                    "invalid cache must not scan or return"
+                ),
+            )
 
 
 if __name__ == "__main__":
@@ -480,9 +665,7 @@ class PromotionReachabilityTest(unittest.TestCase):
     def run_scan(self, graph):
         fast_scan = load_fast_scan()
         return fast_scan.execute_fast_scan(
-            fast_scan.FastScanRequest(
-                self.root, "Rename profile.displayName", (), "balanced"
-            ),
+            fast_scan.FastScanRequest(self.root, "Rename profile.displayName", (), "balanced"),
             graph["settings"],
             payload_sha256="a" * 64,
             coordinator=lambda *args, **kwargs: graph,
@@ -490,18 +673,21 @@ class PromotionReachabilityTest(unittest.TestCase):
 
     def load_graph(self):
         return json.loads(
-            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(encoding="utf-8")
         )
 
     def test_missing_providers_alone_do_not_block_promotion(self):
         graph = self.load_graph()
         self.assertEqual(graph["budget_status"], "provider_limited")
-        graph["providers"].append({
-            "name": "scip", "status": "missing", "confidence": "lexical",
-            "version": None, "executable_sha256": None,
-        })
+        graph["providers"].append(
+            {
+                "name": "scip",
+                "status": "missing",
+                "confidence": "lexical",
+                "version": None,
+                "executable_sha256": None,
+            }
+        )
         for row in graph["frontier"]:
             row["reason"] = "provider unavailable; built-in fallback used: scip"
 
@@ -525,8 +711,7 @@ class PromotionReachabilityTest(unittest.TestCase):
         self.assertEqual(graph["budget_status"], "provider_limited")
         for row in graph["frontier"]:
             row["reason"] = (
-                "provider unavailable; provider output disagreed and "
-                "coverage is incomplete"
+                "provider unavailable; provider output disagreed and coverage is incomplete"
             )
 
         result = self.run_scan(graph)
@@ -536,13 +721,9 @@ class PromotionReachabilityTest(unittest.TestCase):
 
     def test_invented_provider_disclosure_cannot_promote(self):
         graph = self.load_graph()
-        graph["providers"] = [
-            row for row in graph["providers"] if row["name"] == "builtin"
-        ]
+        graph["providers"] = [row for row in graph["providers"] if row["name"] == "builtin"]
         for row in graph["frontier"]:
-            row["reason"] = (
-                "provider unavailable; built-in fallback used: invented-provider"
-            )
+            row["reason"] = "provider unavailable; built-in fallback used: invented-provider"
 
         result = self.run_scan(graph)
 
@@ -552,16 +733,12 @@ class PromotionReachabilityTest(unittest.TestCase):
     def test_budget_exhausted_scan_stays_partial(self):
         fast_scan = load_fast_scan()
         graph = json.loads(
-            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "tests/fixtures/impact-graph-receipt.json").read_text(encoding="utf-8")
         )
         graph["budget_status"] = "budget_exhausted"
 
         result = fast_scan.execute_fast_scan(
-            fast_scan.FastScanRequest(
-                self.root, "Rename profile.displayName", (), "balanced"
-            ),
+            fast_scan.FastScanRequest(self.root, "Rename profile.displayName", (), "balanced"),
             graph["settings"],
             payload_sha256="a" * 64,
             coordinator=lambda *args, **kwargs: graph,
@@ -581,9 +758,7 @@ class DeriveSeedReadEfficiencyTest(unittest.TestCase):
             root = Path(temporary) / "repo"
             root.mkdir()
             for i in range(30):
-                (root / f"module{i:02d}.py").write_text(
-                    f"VALUE_{i} = {i}\n", encoding="utf-8"
-                )
+                (root / f"module{i:02d}.py").write_text(f"VALUE_{i} = {i}\n", encoding="utf-8")
             calls = []
             original = fast_scan._read_source
 
@@ -595,8 +770,7 @@ class DeriveSeedReadEfficiencyTest(unittest.TestCase):
             try:
                 fast_scan.derive_seeds(
                     root,
-                    "Change alpha.one beta.two gamma.three delta.four "
-                    "epsilon.five zeta.six",
+                    "Change alpha.one beta.two gamma.three delta.four epsilon.five zeta.six",
                     (),
                     FakeDeadline(),
                 )
@@ -604,7 +778,8 @@ class DeriveSeedReadEfficiencyTest(unittest.TestCase):
                 fast_scan._read_source = original
 
             self.assertLessEqual(
-                len(calls), len(set(calls)) + 30,
+                len(calls),
+                len(set(calls)) + 30,
                 f"{len(calls)} reads for {len(set(calls))} distinct files",
             )
 
@@ -616,24 +791,28 @@ class PolicyPathDisplayRegressionTest(unittest.TestCase):
             root = Path(temporary)
             (root / "docs").mkdir()
             (root / "docs/POLICY.md").write_text(
-                'POLICY.md authorization privacy api cache state worker\n',
+                "POLICY.md authorization privacy api cache state worker\n",
                 encoding="utf-8",
             )
             for index in range(7):
                 (root / f"module{index}.py").write_text(
-                    'POLICY = "POLICY.md"\n'
-                    'authorization privacy api cache state worker\n',
+                    'POLICY = "POLICY.md"\nauthorization privacy api cache state worker\n',
                     encoding="utf-8",
                 )
             settings = {
-                "enabled": True, "max_seconds": 30, "target_seconds": 10,
-                "providers": ["builtin"], "install_policy": "never",
+                "enabled": True,
+                "max_seconds": 30,
+                "target_seconds": 10,
+                "providers": ["builtin"],
+                "install_policy": "never",
                 "deep": False,
             }
 
             result = fast_scan.execute_fast_scan(
                 fast_scan.FastScanRequest(
-                    root, "Change docs/POLICY.md authorization rules", (),
+                    root,
+                    "Change docs/POLICY.md authorization rules",
+                    (),
                     "balanced",
                 ),
                 settings,
@@ -642,20 +821,19 @@ class PolicyPathDisplayRegressionTest(unittest.TestCase):
 
             self.assertNotIn("POLICY.md → POLICY.md", result.display_text)
             self.assertIn("docs/POLICY.md → module0.py", result.display_text)
-            self.assertNotIn(
-                "built-in scan budget exhausted", result.display_text
-            )
+            self.assertNotIn("built-in scan budget exhausted", result.display_text)
 
     def test_korean_request_automatically_uses_korean_guidance(self):
         fast_scan = load_fast_scan()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "api.py").write_text(
-                'FIELD = "profile.displayName"\n', encoding="utf-8"
-            )
+            (root / "api.py").write_text('FIELD = "profile.displayName"\n', encoding="utf-8")
             settings = {
-                "enabled": True, "max_seconds": 30, "target_seconds": 10,
-                "providers": ["builtin"], "install_policy": "never",
+                "enabled": True,
+                "max_seconds": 30,
+                "target_seconds": 10,
+                "providers": ["builtin"],
+                "install_policy": "never",
                 "deep": False,
             }
 
@@ -685,7 +863,6 @@ class InventoryCompletenessTest(unittest.TestCase):
         (self.root / "ok.py").write_text("VALUE = 1\n", encoding="utf-8")
 
     def test_permission_denied_source_marks_inventory_incomplete(self):
-        import os as _os
         blocked = self.root / "blocked.py"
         blocked.write_text("HIDDEN = 1\n", encoding="utf-8")
         blocked.chmod(0o000)

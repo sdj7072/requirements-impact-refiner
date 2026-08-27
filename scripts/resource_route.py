@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-
+from dataclasses import dataclass
 
 AUDIENCES = {"simple", "balanced", "technical"}
 DELIVERIES = {"compact", "full"}

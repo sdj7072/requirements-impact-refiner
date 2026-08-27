@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-
 ROOT_FILES = (
     ".codex-plugin/plugin.json",
     ".mcp.json",
@@ -33,7 +32,18 @@ ROOT_FILES = (
     "scripts/report_store.py",
     "scripts/resolve-settings.py",
     "scripts/rir-controller.py",
+    "scripts/rir_contracts.py",
+    "scripts/rir_finalize.py",
+    "scripts/rir_graph_delivery.py",
+    "scripts/rir_lineage.py",
+    "scripts/rir_previous.py",
+    "scripts/rir_previous_renderer.py",
+    "scripts/rir_performance.py",
+    "scripts/rir_report_context.py",
+    "scripts/rir_storage.py",
     "scripts/rir_controller.py",
+    "scripts/rir_delta.py",
+    "scripts/rir_delta_worker.py",
     "scripts/rir_mcp_server.py",
     "scripts/validate-impact-report.py",
 )

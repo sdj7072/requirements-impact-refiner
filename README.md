@@ -219,11 +219,26 @@ The validator checks required sections, definitions and references, exact eviden
 
 ## 10. Development and Contributing
 
-Run the standard-library suite from the repository root:
+Runtime tests run on Python 3.9, 3.11, and 3.13 and use only the standard
+library. Run the suite from the repository root:
 
 ```sh
 python3 -m unittest discover -s tests -v
 python3 -m unittest tests.test_documentation -v
 ```
+
+Quality tools run separately on Python 3.13. Create a local virtual environment
+and install only the exact pins in `requirements-quality.txt`:
+
+```sh
+python3.13 -m venv .quality-venv
+.quality-venv/bin/pip install -r requirements-quality.txt
+.quality-venv/bin/python scripts/run-quality-gates.py
+```
+
+Those exact pins are `bandit==1.9.4`, `coverage==7.15.4`, `mypy==1.18.2`, and
+`ruff==0.16.3`. `mypy==1.18.2` runs in the Python 3.13 quality job while checking Python 3.9 source compatibility. Coverage applies to the root `scripts` and `evals/harness`
+source trees and must be at least 80%. Bandit reports medium-or-higher severity
+at every confidence level via `-ll`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for RED/GREEN evaluation discipline, five-repetition controls, validator commands, compatibility-claim rules, and the translation policy. English changes are authoritative, but every semantic README change must update `README.ko.md` and `README.ja.md` together or explicitly record a pending translation. This project is available under the [MIT License](LICENSE).

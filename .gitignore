@@ -1,5 +1,8 @@
 .worktrees/
 .superpowers/
+.quality-venv/
+.coverage
+.coverage.*
 __pycache__/
 *.pyc
 .requirements-impact-refiner/

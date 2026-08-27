@@ -1,13 +1,14 @@
+import importlib.util
 import json
 import stat
 import sys
 import tempfile
 import unittest
-import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "scripts" / "fast_scan_store.py"
+
 
 def load_store():
     if not MODULE.is_file():
@@ -19,11 +20,14 @@ def load_store():
     spec.loader.exec_module(value)
     return value
 
+
 class FastScanStoreTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.payload = json.dumps({"schema_version": 1, "scan_id": "a" * 32}, sort_keys=True, separators=(",", ":")).encode()
+        self.payload = json.dumps(
+            {"schema_version": 1, "scan_id": "a" * 32}, sort_keys=True, separators=(",", ":")
+        ).encode()
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -55,6 +59,7 @@ class FastScanStoreTest(unittest.TestCase):
             store.publish_scan_receipt(self.root, "a" * 32, self.payload)
         with self.assertRaisesRegex(ValueError, "scan_id"):
             store.load_scan_receipt_bytes(self.root, "../outside")
+
 
 if __name__ == "__main__":
     unittest.main()

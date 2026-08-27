@@ -3,17 +3,18 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-
 from evals.harness.models import RunStatus
 from evals.harness.performance import (
     FastScanPerformanceObservation,
     GraphPerformanceObservation,
+    InstantWorkEvidence,
     PerformanceObservation,
-    evaluate_graph_smoke,
     evaluate_fast_scan_gate,
+    evaluate_graph_smoke,
+    evaluate_instant_performance_gate,
     evaluate_smoke_gate,
+    measure_instant_fixture,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "evals" / "performance-baseline-v032.json"
@@ -36,6 +37,125 @@ GRAPH_IDS = (
 
 
 class PerformanceBudgetTest(unittest.TestCase):
+    class FixtureClock:
+        def __init__(self, elapsed_ms):
+            self.values = iter((1_000_000_000, 1_000_000_000 + elapsed_ms * 1_000_000))
+
+        def monotonic_ns(self):
+            return next(self.values)
+
+    def measured_row(
+        self,
+        case_id,
+        path,
+        elapsed_ms,
+        evidence,
+    ):
+        return measure_instant_fixture(
+            case_id,
+            path,
+            lambda: evidence,
+            clock=self.FixtureClock(elapsed_ms),
+        )
+
+    def instant_rows(self, *, with_client_usage=False):
+        client = (
+            {"actual_input_tokens": 600, "baseline_actual_input_tokens": 900}
+            if with_client_usage
+            else {}
+        )
+        return (
+            self.measured_row(
+                "fresh-fixture",
+                "fresh",
+                12,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=0,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=0,
+                    expected_frontier=("Z",),
+                    observed_frontier=("Z",),
+                ),
+            ),
+            self.measured_row(
+                "delta-fixture",
+                "stale_delta",
+                450,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=1,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=700,
+                    expected_frontier=("C", "D", "Z"),
+                    observed_frontier=("C", "D", "Z"),
+                ),
+            ),
+            self.measured_row(
+                "repeat-fixture",
+                "repeated",
+                8,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=0,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=100,
+                    expected_frontier=("Z",),
+                    observed_frontier=("Z",),
+                    **client,
+                ),
+            ),
+            self.measured_row(
+                "changed-fixture",
+                "changed_source",
+                510,
+                InstantWorkEvidence(
+                    provider_calls=0,
+                    graph_calls=1,
+                    model_calls=0,
+                    estimated_serialized_input_tokens=720,
+                    expected_frontier=("C", "D", "Z"),
+                    observed_frontier=("C", "D", "Z"),
+                    **client,
+                ),
+            ),
+        )
+
+    def test_instant_gate_enforces_latency_calls_tokens_and_frontier(self):
+        result = evaluate_instant_performance_gate(self.instant_rows())
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.token_comparison_status, "pending_client_evidence")
+        self.assertEqual(result.previous_lookup_p95_ms, 12)
+        self.assertEqual(result.stale_delta_p95_ms, 450)
+
+        measured = evaluate_instant_performance_gate(self.instant_rows(with_client_usage=True))
+        self.assertTrue(measured.passed, measured.errors)
+        self.assertEqual(measured.token_comparison_status, "measured_client_evidence")
+
+        rows = self.instant_rows()
+        mutations = {
+            "previous lookup p95 exceeds 300 ms": (replace(rows[0], elapsed_ms=301), *rows[1:]),
+            "stale delta p95 exceeds 3000 ms": (
+                rows[0],
+                replace(rows[1], elapsed_ms=3001),
+                *rows[2:],
+            ),
+            "fresh reuse performed provider, graph, or model work": (
+                replace(rows[0], graph_calls=1),
+                *rows[1:],
+            ),
+            "instant path lost an expected frontier": (
+                rows[0],
+                replace(rows[1], observed_frontier=("C", "D")),
+                *rows[2:],
+            ),
+        }
+        for expected, mutated in mutations.items():
+            with self.subTest(expected=expected):
+                self.assertIn(expected, evaluate_instant_performance_gate(mutated).errors)
+
     def observation(self, case_id):
         impact_ids = () if case_id == "NEG-debugging" else ("IMP-001",)
         return PerformanceObservation(
@@ -55,8 +175,12 @@ class PerformanceBudgetTest(unittest.TestCase):
             impact_ids=impact_ids,
             state_markdown_match=True,
             workflow_boundary_passed=True,
-            controller_begin_calls=0 if case_id == "NEG-debugging" else (2 if case_id.startswith("LINEAGE-") else 1),
-            controller_finalize_calls=0 if case_id == "NEG-debugging" else (2 if case_id.startswith("LINEAGE-") else 1),
+            controller_begin_calls=0
+            if case_id == "NEG-debugging"
+            else (2 if case_id.startswith("LINEAGE-") else 1),
+            controller_finalize_calls=0
+            if case_id == "NEG-debugging"
+            else (2 if case_id.startswith("LINEAGE-") else 1),
             controller_draft_ids_match=True,
             controller_finalize_succeeded=True,
             controller_display_text_exact_match=True,
@@ -95,15 +219,24 @@ class PerformanceBudgetTest(unittest.TestCase):
         return tuple(self.graph_observation(case_id) for case_id in GRAPH_IDS)
 
     def fast_scan_rows(self):
-        return tuple(FastScanPerformanceObservation(
-            case_id=case_id, repetition=1, status=RunStatus.PASS,
-            attempt=1, retry_of=None,
-            scan_duration_ms=None if case_id == "GRAPH-negative-no-change" else 8400,
-            output_words=0 if case_id == "GRAPH-negative-no-change" else 150,
-            controller_calls=() if case_id == "GRAPH-negative-no-change" else ("rir_scan",),
-            scoring_passed=True, exact_provenance=True,
-            uncovered_high_risk_nodes=(), input_tokens=None, output_tokens=None,
-        ) for case_id in GRAPH_IDS)
+        return tuple(
+            FastScanPerformanceObservation(
+                case_id=case_id,
+                repetition=1,
+                status=RunStatus.PASS,
+                attempt=1,
+                retry_of=None,
+                scan_duration_ms=None if case_id == "GRAPH-negative-no-change" else 8400,
+                output_words=0 if case_id == "GRAPH-negative-no-change" else 150,
+                controller_calls=() if case_id == "GRAPH-negative-no-change" else ("rir_scan",),
+                scoring_passed=True,
+                exact_provenance=True,
+                uncovered_high_risk_nodes=(),
+                input_tokens=None,
+                output_tokens=None,
+            )
+            for case_id in GRAPH_IDS
+        )
 
     def test_fast_scan_gate_enforces_one_call_time_words_and_provenance(self):
         rows = self.fast_scan_rows()
@@ -111,15 +244,12 @@ class PerformanceBudgetTest(unittest.TestCase):
         self.assertIn(
             "Fast Scan must call only rir_scan once",
             evaluate_fast_scan_gate(
-                (replace(rows[0], controller_calls=("rir_scan", "rir_begin")),)
-                + rows[1:]
+                (replace(rows[0], controller_calls=("rir_scan", "rir_begin")), *rows[1:])
             ).errors,
         )
         self.assertIn(
             "Fast Scan output exceeds 180 words",
-            evaluate_fast_scan_gate(
-                tuple(replace(row, output_words=181) for row in rows)
-            ).errors,
+            evaluate_fast_scan_gate(tuple(replace(row, output_words=181) for row in rows)).errors,
         )
 
     def test_baseline_is_literal_and_matches_preserved_measurement(self):
@@ -139,16 +269,25 @@ class PerformanceBudgetTest(unittest.TestCase):
 
     def test_smoke_gate_rejects_incomplete_duplicate_or_retried_matrix(self):
         missing = self.six_valid_observations()[:-1]
-        duplicate = self.six_valid_observations()[:-1] + (missing[0],)
+        duplicate = (*self.six_valid_observations()[:-1], missing[0])
         retried = list(self.six_valid_observations())
         retried[0] = replace(retried[0], attempt=2, retry_of="attempt-01")
 
-        self.assertIn("smoke observations do not cover the exact six cases", evaluate_smoke_gate(missing).errors)
-        self.assertIn("smoke observations contain duplicate case/repetition rows", evaluate_smoke_gate(duplicate).errors)
-        self.assertIn("smoke observations must select attempt 1 without retry", evaluate_smoke_gate(retried).errors)
+        self.assertIn(
+            "smoke observations do not cover the exact six cases",
+            evaluate_smoke_gate(missing).errors,
+        )
+        self.assertIn(
+            "smoke observations contain duplicate case/repetition rows",
+            evaluate_smoke_gate(duplicate).errors,
+        )
+        self.assertIn(
+            "smoke observations must select attempt 1 without retry",
+            evaluate_smoke_gate(retried).errors,
+        )
 
     def test_smoke_gate_rejects_none_observation_without_throwing(self):
-        rows = (None,) + self.six_valid_observations()[1:]
+        rows = (None, *self.six_valid_observations()[1:])
 
         result = evaluate_smoke_gate(rows)
 
@@ -176,12 +315,24 @@ class PerformanceBudgetTest(unittest.TestCase):
             controller_display_text_presentation_equivalent=False,
         )
 
-        self.assertIn("median compact output exceeds 450 words", evaluate_smoke_gate(too_large).errors)
-        self.assertIn("median routed resources do not reduce baseline by 50 percent", evaluate_smoke_gate(too_many_resources).errors)
-        self.assertIn("state, Markdown, and compact impacts disagree", evaluate_smoke_gate(mismatch).errors)
+        self.assertIn(
+            "median compact output exceeds 450 words", evaluate_smoke_gate(too_large).errors
+        )
+        self.assertIn(
+            "median routed resources do not reduce baseline by 50 percent",
+            evaluate_smoke_gate(too_many_resources).errors,
+        )
+        self.assertIn(
+            "state, Markdown, and compact impacts disagree", evaluate_smoke_gate(mismatch).errors
+        )
         self.assertIn("workflow ownership boundary failed", evaluate_smoke_gate(workflow).errors)
-        self.assertIn("controller call count or order failed", evaluate_smoke_gate(skipped_controller).errors)
-        self.assertIn("controller display text differs from final output", evaluate_smoke_gate(rewritten_output).errors)
+        self.assertIn(
+            "controller call count or order failed", evaluate_smoke_gate(skipped_controller).errors
+        )
+        self.assertIn(
+            "controller display text differs from final output",
+            evaluate_smoke_gate(rewritten_output).errors,
+        )
 
     def test_token_fields_must_be_both_client_reported_or_both_absent(self):
         partial = list(self.six_valid_observations())
@@ -199,14 +350,13 @@ class PerformanceBudgetTest(unittest.TestCase):
 
         slow = replace(self.six_graph_rows()[0], graph_duration_ms=30_001)
         over_target = tuple(
-            replace(row, graph_duration_ms=10_001)
-            if row.graph_duration_ms is not None else row
+            replace(row, graph_duration_ms=10_001) if row.graph_duration_ms is not None else row
             for row in self.six_graph_rows()
         )
 
         self.assertIn(
             "graph duration exceeds 30 seconds",
-            evaluate_graph_smoke((slow,) + self.six_graph_rows()[1:]).errors,
+            evaluate_graph_smoke((slow, *self.six_graph_rows()[1:])).errors,
         )
         self.assertIn(
             "median graph duration exceeds 10 seconds",
@@ -217,15 +367,39 @@ class PerformanceBudgetTest(unittest.TestCase):
         valid = self.six_graph_rows()
         mutations = {
             "graph observations do not cover the exact six cases": valid[:-1],
-            "graph observations contain duplicate case/repetition rows": valid[:-1] + (valid[0],),
-            "graph observations must select attempt 1 without retry": (replace(valid[0], attempt=2, retry_of="retry"),) + valid[1:],
-            "every graph runtime result must pass": (replace(valid[0], status=RunStatus.FAIL),) + valid[1:],
-            "every graph mechanical score must pass": (replace(valid[0], mechanical_passed=False),) + valid[1:],
-            "every graph coverage score must pass": (replace(valid[0], graph_passed=False),) + valid[1:],
-            "receipt, state, and provider provenance disagree": (replace(valid[0], receipt_state_provider_parity=False),) + valid[1:],
-            "graph smoke contains uncovered high-risk nodes": (replace(valid[0], uncovered_high_risk_nodes=("NODE-999",)),) + valid[1:],
-            "controller graph call count or order failed": (replace(valid[0], controller_trace_calls=0),) + valid[1:],
-            "controller graph evidence contains duplicate or error calls": (replace(valid[0], duplicate_or_error_calls=True),) + valid[1:],
+            "graph observations contain duplicate case/repetition rows": (*valid[:-1], valid[0]),
+            "graph observations must select attempt 1 without retry": (
+                replace(valid[0], attempt=2, retry_of="retry"),
+                *valid[1:],
+            ),
+            "every graph runtime result must pass": (
+                replace(valid[0], status=RunStatus.FAIL),
+                *valid[1:],
+            ),
+            "every graph mechanical score must pass": (
+                replace(valid[0], mechanical_passed=False),
+                *valid[1:],
+            ),
+            "every graph coverage score must pass": (
+                replace(valid[0], graph_passed=False),
+                *valid[1:],
+            ),
+            "receipt, state, and provider provenance disagree": (
+                replace(valid[0], receipt_state_provider_parity=False),
+                *valid[1:],
+            ),
+            "graph smoke contains uncovered high-risk nodes": (
+                replace(valid[0], uncovered_high_risk_nodes=("NODE-999",)),
+                *valid[1:],
+            ),
+            "controller graph call count or order failed": (
+                replace(valid[0], controller_trace_calls=0),
+                *valid[1:],
+            ),
+            "controller graph evidence contains duplicate or error calls": (
+                replace(valid[0], duplicate_or_error_calls=True),
+                *valid[1:],
+            ),
         }
         for finding, rows in mutations.items():
             with self.subTest(finding=finding):
@@ -233,13 +407,9 @@ class PerformanceBudgetTest(unittest.TestCase):
 
     def test_graph_smoke_gates_output_and_routed_guidance_but_tokens_are_informational(self):
         rows = self.six_graph_rows()
-        too_verbose = tuple(
-            replace(row, output_words=451) for row in rows
-        )
-        too_many_resources = tuple(
-            replace(row, routed_resource_words=1751) for row in rows
-        )
-        partial_tokens = (replace(rows[0], input_tokens=100),) + rows[1:]
+        too_verbose = tuple(replace(row, output_words=451) for row in rows)
+        too_many_resources = tuple(replace(row, routed_resource_words=1751) for row in rows)
+        partial_tokens = (replace(rows[0], input_tokens=100), *rows[1:])
 
         self.assertIn(
             "median graph compact output exceeds 450 words",

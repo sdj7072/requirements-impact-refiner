@@ -4,7 +4,8 @@ Thank you for improving Requirements Impact Refiner. English documentation and t
 
 ## Setup and tests
 
-Python 3.11+ is recommended. Runtime and repository tests use only the Python standard library.
+Runtime and repository tests use only the Python standard library and run in CI
+on Python 3.9, 3.11, and 3.13.
 
 ```sh
 python3 -m unittest discover -s tests -v
@@ -14,6 +15,20 @@ python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --p
 python3 skills/requirements-impact-refiner/scripts/validate-impact-report.py --previous previous.md --print-expected-delta current.md
 python3 -m py_compile skills/requirements-impact-refiner/scripts/impact_report.py skills/requirements-impact-refiner/scripts/validate-impact-report.py
 ```
+
+Run quality tools separately with Python 3.13. The quality environment uses
+only the exact pins in `requirements-quality.txt`:
+
+```sh
+python3.13 -m venv .quality-venv
+.quality-venv/bin/pip install -r requirements-quality.txt
+.quality-venv/bin/python scripts/run-quality-gates.py
+```
+
+Those pins are `bandit==1.9.4`, `coverage==7.15.4`, `mypy==1.18.2`, and
+`ruff==0.16.3`. `mypy==1.18.2` runs in the Python 3.13 quality job while checking Python 3.9 source compatibility. Coverage applies to the root `scripts` and `evals/harness`
+source trees and requires at least 80%. Bandit reports medium-or-higher severity
+at every confidence level via `-ll`.
 
 For optional platform validation, use:
 

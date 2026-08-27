@@ -2,7 +2,6 @@ import hashlib
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "evals" / "results" / "with-skill.md"
 STATE_MACHINE_V03 = ROOT / "evals" / "results" / "state-machine-v0.3.md"
@@ -15,9 +14,7 @@ EXPECTED_COUNTS = {
     "scoring/initial": 2,
     "scoring/rerun-final": 2,
 }
-EVIDENCE_MANIFEST_SHA256 = (
-    "2f7922729059b3dcb9c1d527706dfcde22559e962f489be8f062e50a695c0ffa"
-)
+EVIDENCE_MANIFEST_SHA256 = "2f7922729059b3dcb9c1d527706dfcde22559e962f489be8f062e50a695c0ffa"
 
 
 def evidence_manifest() -> str:
