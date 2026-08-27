@@ -18,11 +18,12 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import rir_controller  # noqa: E402
+import rir_delta_protocol  # noqa: E402
 
 MAX_INPUT_BYTES = 512 * 1024
-MAX_CONTROL_FRAME_BYTES = 1024
-MAX_FALLBACK_FRAME_BYTES = 4 * 1024 * 1024
-MAX_RESULT_FRAME_BYTES = 4 * 1024 * 1024
+MAX_CONTROL_FRAME_BYTES = rir_delta_protocol.MAX_CONTROL_FRAME_BYTES
+MAX_FALLBACK_FRAME_BYTES = rir_delta_protocol.MAX_FALLBACK_FRAME_BYTES
+MAX_RESULT_FRAME_BYTES = rir_delta_protocol.MAX_RESULT_FRAME_BYTES
 INPUT_KEYS = {
     "schema_version",
     "repo_root",
@@ -76,22 +77,7 @@ def _read_input(path: Path, expected_sha256: str) -> dict[str, object]:
 
 
 def _emit(kind: str, payload: Mapping[str, object], token: str) -> None:
-    maximum = {
-        "control": MAX_CONTROL_FRAME_BYTES,
-        "trusted_fallback": MAX_FALLBACK_FRAME_BYTES,
-        "result": MAX_RESULT_FRAME_BYTES,
-    }.get(kind)
-    if maximum is None or re.fullmatch(r"[0-9a-f]{32}", token) is None:
-        raise ValueError("delta worker output frame type is invalid")
-    body = json.dumps(
-        {"kind": kind, "payload": payload, "token": token},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    if not body or len(body) > maximum:
-        raise ValueError("delta worker output frame exceeds its byte limit")
-    frame = f"{len(body):08x}\n".encode("ascii") + body
+    frame = rir_delta_protocol.encode_frame(kind, payload, token)
     offset = 0
     while offset < len(frame):
         written = os.write(sys.stdout.fileno(), frame[offset:])

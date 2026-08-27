@@ -1504,15 +1504,31 @@ def _trusted_delta_context(root: Path, request: ScanRequest, settings: Mapping[s
     )
 
 
-_DELTA_WORKER_MAX_INPUT = 512 * 1024
-_DELTA_WORKER_MAX_CONTROL_FRAME = 1024
-_DELTA_WORKER_MAX_FALLBACK_FRAME = 4 * 1024 * 1024
-_DELTA_WORKER_MAX_RESULT_FRAME = 4 * 1024 * 1024
-_DELTA_WORKER_MAX_FRAME = max(
-    _DELTA_WORKER_MAX_CONTROL_FRAME,
-    _DELTA_WORKER_MAX_FALLBACK_FRAME,
-    _DELTA_WORKER_MAX_RESULT_FRAME,
+def _is_delta_protocol_contract(value: object) -> bool:
+    return (
+        type(getattr(value, "MAX_CONTROL_FRAME_BYTES", None)) is int
+        and type(getattr(value, "MAX_FALLBACK_FRAME_BYTES", None)) is int
+        and type(getattr(value, "MAX_RESULT_FRAME_BYTES", None)) is int
+        and type(getattr(value, "MAX_FRAME_BYTES", None)) is int
+        and _callables(value, ("encode_frame", "decode_body", "decode_frame"))
+    )
+
+
+DELTA_PROTOCOL = cast(
+    Any,
+    _load_controller_sibling(
+        "rir_delta_protocol.py",
+        "rir_delta_protocol",
+        "_rir_controller_delta_protocol_",
+        _is_delta_protocol_contract,
+        "delta protocol",
+    ),
 )
+_DELTA_WORKER_MAX_INPUT = 512 * 1024
+_DELTA_WORKER_MAX_CONTROL_FRAME = DELTA_PROTOCOL.MAX_CONTROL_FRAME_BYTES
+_DELTA_WORKER_MAX_FALLBACK_FRAME = DELTA_PROTOCOL.MAX_FALLBACK_FRAME_BYTES
+_DELTA_WORKER_MAX_RESULT_FRAME = DELTA_PROTOCOL.MAX_RESULT_FRAME_BYTES
+_DELTA_WORKER_MAX_FRAME = DELTA_PROTOCOL.MAX_FRAME_BYTES
 _DELTA_WORKER_MAX_OUTPUT = (
     _DELTA_WORKER_MAX_CONTROL_FRAME
     + _DELTA_WORKER_MAX_FALLBACK_FRAME
@@ -1971,50 +1987,11 @@ def _cleanup_delta_worker_directory(
 
 
 def _delta_worker_body(payload: bytes, token: str) -> tuple[str, Mapping[str, object]]:
-    if not payload or len(payload) > _DELTA_WORKER_MAX_FRAME:
-        raise ValueError("delta worker frame body size is invalid")
-    try:
-        value = json.loads(payload.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
-        raise ValueError("delta worker frame payload is invalid") from error
-    try:
-        canonical = json.dumps(
-            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-    except (RecursionError, TypeError, UnicodeEncodeError, ValueError) as error:
-        raise ValueError("delta worker frame payload is invalid") from error
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"kind", "payload", "token"}
-        or value.get("token") != token
-        or canonical != payload
-    ):
-        raise ValueError("delta worker frame authentication is invalid")
-    kind = value.get("kind")
-    frame_payload = value.get("payload")
-    if not isinstance(kind, str):
-        raise ValueError("delta worker frame type is invalid")
-    maximum = {
-        "control": _DELTA_WORKER_MAX_CONTROL_FRAME,
-        "trusted_fallback": _DELTA_WORKER_MAX_FALLBACK_FRAME,
-        "result": _DELTA_WORKER_MAX_RESULT_FRAME,
-    }.get(kind)
-    if maximum is None or len(payload) > maximum or not isinstance(frame_payload, Mapping):
-        raise ValueError("delta worker frame type or bound is invalid")
-    return str(kind), frame_payload
+    return DELTA_PROTOCOL.decode_body(payload, token)
 
 
 def _delta_worker_frame(payload: bytes, token: str) -> tuple[str, Mapping[str, object]]:
-    if len(payload) < 9 or len(payload) > _DELTA_WORKER_MAX_FRAME + 9:
-        raise ValueError("delta worker frame size is invalid")
-    header = payload[:9]
-    if re.fullmatch(rb"[0-9a-f]{8}\n", header) is None:
-        raise ValueError("delta worker frame header is invalid")
-    declared = int(header[:8], 16)
-    body = payload[9:]
-    if declared != len(body):
-        raise ValueError("delta worker frame length is invalid")
-    return _delta_worker_body(body, token)
+    return DELTA_PROTOCOL.decode_frame(payload, token)
 
 
 class _DeltaWorkerFrameParser:
