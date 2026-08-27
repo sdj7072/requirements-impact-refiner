@@ -107,6 +107,29 @@ class RirControllerTest(unittest.TestCase):
             'const key = "profile.displayName";\n', encoding="utf-8"
         )
 
+    def test_scan_rejects_unsafe_delta_changed_path_before_starting_worker(self):
+        request = CONTROLLER.ScanRequest(
+            self.root,
+            "Change profile negotiation.",
+            (),
+            previous_report_id="RPT-001",
+            previous_revision=1,
+            changed_paths=("../escape.py",),
+        )
+
+        with mock.patch.object(
+            CONTROLLER,
+            "_execute_delta_worker",
+            side_effect=AssertionError("invalid delta hints reached worker"),
+        ) as worker:
+            with self.assertRaisesRegex(
+                ValueError,
+                "^delta changed path syntax is invalid$",
+            ):
+                CONTROLLER.scan_impact(request)
+
+        worker.assert_not_called()
+
     def graph_context_with_high_risk_license(self, paths):
         receipt = self.fixture("impact-graph-receipt.json")
         receipt["nodes"] = [

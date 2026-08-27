@@ -97,6 +97,13 @@ class RirStorageTest(unittest.TestCase):
             0o600,
         )
 
+    def test_load_draft_rejects_payload_larger_than_bounded_limit(self):
+        _expected, path = self.write_draft()
+        path.write_bytes(b"{" + b"x" * STORAGE.MAX_DRAFT_BYTES)
+
+        with self.assertRaisesRegex(ValueError, "^draft exceeds 4 MiB$"):
+            STORAGE.load_draft(self.root, DRAFT_ID)
+
     def test_cas_recovers_exact_quarantine_replacement_and_cleanup_crash_snapshots(self):
         stem = f".{DRAFT_ID}.{TRANSACTION_ID}"
         expected_names = {

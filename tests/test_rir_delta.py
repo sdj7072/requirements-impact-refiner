@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from contextlib import ExitStack, redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -190,6 +191,15 @@ class DeltaScanTest(unittest.TestCase):
             previous_graph_receipt_id=receipt_id,
             previous_graph_sha256=receipt_sha256,
         )
+
+    def test_delta_context_rejects_execution_budget_outside_contract(self):
+        context = self.context(configured_max_seconds=3)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "^delta max_seconds must be an integer from 1 to 3$",
+        ):
+            replace(context, max_seconds=0)
 
     def chain_context(self):
         state = previous_state()

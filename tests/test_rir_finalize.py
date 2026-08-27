@@ -134,6 +134,24 @@ class RirFinalizeTest(unittest.TestCase):
         self.assertIsNone(finalize.REPORT_STORE.load_current(self.root, draft.report_id))
         self.assertFalse(finalize.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
 
+    def test_finalize_rejects_malformed_draft_requirement_before_publication_or_consumption(self):
+        finalize = self.finalize()
+        draft = self.begin("Reject malformed persisted requirement identity.")
+        request = self.request(draft)
+        runtime = dict(finalize.default_runtime())
+        stored = runtime["load_draft"](self.root, draft.draft_id)
+        state, key_map = runtime["build_state"](stored, request.analysis, None)
+        malformed = dict(stored)
+        malformed["request"] = 7
+        runtime["load_draft"] = lambda *_args: dict(malformed)
+        runtime["build_state"] = lambda *_args: (state, key_map)
+
+        with self.assertRaisesRegex(ValueError, "^draft requirement identity is invalid$"):
+            finalize.finalize_refinement(request, _runtime=runtime)
+
+        self.assertIsNone(finalize.REPORT_STORE.load_current(self.root, draft.report_id))
+        self.assertFalse(finalize.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
     def test_facade_signature_result_type_and_fault_injection_remain_stable(self):
         finalize = self.finalize()
         self.assertEqual(
