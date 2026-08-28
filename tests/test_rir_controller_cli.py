@@ -172,7 +172,8 @@ class RirControllerCliTest(unittest.TestCase):
             payload["elapsed_ms"],
         )
         self.assertTrue(payload["display_text"].startswith("## Previous Impact Report\n"))
-        self.assertNotIn("# Requirements Impact Report\n", payload["display_text"])
+        self.assertIn("# Requirements Impact Report\n", payload["display_text"])
+        self.assertFalse(any(line.startswith("|") for line in payload["display_text"].splitlines()))
         self.assertEqual(
             result.stdout,
             json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",

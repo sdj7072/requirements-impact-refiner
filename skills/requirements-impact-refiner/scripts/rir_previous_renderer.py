@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 import stat
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Callable, Protocol, cast
+
+KOREAN_TEXT = re.compile(r"[\u3131-\u318e\uac00-\ud7a3]")
 
 
 class _CompactStateContract(Protocol):
@@ -226,8 +229,14 @@ def _header_text(value: str) -> str:
     return " ".join(value.replace("`", "").split())
 
 
+def _request_locale(compact_state: Mapping[str, object]) -> str:
+    original = compact_state.get("original_requirement")
+    request = original.get("request") if isinstance(original, Mapping) else None
+    return "ko" if isinstance(request, str) and KOREAN_TEXT.search(request) else "en"
+
+
 def render_previous(result: _PreviousResult, compact_state: Mapping[str, object]) -> str:
-    """Render a fresh canonical report or a bounded stale-report preview."""
+    """Render a complete fresh report or stale report with freshness metadata."""
 
     if result.status in {"none", "ambiguous"}:
         return ""
@@ -249,13 +258,24 @@ def render_previous(result: _PreviousResult, compact_state: Mapping[str, object]
     commit = f"`{result.baseline_commit}`" if result.baseline_commit else "unavailable"
     changed = str(result.changed_count) if result.changed_count is not None else "unavailable"
     reason = _header_text(result.reason)
-    header = (
-        "## Previous Impact Report\n\n"
-        f"- **Freshness:** {result.status}\n"
-        f"- **Report:** `{result.report_id}` revision {result.revision}\n"
-        f"- **Created:** {created}\n"
-        f"- **Commit:** {commit}\n"
-        f"- **Changed files:** {changed}\n"
-        f"- **Reason:** {reason}\n"
-    )
-    return header + "\n" + IMPACT_RENDERER.render_compact(compact_state)
+    if _request_locale(compact_state) == "ko":
+        header = (
+            "## 이전 영향 보고서\n\n"
+            f"- 최신 상태: {result.status}\n"
+            f"- 보고서: `{result.report_id}` 개정 {result.revision}\n"
+            f"- 생성 시각: {created}\n"
+            f"- 커밋: {commit}\n"
+            f"- 변경 파일 수: {changed}\n"
+            f"- 사유: {reason}\n"
+        )
+    else:
+        header = (
+            "## Previous Impact Report\n\n"
+            f"- **Freshness:** {result.status}\n"
+            f"- **Report:** `{result.report_id}` revision {result.revision}\n"
+            f"- **Created:** {created}\n"
+            f"- **Commit:** {commit}\n"
+            f"- **Changed files:** {changed}\n"
+            f"- **Reason:** {reason}\n"
+        )
+    return header + "\n" + IMPACT_RENDERER.render_reader_view(compact_state)

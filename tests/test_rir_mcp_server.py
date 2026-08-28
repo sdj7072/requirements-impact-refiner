@@ -907,9 +907,15 @@ if sys.modules["payload_identity"] is not foreign_payload:
                 "## Previous Impact Report\n"
             )
         )
-        self.assertNotIn(
+        self.assertIn(
             "# Requirements Impact Report\n",
             previous_result["structuredContent"]["display_text"],
+        )
+        self.assertFalse(
+            any(
+                line.startswith("|")
+                for line in previous_result["structuredContent"]["display_text"].splitlines()
+            )
         )
 
     def test_previous_none_returns_structured_status_without_identity_or_body(self):

@@ -156,6 +156,8 @@ Expected: all quality checks and the full test suite pass.
 
 **Files:**
 - Modify: `tests/test_rir_previous.py`
+- Modify: `tests/test_rir_controller_cli.py`
+- Modify: `tests/test_rir_mcp_server.py`
 - Modify: `scripts/rir_previous_renderer.py`
 - Modify: `skills/requirements-impact-refiner/scripts/rir_previous_renderer.py`
 
@@ -188,3 +190,36 @@ Run: `python3 -m unittest tests/test_rir_previous.py tests/test_impact_renderer.
 Run: `.quality-venv/bin/python scripts/run-quality-gates.py`
 
 Expected: all checks pass while stale rendering remains unchanged.
+
+### Task 4: Connect stale previous reports
+
+**Files:**
+- Modify: `tests/test_rir_previous.py`
+- Modify: `scripts/rir_previous_renderer.py`
+- Modify: `skills/requirements-impact-refiner/scripts/rir_previous_renderer.py`
+
+**Interfaces:**
+- Consumes: trusted stale report state plus `impact_renderer.render_reader_view(state)`.
+- Produces: A localized stale-warning block followed by the complete reader view; stale identity and delta metadata remain unchanged.
+
+- [x] **Step 1: Write the failing Korean stale-report test**
+
+Publish a Korean report with incomplete source inventory, look it up as stale, and assert a Korean stale heading, the complete Korean report title, preserved `stale` enum, no Markdown table rows, and the report ID.
+
+- [x] **Step 2: Run the test and confirm the compact English path remains**
+
+Run: `python3 -m unittest tests/test_rir_previous.py -k test_stale_previous_report_uses_localized_full_reader_view`
+
+Expected: FAIL because stale currently emits the English warning plus `render_compact`.
+
+- [x] **Step 3: Localize the stale header and render the complete body**
+
+Detect Hangul from `original_requirement.request` for the header labels. Preserve status, IDs, revision, timestamp, commit, changed count, and reason values. Replace only the stale body call from `render_compact` to `render_reader_view`.
+
+- [x] **Step 4: Synchronize the packaged mirror and verify**
+
+Run: `python3 -m unittest tests/test_rir_previous.py tests/test_rir_controller_cli.py tests/test_rir_mcp_server.py tests/test_integration_adapters.py tests/test_packaging.py`
+
+Run: `.quality-venv/bin/python scripts/run-quality-gates.py`
+
+Expected: all checks pass and fresh/finalized behavior remains unchanged.

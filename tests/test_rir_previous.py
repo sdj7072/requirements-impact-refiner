@@ -390,6 +390,20 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertIn("source inventory", result.reason)
         self.assertIsNotNone(result.display_text)
 
+    def test_stale_previous_report_uses_localized_full_reader_view(self):
+        request = "프로젝트 편집 권한의 영향을 다시 검토해줘."
+        self.publish(request=request, inventory_complete=False)
+
+        result = PREVIOUS.lookup_previous(self.request(request))
+
+        self.assertEqual(result.status, "stale")
+        text = result.display_text or ""
+        self.assertTrue(text.startswith("## 이전 영향 보고서\n"))
+        self.assertIn("- 최신 상태: stale", text)
+        self.assertIn("# 요구사항 영향 보고서", text)
+        self.assertIn("RPT-001", text)
+        self.assertFalse(any(line.startswith("|") for line in text.splitlines()))
+
     def test_relevant_ignored_inventory_source_is_stale(self):
         gitignore = self.root / ".gitignore"
         gitignore.write_text(
