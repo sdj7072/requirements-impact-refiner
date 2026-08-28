@@ -26,6 +26,155 @@ COMPACT_WORD_LIMIT = 450
 COMPACT_SUMMARY_ROWS = 6
 COMPACT_FIELD_WORDS = 8
 
+READER_LABELS = {
+    "en": {
+        "title": "Requirements Impact Report",
+        "report_state": "Report State",
+        "summary": "Change Impact Summary",
+        "impact": "Impact",
+        "original_requirement": "Original Requirement",
+        "refined_requirement": "Current Refined Requirement",
+        "current_behavior": "Current Behavior",
+        "invariant": "Invariant",
+        "preserved_invariants": "Preserved Invariants",
+        "preserved_invariant": "Preserved invariant",
+        "impact_ledger": "Impact Ledger",
+        "impact_detail": "Impact detail",
+        "decision_needed": "Decision Needed",
+        "option": "Option",
+        "decisions": "Decisions and Accepted Risks",
+        "decision": "Decision",
+        "impact_delta": "Impact Delta",
+        "history": "Requirement Revision History",
+        "history_item": "Requirement",
+        "criteria": "Acceptance and Regression Criteria",
+        "criterion_item": "Criterion",
+        "unresolved": "Unresolved, Deferred, and Blocked Items",
+        "unresolved_item": "Unresolved impact",
+        "scope": "Analysis Scope and Limitations",
+        "scope_item": "Scope",
+        "handoff": "Planning Handoff",
+        "none": "none",
+        "id": "ID",
+        "revision": "Revision",
+        "previous_sha256": "Previous SHA-256",
+        "phase": "Phase",
+        "changed_feature": "Changed feature",
+        "possible_issue": "Possible issue",
+        "affected": "Affected feature or user",
+        "trigger": "Trigger",
+        "severity": "Severity",
+        "prevention": "Prevention or check",
+        "status": "Status",
+        "request": "Original request",
+        "source": "Source",
+        "decision_id": "Refined by decision",
+        "supersedes": "Supersedes",
+        "behavior": "Current behavior",
+        "evidence_level": "Evidence level",
+        "evidence": "Evidence",
+        "requirement": "Requirement",
+        "impacts": "Affected impacts",
+        "category": "Category",
+        "state": "State",
+        "invariants": "Invariants",
+        "decision_ids": "Decision",
+        "criterion_ids": "Acceptance criteria",
+        "question": "Question",
+        "option_text": "Option",
+        "tradeoff": "Trade-off",
+        "choice": "Choice",
+        "accepted_impacts": "Accepted impacts",
+        "rationale": "Rationale",
+        "superseded_impacts": "Superseded impacts",
+        "change_summary": "Change summary",
+        "impact_id": "Impact",
+        "invariant_id": "Invariant",
+        "criterion": "Observable criterion",
+        "linked_decision": "Linked decision",
+        "owner": "Next owner",
+        "boundary": "Scope or limitation",
+        "confidence": "Consequence for confidence",
+        "refined_requirement_id": "Refined requirement",
+        "report_ids": "Report IDs",
+        "remaining_risks": "Remaining risks",
+        "workflow": "Selected planning workflow",
+    },
+    "ko": {
+        "title": "요구사항 영향 보고서",
+        "report_state": "보고서 상태",
+        "summary": "변경 영향 요약",
+        "impact": "영향",
+        "original_requirement": "원래 요구사항",
+        "refined_requirement": "현재 정제된 요구사항",
+        "current_behavior": "현재 동작",
+        "invariant": "불변 조건",
+        "preserved_invariants": "보존할 불변 조건",
+        "preserved_invariant": "보존 조건",
+        "impact_ledger": "영향 원장",
+        "impact_detail": "상세 영향",
+        "decision_needed": "필요한 결정",
+        "option": "선택지",
+        "decisions": "결정과 수용한 위험",
+        "decision": "결정",
+        "impact_delta": "영향 변경분",
+        "history": "요구사항 변경 이력",
+        "history_item": "요구사항",
+        "criteria": "수용 및 회귀 기준",
+        "criterion_item": "수용 기준",
+        "unresolved": "미해결·보류·차단 항목",
+        "unresolved_item": "미해결 영향",
+        "scope": "분석 범위와 한계",
+        "scope_item": "범위",
+        "handoff": "계획 인계",
+        "none": "없음",
+        "id": "ID",
+        "revision": "개정",
+        "previous_sha256": "이전 SHA-256",
+        "phase": "단계",
+        "changed_feature": "변경 기능",
+        "possible_issue": "발생 가능한 문제",
+        "affected": "영향받는 기능 또는 사용자",
+        "trigger": "발생 조건",
+        "severity": "심각도",
+        "prevention": "예방 또는 확인",
+        "status": "상태",
+        "request": "원래 요청",
+        "source": "출처",
+        "decision_id": "정제 결정",
+        "supersedes": "대체 대상",
+        "behavior": "현재 동작",
+        "evidence_level": "근거 수준",
+        "evidence": "근거",
+        "requirement": "요구사항",
+        "impacts": "영향 항목",
+        "category": "범주",
+        "state": "상태",
+        "invariants": "불변 조건",
+        "decision_ids": "결정",
+        "criterion_ids": "수용 기준",
+        "question": "질문",
+        "option_text": "선택",
+        "tradeoff": "절충점",
+        "choice": "선택",
+        "accepted_impacts": "수용한 영향",
+        "rationale": "근거",
+        "superseded_impacts": "대체된 영향",
+        "change_summary": "변경 요약",
+        "impact_id": "영향",
+        "invariant_id": "불변 조건",
+        "criterion": "관찰 가능한 기준",
+        "linked_decision": "연결된 결정",
+        "owner": "다음 담당자",
+        "boundary": "범위 또는 한계",
+        "confidence": "신뢰도 결과",
+        "refined_requirement_id": "정제된 요구사항",
+        "report_ids": "보고서 ID",
+        "remaining_risks": "남은 위험",
+        "workflow": "선택한 계획 절차",
+    },
+}
+
 
 def _text(value: object) -> str:
     return (
@@ -361,6 +510,277 @@ def _render_handoff(state: compact_state.State) -> str:
             ),
         ),
     )
+
+
+def _reader_label(locale: str, key: str) -> str:
+    labels = READER_LABELS.get(locale, READER_LABELS["en"])
+    return labels.get(key, READER_LABELS["en"].get(key, key))
+
+
+def _reader_value(value: object, locale: str) -> str:
+    if value is None or value == "" or value == []:
+        return _reader_label(locale, "none")
+    if isinstance(value, list):
+        return ", ".join(_text(item) for item in value)
+    return _text(value)
+
+
+def _reader_fields(
+    lines: list[str],
+    row: Mapping[str, object],
+    fields: Sequence[tuple[str, str]],
+    locale: str,
+) -> None:
+    for field, label in fields:
+        lines.append(f"- {_reader_label(locale, label)}: {_reader_value(row[field], locale)}")
+
+
+def _reader_section(lines: list[str], locale: str, key: str) -> None:
+    lines.extend((f"## {_reader_label(locale, key)}", ""))
+
+
+def _reader_heading(lines: list[str], locale: str, key: str, value: object) -> None:
+    lines.extend((f"### {_reader_label(locale, key)} {_reader_value(value, locale)}", ""))
+
+
+def render_reader_view(state: Mapping[str, object], locale: str = "en") -> str:
+    errors = compact_state.validate_state(state)
+    if errors:
+        raise ValueError("; ".join(errors))
+    typed_state = cast(
+        compact_state.State, state
+    )  # compact_state.validate_state proves the complete State shape.
+    locale = locale if locale in READER_LABELS else "en"
+    lines = [f"# {_reader_label(locale, 'title')}", ""]
+
+    _reader_section(lines, locale, "report_state")
+    _reader_fields(
+        lines,
+        typed_state["report"],
+        (
+            ("id", "id"),
+            ("revision", "revision"),
+            ("previous_sha256", "previous_sha256"),
+            ("phase", "phase"),
+        ),
+        locale,
+    )
+    lines.append("")
+
+    _reader_section(lines, locale, "summary")
+    for summary_row in typed_state["summary"]:
+        _reader_heading(lines, locale, "impact", summary_row["impact_id"])
+        _reader_fields(
+            lines,
+            summary_row,
+            (
+                ("changed_feature", "changed_feature"),
+                ("possible_issue", "possible_issue"),
+                ("affected", "affected"),
+                ("trigger", "trigger"),
+                ("severity", "severity"),
+                ("prevention", "prevention"),
+                ("status", "status"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    _reader_section(lines, locale, "original_requirement")
+    _reader_fields(
+        lines,
+        typed_state["original_requirement"],
+        (("id", "id"), ("request", "request"), ("source", "source")),
+        locale,
+    )
+    lines.append("")
+
+    _reader_section(lines, locale, "refined_requirement")
+    _reader_fields(
+        lines,
+        typed_state["refined_requirement"],
+        (
+            ("id", "id"),
+            ("revision", "revision"),
+            ("decision", "decision_id"),
+            ("supersedes", "supersedes"),
+        ),
+        locale,
+    )
+    lines.append("")
+
+    _reader_section(lines, locale, "current_behavior")
+    for behavior_row in typed_state["current_behavior"]:
+        _reader_heading(lines, locale, "invariant", behavior_row["id"])
+        _reader_fields(
+            lines,
+            behavior_row,
+            (
+                ("behavior", "behavior"),
+                ("evidence_level", "evidence_level"),
+                ("evidence", "evidence"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    _reader_section(lines, locale, "preserved_invariants")
+    for invariant_row in typed_state["preserved_invariants"]:
+        _reader_heading(lines, locale, "preserved_invariant", invariant_row["id"])
+        _reader_fields(
+            lines,
+            invariant_row,
+            (
+                ("requirement", "requirement"),
+                ("impacts", "impacts"),
+                ("evidence", "evidence"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    _reader_section(lines, locale, "impact_ledger")
+    for impact_row in typed_state["impacts"]:
+        _reader_heading(lines, locale, "impact_detail", impact_row["id"])
+        _reader_fields(
+            lines,
+            impact_row,
+            (
+                ("requirement", "requirement"),
+                ("category", "category"),
+                ("severity", "severity"),
+                ("state", "state"),
+                ("evidence_level", "evidence_level"),
+                ("evidence", "evidence"),
+                ("invariants", "invariants"),
+                ("decisions", "decision_ids"),
+                ("criteria", "criterion_ids"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    if typed_state["report"]["phase"] == "pre-decision":
+        _reader_section(lines, locale, "decision_needed")
+        needed = typed_state["decision_needed"]
+        assert needed is not None
+        _reader_fields(lines, needed, (("question", "question"),), locale)
+        lines.append("")
+        for index, option in enumerate(needed["options"], 1):
+            _reader_heading(lines, locale, "option", index)
+            _reader_fields(
+                lines,
+                option,
+                (
+                    ("option", "option_text"),
+                    ("impacts", "impacts"),
+                    ("tradeoff", "tradeoff"),
+                ),
+                locale,
+            )
+            lines.append("")
+    else:
+        _reader_section(lines, locale, "decisions")
+        for decision_row in typed_state["decisions"]:
+            _reader_heading(lines, locale, "decision", decision_row["id"])
+            _reader_fields(
+                lines,
+                decision_row,
+                (
+                    ("choice", "choice"),
+                    ("requirement", "requirement"),
+                    ("accepted_impacts", "accepted_impacts"),
+                    ("rationale", "rationale"),
+                ),
+                locale,
+            )
+            lines.append("")
+
+    _reader_section(lines, locale, "impact_delta")
+    for category in compact_state.DELTA_CATEGORIES:
+        lines.append(f"- {category}: {_reader_value(typed_state['delta'][category], locale)}")
+    lines.append("")
+
+    _reader_section(lines, locale, "history")
+    for history_row in typed_state["history"]:
+        _reader_heading(lines, locale, "history_item", history_row["requirement"])
+        _reader_fields(
+            lines,
+            history_row,
+            (
+                ("revision", "revision"),
+                ("decision", "decision"),
+                ("superseded_impacts", "superseded_impacts"),
+                ("summary", "change_summary"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    _reader_section(lines, locale, "criteria")
+    for criterion_row in typed_state["criteria"]:
+        _reader_heading(lines, locale, "criterion_item", criterion_row["id"])
+        _reader_fields(
+            lines,
+            criterion_row,
+            (
+                ("requirement", "requirement"),
+                ("impact", "impact_id"),
+                ("invariant", "invariant_id"),
+                ("criterion", "criterion"),
+                ("evidence", "evidence"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    _reader_section(lines, locale, "unresolved")
+    if not typed_state["unresolved"]:
+        lines.extend((f"- {_reader_label(locale, 'none')}", ""))
+    for unresolved_row in typed_state["unresolved"]:
+        _reader_heading(lines, locale, "unresolved_item", unresolved_row["impact"])
+        _reader_fields(
+            lines,
+            unresolved_row,
+            (
+                ("state", "state"),
+                ("rationale", "rationale"),
+                ("decision", "linked_decision"),
+                ("owner", "owner"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    _reader_section(lines, locale, "scope")
+    for index, scope_row in enumerate(typed_state["scope"], 1):
+        _reader_heading(lines, locale, "scope_item", index)
+        _reader_fields(
+            lines,
+            scope_row,
+            (
+                ("boundary", "boundary"),
+                ("evidence", "evidence"),
+                ("confidence", "confidence"),
+            ),
+            locale,
+        )
+        lines.append("")
+
+    _reader_section(lines, locale, "handoff")
+    _reader_fields(
+        lines,
+        typed_state["handoff"],
+        (
+            ("refined_requirement", "refined_requirement_id"),
+            ("report_ids", "report_ids"),
+            ("remaining_risks", "remaining_risks"),
+            ("criteria", "criterion_ids"),
+            ("workflow", "workflow"),
+        ),
+        locale,
+    )
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def render_markdown(state: Mapping[str, object]) -> str:

@@ -147,6 +147,48 @@ class ImpactRendererTest(unittest.TestCase):
         ):
             RENDERER.render_markdown(state)
 
+    def test_reader_view_localizes_labels_preserves_literals_and_avoids_tables(self):
+        state = self.fixture()
+        workflow = (
+            "superpowers:after-approved-brainstorming;impact-refinement;"
+            "manual-handoff-before-writing-plans"
+        )
+        state["handoff"]["workflow"] = workflow
+
+        rendered = RENDERER.render_reader_view(state, "ko")
+
+        self.assertTrue(rendered.startswith("# 요구사항 영향 보고서\n"))
+        self.assertIn("## 보고서 상태", rendered)
+        self.assertIn("### 영향 IMP-001", rendered)
+        self.assertIn("- 심각도: critical", rendered)
+        self.assertIn(workflow, rendered)
+        self.assertFalse(any(line.startswith("|") for line in rendered.splitlines()))
+        self.assertEqual(rendered.count("### 영향 "), len(state["summary"]))
+
+    def test_reader_view_contains_every_canonical_item(self):
+        state = self.fixture()
+
+        rendered = RENDERER.render_reader_view(state, "ko")
+
+        for collection in ("summary", "current_behavior", "impacts", "criteria", "scope"):
+            for row in state[collection]:
+                identifier = row.get("id") or row.get("impact_id")
+                if identifier:
+                    self.assertIn(identifier, rendered)
+                for value in row.values():
+                    if isinstance(value, str):
+                        self.assertIn(value, rendered)
+
+    def test_reader_view_does_not_change_canonical_markdown(self):
+        state = self.fixture()
+
+        RENDERER.render_reader_view(state, "ko")
+
+        self.assertEqual(
+            RENDERER.render_markdown(state),
+            (FIXTURES / "compact-state-post-decision.md").read_text(encoding="utf-8"),
+        )
+
     def test_compact_render_names_every_impact_once_and_stays_bounded(self):
         state = self.fixture()
 
