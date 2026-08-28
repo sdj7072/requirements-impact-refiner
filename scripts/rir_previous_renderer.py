@@ -36,6 +36,8 @@ class _ImpactRendererContract(Protocol):
 
     def render_markdown(self, state: Mapping[str, object]) -> str: ...
 
+    def render_reader_view(self, state: Mapping[str, object], locale: str | None = None) -> str: ...
+
     def validate_rendered_markdown(
         self, text: str, previous_bytes: bytes | None = None
     ) -> list[str]: ...
@@ -199,6 +201,7 @@ def _impact_renderer_contract(value: object) -> bool:
         and module_uses_sibling(getattr(value, "VALIDATOR", None), "validate-impact-report.py")
         and callable(getattr(value, "render_compact", None))
         and callable(getattr(value, "render_markdown", None))
+        and callable(getattr(value, "render_reader_view", None))
         and callable(getattr(value, "validate_rendered_markdown", None))
     )
 
@@ -241,7 +244,7 @@ def render_previous(result: _PreviousResult, compact_state: Mapping[str, object]
     if result.report_id is None or result.revision is None:
         raise ValueError("selected previous result identity is unavailable")
     if result.status == "fresh":
-        return IMPACT_RENDERER.render_markdown(compact_state)
+        return IMPACT_RENDERER.render_reader_view(compact_state)
     created = result.created_at or "unavailable"
     commit = f"`{result.baseline_commit}`" if result.baseline_commit else "unavailable"
     changed = str(result.changed_count) if result.changed_count is not None else "unavailable"

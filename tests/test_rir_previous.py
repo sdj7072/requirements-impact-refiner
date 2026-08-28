@@ -195,6 +195,18 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertGreater(result.performance_metrics.accounted_reused_bytes, 0)
         self.assertIsNone(result.performance_metrics.actual_input_tokens)
 
+    def test_fresh_previous_report_uses_localized_reader_view(self):
+        request = "프로젝트 편집 권한의 영향을 검토해줘."
+        self.publish(request=request)
+
+        result = PREVIOUS.lookup_previous(self.request(request))
+
+        self.assertEqual(result.status, "fresh")
+        text = result.display_text or ""
+        self.assertTrue(text.startswith("# 요구사항 영향 보고서\n"))
+        self.assertFalse(any(line.startswith("|") for line in text.splitlines()))
+        self.assertIn("RPT-001", text)
+
     def test_fresh_lookup_preserves_detailed_request_and_evidence_bounds(self):
         request_text = "x" * 5000
         evidence = ("e" * 5000, "duplicate", "duplicate")
@@ -1168,7 +1180,8 @@ class PreviousLookupTest(unittest.TestCase):
         for result in results:
             self.assertEqual(result.status, "fresh")
             self.assertIn(result.revision, {1, 2})
-            self.assertIn(f"| `RPT-001` | {result.revision} |", result.display_text or "")
+            self.assertIn("- ID: RPT-001", result.display_text or "")
+            self.assertIn(f"- Revision: {result.revision}", result.display_text or "")
             expected = pointer_one if result.revision == 1 else pointer_two
             self.assertEqual(result.markdown_sha256, expected["markdown_sha256"])
 

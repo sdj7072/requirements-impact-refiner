@@ -151,3 +151,40 @@ Expected: PASS.
 Run: `.quality-venv/bin/python scripts/run-quality-gates.py`
 
 Expected: all quality checks and the full test suite pass.
+
+### Task 3: Connect fresh previous reports
+
+**Files:**
+- Modify: `tests/test_rir_previous.py`
+- Modify: `scripts/rir_previous_renderer.py`
+- Modify: `skills/requirements-impact-refiner/scripts/rir_previous_renderer.py`
+
+**Interfaces:**
+- Consumes: `impact_renderer.render_reader_view(state)` with request-locale detection from canonical state.
+- Produces: A fresh previous report body in the same complete reader-view format used by newly finalized reports.
+
+- [x] **Step 1: Write the failing Korean fresh-report test**
+
+Publish a valid report whose original request is Korean, look it up with the same request, and assert that `display_text` starts with `# 요구사항 영향 보고서`, contains no Markdown table row, and still contains its report ID.
+
+- [x] **Step 2: Run the focused test and confirm canonical table output remains**
+
+Run: `python3 -m unittest tests/test_rir_previous.py -k test_fresh_previous_report_uses_localized_reader_view`
+
+Expected: FAIL because the fresh branch still calls `render_markdown`.
+
+- [x] **Step 3: Route only the fresh branch through reader view**
+
+Add `render_reader_view` to the previous-renderer sibling contract and change only `result.status == "fresh"` to call it. Leave stale header and compact body unchanged.
+
+- [x] **Step 4: Synchronize the packaged mirror and update fresh-format assertions**
+
+Update existing fresh tests to assert report identity and complete reader-view sections without depending on canonical table syntax. Copy the root previous renderer to its packaged mirror and verify with `cmp -s`.
+
+- [x] **Step 5: Verify focused and full regressions**
+
+Run: `python3 -m unittest tests/test_rir_previous.py tests/test_impact_renderer.py tests/test_packaging.py`
+
+Run: `.quality-venv/bin/python scripts/run-quality-gates.py`
+
+Expected: all checks pass while stale rendering remains unchanged.
