@@ -96,3 +96,58 @@ Expected: PASS with root and packaged renderer parity intact.
 Run: `git diff --check && git status --short`
 
 Expected: only this plan, the two renderer mirrors, and renderer tests are changed. Do not commit until the user requests it.
+
+### Task 2: Connect newly finalized full reports
+
+**Files:**
+- Modify: `tests/test_rir_finalize.py`
+- Modify: `tests/fixtures/rir-controller-facade-v05.json`
+- Modify: `scripts/impact_renderer.py`
+- Modify: `scripts/rir_finalize.py`
+- Modify: `skills/requirements-impact-refiner/scripts/impact_renderer.py`
+- Modify: `skills/requirements-impact-refiner/scripts/rir_finalize.py`
+
+**Interfaces:**
+- Consumes: `render_reader_view(state: Mapping[str, object], locale: str | None = None) -> str`
+- Produces: Full-delivery `FinalizeResult.display_text` in the original request language while retaining canonical Markdown at `FinalizeResult.markdown_path`.
+
+- [x] **Step 1: Write the failing finalize boundary test**
+
+```python
+def test_full_finalize_returns_localized_reader_view_and_keeps_canonical_artifact(self):
+    finalize = self.finalize()
+    draft = self.begin("모든 프로젝트의 편집 권한 영향을 검토해줘.")
+
+    result = finalize.finalize_refinement(self.request(draft))
+
+    self.assertEqual(result.delivery, "full")
+    self.assertTrue(result.display_text.startswith("# 요구사항 영향 보고서\n"))
+    self.assertFalse(any(line.startswith("|") for line in result.display_text.splitlines()))
+    self.assertTrue(result.markdown_path.read_text(encoding="utf-8").startswith(
+        "# Requirements Impact Report\n"
+    ))
+```
+
+- [x] **Step 2: Run the test and confirm canonical display is still returned**
+
+Run: `python3 -m unittest tests/test_rir_finalize.py -k test_full_finalize_returns_localized_reader_view_and_keeps_canonical_artifact`
+
+Expected: FAIL because `display_text` starts with the canonical English report title.
+
+- [x] **Step 3: Add request-locale detection and the finalize runtime operation**
+
+Change `render_reader_view` so omitted locale is derived from `state["original_requirement"]["request"]`, recognizing Hangul as `ko` and otherwise falling back to `en`. Add `render_reader_view` to the finalize renderer contract, dependency validation, runtime key allowlist, default runtime, and full-delivery display branch. Keep compact delivery and `publish_revision` unchanged.
+
+- [x] **Step 4: Synchronize packaged skill mirrors**
+
+Copy the two root implementation files to their existing packaged mirrors and verify each pair with `cmp -s`.
+
+- [x] **Step 5: Run focused and full regression verification**
+
+Run: `python3 -m unittest tests/test_impact_renderer.py tests/test_rir_finalize.py tests/test_packaging.py`
+
+Expected: PASS.
+
+Run: `.quality-venv/bin/python scripts/run-quality-gates.py`
+
+Expected: all quality checks and the full test suite pass.

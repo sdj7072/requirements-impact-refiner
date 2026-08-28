@@ -25,6 +25,7 @@ GENERIC_ID_PATTERN = re.compile(r"\b(?:REQ|INV|IMP|DEC|AC)-\d{3}\b")
 COMPACT_WORD_LIMIT = 450
 COMPACT_SUMMARY_ROWS = 6
 COMPACT_FIELD_WORDS = 8
+KOREAN_TEXT = re.compile(r"[\u3131-\u318e\uac00-\ud7a3]")
 
 READER_LABELS = {
     "en": {
@@ -543,14 +544,23 @@ def _reader_heading(lines: list[str], locale: str, key: str, value: object) -> N
     lines.extend((f"### {_reader_label(locale, key)} {_reader_value(value, locale)}", ""))
 
 
-def render_reader_view(state: Mapping[str, object], locale: str = "en") -> str:
+def _reader_locale(state: compact_state.State, locale: str | None) -> str:
+    if locale in READER_LABELS:
+        return cast(str, locale)
+    if locale is not None:
+        return "en"
+    request = state["original_requirement"]["request"]
+    return "ko" if KOREAN_TEXT.search(request) else "en"
+
+
+def render_reader_view(state: Mapping[str, object], locale: str | None = None) -> str:
     errors = compact_state.validate_state(state)
     if errors:
         raise ValueError("; ".join(errors))
     typed_state = cast(
         compact_state.State, state
     )  # compact_state.validate_state proves the complete State shape.
-    locale = locale if locale in READER_LABELS else "en"
+    locale = _reader_locale(typed_state, locale)
     lines = [f"# {_reader_label(locale, 'title')}", ""]
 
     _reader_section(lines, locale, "report_state")

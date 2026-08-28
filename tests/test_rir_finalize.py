@@ -115,6 +115,21 @@ class RirFinalizeTest(unittest.TestCase):
         self.assertIs(type(result), finalize.CONTRACTS.FinalizeResult)
         self.assertTrue(CONTROLLER.load_draft(self.root, draft.draft_id)["consumed"])
 
+    def test_full_finalize_returns_localized_reader_view_and_keeps_canonical_artifact(self):
+        finalize = self.finalize()
+        draft = self.begin("모든 프로젝트의 편집 권한 영향을 검토해줘.")
+
+        result = finalize.finalize_refinement(self.request(draft))
+
+        self.assertEqual(result.delivery, "full")
+        self.assertTrue(result.display_text.startswith("# 요구사항 영향 보고서\n"))
+        self.assertFalse(any(line.startswith("|") for line in result.display_text.splitlines()))
+        self.assertTrue(
+            result.markdown_path.read_text(encoding="utf-8").startswith(
+                "# Requirements Impact Report\n"
+            )
+        )
+
     def test_graph_disabled_finalize_rejects_receipt_without_publication_or_consumption(self):
         finalize = self.finalize()
         draft = self.begin("Reject a graph receipt when graph analysis is disabled.")
