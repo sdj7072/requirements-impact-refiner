@@ -22,6 +22,7 @@ _REPORT_WORKFLOW = re.compile(
     re.IGNORECASE,
 )
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
+_REJECTION_FORBIDDEN_STATES = frozenset(("resolved", "accepted", "superseded"))
 
 
 def _load_validator() -> ModuleType:
@@ -93,6 +94,13 @@ def _planning_handoff_workflow(output: str) -> Optional[str]:
     return _report_model().unquote(rows[0].get("Selected planning workflow", ""))
 
 
+def _rejection_states_are_supported(states: set[str]) -> bool:
+    """Require one active risk without allowing an unsupported terminal claim."""
+    return bool(states & _REJECTION_ACTIVE_STATES) and not bool(
+        states & _REJECTION_FORBIDDEN_STATES
+    )
+
+
 def _lineage_findings(case: CaseSpec, output: str) -> list[str]:
     """Check the catalog's transition claim without making a human judgment."""
     transition = case.expected_transition
@@ -105,7 +113,7 @@ def _lineage_findings(case: CaseSpec, output: str) -> list[str]:
             for row in parsed.tables.get("Impact Ledger", ())
         }
         findings = []
-        if not states or not states <= _REJECTION_ACTIVE_STATES:
+        if not _rejection_states_are_supported(states):
             findings.append(f"{case.id} requires an active evidence-supported ledger state")
         authored = _report_model().authored_delta(parsed)
         if authored.get("resolved") or authored.get("accepted"):

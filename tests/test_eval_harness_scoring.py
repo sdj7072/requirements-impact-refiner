@@ -11,7 +11,11 @@ from evals.harness.models import (
     RunStatus,
 )
 from evals.harness.reporting import render_report, summarize
-from evals.harness.scoring import score_mechanical, validate_adjudications
+from evals.harness.scoring import (
+    _rejection_states_are_supported,
+    score_mechanical,
+    validate_adjudications,
+)
 from tests.test_report_lineage import next_report, report_with_state
 from tests.test_validate_impact_report import VALID_REPORT
 
@@ -471,6 +475,14 @@ class EvalHarnessScoringTest(unittest.TestCase):
         self.assertFalse(accepted.passed)
         self.assertTrue(any("active" in finding for finding in accepted.findings))
         self.assertTrue(active.passed, active.findings)
+
+    def test_rejected_lineage_allows_mitigated_supporting_impact_beside_active_risk(self):
+        self.assertTrue(_rejection_states_are_supported({"blocked", "mitigated"}))
+        self.assertTrue(_rejection_states_are_supported({"detected", "refining"}))
+        self.assertFalse(_rejection_states_are_supported({"mitigated"}))
+        self.assertFalse(_rejection_states_are_supported({"blocked", "accepted"}))
+        self.assertFalse(_rejection_states_are_supported({"refining", "resolved"}))
+        self.assertFalse(_rejection_states_are_supported({"blocked", "superseded"}))
 
     def test_rendering_promotes_only_complete_sealed_canonical_matrix(self):
         """Raw pass statuses and caller metadata cannot manufacture verification."""
