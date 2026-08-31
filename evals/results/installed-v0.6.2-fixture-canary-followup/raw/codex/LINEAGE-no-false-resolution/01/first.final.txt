@@ -1,0 +1,57 @@
+Recorded as [RPT-001 revision 1](</private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-aftzmu34/.requirements-impact-refiner/reports/RPT-001/revision-0001.md>).
+
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Webhook delivery retry behavior after provider timeout
+- Possible issue: The same webhook event may be delivered more than once when the first provider attempt succeeded but its response timed out.
+- Affected feature or user: Webhook consumers and any non-idempotent downstream side effects triggered by `retry_delivery`.
+- Trigger: An ambiguous provider timeout followed by `retry_delivery`, especially overlapping or repeated retry attempts.
+- Severity: high
+- Prevention or check: Select and document an idempotency policy before implementation, then enforce a stable attempt identity or explicitly accept at-least-once duplicates and verify the chosen concurrency behavior.
+- Status: blocked
+
+## Current Refined Requirement
+
+Change webhook retry behavior in `webhook/delivery.py` for `retry_delivery` after a provider timeout, but do not enable a retry path until the delivery idempotency contract is selected and specified. The selected contract must define:
+
+- How an ambiguous provider timeout is distinguished from a failed delivery.
+- How repeated attempts are identified.
+- What duplicate side effects are permitted or prevented.
+
+## Verified Current Behavior
+
+- `webhook/delivery.py:1-4` defines the timeout source and currently returns the supplied event unchanged from `retry_delivery`.
+- `webhook/idempotency.py:1-2` says idempotency is not configured and defines no key, deduplication store, retention period, or concurrency semantics.
+
+## Decision Needed
+
+What duplicate-delivery contract should `retry_delivery` enforce after an ambiguous provider timeout?
+
+1. Require a stable event idempotency key and suppress or coalesce duplicate attempts.
+2. Keep at-least-once delivery and explicitly allow duplicates.
+3. Do not automatically retry ambiguous provider timeouts.
+
+## Acceptance and Regression Criteria
+
+- Document the delivery guarantee, idempotency-key source, persistence and retention rules, and ownership of downstream duplicate handling.
+- Test both ambiguous timeout outcomes: the provider accepted the first attempt, and the provider did not accept it.
+- Test simultaneous retry calls for the same event and verify that delivery counts match the selected contract.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the duplicate-delivery contract is selected.
+- Remaining risk: IMP-001
+- Status: blocked
+- Next owner: Webhook delivery owner
+- No implementation or planning should begin until the decision is resolved.

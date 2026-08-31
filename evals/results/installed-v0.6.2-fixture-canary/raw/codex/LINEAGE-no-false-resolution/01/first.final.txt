@@ -1,0 +1,232 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Webhook delivery retry behavior in retry_delivery
+- Possible issue: A retry after an ambiguous provider timeout may deliver the same event twice and repeat downstream side effects.
+- Affected feature or user: Webhook recipients and any downstream state changes triggered by the event
+- Trigger: The provider accepts or processes the first attempt but its response times out, after which retry_delivery sends another attempt.
+- Severity: high
+- Prevention or check: Choose an explicit duplicate-delivery policy: enforce an idempotency key and deduplication, avoid automatic retry for ambiguous timeouts, or explicitly accept at-least-once delivery with compensating safeguards.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: The result and observable contract of retry_delivery
+- Possible issue: Callers may observe a changed return value or delivery outcome without a defined compatibility contract.
+- Affected feature or user: Callers of retry_delivery and operational handling of failed webhook attempts
+- Trigger: Retry logic starts returning a status, wrapping the event, suppressing a retry, or raising an error instead of returning the event unchanged.
+- Severity: medium
+- Prevention or check: Document the selected timeout and return-value contract, preserve event passthrough unless intentionally changed, and add contract tests before implementation.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for changing webhook delivery retries at webhook/delivery.py and retry_delivery. The supplied evidence identifies an unresolved duplicate-delivery risk.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Change webhook retry behavior in webhook/delivery.py at retry_delivery for provider-timeout outcomes only after selecting and specifying a duplicate-delivery policy; the implementation must preserve the event passed to retry_delivery and must prevent, suppress, or explicitly accept duplicate externally observable delivery when the provider may have accepted the original attempt before timing out.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: A provider-timeout outcome is the boundary that invokes retry_delivery.
+- Evidence level: verified
+- Evidence: webhook/delivery.py defines TIMEOUT_SOURCE = "provider timeout" and defines retry_delivery immediately in the same module.
+
+### Invariant INV-002
+
+- Current behavior: retry_delivery currently returns the supplied event unchanged.
+- Evidence level: verified
+- Evidence: webhook/delivery.py implements retry_delivery(event) as return event.
+
+### Invariant INV-003
+
+- Current behavior: No current repository behavior guarantees that repeated delivery of the same event is idempotent or deduplicated.
+- Evidence level: verified
+- Evidence: webhook/idempotency.py contains only STATUS = "not configured" and DELIVERY_REF = "provider timeout"; it documents no idempotency key, store, retention rule, or duplicate-handling behavior.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002
+- Evidence: webhook/delivery.py defines TIMEOUT_SOURCE = "provider timeout" and defines retry_delivery immediately in the same module.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002
+- Evidence: webhook/delivery.py implements retry_delivery(event) as return event.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: webhook/idempotency.py contains only STATUS = "not configured" and DELIVERY_REF = "provider timeout"; it documents no idempotency key, store, retention rule, or duplicate-handling behavior.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: retry_delivery is associated with a provider timeout, while webhook/idempotency.py says idempotency is not configured. A timeout can leave provider acceptance unknown, so another attempt may repeat an already accepted event.
+- Invariants: INV-001, INV-002, INV-003
+- Decision: none
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: interfaces
+- Severity: medium
+- State: blocked
+- Evidence level: unknown
+- Evidence: The repository provides no caller contract, provider acknowledgment model, retry result type, or tests beyond retry_delivery returning the input event, so changing retry mechanics may alter expectations that are not yet documented.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-002
+
+## Decision Needed
+
+- Question: Which duplicate-delivery policy should govern retry_delivery when a provider timeout leaves acceptance of the original attempt unknown?
+
+### Option 1
+
+- Option: Require a stable idempotency key and durable deduplication before automatic retry.
+- Affected impacts: IMP-001, IMP-002
+- Trade-off: Best duplicate suppression, but requires a key contract, storage/retention rules, and defined behavior when the deduplication store is unavailable.
+
+### Option 2
+
+- Option: Do not automatically retry ambiguous provider timeouts; surface the delivery for reconciliation.
+- Affected impacts: IMP-001, IMP-002
+- Trade-off: Avoids retry-created duplicates, but may leave accepted-unknown or genuinely failed deliveries pending and requires an operational reconciliation path.
+
+### Option 3
+
+- Option: Retain automatic retry and explicitly accept at-least-once delivery.
+- Affected impacts: IMP-001, IMP-002
+- Trade-off: Keeps availability and simple retry behavior, but downstream consumers must tolerate duplicates and the identified risk remains accepted rather than prevented.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Change webhook retry behavior in webhook/delivery.py at retry_delivery for provider-timeout outcomes only after selecting and specifying a duplicate-delivery policy; the implementation must preserve the event passed to retry_delivery and must prevent, suppress, or explicitly accept duplicate externally observable delivery when the provider may have accepted the original attempt before timing out.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-003
+- Observable criterion: A test simulating an initial provider acceptance followed by a response timeout demonstrates the selected policy: the event is deduplicated, withheld for reconciliation, or deliberately redelivered under a documented at-least-once contract.
+- Evidence: No such policy or test is present in the supplied files; this criterion closes the identified duplicate-delivery evidence gap.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-002
+- Observable criterion: Tests document the retry_delivery return-value and failure contract and confirm that the input event remains unchanged unless a separately approved compatibility change specifies otherwise.
+- Evidence: The only verified current function behavior is return event.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The repository does not select among deduplication, reconciliation, or accepted at-least-once delivery.
+- Linked decision: none
+- Next owner: Webhook delivery owner
+
+### Unresolved impact IMP-002
+
+- State: blocked
+- Rationale: Caller expectations and the intended retry result contract are not documented or tested.
+- Linked decision: none
+- Next owner: Webhook delivery owner
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: webhook/delivery.py: retry_delivery and provider-timeout retry behavior
+- Evidence: Direct repository inspection confirms TIMEOUT_SOURCE and the event-passthrough retry_delivery implementation.
+- Consequence for confidence: high
+
+### Scope 2
+
+- Scope or limitation: webhook/idempotency.py: duplicate suppression behavior
+- Evidence: Direct repository inspection confirms idempotency status is not configured and no key/store/retention behavior is defined.
+- Consequence for confidence: high
+
+### Scope 3
+
+- Scope or limitation: Callers, provider acknowledgment semantics, persistence, and tests
+- Evidence: No additional source files or contracts were found in the bounded repository scan.
+- Consequence for confidence: low; this remains an evidence frontier
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: webhook/delivery.py → webhook/idempotency.py
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location webhook/delivery.py + webhook/idempotency.py
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-001: webhook/delivery.py → webhook/idempotency.py
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location webhook/delivery.py + webhook/idempotency.py
+
+### Scope 6
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 526da878eeb2ab932f99ec6a51a5deda; sha256 61a2deb7df377f1de4a4a8328b4a29505ecd17f1f91c36550204c121fc2daed1; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002
+- Remaining risks: IMP-001, IMP-002
+- Acceptance criteria: AC-001, AC-002
+- Selected planning workflow: Not ready

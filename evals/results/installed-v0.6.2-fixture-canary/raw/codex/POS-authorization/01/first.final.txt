@@ -1,0 +1,229 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: post-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: authorization.workspace_edit role policy
+- Possible issue: A broad authorization change could accidentally admit unintended roles or remove existing owner/admin access.
+- Affected feature or user: All workspace members and every project protected by authorize_project_edit.
+- Trigger: A user attempts to edit a project with a member, owner, admin, or unsupported role.
+- Severity: critical
+- Prevention or check: Limit the policy change to adding member to the explicit permitted-role tuple and verify positive and negative role cases.
+- Status: accepted
+
+### Impact IMP-002
+
+- Changed feature: Edits performed by newly authorized members
+- Possible issue: Member edits could become less attributable if the existing role-aware audit contract were changed or bypassed.
+- Affected feature or user: Operators and reviewers relying on project.edit.audited records.
+- Trigger: A newly authorized member edits a project and audit data is emitted.
+- Severity: high
+- Prevention or check: Leave events/audit.py unchanged and verify emit_actor_role_audit continues to return event, actor, and role.
+- Status: accepted
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Let workspace members edit every project by widening authorization.workspace_edit in auth/authorize.py.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Widen authorization.workspace_edit by adding the existing member role to auth/authorize.py's permitted roles, so workspace members—including users receiving the invitation default role—can edit every project. Preserve owner/admin access, deny roles outside owner/admin/member, and keep the existing project.edit.audited actor-and-role audit contract unchanged.
+- Refined by decision: DEC-001
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: Project editing is controlled by authorization.workspace_edit and authorize_project_edit currently permits owner and admin roles.
+- Evidence level: verified
+- Evidence: auth/authorize.py defines GATE = "authorization.workspace_edit", PERMITTED = ("owner", "admin"), and returns role in PERMITTED.
+
+### Invariant INV-002
+
+- Current behavior: New invitations receive the member role by default and reference the same workspace edit gate.
+- Evidence level: verified
+- Evidence: roles/defaults.py defines INVITATION_DEFAULT_ROLE = "member" and GATE_REF = "authorization.workspace_edit".
+
+### Invariant INV-003
+
+- Current behavior: Project-edit auditing uses project.edit.audited and retains both actor and role in emitted audit data.
+- Evidence level: verified
+- Evidence: events/audit.py defines AUDIT_EVENT = "project.edit.audited", links authorization.workspace_edit, and emit_actor_role_audit returns event, actor, and role.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002
+- Evidence: auth/authorize.py defines GATE = "authorization.workspace_edit", PERMITTED = ("owner", "admin"), and returns role in PERMITTED.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: roles/defaults.py defines INVITATION_DEFAULT_ROLE = "member" and GATE_REF = "authorization.workspace_edit".
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002
+- Evidence: events/audit.py defines AUDIT_EVENT = "project.edit.audited", links authorization.workspace_edit, and emit_actor_role_audit returns event, actor, and role.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: critical
+- State: accepted
+- Evidence level: unknown
+- Evidence: The inspected gate excludes member while the invitation default is member. The promoted receipt connects these files using fallback graph evidence whose provider confidence is not verified.
+- Invariants: INV-001, INV-002
+- Decision: DEC-001
+- Acceptance criteria: AC-001, AC-002, AC-003
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: high
+- State: accepted
+- Evidence level: unknown
+- Evidence: The promoted receipt connects authorization to auditing using fallback graph evidence whose provider confidence is not verified; inspected code separately confirms the audit payload shape.
+- Invariants: INV-001, INV-003
+- Decision: DEC-001
+- Acceptance criteria: AC-004
+
+## Decisions and Accepted Risks
+
+### Decision DEC-001
+
+- Choice: Add member to the explicit PERMITTED roles in auth/authorize.py and preserve the existing default-role and audit contracts.
+- Requirement: REQ-001
+- Accepted impacts: IMP-001, IMP-002
+- Rationale: The user explicitly selected widening authorization.workspace_edit for workspace members and supplied the default-role and audit paths as required repository context.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Widen authorization.workspace_edit by adding the existing member role to auth/authorize.py's permitted roles, so workspace members—including users receiving the invitation default role—can edit every project. Preserve owner/admin access, deny roles outside owner/admin/member, and keep the existing project.edit.audited actor-and-role audit contract unchanged.
+- Decision: DEC-001
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: authorize_project_edit("member") returns true, granting the invitation-default role edit access across every project using this gate.
+- Evidence: Target behavior derived from the explicit request and roles/defaults.py.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: authorize_project_edit("owner") and authorize_project_edit("admin") continue to return true.
+- Evidence: Existing permitted roles in auth/authorize.py must remain permitted.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: Roles other than owner, admin, and member continue to return false.
+- Evidence: The existing explicit membership check provides a deny-by-default boundary.
+
+### Criterion AC-004
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-003
+- Observable criterion: emit_actor_role_audit still emits project.edit.audited with the supplied actor and role, including role member.
+- Evidence: Current events/audit.py behavior and the supplied audit requirement.
+
+## Unresolved, Deferred, and Blocked Items
+
+- none
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: Authorization implementation
+- Evidence: auth/authorize.py contains the complete role tuple and edit predicate.
+- Consequence for confidence: high
+
+### Scope 2
+
+- Scope or limitation: Invitation role mapping
+- Evidence: roles/defaults.py establishes member as the default and references the same gate; no source change is required.
+- Consequence for confidence: high
+
+### Scope 3
+
+- Scope or limitation: Audit contract
+- Evidence: events/audit.py defines the gate-linked event and role-aware payload; no source change is required.
+- Consequence for confidence: high
+
+### Scope 4
+
+- Scope or limitation: Automated regression coverage
+- Evidence: Repository inventory contains only the three supplied Python modules and no existing test files.
+- Consequence for confidence: high
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-002: authorization.workspace_edit → authorization.workspace_edit
+- Consequence for confidence: PATH-002: provider builtin; confidence lexical; location auth/authorize.py + roles/defaults.py
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-001: authorization.workspace_edit → authorization.workspace_edit
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location auth/authorize.py + events/audit.py
+
+### Scope 7
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 3 nodes / 6 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 73c26f372620ec276af5a9dab5b0aa1c; sha256 ca47f874472353ca1534eab0d158c39e0100af215bb0e753e70e66c0972ef799; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: REQ-001
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, DEC-001
+- Remaining risks: IMP-001, IMP-002
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004
+- Selected planning workflow: Ready for implementation: make the localized permitted-role change, use direct assertions because no test harness exists, and verify authorization plus audit invariants.

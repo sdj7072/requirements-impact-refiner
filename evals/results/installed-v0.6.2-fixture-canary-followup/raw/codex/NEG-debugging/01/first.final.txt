@@ -1,0 +1,8 @@
+I can’t diagnose it yet because the provided workspace is empty—no repository, tests, CI configuration, or Git metadata.
+
+Please provide either:
+
+- The repository files/path, or
+- The failing test’s name/source plus the full CI failure output and workflow configuration.
+
+The “CI only” clue alone isn’t enough to distinguish timing, parallelism, environment, timezone/locale, filesystem ordering, or resource-limit issues.

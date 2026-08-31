@@ -1,0 +1,3 @@
+I can’t identify the cause yet: the workspace is empty, and several GitHub repositories are connected.
+
+Please provide the repository name plus the failing test name or CI failure log. The “CI-only” fact alone isn’t enough to distinguish timing, parallelism, environment, timezone, resource, or dependency causes.

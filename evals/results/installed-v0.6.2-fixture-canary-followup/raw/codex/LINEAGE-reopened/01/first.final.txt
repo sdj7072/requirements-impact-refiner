@@ -1,0 +1,54 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: post-decision
+
+## Change Impact Summary
+
+### IMP-001 — Client compatibility
+
+- Severity: high
+- Status: accepted
+- Change: Remove mobile decoding of `profile.displayName`.
+- Risk: Older clients could encounter immediate server-side field removal.
+- Resolution: Preserve the field for one release. The supplied migration evidence supports treating compatibility as addressed.
+
+### IMP-002 — Display-name behavior
+
+- Severity: medium
+- Status: accepted
+- Change: The mobile profile model will no longer expose decoded `profile.displayName`.
+- Check: Remove the decoder and verify no mobile references remain.
+
+### IMP-003 — Downstream regression
+
+- Severity: low
+- Status: mitigated
+- Risk: An overlooked call site could fail to compile or silently lose a value.
+- Check: Repeat the reference search and compile/test after removal.
+
+## Refined Requirement
+
+Remove support for `profile.displayName` starting in `mobile/ProfileDecoder.swift` by deleting `decodeDisplayName` and its `decodedField` declaration. Retain the configured one-release migration preservation window for backward client compatibility.
+
+## Decision
+
+Remove `profile.displayName` decoding and use `PRESERVE_RELEASES = 1` as the client compatibility resolution.
+
+## Acceptance Criteria
+
+- `mobile/ProfileDecoder.swift` no longer declares `decodeDisplayName` or `decodedField` for `profile.displayName`.
+- `migrations/profile_field.py` continues preserving `profile.displayName` for exactly one release.
+- No mobile references remain to `decodeDisplayName`, `decodedField`, `displayName`, or `profile.displayName`, except intentional migration metadata.
+- Compile and tests pass after removal.
+
+## Scope and Limitations
+
+Direct inspection verified both supplied repository facts. Repository text search found no additional consumers. Transitive graph confidence remains limited because optional graph providers were unavailable, so external client relationships were recorded as an explicitly accepted compatibility decision rather than independently graph-verified.
+
+## Planning Handoff
+
+The report is recorded as **RPT-001, revision 1**, and is ready for planning. No deferred or blocked items remain.

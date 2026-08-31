@@ -1,0 +1,5 @@
+Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.
+
+Repository evidence:
+- mobile/ProfileDecoder.swift defines decodeDisplayName for profile.displayName
+- migrations/profile_field.py sets PRESERVE_RELEASES to 1

@@ -1,0 +1,62 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Tenant archive export behavior in `write_tenant_archive`.
+- Possible issue: The change could create, retain, or dispose of tenant archive data under an unconfirmed retention policy.
+- Affected: Tenants whose data is archived and operators responsible for archive storage and deletion.
+- Severity: medium
+- Status: blocked
+- Prevention: Identify the export retention owner and obtain confirmation of the governing policy before planning or implementation.
+
+## Current Refined Requirement
+
+Assess the proposed data export change beginning at `exports/export_writer.py::write_tenant_archive`, preserving tenant archive behavior and withholding planning or implementation until the export retention owner confirms which retention policy applies.
+
+## Preserved Invariant
+
+- `write_tenant_archive` continues to produce tenant archives for tenants.
+- Evidence level: verified
+- Evidence: `exports/export_writer.py` defines the function for tenant archives.
+
+## Decision Needed
+
+Which retention policy does the export retention owner approve?
+
+1. Confirm that the existing retention policy applies unchanged.
+2. Approve a revised retention policy for the changed export.
+
+## Acceptance Criterion
+
+Before planning or implementation proceeds, the identified export retention owner must confirm the applicable tenant-archive retention and disposal policy, and that confirmation must be recorded as repository evidence.
+
+## Blocked Item
+
+- Impact: IMP-001
+- State: blocked
+- Rationale: `policy/retention.py` has no `RETENTION_OWNER` declaration, and no supplied evidence identifies an accountable owner or confirms the policy.
+- Next owner: Export retention owner, currently unidentified.
+
+## Scope and Limitations
+
+- Entry point: `exports/export_writer.py::write_tenant_archive`
+- Policy boundary: `policy/retention.py`
+- Downstream archive storage, deletion, scheduling, and consumers: unknown due to missing evidence
+- Evidence path: `exports/export_writer.py → policy/retention.py`
+- Graph coverage was provider-limited and identified one unknown frontier.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending policy decision is resolved.
+- Report IDs: REQ-001, INV-001, IMP-001
+- Remaining risk: IMP-001
+- Acceptance criterion: AC-001
+- Selected planning workflow: Not ready

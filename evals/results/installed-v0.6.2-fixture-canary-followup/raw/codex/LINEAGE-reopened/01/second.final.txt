@@ -1,0 +1,162 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 2
+- Previous SHA-256: f61da16d6ecacc9ed041fdc62ce77eb982e3d2dca951e4ba58a53bfe6f87ef77
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Remove profile.displayName across mobile and desktop clients.
+- Possible issue: The desktop cache may continue writing or expecting the field after the mobile decoder and server field are removed, invalidating the earlier compatibility treatment.
+- Affected feature or user: Desktop cache users and mixed-version mobile/desktop deployments.
+- Trigger: The field is removed while a released desktop client still serializes profile.displayName.
+- Severity: high
+- Prevention or check: Select and verify a desktop migration and rollout strategy before treating the one-release preservation window as sufficient.
+- Status: refining
+
+### Impact IMP-002
+
+- Changed feature: Stop exposing profile.displayName through the mobile decoder.
+- Possible issue: Removing only the mobile decode path leaves the field active in another client and does not complete the requested field removal.
+- Affected feature or user: Mobile profile behavior and cross-client consistency.
+- Trigger: decodeDisplayName is removed without addressing the desktop serializer.
+- Severity: medium
+- Prevention or check: Keep the mobile removal criterion, but plan it as part of an all-client field-removal boundary.
+- Status: refining
+
+### Impact IMP-003
+
+- Changed feature: Remove the profile.displayName field from repository clients.
+- Possible issue: Desktop cache serialization can preserve stale data, fail after schema removal, or reintroduce the removed field.
+- Affected feature or user: Desktop cache reads/writes and any synchronization using cached profiles.
+- Trigger: The migration expires or the server field disappears while desktop serialization remains.
+- Severity: high
+- Prevention or check: Reopen the regression analysis, address every client reference, and test cache migration plus mixed-version operation.
+- Status: refining
+
+### Impact IMP-004
+
+- Changed feature: Stop serializing profile.displayName in the desktop profile cache.
+- Possible issue: Existing cached records may retain the field or become incompatible with readers after serialization changes.
+- Affected feature or user: Persisted desktop profile-cache entries and desktop cache consumers.
+- Trigger: Desktop serialization changes or the migration preservation window ends without a cache migration policy.
+- Severity: high
+- Prevention or check: Choose whether to remove, transform, or temporarily retain desktop cache data and verify existing-cache upgrade behavior.
+- Status: refining
+
+### Impact IMP-005
+
+- Changed feature: Continue the persisted report lineage without substituting chat-response bytes.
+- Possible issue: Using first.final.txt or normalized conversation text as predecessor content would create a false report lineage and incorrect previous hash.
+- Affected feature or user: RPT-001 revision identity and auditability.
+- Trigger: A continuation reads or reconstructs predecessor Markdown from first.final.txt instead of the file selected by current.json.
+- Severity: high
+- Prevention or check: Use revision-0001.md exactly as selected by current.json and verify its SHA-256 before publishing revision 2.
+- Status: mitigated
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Remove profile.displayName from all in-repository client behavior, beginning with mobile/ProfileDecoder.swift at decodeDisplayName and now including direct serialization in desktop/ProfileCache.swift; do not treat the existing one-release preservation setting as sufficient compatibility resolution until a desktop migration and rollout strategy is selected.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: The mobile profile decoder currently reads the displayName payload key for profile.displayName.
+- Evidence level: verified
+- Evidence: mobile/ProfileDecoder.swift declares decodedField = "profile.displayName" and decodeDisplayName returns payload["displayName"].
+
+### Invariant INV-002
+
+- Current behavior: The migration currently preserves profile.displayName for one release.
+- Evidence level: verified
+- Evidence: migrations/profile_field.py sets PRESERVE_RELEASES = 1 and FIELD = "profile.displayName".
+
+### Invariant INV-004
+
+- Current behavior: The desktop profile cache currently serializes profile.displayName directly.
+- Evidence level: verified
+- Evidence: desktop/ProfileCache.swift declares serializedField = "profile.displayName".
+
+### Invariant INV-005
+
+- Current behavior: profile.displayName currently has at least two in-repository client behaviors: mobile decoding and desktop cache serialization.
+- Evidence level: verified
+- Evidence: Direct source inspection finds the field in mobile/ProfileDecoder.swift and desktop/ProfileCache.swift, in addition to migration metadata.
+
+### Invariant INV-006
+
+- Current behavior: Persisted impact-report lineage is selected by RPT-001/current.json and uses the exact bytes of its canonical Markdown target, not chat-response text.
+- Evidence level: verified
+- Evidence: current.json selects revision-0001.md and records SHA-256 f61da16d6ecacc9ed041fdc62ce77eb982e3d2dca951e4ba58a53bfe6f87ef77; an independent hash of that exact file matches.
+
+## Impact Ledger
+
+- IMP-001: compatibility, high, refining
+- IMP-002: functionality, medium, refining
+- IMP-003: regression, high, refining
+- IMP-004: data, high, refining
+- IMP-005: operations, high, mitigated
+
+## Decision Needed
+
+How should `desktop/ProfileCache.swift` and existing cached `profile.displayName` data be handled before the field is removed?
+
+### Option 1
+
+- Option: Migrate desktop in the same change
+- Affected impacts: IMP-001, IMP-002, IMP-003, IMP-004
+- Trade-off: Removes mobile decoding and desktop serialization together and validates existing-cache upgrades; largest immediate change, but gives the clearest compatibility boundary.
+
+### Option 2
+
+- Option: Stage desktop migration and extend preservation
+- Affected impacts: IMP-001, IMP-003, IMP-004
+- Trade-off: Ships a desktop cache migration first and retains profile.displayName beyond the current one-release window; safer for released clients but delays final removal.
+
+### Option 3
+
+- Option: Defer field removal
+- Affected impacts: IMP-001, IMP-002, IMP-003, IMP-004
+- Trade-off: Keeps current behavior until desktop cache lifecycle evidence is available; lowest immediate compatibility risk but postpones the requested cleanup.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: IMP-003
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: IMP-001, IMP-002
+- new: IMP-004, IMP-005
+
+## Acceptance and Regression Criteria
+
+- AC-004: Remove `decodedField` and `decodeDisplayName` from `mobile/ProfileDecoder.swift`.
+- AC-005: Select a rollout strategy covering released desktop clients.
+- AC-006: Verify the preservation duration across mixed mobile and desktop versions.
+- AC-007: Confirm no unintended mobile or desktop dependency remains after migration.
+- AC-008: Safely upgrade existing desktop cache entries and stop new serialization at the selected transition.
+- AC-009: Preserve canonical lineage using the exact predecessor SHA-256 `f61da16d6ecacc9ed041fdc62ce77eb982e3d2dca951e4ba58a53bfe6f87ef77`.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Remaining risks: IMP-001, IMP-002, IMP-003, IMP-004, IMP-005
+- Status: Not ready

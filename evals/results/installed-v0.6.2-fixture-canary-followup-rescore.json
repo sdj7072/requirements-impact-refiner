@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "not_verified",
+  "source_evidence_directory": "evals/results/installed-v0.6.2-fixture-canary-followup",
+  "source_manifest_sha256": "fdf1c70512edaf082ca031df1901f5be513a50391cbf179019814c2d7b9bfad3",
+  "source_controller_sha256": "cf8a1f6b834899004f03dc5a24e471c441ddab49ba031593310e34f33bb9ffd5",
+  "source_report_sha256": "8e03c3190dce36e7dd9a6376fdaad54498958c22b0106b62d0ecec5f511d9141",
+  "source_recorded_strict_score": "5/6",
+  "scorer_commit": "324624ad444faf882fff85ed1262bd7a09450cc1",
+  "scorer_sha256": "0aa3223791d1cbea8cd3499bf8343c5cda4ba1a2a6050d0bb490e4fa72974279",
+  "base_catalog_sha256": "9309a796120082b0d79759266945a80fa2449007bef4407d97005cc61564d552",
+  "lineage_catalog_sha256": "f0971aeafe6053bbc43f697da47e90f3c5ce56f93451dc258657055c68035d95",
+  "deterministic_rescore": {
+    "strict_score": "6/6",
+    "cases": {
+      "POS-authorization": true,
+      "NEG-debugging": true,
+      "INT-superpowers": true,
+      "LINEAGE-stable-blocked": true,
+      "LINEAGE-reopened": true,
+      "LINEAGE-no-false-resolution": true
+    }
+  },
+  "reason": "The sealed raw outputs were not rerun or modified. The current scorer accepts an ancillary mitigated lineage-integrity impact beside the required active blocked risk, while continuing to reject resolved, accepted, or superseded terminal claims.",
+  "remaining_gates": [
+    "five first-attempt repetitions per selected case",
+    "complete quote-bound adjudications",
+    "explicit approval before the 85-run full batch"
+  ]
+}
