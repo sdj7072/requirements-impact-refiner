@@ -3,74 +3,114 @@
     {
       "id": "POS-authorization",
       "kind": "positive",
-      "request": "Let workspace members edit every project.",
-      "repository_evidence": ["authorizeProjectEdit currently permits owner and admin roles", "workspace invitations default to member", "project edits emit an actor-role audit event"],
+      "request": "Let workspace members edit every project by widening authorization.workspace_edit in auth/authorize.py.",
+      "repository_evidence": ["auth/authorize.py defines authorization.workspace_edit for owner and admin roles", "roles/defaults.py sets INVITATION_DEFAULT_ROLE to member", "events/audit.py emits project.edit.audited through emit_actor_role_audit"],
       "must_detect": ["owner/admin distinction", "invitation scope", "audit behavior"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "auth/authorize.py", "content": "PERMITTED = (\"owner\", \"admin\")\nGATE = \"authorization.workspace_edit\"\n\ndef authorize_project_edit(role):\n    return role in PERMITTED\n"},
+        {"path": "roles/defaults.py", "content": "INVITATION_DEFAULT_ROLE = \"member\"\nGATE_REF = \"authorization.workspace_edit\"\n"},
+        {"path": "events/audit.py", "content": "AUDIT_EVENT = \"project.edit.audited\"\nGATE_LINK = \"authorization.workspace_edit\"\n\ndef emit_actor_role_audit(actor, role):\n    return {\"event\": AUDIT_EVENT, \"actor\": actor, \"role\": role}\n"}
+      ]
     },
     {
       "id": "POS-deletion",
       "kind": "positive",
-      "request": "Delete an account immediately.",
-      "repository_evidence": ["invoice.account_id uses RESTRICT", "privacy.md requires a 30-day finance retention period", "account cleanup is consumed by a background worker"],
+      "request": "Delete an account immediately through account.delete_flow in db/constraints.py.",
+      "repository_evidence": ["db/constraints.py declares invoice.account_id ON DELETE RESTRICT", "policy/retention.py sets FINANCE_RETENTION_DAYS to 30", "workers/cleanup.py consumes account-cleanup events"],
       "must_detect": ["foreign records", "retention policy", "asynchronous jobs"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "db/constraints.py", "content": "INVOICE_FK = \"invoice.account_id ON DELETE RESTRICT\"\nFLOW = \"account.delete_flow\"\n"},
+        {"path": "policy/retention.py", "content": "FINANCE_RETENTION_DAYS = 30\nFLOW_REF = \"account.delete_flow\"\n"},
+        {"path": "workers/cleanup.py", "content": "QUEUE = \"account-cleanup\"\nFLOW_LINK = \"account.delete_flow\"\n\ndef consume(event):\n    return event[\"account_id\"]\n"}
+      ]
     },
     {
       "id": "POS-api-contract",
       "kind": "positive",
-      "request": "Rename displayName to name.",
-      "repository_evidence": ["ios/UserDTO.swift decodes displayName", "cached profile JSON persists displayName", "the public API changelog promises one-version deprecation"],
+      "request": "Rename profile.displayName to profile.name in api/profile.py.",
+      "repository_evidence": ["api/profile.py publishes profile.displayName", "ios/UserDTO.swift decodes profile.displayName", "cache/profile_cache.py persists profile.displayName", "docs/changelog.py sets DEPRECATION_RELEASES to 1"],
       "must_detect": ["mobile consumer", "stored payload", "backward compatibility"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "api/profile.py", "content": "PROFILE_FIELD = \"profile.displayName\"\n"},
+        {"path": "ios/UserDTO.swift", "content": "let decodedField = \"profile.displayName\"\n"},
+        {"path": "cache/profile_cache.py", "content": "CACHED_FIELD = \"profile.displayName\"\n"},
+        {"path": "docs/changelog.py", "content": "DEPRECATION_RELEASES = 1\nFIELD = \"profile.displayName\"\n"}
+      ]
     },
     {
       "id": "POS-cache",
       "kind": "positive",
-      "request": "Cache the dashboard response for one hour.",
-      "repository_evidence": ["dashboard results depend on tenant_id", "role changes invalidate permission_cache only", "dashboard writes publish dashboard.updated"],
+      "request": "Cache dashboard.response from api/dashboard.py for one hour.",
+      "repository_evidence": ["api/dashboard.py renders dashboard.response by tenant_id", "cache/permission_cache.py invalidates permission_cache on role changes", "events/dashboard_updated.py publishes dashboard.updated"],
       "must_detect": ["tenant key", "invalidation path", "stale authorization"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "api/dashboard.py", "content": "RESPONSE = \"dashboard.response\"\n\ndef render(tenant_id):\n    return {\"tenant\": tenant_id, \"body\": RESPONSE}\n"},
+        {"path": "cache/permission_cache.py", "content": "INVALIDATED_ON_ROLE_CHANGE = True\nSCOPE = \"permission_cache\"\nRESPONSE_REF = \"dashboard.response\"\n"},
+        {"path": "events/dashboard_updated.py", "content": "EVENT = \"dashboard.updated\"\nRESPONSE_LINK = \"dashboard.response\"\n"}
+      ]
     },
     {
       "id": "POS-payments",
       "kind": "positive",
-      "request": "Retry every failed charge automatically.",
-      "repository_evidence": ["charge requests accept an idempotency_key", "payment status is rendered before webhook settlement", "the provider may time out after capture"],
+      "request": "Retry every failed payment.charge automatically, starting in payments/charge.py.",
+      "repository_evidence": ["payments/charge.py accepts idempotency_key for payment.charge", "ui/status.py renders status before webhook settlement", "providers/gateway.py sets TIMEOUT_AFTER_CAPTURE"],
       "must_detect": ["idempotency key", "user-visible status", "duplicate capture"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "payments/charge.py", "content": "OPERATION = \"payment.charge\"\n\ndef charge(amount, idempotency_key):\n    return {\"op\": OPERATION, \"key\": idempotency_key}\n"},
+        {"path": "ui/status.py", "content": "RENDERS_BEFORE_WEBHOOK_SETTLEMENT = True\nOPERATION_REF = \"payment.charge\"\n"},
+        {"path": "providers/gateway.py", "content": "TIMEOUT_AFTER_CAPTURE = True\nOPERATION_LINK = \"payment.charge\"\n"}
+      ]
     },
     {
       "id": "POS-sharing",
       "kind": "positive",
-      "request": "Make shared links permanent.",
-      "repository_evidence": ["share tokens currently expire after seven days", "permission changes revoke active tokens", "token signing keys rotate every 90 days"],
+      "request": "Make sharing.link tokens in share/tokens.py permanent.",
+      "repository_evidence": ["share/tokens.py sets EXPIRY_DAYS to 7 for sharing.link", "share/revoke.py sets REVOKE_ON_PERMISSION_CHANGE", "crypto/rotation.py sets SIGNING_KEY_ROTATION_DAYS to 90"],
       "must_detect": ["revocation", "permission changes", "secret rotation"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "share/tokens.py", "content": "TOKEN = \"sharing.link\"\nEXPIRY_DAYS = 7\n"},
+        {"path": "share/revoke.py", "content": "REVOKE_ON_PERMISSION_CHANGE = True\nTOKEN_REF = \"sharing.link\"\n"},
+        {"path": "crypto/rotation.py", "content": "SIGNING_KEY_ROTATION_DAYS = 90\nTOKEN_LINK = \"sharing.link\"\n"}
+      ]
     },
     {
       "id": "POS-offline-sync",
       "kind": "positive",
-      "request": "Sync offline edits when the app reconnects.",
-      "repository_evidence": ["records carry an updated_at timestamp", "server deletions create tombstones for 24 hours", "the client queue preserves local creation order only"],
+      "request": "Sync offline.edits through models/record.py when the app reconnects.",
+      "repository_evidence": ["models/record.py stamps updated_at for offline.edits", "server/tombstones.py sets TOMBSTONE_HOURS to 24", "client/queue.py preserves local creation order only"],
       "must_detect": ["conflict resolution", "deleted records", "ordering"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "models/record.py", "content": "STREAM = \"offline.edits\"\nSTAMPED = \"updated_at\"\n"},
+        {"path": "server/tombstones.py", "content": "TOMBSTONE_HOURS = 24\nSTREAM_REF = \"offline.edits\"\n"},
+        {"path": "client/queue.py", "content": "PRESERVES = \"local creation order only\"\nSTREAM_LINK = \"offline.edits\"\n"}
+      ]
     },
     {
       "id": "POS-background-retry",
       "kind": "positive",
-      "request": "Retry failed export jobs forever.",
-      "repository_evidence": ["exports write to a deterministic object key", "worker retries currently stop after five attempts", "alerts consume dead_letter events"],
+      "request": "Retry export.jobs in workers/export.py forever.",
+      "repository_evidence": ["workers/export.py writes export.jobs to a deterministic object key", "workers/export.py sets MAX_ATTEMPTS to 5", "alerts/dead_letter.py consumes dead_letter"],
       "must_detect": ["duplicate output", "retry ceiling", "dead-letter observability"],
       "must_not_do": ["write implementation plan", "modify repository"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": [
+        {"path": "workers/export.py", "content": "JOB = \"export.jobs\"\nOBJECT_KEY = \"deterministic\"\nMAX_ATTEMPTS = 5\n"},
+        {"path": "alerts/dead_letter.py", "content": "CONSUMES = \"dead_letter\"\nJOB_REF = \"export.jobs\"\n"}
+      ]
     },
     {
       "id": "NEG-brainstorming",
@@ -79,7 +119,8 @@
       "repository_evidence": [],
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "invent repository evidence"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": []
     },
     {
       "id": "NEG-planning",
@@ -88,7 +129,8 @@
       "repository_evidence": ["the impact report is already approved"],
       "must_detect": [],
       "must_not_do": ["repeat impact refinement", "replace the planning workflow"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": []
     },
     {
       "id": "NEG-debugging",
@@ -97,7 +139,8 @@
       "repository_evidence": ["the failure occurs only in CI"],
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "rewrite the requirement"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": []
     },
     {
       "id": "NEG-code-review",
@@ -106,7 +149,8 @@
       "repository_evidence": ["a complete diff is supplied"],
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "replace code review"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": []
     },
     {
       "id": "NEG-generic-prd",
@@ -115,7 +159,8 @@
       "repository_evidence": [],
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "claim repository-backed findings"],
-      "modes": ["generic", "codex", "claude-code"]
+      "modes": ["generic", "codex", "claude-code"],
+      "fixture_files": []
     },
     {
       "id": "INT-generic",
@@ -124,16 +169,20 @@
       "repository_evidence": ["the requirement is approved", "no named orchestration framework is active"],
       "must_detect": ["generic entry after clarification", "handoff to user-selected planning method"],
       "must_not_do": ["invoke an external framework", "write implementation tasks"],
-      "modes": ["generic"]
+      "modes": ["generic"],
+      "fixture_files": []
     },
     {
       "id": "INT-superpowers",
       "kind": "integration",
-      "request": "Brainstorming approved the design; refine repository impacts next.",
-      "repository_evidence": ["Superpowers brainstorming is complete", "writing-plans has not started"],
+      "request": "Brainstorming approved a design to cache dashboard.response for one hour; refine repository impacts next from api/dashboard.py and render_dashboard.",
+      "repository_evidence": ["Superpowers brainstorming approved the one-hour dashboard cache", "api/dashboard.py defines render_dashboard for dashboard.response", "writing-plans has not started"],
       "must_detect": ["entry after brainstorming", "exit before writing-plans"],
       "must_not_do": ["repeat brainstorming", "invoke writing-plans automatically"],
-      "modes": ["superpowers"]
+      "modes": ["superpowers"],
+      "fixture_files": [
+        {"path": "api/dashboard.py", "content": "RESPONSE = \"dashboard.response\"\n\ndef render_dashboard(tenant_id):\n    return {\"tenant\": tenant_id, \"body\": RESPONSE}\n"}
+      ]
     },
     {
       "id": "INT-claude-feature-dev",
@@ -142,7 +191,8 @@
       "repository_evidence": ["feature-dev Phase 3 is complete", "Phase 4 architecture has not started"],
       "must_detect": ["entry after Phase 3", "exit before Phase 4"],
       "must_not_do": ["repeat general clarification", "invoke architecture design automatically"],
-      "modes": ["claude-feature-dev"]
+      "modes": ["claude-feature-dev"],
+      "fixture_files": []
     },
     {
       "id": "INT-spec-kit",
@@ -151,7 +201,8 @@
       "repository_evidence": ["speckit.clarify is complete", "speckit.plan has not started"],
       "must_detect": ["entry after speckit.clarify", "exit before speckit.plan"],
       "must_not_do": ["repeat specification", "invoke speckit.plan automatically"],
-      "modes": ["spec-kit"]
+      "modes": ["spec-kit"],
+      "fixture_files": []
     }
   ]
 }

@@ -6,13 +6,27 @@ import re
 import stat
 import tempfile
 from collections.abc import Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
+from ..catalog import (
+    MAX_FIXTURE_CONTENT_BYTES,
+    MAX_FIXTURE_FILES,
+    MAX_FIXTURE_PATH_BYTES,
+    MAX_FIXTURE_TOTAL_BYTES,
+)
 from ..controller_evidence import analyze_controller_trace
 from ..evidence import Artifact, PotentialSecretError, record_run
 from ..graph_scoring import graph_run_policy, load_graph_cases
-from ..models import CaseTurn, ClientProbe, CommandResult, RunRequest, RunResult, RunStatus
+from ..models import (
+    CaseSpec,
+    CaseTurn,
+    ClientProbe,
+    CommandResult,
+    RunRequest,
+    RunResult,
+    RunStatus,
+)
 from ..process import run_command
 from .base import ClientAdapter
 
@@ -149,13 +163,14 @@ class CodexAdapter(ClientAdapter):
         with tempfile.TemporaryDirectory(prefix="codex-eval-") as temporary:
             temporary_root = Path(temporary)
             try:
+                self._stage_catalog_fixture(request.case, temporary_root)
                 self._stage_graph_fixture(request.case.id, temporary_root)
             except (OSError, ValueError) as error:
                 return self._record_result(
                     request,
                     artifacts,
                     RunStatus.INFRA_ERROR,
-                    f"graph fixture staging failed: {error}",
+                    f"fixture staging failed: {error}",
                     None,
                     None,
                     None,
@@ -520,24 +535,18 @@ class CodexAdapter(ClientAdapter):
         return None
 
     @staticmethod
-    def _stage_graph_fixture(case_id: str, workspace_root: Path) -> None:
-        matches = tuple(case for case in load_graph_cases() if case.id == case_id)
-        if not matches:
-            return
-        case = matches[0]
-        if case.kind == "negative":
-            return
+    def _write_fixture_files(
+        workspace_root: Path,
+        fixture_files: tuple[tuple[str, str], ...],
+    ) -> None:
         root = Path(workspace_root)
         if root.is_symlink() or not root.is_dir():
-            raise ValueError("graph fixture workspace must be a real directory")
-        policy = graph_run_policy(case)
-        settings = {
-            "impact_graph": policy["settings"],
-            "audience": "technical",
-            "delivery": "compact",
-        }
+            raise ValueError("fixture workspace must be a real directory")
+        if len(fixture_files) > MAX_FIXTURE_FILES:
+            raise ValueError("fixture file count is unsafe")
         directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
         file_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        total_bytes = 0
 
         def write_file(relative: str, payload: bytes) -> None:
             current_fd = os.open(root, directory_flags)
@@ -565,17 +574,64 @@ class CodexAdapter(ClientAdapter):
                 os.fsync(current_fd)
             except OSError as error:
                 raise ValueError(
-                    "graph fixture path is unsafe or would overwrite workspace state"
+                    "fixture path is unsafe or would overwrite workspace state"
                 ) from error
             finally:
                 os.close(current_fd)
 
-        write_file(
-            ".requirements-impact-refiner.json",
-            (json.dumps(settings, sort_keys=True) + "\n").encode("utf-8"),
+        for relative, content in fixture_files:
+            if not isinstance(relative, str) or not isinstance(content, str) or not content.strip():
+                raise ValueError("fixture path or content is unsafe")
+            pure = PurePosixPath(relative)
+            if (
+                pure.is_absolute()
+                or relative != pure.as_posix()
+                or "\\" in relative
+                or any(part in {"", ".", ".."} for part in pure.parts)
+                or (pure.parts and pure.parts[0] == ".requirements-impact-refiner")
+                or any(ord(character) < 32 or ord(character) == 127 for character in relative)
+            ):
+                raise ValueError("fixture path is unsafe")
+            try:
+                path_bytes = len(relative.encode("utf-8"))
+                payload = content.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise ValueError("fixture path or content is unsafe") from error
+            if path_bytes > MAX_FIXTURE_PATH_BYTES or len(payload) > MAX_FIXTURE_CONTENT_BYTES:
+                raise ValueError("fixture path or content is unsafe")
+            total_bytes += path_bytes + len(payload)
+            if total_bytes > MAX_FIXTURE_TOTAL_BYTES:
+                raise ValueError("fixture total bytes are unsafe")
+            write_file(relative, payload)
+
+    @classmethod
+    def _stage_catalog_fixture(cls, case: CaseSpec, workspace_root: Path) -> None:
+        cls._write_fixture_files(workspace_root, case.fixture_files)
+
+    @classmethod
+    def _stage_graph_fixture(cls, case_id: str, workspace_root: Path) -> None:
+        matches = tuple(case for case in load_graph_cases() if case.id == case_id)
+        if not matches:
+            return
+        case = matches[0]
+        if case.kind == "negative":
+            return
+        policy = graph_run_policy(case)
+        settings = {
+            "impact_graph": policy["settings"],
+            "audience": "technical",
+            "delivery": "compact",
+        }
+        cls._write_fixture_files(
+            workspace_root,
+            (
+                (
+                    ".requirements-impact-refiner.json",
+                    json.dumps(settings, sort_keys=True) + "\n",
+                ),
+                *case.fixture_files,
+            ),
         )
-        for relative, content in case.fixture_files:
-            write_file(relative, content.encode("utf-8"))
 
     @staticmethod
     def _workspace_graph_artifacts(workspace_root: Path) -> dict[str, bytes]:

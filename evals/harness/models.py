@@ -30,6 +30,7 @@ class CaseSpec:
     must_not_do: tuple[str, ...]
     modes: tuple[str, ...]
     expected_transition: Optional[str] = None
+    fixture_files: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

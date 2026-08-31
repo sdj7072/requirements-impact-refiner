@@ -10,6 +10,20 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1, "pattern": "\\S" }
     },
+    "fixtureFile": {
+      "type": "object",
+      "required": ["path", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "\\S" },
+        "content": { "type": "string", "minLength": 1, "maxLength": 65536, "pattern": "\\S" }
+      }
+    },
+    "fixtureFiles": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/fixtureFile" }
+    },
     "turn": {
       "type": "object",
       "required": ["prompt", "repository_evidence"],
@@ -21,11 +35,12 @@
     },
     "common": {
       "type": "object",
-      "required": ["id", "kind", "must_detect", "must_not_do", "modes"],
+      "required": ["id", "kind", "must_detect", "must_not_do", "modes", "fixture_files"],
       "properties": {
         "id": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "must_detect": { "$ref": "#/$defs/rubric" },
         "must_not_do": { "$ref": "#/$defs/rubric" },
+        "fixture_files": { "$ref": "#/$defs/fixtureFiles" },
         "modes": {
           "type": "array",
           "items": {
@@ -48,6 +63,7 @@
             "repository_evidence": { "$ref": "#/$defs/rubric" },
             "must_detect": { "$ref": "#/$defs/rubric" },
             "must_not_do": { "$ref": "#/$defs/rubric" },
+            "fixture_files": { "$ref": "#/$defs/fixtureFiles" },
             "modes": { "$ref": "#/$defs/common/properties/modes" }
           }
         }
@@ -71,6 +87,7 @@
             },
             "must_detect": { "$ref": "#/$defs/rubric" },
             "must_not_do": { "$ref": "#/$defs/rubric" },
+            "fixture_files": { "$ref": "#/$defs/fixtureFiles" },
             "modes": { "$ref": "#/$defs/common/properties/modes" },
             "expected_transition": { "enum": ["unchanged", "reopened", "rejected"] }
           }

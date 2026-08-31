@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterable, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 from .models import CaseSpec, CaseTurn
@@ -15,6 +15,10 @@ _KNOWN_MODES = frozenset(
     ("generic", "codex", "claude-code", "superpowers", "claude-feature-dev", "spec-kit")
 )
 _LINEAGE_TRANSITIONS = frozenset(("unchanged", "reopened", "rejected"))
+MAX_FIXTURE_FILES = 32
+MAX_FIXTURE_PATH_BYTES = 4096
+MAX_FIXTURE_CONTENT_BYTES = 64 * 1024
+MAX_FIXTURE_TOTAL_BYTES = 256 * 1024
 _SMOKE_CASE_IDS = (
     "POS-authorization",
     "NEG-debugging",
@@ -59,6 +63,56 @@ def _modes(value: Any, case_id: str) -> tuple[str, ...]:
     if unknown:
         raise CatalogError("{} has unknown modes: {}".format(case_id, ", ".join(sorted(unknown))))
     return modes
+
+
+def _fixture_files(
+    value: Any,
+    case_id: str,
+    kind: str,
+    rubrics: tuple[str, ...],
+) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, list) or len(value) > MAX_FIXTURE_FILES:
+        raise CatalogError(f"{case_id} fixture_files must be a bounded list")
+    fixtures = []
+    paths = set()
+    total_bytes = 0
+    for row in value:
+        if not isinstance(row, dict) or set(row) != {"path", "content"}:
+            raise CatalogError(f"{case_id} fixture file must contain path and content")
+        path = _required_string(row["path"], "fixture path", case_id)
+        content = _required_string(row["content"], "fixture content", case_id)
+        pure = PurePosixPath(path)
+        if (
+            pure.is_absolute()
+            or path != pure.as_posix()
+            or "\\" in path
+            or any(part in {"", ".", ".."} for part in pure.parts)
+            or (pure.parts and pure.parts[0] == ".requirements-impact-refiner")
+            or any(ord(character) < 32 or ord(character) == 127 for character in path)
+        ):
+            raise CatalogError(f"{case_id} fixture path is unsafe")
+        try:
+            path_bytes = len(path.encode("utf-8"))
+            content_bytes = len(content.encode("utf-8"))
+        except UnicodeEncodeError as error:
+            raise CatalogError(f"{case_id} fixture file is not valid UTF-8") from error
+        if path_bytes > MAX_FIXTURE_PATH_BYTES or content_bytes > MAX_FIXTURE_CONTENT_BYTES:
+            raise CatalogError(f"{case_id} fixture file exceeds its byte limit")
+        if path in paths:
+            raise CatalogError(f"{case_id} fixture path is duplicated")
+        paths.add(path)
+        total_bytes += path_bytes + content_bytes
+        fixtures.append((path, content))
+    if total_bytes > MAX_FIXTURE_TOTAL_BYTES:
+        raise CatalogError(f"{case_id} fixture files exceed their total byte limit")
+    requires_fixture = kind in {"positive", "lineage"} or case_id == "INT-superpowers"
+    if requires_fixture != bool(fixtures):
+        expectation = "requires" if requires_fixture else "forbids"
+        raise CatalogError(f"{case_id} {expectation} repository fixtures")
+    fixture_text = "\n".join(path + "\n" + content for path, content in fixtures).casefold()
+    if any(rubric.casefold() in fixture_text for rubric in rubrics):
+        raise CatalogError(f"{case_id} fixture leaks a scoring rubric")
+    return tuple(fixtures)
 
 
 def _turns(value: Any, case_id: str, require_two: bool) -> tuple[CaseTurn, ...]:
@@ -113,6 +167,12 @@ def _case_from_raw(raw: Any, lineage: bool) -> CaseSpec:
                 case_id, ", ".join(sorted(duplicated_rubrics))
             )
         )
+    fixture_files = _fixture_files(
+        raw.get("fixture_files"),
+        case_id,
+        kind,
+        (*must_detect, *must_not_do),
+    )
 
     return CaseSpec(
         id=case_id,
@@ -122,6 +182,7 @@ def _case_from_raw(raw: Any, lineage: bool) -> CaseSpec:
         must_not_do=must_not_do,
         modes=_modes(raw.get("modes"), case_id),
         expected_transition=expected_transition,
+        fixture_files=fixture_files,
     )
 
 

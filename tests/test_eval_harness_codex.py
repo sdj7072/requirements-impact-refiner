@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -213,6 +214,99 @@ class CodexAdapterTest(unittest.TestCase):
             self.assertEqual(settings["impact_graph"]["max_seconds"], 30)
             self.assertEqual(settings["impact_graph"]["target_seconds"], 10)
             self.assertEqual(settings["impact_graph"]["install_policy"], "never")
+
+    def test_catalog_fixture_is_staged_privately_without_overwrite(self):
+        case = CaseSpec(
+            id="POS-example",
+            kind="positive",
+            turns=(CaseTurn("Change role checks in src/roles.py.", ("src/roles.py",)),),
+            must_detect=("authorization impact",),
+            must_not_do=("write implementation",),
+            modes=("codex",),
+            fixture_files=(("src/roles.py", "def authorize_project_edit():\n    return True\n"),),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            CodexAdapter._stage_catalog_fixture(case, root)
+
+            staged = root / "src" / "roles.py"
+            self.assertEqual(staged.read_text(encoding="utf-8"), case.fixture_files[0][1])
+            self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+            with self.assertRaisesRegex(ValueError, "overwrite"):
+                CodexAdapter._stage_catalog_fixture(case, root)
+
+    def test_catalog_fixture_staging_rejects_manual_traversal_case(self):
+        case = CaseSpec(
+            id="POS-example",
+            kind="positive",
+            turns=(CaseTurn("Change src/roles.py.", ("src/roles.py",)),),
+            must_detect=("authorization impact",),
+            must_not_do=("write implementation",),
+            modes=("codex",),
+            fixture_files=(("src/roles.py", "ROLE = 'editor'\n"),),
+        )
+        unsafe = replace(case, fixture_files=(("../escape.py", "escaped = True\n"),))
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "workspace"
+            root.mkdir()
+
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                CodexAdapter._stage_catalog_fixture(unsafe, root)
+
+            self.assertFalse((base / "escape.py").exists())
+
+    def test_catalog_fixture_staging_rejects_reserved_and_non_utf8_inputs(self):
+        case = CaseSpec(
+            id="POS-example",
+            kind="positive",
+            turns=(CaseTurn("Change src/roles.py.", ("src/roles.py",)),),
+            must_detect=("authorization impact",),
+            must_not_do=("write implementation",),
+            modes=("codex",),
+        )
+        mutations = (
+            ((".requirements-impact-refiner/reports/RPT-001/current.json", "{}\n"),),
+            (("src/\ud800.py", "x\n"),),
+            (("src/roles.py", "\ud800"),),
+            tuple((f"src/file-{index:02d}.py", "x\n") for index in range(33)),
+            (("src/large.py", "x" * (64 * 1024 + 1)),),
+        )
+        for fixture_files in mutations:
+            with (
+                self.subTest(fixture_files=fixture_files),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                with self.assertRaisesRegex(ValueError, "unsafe"):
+                    CodexAdapter._stage_catalog_fixture(
+                        replace(case, fixture_files=fixture_files),
+                        root,
+                    )
+
+    def test_execute_rejects_preseeded_report_fixture_before_client_run(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary)
+            request = make_request(temporary, ("first turn",))
+            reserved = replace(
+                request.case,
+                fixture_files=(
+                    (
+                        ".requirements-impact-refiner/reports/RPT-001/current.json",
+                        "{}\n",
+                    ),
+                ),
+            )
+            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary))
+
+            result = adapter.execute(replace(request, case=reserved))
+
+            self.assertEqual(result.status, RunStatus.INFRA_ERROR)
+            self.assertIn("fixture staging failed", result.reason)
+            attempt = request.output_root / "codex" / "POS-example" / "01"
+            self.assertFalse(any(attempt.glob("workspace-reports/**")))
+            self.assertFalse((attempt / "first.jsonl").exists())
 
     def test_graph_case_policy_is_sealed_in_raw_run_metadata(self):
         case = load_graph_cases()[0]

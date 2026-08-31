@@ -5,10 +5,10 @@
       "kind": "lineage",
       "turns": [
         {
-          "prompt": "Record an impact report for a data export change. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.",
+          "prompt": "Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.",
           "repository_evidence": [
-            "exports.py writes files to the tenant archive",
-            "retention ownership is not documented"
+            "exports/export_writer.py defines write_tenant_archive for tenant archives",
+            "policy/retention.py has no RETENTION_OWNER declaration"
           ]
         },
         {
@@ -32,17 +32,21 @@
         "resolve the blocked impact without evidence"
       ],
       "modes": ["superpowers"],
-      "expected_transition": "unchanged"
+      "expected_transition": "unchanged",
+      "fixture_files": [
+        {"path": "exports/export_writer.py", "content": "ARCHIVE_TARGET = \"tenant archive\"\n\ndef write_tenant_archive(tenant_id, payload):\n    return {\"tenant\": tenant_id, \"payload\": payload}\n"},
+        {"path": "policy/retention.py", "content": "RETENTION_POLICY = \"undocumented\"\nEXPORT_REF = \"tenant archive\"\n"}
+      ]
     },
     {
       "id": "LINEAGE-reopened",
       "kind": "lineage",
       "turns": [
         {
-          "prompt": "Record an impact report for removing a profile field. The supplied migration evidence supports resolving the client compatibility impact.",
+          "prompt": "Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.",
           "repository_evidence": [
-            "mobile clients consume profile.displayName",
-            "the approved migration preserves the field for one release"
+            "mobile/ProfileDecoder.swift defines decodeDisplayName for profile.displayName",
+            "migrations/profile_field.py sets PRESERVE_RELEASES to 1"
           ]
         },
         {
@@ -67,17 +71,22 @@
         "invent a decision for the desktop client"
       ],
       "modes": ["superpowers"],
-      "expected_transition": "reopened"
+      "expected_transition": "reopened",
+      "fixture_files": [
+        {"path": "mobile/ProfileDecoder.swift", "content": "let decodedField = \"profile.displayName\"\nfunc decodeDisplayName(payload: [String: String]) -> String? {\n    return payload[\"displayName\"]\n}\n"},
+        {"path": "migrations/profile_field.py", "content": "PRESERVE_RELEASES = 1\nFIELD = \"profile.displayName\"\n"},
+        {"path": "desktop/ProfileCache.swift", "content": "let serializedField = \"profile.displayName\"\n"}
+      ]
     },
     {
       "id": "LINEAGE-no-false-resolution",
       "kind": "lineage",
       "turns": [
         {
-          "prompt": "Record an impact report for changing webhook delivery retries. The supplied evidence identifies an unresolved duplicate-delivery risk.",
+          "prompt": "Record an impact report for changing webhook delivery retries at webhook/delivery.py and retry_delivery. The supplied evidence identifies an unresolved duplicate-delivery risk.",
           "repository_evidence": [
-            "delivery retries can repeat after a provider timeout",
-            "no idempotency behavior is documented"
+            "webhook/delivery.py defines retry_delivery after provider timeout",
+            "webhook/idempotency.py contains no documented idempotency behavior"
           ]
         },
         {
@@ -102,7 +111,11 @@
         "fabricate an approved decision"
       ],
       "modes": ["superpowers"],
-      "expected_transition": "rejected"
+      "expected_transition": "rejected",
+      "fixture_files": [
+        {"path": "webhook/delivery.py", "content": "TIMEOUT_SOURCE = \"provider timeout\"\n\ndef retry_delivery(event):\n    return event\n"},
+        {"path": "webhook/idempotency.py", "content": "STATUS = \"not configured\"\nDELIVERY_REF = \"provider timeout\"\n"}
+      ]
     }
   ]
 }

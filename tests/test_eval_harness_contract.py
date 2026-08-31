@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from evals.harness.catalog import CatalogError, load_all, load_catalog, select_suite
 from evals.harness.models import CaseSpec, CaseTurn, RunRequest
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "evals" / "cases.json"
 CASE_SCHEMA_PATH = ROOT / "evals" / "harness" / "schemas" / "case.schema.json"
 RESULT_SCHEMA_PATH = ROOT / "evals" / "harness" / "schemas" / "result.schema.json"
-CASES_SHA256 = "03dbedb66900e89efec45fae7d73312fe2ccb6508a67e9143af3e3c88c1c53bc"
+CASES_SHA256 = "a95817bfa5f75ea8d22eb80b3a41ab2c94195e619a9ad5e2ea9f00a8ae8b2628"
 
 
 class EvalHarnessContractTest(unittest.TestCase):
@@ -89,6 +89,7 @@ class EvalHarnessContractTest(unittest.TestCase):
             must_detect=("role boundary",),
             must_not_do=("write implementation plan",),
             modes=("codex",),
+            fixture_files=(("src/roles.py", "def authorize_project_edit(): pass\n"),),
         )
 
         with self.assertRaises(FrozenInstanceError):
@@ -103,6 +104,7 @@ class EvalHarnessContractTest(unittest.TestCase):
             "must_detect": ["role boundary"],
             "must_not_do": ["write implementation plan"],
             "modes": ["codex"],
+            "fixture_files": [{"path": "src/roles.py", "content": "ROLE = 'editor'\n"}],
         }
         valid_lineage = {
             "id": "LINEAGE-example",
@@ -115,6 +117,7 @@ class EvalHarnessContractTest(unittest.TestCase):
             "must_not_do": ["fabricate a decision"],
             "modes": ["superpowers"],
             "expected_transition": "unchanged",
+            "fixture_files": [{"path": "src/export.py", "content": "def export(): pass\n"}],
         }
         invalid_records = {
             "duplicate IDs": ([valid_case, dict(valid_case)], [valid_lineage]),
@@ -137,6 +140,57 @@ class EvalHarnessContractTest(unittest.TestCase):
                 [valid_case],
                 [dict(valid_lineage, turns=valid_lineage["turns"][:1])],
             ),
+            "missing fixtures": (
+                [{key: value for key, value in valid_case.items() if key != "fixture_files"}],
+                [valid_lineage],
+            ),
+            "unsafe fixture path": (
+                [dict(valid_case, fixture_files=[{"path": "../roles.py", "content": "x\n"}])],
+                [valid_lineage],
+            ),
+            "reserved runtime fixture path": (
+                [
+                    dict(
+                        valid_case,
+                        fixture_files=[
+                            {
+                                "path": ".requirements-impact-refiner/reports/RPT-001/current.json",
+                                "content": "{}\n",
+                            }
+                        ],
+                    )
+                ],
+                [valid_lineage],
+            ),
+            "non-utf8 fixture path": (
+                [dict(valid_case, fixture_files=[{"path": "src/\ud800.py", "content": "x\n"}])],
+                [valid_lineage],
+            ),
+            "non-utf8 fixture content": (
+                [dict(valid_case, fixture_files=[{"path": "src/roles.py", "content": "\ud800"}])],
+                [valid_lineage],
+            ),
+            "duplicate fixture path": (
+                [
+                    dict(
+                        valid_case,
+                        fixture_files=[
+                            {"path": "src/roles.py", "content": "x\n"},
+                            {"path": "src/roles.py", "content": "y\n"},
+                        ],
+                    )
+                ],
+                [valid_lineage],
+            ),
+            "rubric leaked through fixture": (
+                [
+                    dict(
+                        valid_case,
+                        fixture_files=[{"path": "src/roles.py", "content": "role boundary\n"}],
+                    )
+                ],
+                [valid_lineage],
+            ),
         }
 
         for name, (cases, lineage) in invalid_records.items():
@@ -152,6 +206,25 @@ class EvalHarnessContractTest(unittest.TestCase):
 
     def test_canonical_cases_bytes_are_unchanged(self):
         self.assertEqual(hashlib.sha256(CASES_PATH.read_bytes()).hexdigest(), CASES_SHA256)
+
+    def test_installed_cases_have_safe_nonleaking_fixture_contract(self):
+        selected = select_suite(load_all(), "installed-superpowers")
+
+        for case in selected:
+            fixtures = case.fixture_files
+            if case.kind in {"positive", "lineage"} or case.id == "INT-superpowers":
+                self.assertTrue(fixtures, case.id)
+            else:
+                self.assertEqual(fixtures, (), case.id)
+            fixture_text = "\n".join(path + "\n" + content for path, content in fixtures).casefold()
+            for path, content in fixtures:
+                pure = PurePosixPath(path)
+                self.assertFalse(pure.is_absolute(), case.id)
+                self.assertEqual(path, pure.as_posix(), case.id)
+                self.assertNotIn("..", pure.parts, case.id)
+                self.assertTrue(content.strip(), case.id)
+            for rubric in (*case.must_detect, *case.must_not_do):
+                self.assertNotIn(rubric.casefold(), fixture_text, case.id)
 
     def test_result_schema_exposes_every_public_artifact_type(self):
         schema = json.loads(RESULT_SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -193,9 +266,12 @@ class EvalHarnessContractTest(unittest.TestCase):
             definitions["singleTurnCase"]["allOf"][1]["properties"]["id"],
             definitions["singleTurnCase"]["allOf"][1]["properties"]["request"],
             definitions["lineageCase"]["allOf"][1]["properties"]["id"],
+            definitions["fixtureFile"]["properties"]["path"],
+            definitions["fixtureFile"]["properties"]["content"],
         )
 
         self.assertTrue(all(item.get("pattern") == r"\S" for item in nonblank_schemas))
+        self.assertIn("fixture_files", definitions["common"]["required"])
 
 
 if __name__ == "__main__":
