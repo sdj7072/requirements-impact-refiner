@@ -582,6 +582,37 @@ class PreviousLookupTest(unittest.TestCase):
         self.assertEqual(result.status, "stale")
         self.assertIn("byte limit", result.reason.lower())
 
+    def test_previous_index_snapshot_uses_dedicated_output_bound(self):
+        object_id = "a" * 40
+        rows = [
+            f"H 100644 {object_id} 0\tgenerated/path-{index:04d}.py\0".encode()
+            for index in range(5000)
+        ]
+        payload = b"".join(rows)
+        self.assertGreater(len(payload), PREVIOUS.MAX_GIT_OUTPUT_BYTES)
+
+        def bounded_runner(
+            _root,
+            _arguments,
+            _deadline,
+            *,
+            environment=None,
+            maximum_output=PREVIOUS.MAX_GIT_OUTPUT_BYTES,
+        ):
+            del environment
+            if len(payload) > maximum_output:
+                raise PREVIOUS._GitUnavailable("Git output exceeds its byte limit")
+            return PREVIOUS._GitCommandResult(0, payload)
+
+        with mock.patch.object(PREVIOUS, "_run_git_command", side_effect=bounded_runner):
+            captured = PREVIOUS._index_flags_snapshot(
+                self.root,
+                ("git", "worktree"),
+                time.monotonic() + 1,
+            )
+
+        self.assertEqual(captured, payload)
+
     def test_required_source_symlink_is_stale_even_when_target_bytes_match(self):
         gitignore = self.root / ".gitignore"
         gitignore.write_text(

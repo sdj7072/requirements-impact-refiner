@@ -106,6 +106,7 @@ MAX_POINTER_BYTES = 8 * 1024
 MAX_STATE_BYTES = 4 * 1024 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
+MAX_GIT_INDEX_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_CHANGED_PATHS = 4096
 MAX_CHANGED_PATH_BYTES = 4096
 MAX_REPORT_ENTRIES = 4096
@@ -846,6 +847,7 @@ def _run_git_command(
     deadline: float,
     *,
     environment: Mapping[str, str] | None = None,
+    maximum_output: int = MAX_GIT_OUTPUT_BYTES,
 ) -> _GitCommandResult | None:
     command = (
         "git",
@@ -903,7 +905,7 @@ def _run_git_command(
             try:
                 chunk = os.read(
                     descriptor,
-                    min(64 * 1024, MAX_GIT_OUTPUT_BYTES + 1 - len(payload)),
+                    min(64 * 1024, maximum_output + 1 - len(payload)),
                 )
             except BlockingIOError:
                 continue
@@ -913,7 +915,7 @@ def _run_git_command(
             accounting = _ACCOUNTING.get()
             if accounting is not None:
                 accounting.read(chunk)
-            if len(payload) > MAX_GIT_OUTPUT_BYTES:
+            if len(payload) > maximum_output:
                 _stop_process(process)
                 raise _GitUnavailable("Git output exceeds its byte limit")
         remaining = deadline - time.monotonic()
@@ -1377,7 +1379,12 @@ def _worktree_scope(root: Path, deadline: float) -> tuple[str, str]:
 
 def _index_flags_snapshot(root: Path, scope: tuple[str, str], deadline: float) -> bytes:
     payload = _successful(
-        _run_git_command(root, (*scope, "ls-files", "-s", "-v", "-z"), deadline),
+        _run_git_command(
+            root,
+            (*scope, "ls-files", "-s", "-v", "-z"),
+            deadline,
+            maximum_output=MAX_GIT_INDEX_OUTPUT_BYTES,
+        ),
         "Git index flags",
     )
     if not payload:

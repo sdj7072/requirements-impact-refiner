@@ -33,6 +33,7 @@ MAX_CONTEXT_BYTES = 80 * 1024
 MAX_STATE_BYTES = 4 * 1024 * 1024
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
+MAX_GIT_INDEX_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_GIT_TREE_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_GIT_BLOB_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_REQUIRED_SOURCE_DIGESTS = 64
@@ -211,6 +212,10 @@ class ReportContext:
 
 class UnsafeGitOutput(ValueError):
     """Git emitted output that cannot safely participate in report identity."""
+
+
+class GitOutputLimitExceeded(UnsafeGitOutput):
+    """Git output was structurally unread because it exceeded a bounded capture."""
 
 
 def canonical_requirement_text(request: str) -> str:
@@ -1056,7 +1061,7 @@ def _run_git(
             payload.extend(chunk)
             if len(payload) > maximum_output:
                 _stop_process(process)
-                raise UnsafeGitOutput("Git baseline output exceeds its byte limit")
+                raise GitOutputLimitExceeded("Git baseline output exceeds its byte limit")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             _stop_process(process)
@@ -1106,6 +1111,8 @@ def probe_git_baseline(root: Path) -> tuple[str | None, bool]:
         if before[1:] != after[1:]:
             return commit, False
         return commit, True
+    except GitOutputLimitExceeded:
+        return commit, False
     except UnsafeGitOutput:
         raise
     except (OSError, TimeoutError, ValueError):
@@ -1561,11 +1568,21 @@ def _capture_repository_git_state(
         raise ValueError("Git replacement refs are present")
     if expected_commit is not None and head != expected_commit:
         raise ValueError("Git HEAD does not match the captured commit")
-    flags = _git_bytes(root, (*scope, "ls-files", "-v", "-z"), "Git index flags")
+    flags = _git_bytes(
+        root,
+        (*scope, "ls-files", "-v", "-z"),
+        "Git index flags",
+        maximum_output=MAX_GIT_INDEX_OUTPUT_BYTES,
+    )
     _tracked, flags_clean = _tracked_paths_from_flags(flags)
     if not flags_clean:
         raise ValueError("Git index visibility flags are present")
-    index = _git_bytes(root, (*scope, "ls-files", "-s", "-z"), "Git index")
+    index = _git_bytes(
+        root,
+        (*scope, "ls-files", "-s", "-z"),
+        "Git index",
+        maximum_output=MAX_GIT_INDEX_OUTPUT_BYTES,
+    )
     _index_paths_without_unsupported_entries(index)
     status = _git_bytes(
         root,

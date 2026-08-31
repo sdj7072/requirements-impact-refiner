@@ -1045,6 +1045,46 @@ class RirReportContextTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             CONTEXT.probe_source_inventory_git(self.root, {"path.py": "bad"})
 
+    def test_repository_git_state_uses_dedicated_index_output_bound(self):
+        commit = "a" * 40
+        paths = [f"generated/path-{index:05d}.py" for index in range(11000)]
+        flags = b"".join(f"H {path}\0".encode() for path in paths)
+        index = b"".join(f"100644 {commit} 0\t{path}\0".encode() for path in paths)
+        self.assertGreater(len(flags), CONTEXT.MAX_GIT_OUTPUT_BYTES)
+        self.assertGreater(len(index), CONTEXT.MAX_GIT_OUTPUT_BYTES)
+
+        def bounded_git_bytes(
+            _root,
+            _arguments,
+            label,
+            *,
+            input_payload=None,
+            maximum_output=CONTEXT.MAX_GIT_OUTPUT_BYTES,
+        ):
+            del input_payload
+            payload = {
+                "Git HEAD": (commit + "\n").encode("ascii"),
+                "Git replacement refs": b"",
+                "Git index flags": flags,
+                "Git index": index,
+                "Git status": b"",
+            }[label]
+            if len(payload) > maximum_output:
+                raise CONTEXT.GitOutputLimitExceeded(label)
+            return payload
+
+        with (
+            mock.patch.object(CONTEXT, "_git_worktree_scope", return_value=("git", "worktree")),
+            mock.patch.object(CONTEXT, "_git_bytes", side_effect=bounded_git_bytes),
+            mock.patch.object(CONTEXT, "_checkout_transform_snapshot", return_value=()),
+        ):
+            captured = CONTEXT._capture_repository_git_state(
+                self.root, commit, time.monotonic() + 1
+            )
+
+        self.assertEqual(captured[2], flags)
+        self.assertEqual(captured[3], index)
+
     def test_context_accepts_every_positive_nonboolean_report_revision(self):
         report_dir = self.root / ".requirements-impact-refiner" / "reports" / "RPT-001"
         report_dir.mkdir(parents=True)
@@ -1551,6 +1591,23 @@ class RirReportContextTest(unittest.TestCase):
         with mock.patch.object(CONTEXT, "_run_git", return_value=None):
             self.assertEqual(CONTEXT.probe_git_baseline(self.root), (None, False))
 
+    def test_bounded_git_reader_raises_typed_output_limit(self):
+        real_popen = subprocess.Popen
+
+        def launch_oversized_git(_command, **kwargs):
+            return real_popen(
+                [sys.executable, "-c", "import sys;sys.stdout.buffer.write(b'x' * 5)"],
+                **kwargs,
+            )
+
+        with mock.patch.object(
+            CONTEXT.subprocess,
+            "Popen",
+            side_effect=launch_oversized_git,
+        ):
+            with self.assertRaises(CONTEXT.GitOutputLimitExceeded):
+                CONTEXT._run_git(self.root, ("status",), maximum_output=4)
+
     @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
     def test_git_timeout_kills_the_entire_descendant_process_group(self):
         fake_bin = self.root / "fake-bin"
@@ -1647,6 +1704,36 @@ class RirReportContextTest(unittest.TestCase):
             FINALIZE.finalize_refinement(request, _runtime=runtime)
         self.assertIsNone(FINALIZE.REPORT_STORE.load_current(self.root, "RPT-001"))
         self.assertFalse(FINALIZE.STORAGE.load_private_draft(self.root, draft.draft_id)["consumed"])
+
+    def test_git_output_limit_publishes_unverified_context_without_false_clean(self):
+        self.configure_graph(False)
+        draft = self.begin("Large Git index still publishes a report.")
+        request = self.finalize_request(draft)
+        commit = "a" * 40
+
+        with (
+            mock.patch.object(
+                FINALIZE.REPORT_CONTEXT,
+                "_run_git",
+                return_value=(0, (commit + "\n").encode("ascii")),
+            ),
+            mock.patch.object(
+                FINALIZE.REPORT_CONTEXT,
+                "_capture_repository_git_state",
+                side_effect=FINALIZE.REPORT_CONTEXT.GitOutputLimitExceeded(
+                    "bounded Git output exceeded"
+                ),
+            ),
+        ):
+            result = FINALIZE.finalize_refinement(request)
+
+        context = CONTEXT.load_report_context(self.root, result.report_id, result.revision)
+        self.assertIsNotNone(context)
+        assert context is not None
+        self.assertEqual(result.status, "published")
+        self.assertEqual(context.baseline_commit, commit)
+        self.assertFalse(context.baseline_clean)
+        self.assertFalse(context.source_inventory_git_tracked_only)
 
     def test_finalize_publishes_unavailable_context_after_report_readback_before_consumption(self):
         self.configure_graph(False)
