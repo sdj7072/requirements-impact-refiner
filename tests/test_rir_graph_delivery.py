@@ -219,6 +219,95 @@ class RirGraphDeliveryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "uncovered high-risk graph node NODE-009"):
             delivery.validate_graph_coverage(analysis, graph_context(paths))
 
+    def test_hidden_compact_path_does_not_create_impossible_coverage_requirement(self):
+        delivery = self.delivery()
+        receipt = graph_context([])["receipt"]
+        receipt["frontier"] = []
+        receipt["nodes"] = []
+        receipt["edges"] = []
+        receipt["paths"] = []
+        for index in range(17):
+            source = f"NODE-{index * 2 + 1:03d}"
+            target = f"NODE-{index * 2 + 2:03d}"
+            edge = f"EDGE-{index + 1:03d}"
+            path = f"PATH-{index + 1:03d}"
+            for identifier in (source, target):
+                receipt["nodes"].append(
+                    {
+                        "id": identifier,
+                        "kind": "file",
+                        "label": identifier.lower(),
+                        "location": f"src/{identifier.lower()}.py",
+                        "provider": "builtin",
+                        "confidence": "lexical",
+                        "source_sha256": None,
+                        "risk_domains": ["interfaces"],
+                    }
+                )
+            receipt["edges"].append(
+                {
+                    "id": edge,
+                    "source": source,
+                    "target": target,
+                    "kind": "references",
+                    "location": f"src/path-{index + 1:03d}.py",
+                    "evidence": "shared contract",
+                    "confidence": "lexical",
+                    "provider": "builtin",
+                    "source_sha256": None,
+                }
+            )
+            receipt["paths"].append(
+                {
+                    "id": path,
+                    "nodes": [source, target],
+                    "edges": [edge],
+                    "distance": 1,
+                    "risk_domains": ["interfaces"],
+                }
+            )
+        compact = delivery.compact_graph(receipt)
+        visible_paths = [row["key"] for row in compact["paths"]]
+        self.assertEqual(len(visible_paths), delivery.COMPACT_MAX_PATHS)
+        self.assertNotIn("PATH-017", visible_paths)
+        analysis = supplied_only_analysis()
+        analysis["impacts"][0]["graph_path_keys"] = visible_paths
+
+        delivery.validate_graph_coverage(
+            analysis,
+            {
+                "receipt": receipt,
+                "sha256": "e" * 64,
+                "exposed_path_ids": visible_paths,
+            },
+        )
+
+    def test_hidden_compact_path_cannot_be_guessed_into_the_report(self):
+        delivery = self.delivery()
+        paths = [
+            {
+                "id": "PATH-001",
+                "nodes": ["NODE-001", "NODE-009"],
+                "edges": ["EDGE-001"],
+                "distance": 1,
+                "risk_domains": ["interfaces", "legal/policy"],
+            }
+        ]
+        analysis = supplied_only_analysis()
+        analysis["impacts"][0]["graph_path_keys"] = ["PATH-001"]
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "graph path key PATH-001 was not exposed to the analysis",
+        ):
+            delivery.validate_graph_coverage(
+                analysis,
+                {
+                    **graph_context(paths),
+                    "exposed_path_ids": [],
+                },
+            )
+
     def test_root_and_skill_delivery_resolve_only_their_own_dependency_graph(self):
         self.delivery()
         exact_names = {

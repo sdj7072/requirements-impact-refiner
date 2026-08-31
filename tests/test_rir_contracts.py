@@ -468,6 +468,17 @@ class RirContractsTest(unittest.TestCase):
     def test_analysis_validation_accepts_fixture_and_preserves_exact_error(self):
         valid = self.fixture("controller-analysis-post-decision.json")
         CONTRACTS.validate_analysis(valid)
+        missing_graph_paths = json.loads(json.dumps(valid))
+        missing_graph_paths["impacts"][0].pop("graph_path_keys")
+        with self.assertRaisesRegex(ValueError, "missing impact key graph_path_keys"):
+            CONTRACTS.validate_analysis(missing_graph_paths)
+        unhashable_graph_path = json.loads(json.dumps(valid))
+        unhashable_graph_path["impacts"][0]["graph_path_keys"] = [{}]
+        with self.assertRaisesRegex(
+            ValueError,
+            "impact graph_path_keys must be a unique bounded array",
+        ):
+            CONTRACTS.validate_analysis(unhashable_graph_path)
         invalid = dict(valid)
         invalid["decision_needed"] = {
             "question": "Choose",

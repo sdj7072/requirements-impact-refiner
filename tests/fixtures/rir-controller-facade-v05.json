@@ -84,7 +84,7 @@
         "message": "invalid analysis phase"
       },
       "success": {
-        "analysis_fixture_sha256": "11d3cdc28cbbc3400a67065b373bc78303d2407cea151bf8f8510676afc875ca",
+        "analysis_fixture_sha256": "22361547f4fe3c64558ede8d279a1d0fd4caf0ee8d34039f83e44f99c140d5b9",
         "filesystem": {
           "modes": {
             ".requirements-impact-refiner/drafts": "0700",

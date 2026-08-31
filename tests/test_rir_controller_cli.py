@@ -304,6 +304,26 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("unknown impact key id", result.stderr)
 
+    def test_graph_disabled_finalize_rejects_missing_graph_path_keys(self):
+        begin = json.loads(self.begin().stdout)
+        invalid = json.loads(self.analysis_path.read_text(encoding="utf-8"))
+        invalid["impacts"][0].pop("graph_path_keys")
+        self.analysis_path.write_text(json.dumps(invalid), encoding="utf-8")
+
+        result = self.run_cli(
+            "finalize",
+            "--repo-root",
+            self.root,
+            "--draft-id",
+            begin["draft_id"],
+            "--input",
+            self.analysis_path,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("missing impact key graph_path_keys", result.stderr)
+
     def test_full_delivery_returns_canonical_markdown(self):
         begin_payload = json.loads(self.begin_path.read_text(encoding="utf-8"))
         begin_payload["delivery_override"] = "full"

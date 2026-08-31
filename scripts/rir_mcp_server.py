@@ -1538,6 +1538,10 @@ def _finalize(arguments: object) -> dict[str, object]:
         "state_path": state_path,
         "markdown_path": markdown_path,
         "markdown_sha256": result.markdown_sha256,
+        "delivery_contract": {
+            "canonical": True,
+            "must_return_content_verbatim": True,
+        },
     }
     return {
         "content": [{"type": "text", "text": result.display_text}],
@@ -1623,6 +1627,15 @@ def _trace(arguments: object) -> dict[str, object]:
         "budget_status": result.budget_status,
         "request_sha256": result.request_sha256,
         "seeds": [{"term": seed.term, "location": seed.location} for seed in result.seeds],
+        "next_action": {
+            "tool": "rir_finalize",
+            "required": True,
+            "arguments": {
+                "repo_root": arguments["repo_root"],
+                "draft_id": arguments["draft_id"],
+                "graph_receipt_id": result.receipt_id,
+            },
+        },
     }
     return {
         "content": [

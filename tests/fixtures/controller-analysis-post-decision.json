@@ -5,7 +5,7 @@
     {"key": "existing-roles", "behavior": "Owners and admins can edit projects.", "evidence_level": "verified", "evidence": "authorizeProjectEdit permits owner and admin"}
   ],
   "impacts": [
-    {"key": "member-scope", "category": "authorization/privacy", "severity": "high", "state": "accepted", "evidence_level": "verified", "evidence": "The request explicitly grants workspace members edit access.", "invariant_keys": ["existing-roles"], "decision_keys": ["own-workspace"], "criterion_keys": ["member-boundary"], "summary": {"changed_feature": "Project editing", "possible_issue": "Members gain broader edit access.", "affected": "Project owners and workspace members", "trigger": "A member edits a project", "prevention": "Restrict access to the member's workspace and test denials."}}
+    {"key": "member-scope", "category": "authorization/privacy", "severity": "high", "state": "accepted", "evidence_level": "verified", "evidence": "The request explicitly grants workspace members edit access.", "graph_path_keys": [], "invariant_keys": ["existing-roles"], "decision_keys": ["own-workspace"], "criterion_keys": ["member-boundary"], "summary": {"changed_feature": "Project editing", "possible_issue": "Members gain broader edit access.", "affected": "Project owners and workspace members", "trigger": "A member edits a project", "prevention": "Restrict access to the member's workspace and test denials."}}
   ],
   "decision_needed": null,
   "decisions": [{"key": "own-workspace", "choice": "Members edit projects only in their own workspace.", "accepted_impact_keys": ["member-scope"], "rationale": "This is the explicit selected scope."}],

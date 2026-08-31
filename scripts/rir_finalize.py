@@ -1048,6 +1048,7 @@ def load_promoted_scan_context(
         "receipt": receipt,
         "sha256": binding["receipt_sha256"],
         "binding": binding,
+        "exposed_path_ids": [row["id"] for row in receipt["paths"]],
         "source_inventory": {
             "sha256": GRAPH_DELIVERY.source_inventory_sha256(inventory_digests),
             "complete": inventory["complete"],

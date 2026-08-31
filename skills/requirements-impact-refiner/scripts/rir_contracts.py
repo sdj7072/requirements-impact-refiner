@@ -42,6 +42,7 @@ ROW_KEYS = {
         "state",
         "evidence_level",
         "evidence",
+        "graph_path_keys",
         "invariant_keys",
         "decision_keys",
         "criterion_keys",
@@ -52,7 +53,7 @@ ROW_KEYS = {
     "unresolved": {"impact_key", "state", "rationale", "decision_key", "owner"},
     "scope": {"boundary", "evidence", "confidence"},
 }
-IMPACT_OPTIONAL_KEYS = {"graph_path_keys", "coverage_rationale"}
+IMPACT_OPTIONAL_KEYS = {"coverage_rationale"}
 SUMMARY_KEYS = {"changed_feature", "possible_issue", "affected", "trigger", "prevention"}
 
 
@@ -210,6 +211,16 @@ def validate_analysis(analysis: Mapping[str, object]) -> None:
                 for name in ("invariant_keys", "decision_keys", "criterion_keys"):
                     if not isinstance(row[name], list) or len(row[name]) > 128:
                         raise ValueError(f"impact {name} has too many items")
+                graph_path_keys = row["graph_path_keys"]
+                if (
+                    not isinstance(graph_path_keys, list)
+                    or len(graph_path_keys) > 128
+                    or not all(isinstance(key, str) for key in graph_path_keys)
+                    or len(graph_path_keys) != len(set(graph_path_keys))
+                ):
+                    raise ValueError("impact graph_path_keys must be a unique bounded array")
+                if not all(re.fullmatch(r"PATH-\d{3}", key) for key in graph_path_keys):
+                    raise ValueError("invalid graph path key")
             if section == "decisions" and (
                 not isinstance(row["accepted_impact_keys"], list)
                 or len(row["accepted_impact_keys"]) > 128

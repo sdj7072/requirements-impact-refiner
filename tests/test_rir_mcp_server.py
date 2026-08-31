@@ -663,6 +663,10 @@ else:
         impact_properties = analysis["properties"]["impacts"]["items"]["properties"]
         self.assertIn("graph_path_keys", impact_properties)
         self.assertIn("coverage_rationale", impact_properties)
+        self.assertIn(
+            "graph_path_keys",
+            analysis["properties"]["impacts"]["items"]["required"],
+        )
 
     def test_incomplete_controller_sibling_fails_closed(self):
         script = r"""
@@ -1342,6 +1346,18 @@ if sys.modules["payload_identity"] is not foreign_payload:
                     traced["seeds"], [{"term": "profile.displayName", "location": "api/profile.py"}]
                 )
                 self.assertRegex(traced["request_sha256"], r"^[0-9a-f]{64}$")
+                self.assertEqual(
+                    traced["next_action"],
+                    {
+                        "tool": "rir_finalize",
+                        "required": True,
+                        "arguments": {
+                            "repo_root": str(root),
+                            "draft_id": begun["draft_id"],
+                            "graph_receipt_id": traced["receipt_id"],
+                        },
+                    },
+                )
                 analysis = json.loads(
                     (FIXTURES / "controller-analysis-pre-decision.json").read_text()
                 )
@@ -1368,6 +1384,13 @@ if sys.modules["payload_identity"] is not foreign_payload:
         self.assertEqual(
             finalized["result"]["content"][0]["text"],
             finalized["result"]["structuredContent"]["display_text"],
+        )
+        self.assertEqual(
+            finalized["result"]["structuredContent"]["delivery_contract"],
+            {
+                "canonical": True,
+                "must_return_content_verbatim": True,
+            },
         )
 
     def test_malformed_trace_error_is_bounded_and_following_request_survives(self):

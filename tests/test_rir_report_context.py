@@ -1935,6 +1935,10 @@ class RirReportContextTest(unittest.TestCase):
         )
         self.assertNotIn("generated/api.py", wrapper["source_inventory"]["digests"])
         required_digests = graph_context["source_inventory"]["required_digests"]
+        self.assertEqual(
+            graph_context["exposed_path_ids"],
+            [row["id"] for row in wrapper["graph_receipt"]["paths"]],
+        )
         self.assertEqual(required_digests["generated/api.py"], generated_seed["source_sha256"])
         self.assertNotIn("generated/later.py", required_digests)
         self.assertIsNone(context.required_source_digests)

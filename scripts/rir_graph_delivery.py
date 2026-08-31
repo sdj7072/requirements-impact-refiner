@@ -799,6 +799,7 @@ class GraphContext(TypedDict, total=False):
     sha256: str
     binding: dict[str, object]
     source_inventory: dict[str, object]
+    exposed_path_ids: list[str]
     impact_paths: dict[str, list[str]]
     rationales: dict[str, str | None]
     impact_confidences: dict[str, str]
@@ -1892,10 +1893,12 @@ def load_graph_context(
             required_complete = False
             continue
         required_digests[location] = cast(str, next(iter(candidates)))
+    exposed_path_ids = [row["key"] for row in compact_graph(receipt)["paths"]]
     return {
         "receipt": receipt,
         "sha256": digest,
         "binding": binding,
+        "exposed_path_ids": exposed_path_ids,
         "source_inventory": {
             "sha256": inventory_sha256,
             "complete": source_inventory_complete,
@@ -1943,7 +1946,25 @@ def validate_graph_coverage(analysis: Mapping[str, object], context: GraphContex
     nodes = {row["id"]: row for row in receipt["nodes"]}
     edges = {row["id"]: row for row in receipt["edges"]}
     paths = {row["id"]: row for row in receipt["paths"]}
-    path_nodes = {identifier for path in paths.values() for identifier in path["nodes"]}
+    exposed_value = context.get("exposed_path_ids")
+    if exposed_value is None:
+        exposed_path_ids = set(paths)
+    elif (
+        not isinstance(exposed_value, list)
+        or len(exposed_value) != len(set(exposed_value))
+        or not all(
+            isinstance(identifier, str) and identifier in paths for identifier in exposed_value
+        )
+    ):
+        raise ValueError("graph coverage exposure is invalid")
+    else:
+        exposed_path_ids = set(exposed_value)
+    path_nodes = {
+        identifier
+        for path_id, path in paths.items()
+        if path_id in exposed_path_ids
+        for identifier in path["nodes"]
+    }
     frontier_nodes = {row["node"] for row in receipt["frontier"]}
     covered_nodes = set()
     impact_confidences: dict[str, str] = {}
@@ -1972,6 +1993,8 @@ def validate_graph_coverage(analysis: Mapping[str, object], context: GraphContex
                 raise ValueError("invalid graph path key")
             if key not in paths:
                 raise ValueError(f"unknown graph path key {key}")
+            if key not in exposed_path_ids:
+                raise ValueError(f"graph path key {key} was not exposed to the analysis")
             selected_paths.append(paths[key])
             covered_nodes.update(paths[key]["nodes"])
         rationale = impact.get("coverage_rationale")
