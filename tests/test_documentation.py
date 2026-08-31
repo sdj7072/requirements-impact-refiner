@@ -281,7 +281,7 @@ class DocumentationTest(unittest.TestCase):
     def test_top_descriptions_identify_the_current_development_version(self):
         for name in READMES:
             description = (ROOT / name).read_text(encoding="utf-8").splitlines()[4]
-            self.assertIn("`0.6.1-dev`", description, name)
+            self.assertIn("`0.6.2-dev`", description, name)
             self.assertNotIn("`0.6.0`", description, name)
             self.assertNotIn("`0.3.0`", description, name)
 
@@ -293,8 +293,8 @@ class DocumentationTest(unittest.TestCase):
                 "simple",
                 "balanced",
                 "technical",
-                '"delivery":"compact"',
-                "delivery: full",
+                '"delivery":"full"',
+                "ask",
                 "full-inline",
                 "Change Impact Summary",
                 "--require-summary",

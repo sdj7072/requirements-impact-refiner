@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.6.1-dev`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 **Public Preview** 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
+Requirements Impact Refiner `0.6.2-dev`는 구체적인 소프트웨어 변경을 구현 계획 전에 근거와 연결된 영향도 목록으로 정제하는 **Public Preview** 저장소 인식형 Agent Skill입니다. [README.md](README.md)가 의미상 기준 문서이며 [README.ko.md](README.ko.md)와 [README.ja.md](README.ja.md)는 완전한 번역본입니다.
 
 ## 1. 문제
 
@@ -94,14 +94,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 이제 모든 보고서 앞에는 사용자 친화적인 `Change Impact Summary`가 붙습니다. 어떤 기능이 바뀌는지, 어떤 문제가 생길 수 있는지, 누구 또는 어떤 기능이 영향을 받는지, 언제 발생하는지, 어떻게 예방하거나 확인할지를 보여줍니다. 기본 대상은 `balanced`이며 저장소 루트의 `.requirements-impact-refiner.json`에서 설정할 수 있습니다.
 
 ```json
-{"audience":"balanced","delivery":"compact","flow":"report"}
+{"audience":"balanced","delivery":"full","flow":"report"}
 ```
 
 `flow` 설정은 응답의 형태를 결정합니다: 기본값 `report`는 완전한 영향도 보고서를 곧바로 전달하고(스캔은 내부에서 시드용으로만 실행되며 `needs_input`일 때만 조기 정지), `ask`는 한 줄 스캔 요약과 확인 질문을 먼저 반환한 뒤 상세 정제로 진입합니다.
 
-audience 허용값은 `simple`, `balanced`, `technical`입니다. delivery 기본값은 compact이며, 전체 기준 보고서를 인라인으로 받으려면 `delivery: full`을 요청하거나 `"delivery":"full"`을 설정합니다. Compact 모드는 append-only JSON과 Markdown을 저장하고 짧은 요약과 경로만 반환합니다. 저장할 수 없으면 이를 밝히고 `full-inline` fallback을 사용합니다. 현재 요청이 저장소 설정보다 우선합니다. 이는 Codex나 Claude 전용 설정 화면이 아닌 크로스 클라이언트 스킬 설정입니다.
+audience 허용값은 `simple`, `balanced`, `technical`입니다. 기본 `report` 흐름은 항상 전체 reader view를 반환하며 report 흐름의 compact override는 경고와 함께 무시됩니다. Compact delivery는 명시적인 `ask` 흐름의 scan-and-confirm 응답에서만 유지됩니다. append-only 기준 JSON과 Markdown은 계속 저장되며, 저장할 수 없으면 이를 밝히고 `full-inline` fallback을 사용합니다. report-flow full 정규화를 제외하면 현재 요청이 저장소 설정보다 우선합니다. 이는 Codex나 Claude 전용 설정 화면이 아닌 크로스 클라이언트 스킬 설정입니다.
 
-기본 경로는 `rir_scan` 1회와 최대 `180 words`의 renderer-owned 응답입니다. 고위험 결과도 상세 정제를 자동 실행하지 않고 먼저 묻습니다. 그래프 엔진 목표는 `10s`, 상한은 `30s`지만 전체 모델 시간 보장은 아닙니다. 첫 대표 canary는 API → decoder → cache → migration 경로를 17 ms에 찾았지만 모델 턴은 `297.159`초였고 strict one-call automation에 실패했으므로 v0.4는 계속 `not verified`입니다.
+기본 report 경로는 `rir_scan`을 내부에서 한 번 실행하고, 결과가 `needs_input`이 아니면 상세 정제를 바로 계속합니다. 명시적인 `ask` 흐름만 renderer-owned scan 응답을 최대 `180 words`로 제한하고 상세 정제 전에 확인합니다. 그래프 엔진 목표는 `10s`, 상한은 `30s`지만 전체 모델 시간 보장은 아닙니다. 첫 대표 canary는 API → decoder → cache → migration 경로를 17 ms에 찾았지만 모델 턴은 `297.159`초였고 strict one-call automation에 실패했으므로 v0.4는 계속 `not verified`입니다.
 
 상세 그래프 정제는 호환성을 위해 `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text`를 유지합니다. 승격된 Fast Scan은 trace를 건너뛰고 기존 receipt를 재사용합니다. receipt는 impact별 짧은 경로와 coverage footer 하나를 추가하며 raw provider output은 노출하지 않습니다. 모든 클라이언트에서 동일한 제한 로컬 graph 설정을 사용합니다.
 

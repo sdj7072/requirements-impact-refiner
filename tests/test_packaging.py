@@ -274,7 +274,7 @@ class PackagingTest(unittest.TestCase):
     def test_codex_manifest_points_to_canonical_skills(self):
         manifest = self.load(".codex-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.6.1-dev")
+        self.assertEqual(manifest["version"], "0.6.2-dev")
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertEqual(manifest["mcpServers"], "./.mcp.json")
         self.assertTrue((FORBIDDEN_COMPONENTS - {"mcpServers"}).isdisjoint(manifest))
@@ -289,7 +289,7 @@ class PackagingTest(unittest.TestCase):
     def test_claude_manifest_uses_default_skill_location(self):
         manifest = self.load(".claude-plugin/plugin.json")
         self.assertEqual(manifest["name"], "requirements-impact-refiner")
-        self.assertEqual(manifest["version"], "0.6.1-dev")
+        self.assertEqual(manifest["version"], "0.6.2-dev")
         self.assertTrue(FORBIDDEN_COMPONENTS.isdisjoint(manifest))
 
     def test_mcp_config_uses_local_relative_launcher_without_credentials(self):
@@ -312,7 +312,7 @@ class PackagingTest(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertIn("name: using-requirements-impact-refiner", text)
         self.assertIn("Use when starting any software-development conversation", text)
-        self.assertIn('version: "0.6.1-dev"', text)
+        self.assertIn('version: "0.6.2-dev"', text)
 
     def test_compact_delivery_demo_svg_is_safe_and_accessible(self):
         path = ROOT / "assets/compact-delivery-demo.svg"
@@ -485,12 +485,13 @@ class PackagingTest(unittest.TestCase):
         self.assertNotIn("references/transitive-impact-graph.md", core)
         self.assertIn("exactly one adapter", core)
 
-    def test_core_skill_defaults_to_compact_with_full_inline_fallback(self):
+    def test_core_skill_uses_full_report_and_keeps_ask_compact_fallback(self):
         core = (ROOT / "skills/requirements-impact-refiner/SKILL.md").read_text(encoding="utf-8")
         workflow = (
             ROOT / "skills/requirements-impact-refiner/references/controller-workflow.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("`balanced` + `compact`", workflow)
+        self.assertIn("`balanced` + `full`", workflow)
+        self.assertIn("ask flow keeps compact delivery", workflow)
         self.assertIn("scripts/rir-controller.py", core)
         self.assertIn("renderer-owned display text", workflow)
         self.assertIn("full-inline", core)

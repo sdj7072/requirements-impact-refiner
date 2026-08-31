@@ -4,7 +4,7 @@ description: Use when the automatic bootstrap has selected a concrete behavior c
 license: MIT
 compatibility: Agent Skills clients.
 metadata:
-  version: "0.6.1-dev"
+  version: "0.6.2-dev"
 ---
 
 # Requirements Impact Refiner

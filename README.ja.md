@@ -2,7 +2,7 @@
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.6.1-dev` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化する **Public Preview** のリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
+Requirements Impact Refiner `0.6.2-dev` は、具体的なソフトウェア変更を実装計画の前に、根拠と結び付いた影響台帳へ精緻化する **Public Preview** のリポジトリ認識型 Agent Skill です。[README.md](README.md) を意味上の正本とし、[README.ko.md](README.ko.md) と [README.ja.md](README.ja.md) は完全な翻訳です。
 
 ## 1. 課題
 
@@ -94,14 +94,14 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 各報告書の先頭には、利用者向けの `Change Impact Summary` が表示されます。変更される機能、起こり得る問題、影響を受ける機能や利用者、発生条件、予防または確認方法を示します。既定値は `balanced` で、リポジトリルートの `.requirements-impact-refiner.json` で設定できます。
 
 ```json
-{"audience":"balanced","delivery":"compact","flow":"report"}
+{"audience":"balanced","delivery":"full","flow":"report"}
 ```
 
 `flow` 設定は応答の形を決めます: 既定の `report` は完全な影響レポートを直接返し(スキャンはシード用に内部でのみ実行され、`needs_input` の場合のみ早期停止)、`ask` は 1 行のスキャン要約と確認の質問を先に返してから詳細精緻化に進みます。
 
-audience は `simple`, `balanced`, `technical` を指定できます。delivery の既定値は compact です。完全な正規報告をインラインで返すには `delivery: full` を依頼するか `"delivery":"full"` を設定します。Compact モードは append-only JSON と Markdown を保存し、短い要約とパスだけを返します。保存できない場合は明示した `full-inline` fallback を使います。現在の依頼がリポジトリ設定より優先されます。これは Codex や Claude 専用画面ではなくクロスクライアントのスキル設定です。
+audience は `simple`, `balanced`, `technical` を指定できます。既定の `report` フローは常に完全な reader view を返し、report フローの compact override は警告付きで無視されます。Compact delivery は明示的な `ask` フローの scan-and-confirm 応答だけに残ります。append-only の正規 JSON と Markdown は引き続き保存され、保存できない場合は明示した `full-inline` fallback を使います。report-flow full 正規化を除き、現在の依頼がリポジトリ設定より優先されます。これは Codex や Claude 専用画面ではなくクロスクライアントのスキル設定です。
 
-既定経路は `rir_scan` 1回と最大 `180 words` の renderer-owned 応答です。high-risk でも detailed refinement を自動実行せず先に確認します。graph engine の target は `10s`、ceiling は `30s` ですが total model latency の保証ではありません。最初の representative canary は API → decoder → cache → migration path を17 msで発見しましたが model turn は `297.159`秒で strict one-call automation に失敗したため、v0.4 は `not verified` のままです。
+既定の report 経路は `rir_scan` を内部で1回実行し、結果が `needs_input` でなければ詳細精緻化を直ちに続行します。明示的な `ask` フローだけが renderer-owned scan 応答を最大 `180 words` に制限し、詳細精緻化の前に確認します。graph engine の target は `10s`、ceiling は `30s` ですが total model latency の保証ではありません。最初の representative canary は API → decoder → cache → migration path を17 msで発見しましたが model turn は `297.159`秒で strict one-call automation に失敗したため、v0.4 は `not verified` のままです。
 
 互換性のため detailed graph refinement は `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` を維持します。promoted Fast Scan は trace を省略して receipt を再利用します。receipt は impact ごとの短い path と一つの coverage footer を加え、raw provider output は表示しません。全クライアントで同じ bounded local graph 設定を使います。
 

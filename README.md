@@ -2,7 +2,7 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # Requirements Impact Refiner
 
-Requirements Impact Refiner `0.6.1-dev` is a **Public Preview** repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
+Requirements Impact Refiner `0.6.2-dev` is a **Public Preview** repository-aware Agent Skill for turning a concrete software change into an evidence-linked impact ledger before implementation planning. English is the semantic authority for [README.md](README.md), [README.ko.md](README.ko.md), and [README.ja.md](README.ja.md).
 
 ## 1. Problem
 
@@ -94,14 +94,14 @@ When the plugin is enabled, [`using-requirements-impact-refiner`](skills/using-r
 Every report now starts with a user-facing `Change Impact Summary`: which feature changes, what can go wrong, who or what is affected, when it happens, and how to prevent or check it. Its audience defaults to `balanced`. Set a repository preference in `.requirements-impact-refiner.json`:
 
 ```json
-{"audience":"balanced","delivery":"compact","flow":"report"}
+{"audience":"balanced","delivery":"full","flow":"report"}
 ```
 
 The `flow` setting shapes the answer: the default `report` delivers the complete impact report directly (the scan runs internally to seed it, stopping early only on `needs_input`), while `ask` returns the one-line scan summary plus a confirmation question before detailed refinement.
 
-Allowed audience values are `simple`, `balanced`, and `technical`. Delivery defaults to compact; request `delivery: full` or set `"delivery":"full"` to return the complete canonical report inline. Compact mode persists append-only JSON and Markdown and returns the short summary plus artifact paths. If persistence is unavailable, the skill uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
+Allowed audience values are `simple`, `balanced`, and `technical`. The default `report` flow always returns the complete reader view; a compact delivery override in report flow is ignored with a warning. Compact delivery remains available only for the explicit `ask` flow's scan-and-confirm response. Append-only canonical JSON and Markdown are still persisted, and persistence failure uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings except for report-flow full normalization. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
 
-The default path is one `rir_scan` call and a renderer-owned response of at most `180 words`; high-risk results ask before detailed refinement. The graph engine targets `10s` with a `30s` ceiling, but this does not promise total model latency: the first representative canary found the API → decoder → cache → migration path in 17 ms while the model turn took `297.159` seconds and failed strict one-call automation, so v0.4 remains `not verified`.
+The default report path runs one `rir_scan` internally and continues directly to detailed refinement unless the scan returns `needs_input`. The explicit `ask` flow keeps the renderer-owned scan response bounded to `180 words` and asks before detailed refinement. The graph engine targets `10s` with a `30s` ceiling, but this does not promise total model latency: the first representative canary found the API → decoder → cache → migration path in 17 ms while the model turn took `297.159` seconds and failed strict one-call automation, so v0.4 remains `not verified`.
 
 Detailed graph refinement still supports `rir_begin → rir_trace_impact → inspect compact receipt → rir_finalize → return display_text` for compatibility. A promoted Fast Scan skips trace and reuses its receipt. The receipt adds a short per-impact path and one coverage footer; it never exposes raw provider output. Configure the bounded, local graph pass with the same settings in every client:
 
