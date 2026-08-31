@@ -893,7 +893,10 @@ if sys.modules["payload_identity"] is not foreign_payload:
 
         result = final_reply["result"]
         self.assertEqual(result["structuredContent"]["status"], "published")
-        self.assertTrue(result["content"][0]["text"].startswith("## Change Impact Summary"))
+        self.assertTrue(result["content"][0]["text"].startswith("# Requirements Impact Report"))
+        self.assertFalse(
+            any(line.startswith("|") for line in result["content"][0]["text"].splitlines())
+        )
         self.assertEqual(result["content"][0]["text"], result["structuredContent"]["display_text"])
         self.assertFalse(result["structuredContent"]["display_text"].endswith("\n"))
         previous_result = previous_reply["result"]

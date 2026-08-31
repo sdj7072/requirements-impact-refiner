@@ -223,3 +223,39 @@ Run: `python3 -m unittest tests/test_rir_previous.py tests/test_rir_controller_c
 Run: `.quality-venv/bin/python scripts/run-quality-gates.py`
 
 Expected: all checks pass and fresh/finalized behavior remains unchanged.
+
+### Task 5: Normalize report-flow compact delivery
+
+**Files:**
+- Modify: `tests/test_presentation_settings.py`
+- Modify: `tests/test_rir_controller.py`
+- Modify: `tests/test_rir_controller_cli.py`
+- Modify: `tests/test_rir_mcp_server.py`
+- Modify: `scripts/resolve-settings.py`
+- Modify: `skills/requirements-impact-refiner/scripts/resolve-settings.py`
+
+**Interfaces:**
+- Consumes: existing `flow` and `delivery` request/repository settings.
+- Produces: `flow == "report"` always resolves to `delivery == "full"`; ask flow retains its existing compact behavior.
+
+- [x] **Step 1: Change the explicit compact report test to the required contract**
+
+Assert repository and request compact settings under report flow resolve to `full`, use `delivery_source == "default"`, and disclose one warning that compact delivery is ignored for report flow.
+
+- [x] **Step 2: Run the focused test and confirm compact still wins**
+
+Run: `python3 -m unittest tests/test_presentation_settings.py -k compact`
+
+Expected: FAIL because explicit compact currently overrides the report-flow full default.
+
+- [x] **Step 3: Implement one post-resolution normalization**
+
+Resolve and validate the configured delivery as before. If flow is report and the resolved delivery is compact, replace it with full, set its source to default, and append `compact delivery is ignored for report flow; using full` to warnings. Do not change ask flow.
+
+- [x] **Step 4: Synchronize the packaged mirror and verify**
+
+Run: `python3 -m unittest tests/test_presentation_settings.py tests/test_rir_controller.py tests/test_packaging.py`
+
+Run: `.quality-venv/bin/python scripts/run-quality-gates.py`
+
+Expected: all checks pass and ask flow remains compact by default.

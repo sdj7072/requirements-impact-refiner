@@ -86,6 +86,8 @@ class PresentationSettingsTest(unittest.TestCase):
                 "technical",
                 "--delivery",
                 "compact",
+                "--flow",
+                "ask",
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -96,8 +98,8 @@ class PresentationSettingsTest(unittest.TestCase):
                 "audience_source": "request",
                 "delivery": "compact",
                 "delivery_source": "request",
-                "flow": "report",
-                "flow_source": "default",
+                "flow": "ask",
+                "flow_source": "request",
                 "impact_graph": {
                     "enabled": True,
                     "max_seconds": 30,
@@ -262,10 +264,14 @@ class ReportFlowDeliveryTest(unittest.TestCase):
             settings = json.loads(self.run_resolver(root).stdout)
             self.assertEqual(settings["delivery"], "compact")
 
-    def test_explicit_compact_config_wins_in_report_flow(self):
+    def test_explicit_compact_config_is_normalized_in_report_flow(self):
         with tempfile.TemporaryDirectory() as root:
             (Path(root) / ".requirements-impact-refiner.json").write_text('{"delivery": "compact"}')
             settings = json.loads(self.run_resolver(root).stdout)
             self.assertEqual(settings["flow"], "report")
-            self.assertEqual(settings["delivery"], "compact")
-            self.assertEqual(settings["delivery_source"], "repository")
+            self.assertEqual(settings["delivery"], "full")
+            self.assertEqual(settings["delivery_source"], "default")
+            self.assertEqual(
+                settings["warnings"],
+                ["compact delivery is ignored for report flow; using full"],
+            )

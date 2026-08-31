@@ -41,6 +41,7 @@ class RirControllerTest(unittest.TestCase):
             json.dumps(
                 {
                     "delivery": "compact",
+                    "flow": "ask",
                     "impact_graph": {
                         "enabled": False,
                         "max_seconds": 30,
@@ -86,6 +87,7 @@ class RirControllerTest(unittest.TestCase):
             json.dumps(
                 {
                     "delivery": "compact",
+                    "flow": "ask",
                     "impact_graph": {
                         "enabled": True,
                         "max_seconds": 30,

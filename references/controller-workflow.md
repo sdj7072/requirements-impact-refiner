@@ -6,7 +6,7 @@ Read this reference only after the user accepts detailed refinement. A promoted 
 
 ## Before begin
 
-- Resolve presentation overrides from the user's request. Otherwise the controller loads `.requirements-impact-refiner.json` and uses disclosed `balanced` + `compact` defaults for invalid configuration.
+- Resolve presentation overrides from the user's request. Otherwise the controller loads `.requirements-impact-refiner.json`; report flow normalizes to disclosed `balanced` + `full`, while explicit ask flow keeps compact delivery.
 - Apply exactly one integration adapter's Entry rule.
 - Send supplied `Repository evidence` unchanged. It remains inspectable when the workspace is empty.
 

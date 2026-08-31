@@ -160,13 +160,17 @@ def resolve(
     # The default flow answers with the impact report itself; the scan
     # summary plus a refinement question is an explicit opt-in ("ask").
     flow, flow_source = resolve_value("flow", flow_override, config, FLOWS, "report")
-    # Report flow relays the canonical markdown verbatim, so its delivery
-    # default is full; reconstructing tables from a compact summary is how
-    # inline copies got silently abbreviated. Explicit config still wins.
+    # Report flow always returns the complete reader view. Ask flow keeps a
+    # compact default for its explicit scan-and-confirm interaction.
     delivery_default = "full" if flow == "report" else "compact"
     delivery, delivery_source = resolve_value(
         "delivery", delivery_override, config, DELIVERIES, delivery_default
     )
+    delivery_warning = None
+    if flow == "report" and delivery == "compact":
+        delivery = "full"
+        delivery_source = "default"
+        delivery_warning = "compact delivery is ignored for report flow; using full"
     impact_graph, warning = resolve_graph_settings(config)
     _delta_max_seconds, delta_warning = _resolve_delta_max_seconds(config)
     resolved: dict[str, object] = {
@@ -179,6 +183,8 @@ def resolve(
         "impact_graph": impact_graph,
     }
     warnings = []
+    if delivery_warning is not None:
+        warnings.append(delivery_warning)
     if warning is not None:
         warnings.append("invalid impact_graph configuration: " + warning)
     if delta_warning is not None:

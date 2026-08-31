@@ -126,7 +126,7 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertRegex(payload["draft_id"], r"^[0-9a-f]{32}$")
         self.assertEqual(payload["report_id"], "RPT-001")
         self.assertEqual(payload["revision"], 1)
-        self.assertEqual(payload["delivery"], "compact")
+        self.assertEqual(payload["delivery"], "full")
 
     def test_previous_cli_returns_renderer_neutral_canonical_json(self):
         begin = json.loads(self.begin().stdout)
@@ -278,9 +278,10 @@ class RirControllerCliTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(result.stdout.startswith("## Change Impact Summary\n"))
-        self.assertIn("`IMP-001`", result.stdout)
-        self.assertIn("**Decision needed:**", result.stdout)
+        self.assertTrue(result.stdout.startswith("# Requirements Impact Report\n"))
+        self.assertIn("IMP-001", result.stdout)
+        self.assertIn("## Decision Needed", result.stdout)
+        self.assertFalse(any(line.startswith("|") for line in result.stdout.splitlines()))
         self.assertNotIn('"status": "published"', result.stdout)
 
     def test_invalid_finalize_has_no_display_stdout(self):
@@ -414,7 +415,8 @@ class RirControllerCliTest(unittest.TestCase):
         )
 
         self.assertEqual(finalized.returncode, 0, finalized.stderr)
-        self.assertTrue(finalized.stdout.startswith("## Change Impact Summary\n"))
+        self.assertTrue(finalized.stdout.startswith("# Requirements Impact Report\n"))
+        self.assertFalse(any(line.startswith("|") for line in finalized.stdout.splitlines()))
 
     def test_trace_validation_and_io_failures_preserve_cli_exit_contracts(self):
         self.enable_graph_sources()

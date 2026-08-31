@@ -8,18 +8,19 @@ Resolve each setting independently in this order:
 2. Repository-root `.requirements-impact-refiner.json`.
 3. Its default.
 
-Run `python3 "$SKILL_DIR/scripts/resolve-settings.py" --project-root REPOSITORY_ROOT`. Add `--audience MODE` or `--delivery MODE` only for an explicit current-request override. If configuration is invalid, disclose the error and use `balanced` plus `compact` for that report.
+Run `python3 "$SKILL_DIR/scripts/resolve-settings.py" --project-root REPOSITORY_ROOT`. Add `--audience MODE`, `--delivery MODE`, or `--flow MODE` only for an explicit current-request override. If configuration is invalid, disclose the error and use `balanced` plus `full` for report flow.
 
 Repository configuration:
 
 ```json
 {
   "audience": "balanced",
-  "delivery": "compact"
+  "delivery": "full",
+  "flow": "report"
 }
 ```
 
-`audience` accepts `simple`, `balanced`, or `technical` and defaults to `balanced`. `delivery` accepts `compact` or `full` and defaults to `compact`. Audience controls wording detail; delivery controls whether the complete canonical report is returned inline.
+`audience` accepts `simple`, `balanced`, or `technical` and defaults to `balanced`. The default `report` flow always normalizes delivery to `full`; a compact report override is ignored with a warning. The explicit `ask` flow defaults to `compact` and retains the bounded scan-and-confirm response. Audience controls wording detail.
 
 Use the same fixed table and one row per current `IMP-###` in every mode. Copy `Severity` and `Status` exactly from that impact's ledger row.
 
