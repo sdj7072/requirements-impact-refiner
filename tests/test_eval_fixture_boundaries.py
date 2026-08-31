@@ -52,6 +52,30 @@ class EvaluationFixtureBoundaryTest(unittest.TestCase):
                     case.id,
                 )
 
+    def test_reopened_lineage_exposes_desktop_evidence_only_after_followup_staging(self):
+        case = next(case for case in load_all() if case.id == "LINEAGE-reopened")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            CodexAdapter._stage_catalog_fixture(case, root)
+            second_turn = case.turns[1]
+
+            before = FAST_SCAN.derive_seeds(
+                root,
+                second_turn.prompt,
+                second_turn.repository_evidence,
+                OpenDeadline(),
+            )
+            CodexAdapter._stage_followup_fixture(case, root)
+            after = FAST_SCAN.derive_seeds(
+                root,
+                second_turn.prompt,
+                second_turn.repository_evidence,
+                OpenDeadline(),
+            )
+
+            self.assertNotIn("desktop/ProfileCache.swift", {seed.location for seed in before})
+            self.assertIn("desktop/ProfileCache.swift", {seed.location for seed in after})
+
 
 if __name__ == "__main__":
     unittest.main()

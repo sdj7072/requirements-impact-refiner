@@ -263,6 +263,20 @@ class CodexAdapter(ClientAdapter):
                 )
 
             second_turn = request.case.turns[1]
+            try:
+                self._stage_followup_fixture(request.case, temporary_root)
+            except (OSError, ValueError) as error:
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INFRA_ERROR,
+                    f"follow-up fixture staging failed: {error}",
+                    first_command,
+                    None,
+                    thread_id,
+                    probe,
+                    first_command,
+                )
             second_final = temporary_root / "second.final.txt"
             second_prompt = self._resume_prompt(second_turn)
             second_command = run_command(
@@ -607,6 +621,10 @@ class CodexAdapter(ClientAdapter):
     @classmethod
     def _stage_catalog_fixture(cls, case: CaseSpec, workspace_root: Path) -> None:
         cls._write_fixture_files(workspace_root, case.fixture_files)
+
+    @classmethod
+    def _stage_followup_fixture(cls, case: CaseSpec, workspace_root: Path) -> None:
+        cls._write_fixture_files(workspace_root, case.followup_fixture_files)
 
     @classmethod
     def _stage_graph_fixture(cls, case_id: str, workspace_root: Path) -> None:

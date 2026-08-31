@@ -36,7 +36,8 @@
       "fixture_files": [
         {"path": "exports/export_writer.py", "content": "ARCHIVE_TARGET = \"tenant archive\"\n\ndef write_tenant_archive(tenant_id, payload):\n    return {\"tenant\": tenant_id, \"payload\": payload}\n"},
         {"path": "policy/retention.py", "content": "RETENTION_POLICY = \"undocumented\"\nEXPORT_REF = \"tenant archive\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "LINEAGE-reopened",
@@ -74,7 +75,9 @@
       "expected_transition": "reopened",
       "fixture_files": [
         {"path": "mobile/ProfileDecoder.swift", "content": "let decodedField = \"profile.displayName\"\nfunc decodeDisplayName(payload: [String: String]) -> String? {\n    return payload[\"displayName\"]\n}\n"},
-        {"path": "migrations/profile_field.py", "content": "PRESERVE_RELEASES = 1\nFIELD = \"profile.displayName\"\n"},
+        {"path": "migrations/profile_field.py", "content": "PRESERVE_RELEASES = 1\nFIELD = \"profile.displayName\"\n"}
+      ],
+      "followup_fixture_files": [
         {"path": "desktop/ProfileCache.swift", "content": "let serializedField = \"profile.displayName\"\n"}
       ]
     },
@@ -115,7 +118,8 @@
       "fixture_files": [
         {"path": "webhook/delivery.py", "content": "TIMEOUT_SOURCE = \"provider timeout\"\n\ndef retry_delivery(event):\n    return event\n"},
         {"path": "webhook/idempotency.py", "content": "STATUS = \"not configured\"\nDELIVERY_REF = \"provider timeout\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     }
   ]
 }

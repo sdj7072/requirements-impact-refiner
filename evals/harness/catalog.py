@@ -68,11 +68,13 @@ def _modes(value: Any, case_id: str) -> tuple[str, ...]:
 def _fixture_files(
     value: Any,
     case_id: str,
-    kind: str,
     rubrics: tuple[str, ...],
+    *,
+    field: str,
+    policy: str,
 ) -> tuple[tuple[str, str], ...]:
     if not isinstance(value, list) or len(value) > MAX_FIXTURE_FILES:
-        raise CatalogError(f"{case_id} fixture_files must be a bounded list")
+        raise CatalogError(f"{case_id} {field} must be a bounded list")
     fixtures = []
     paths = set()
     total_bytes = 0
@@ -105,10 +107,10 @@ def _fixture_files(
         fixtures.append((path, content))
     if total_bytes > MAX_FIXTURE_TOTAL_BYTES:
         raise CatalogError(f"{case_id} fixture files exceed their total byte limit")
-    requires_fixture = kind in {"positive", "lineage"} or case_id == "INT-superpowers"
-    if requires_fixture != bool(fixtures):
-        expectation = "requires" if requires_fixture else "forbids"
-        raise CatalogError(f"{case_id} {expectation} repository fixtures")
+    if policy == "required" and not fixtures:
+        raise CatalogError(f"{case_id} requires repository fixtures")
+    if policy == "forbidden" and fixtures:
+        raise CatalogError(f"{case_id} forbids {field}")
     fixture_text = "\n".join(path + "\n" + content for path, content in fixtures).casefold()
     if any(rubric.casefold() in fixture_text for rubric in rubrics):
         raise CatalogError(f"{case_id} fixture leaks a scoring rubric")
@@ -170,8 +172,20 @@ def _case_from_raw(raw: Any, lineage: bool) -> CaseSpec:
     fixture_files = _fixture_files(
         raw.get("fixture_files"),
         case_id,
-        kind,
         (*must_detect, *must_not_do),
+        field="fixture_files",
+        policy=(
+            "required"
+            if kind in {"positive", "lineage"} or case_id == "INT-superpowers"
+            else "forbidden"
+        ),
+    )
+    followup_fixture_files = _fixture_files(
+        raw.get("followup_fixture_files"),
+        case_id,
+        (*must_detect, *must_not_do),
+        field="followup_fixture_files",
+        policy="optional" if kind == "lineage" else "forbidden",
     )
 
     return CaseSpec(
@@ -183,6 +197,7 @@ def _case_from_raw(raw: Any, lineage: bool) -> CaseSpec:
         modes=_modes(raw.get("modes"), case_id),
         expected_transition=expected_transition,
         fixture_files=fixture_files,
+        followup_fixture_files=followup_fixture_files,
     )
 
 

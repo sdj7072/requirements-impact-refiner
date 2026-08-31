@@ -15,6 +15,7 @@ REQUIRED_KEYS = {
     "must_not_do",
     "modes",
     "fixture_files",
+    "followup_fixture_files",
 }
 ALLOWED_KINDS = {"positive", "negative", "integration"}
 REQUIRED_POSITIVE_TOPICS = {
@@ -29,7 +30,7 @@ REQUIRED_POSITIVE_TOPICS = {
 }
 # Canonical SHA-256 of the approved Task 1 case set. Update deliberately only
 # when the evaluation contract changes through its review process.
-CASES_SHA256 = "a95817bfa5f75ea8d22eb80b3a41ab2c94195e619a9ad5e2ea9f00a8ae8b2628"
+CASES_SHA256 = "9309a796120082b0d79759266945a80fa2449007bef4407d97005cc61564d552"
 
 
 def load_cases():
@@ -76,6 +77,7 @@ class EvalCaseContractTest(unittest.TestCase):
             self.assertIsInstance(case["must_not_do"], list)
             self.assertIsInstance(case["modes"], list)
             self.assertIsInstance(case["fixture_files"], list)
+            self.assertIsInstance(case["followup_fixture_files"], list)
 
     def test_positive_cases_cover_the_release_taxonomy(self):
         topics = {

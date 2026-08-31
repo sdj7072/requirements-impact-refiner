@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from evals.harness.adapters.codex import CodexAdapter
+from evals.harness.catalog import load_all
 from evals.harness.graph_scoring import load_graph_cases
 from evals.harness.models import (
     CaseSpec,
@@ -307,6 +308,24 @@ class CodexAdapterTest(unittest.TestCase):
             attempt = request.output_root / "codex" / "POS-example" / "01"
             self.assertFalse(any(attempt.glob("workspace-reports/**")))
             self.assertFalse((attempt / "first.jsonl").exists())
+
+    def test_lineage_followup_fixture_is_staged_only_after_first_turn(self):
+        case = next(case for case in load_all() if case.id == "LINEAGE-reopened")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            CodexAdapter._stage_catalog_fixture(case, root)
+            self.assertFalse((root / "desktop" / "ProfileCache.swift").exists())
+
+            CodexAdapter._stage_followup_fixture(case, root)
+
+            followup = root / "desktop" / "ProfileCache.swift"
+            self.assertEqual(
+                followup.read_text(encoding="utf-8"),
+                dict(case.followup_fixture_files)["desktop/ProfileCache.swift"],
+            )
+            with self.assertRaisesRegex(ValueError, "overwrite"):
+                CodexAdapter._stage_followup_fixture(case, root)
 
     def test_graph_case_policy_is_sealed_in_raw_run_metadata(self):
         case = load_graph_cases()[0]

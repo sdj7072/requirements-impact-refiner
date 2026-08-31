@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "evals" / "cases.json"
 CASE_SCHEMA_PATH = ROOT / "evals" / "harness" / "schemas" / "case.schema.json"
 RESULT_SCHEMA_PATH = ROOT / "evals" / "harness" / "schemas" / "result.schema.json"
-CASES_SHA256 = "a95817bfa5f75ea8d22eb80b3a41ab2c94195e619a9ad5e2ea9f00a8ae8b2628"
+CASES_SHA256 = "9309a796120082b0d79759266945a80fa2449007bef4407d97005cc61564d552"
 
 
 class EvalHarnessContractTest(unittest.TestCase):
@@ -90,6 +90,7 @@ class EvalHarnessContractTest(unittest.TestCase):
             must_not_do=("write implementation plan",),
             modes=("codex",),
             fixture_files=(("src/roles.py", "def authorize_project_edit(): pass\n"),),
+            followup_fixture_files=(),
         )
 
         with self.assertRaises(FrozenInstanceError):
@@ -105,6 +106,7 @@ class EvalHarnessContractTest(unittest.TestCase):
             "must_not_do": ["write implementation plan"],
             "modes": ["codex"],
             "fixture_files": [{"path": "src/roles.py", "content": "ROLE = 'editor'\n"}],
+            "followup_fixture_files": [],
         }
         valid_lineage = {
             "id": "LINEAGE-example",
@@ -118,6 +120,7 @@ class EvalHarnessContractTest(unittest.TestCase):
             "modes": ["superpowers"],
             "expected_transition": "unchanged",
             "fixture_files": [{"path": "src/export.py", "content": "def export(): pass\n"}],
+            "followup_fixture_files": [],
         }
         invalid_records = {
             "duplicate IDs": ([valid_case, dict(valid_case)], [valid_lineage]),
@@ -225,6 +228,15 @@ class EvalHarnessContractTest(unittest.TestCase):
                 self.assertTrue(content.strip(), case.id)
             for rubric in (*case.must_detect, *case.must_not_do):
                 self.assertNotIn(rubric.casefold(), fixture_text, case.id)
+            followup_text = "\n".join(
+                path + "\n" + content for path, content in case.followup_fixture_files
+            ).casefold()
+            for rubric in (*case.must_detect, *case.must_not_do):
+                self.assertNotIn(rubric.casefold(), followup_text, case.id)
+        reopened = next(case for case in selected if case.id == "LINEAGE-reopened")
+        self.assertTrue(reopened.followup_fixture_files)
+        self.assertNotIn("desktop/ProfileCache.swift", dict(reopened.fixture_files))
+        self.assertIn("desktop/ProfileCache.swift", dict(reopened.followup_fixture_files))
 
     def test_result_schema_exposes_every_public_artifact_type(self):
         schema = json.loads(RESULT_SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -272,6 +284,7 @@ class EvalHarnessContractTest(unittest.TestCase):
 
         self.assertTrue(all(item.get("pattern") == r"\S" for item in nonblank_schemas))
         self.assertIn("fixture_files", definitions["common"]["required"])
+        self.assertIn("followup_fixture_files", definitions["common"]["required"])
 
 
 if __name__ == "__main__":

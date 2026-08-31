@@ -31,6 +31,7 @@ class CaseSpec:
     modes: tuple[str, ...]
     expected_transition: Optional[str] = None
     fixture_files: tuple[tuple[str, str], ...] = ()
+    followup_fixture_files: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

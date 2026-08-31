@@ -35,12 +35,13 @@
     },
     "common": {
       "type": "object",
-      "required": ["id", "kind", "must_detect", "must_not_do", "modes", "fixture_files"],
+      "required": ["id", "kind", "must_detect", "must_not_do", "modes", "fixture_files", "followup_fixture_files"],
       "properties": {
         "id": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "must_detect": { "$ref": "#/$defs/rubric" },
         "must_not_do": { "$ref": "#/$defs/rubric" },
         "fixture_files": { "$ref": "#/$defs/fixtureFiles" },
+        "followup_fixture_files": { "$ref": "#/$defs/fixtureFiles" },
         "modes": {
           "type": "array",
           "items": {
@@ -64,6 +65,7 @@
             "must_detect": { "$ref": "#/$defs/rubric" },
             "must_not_do": { "$ref": "#/$defs/rubric" },
             "fixture_files": { "$ref": "#/$defs/fixtureFiles" },
+            "followup_fixture_files": { "$ref": "#/$defs/fixtureFiles" },
             "modes": { "$ref": "#/$defs/common/properties/modes" }
           }
         }
@@ -88,6 +90,7 @@
             "must_detect": { "$ref": "#/$defs/rubric" },
             "must_not_do": { "$ref": "#/$defs/rubric" },
             "fixture_files": { "$ref": "#/$defs/fixtureFiles" },
+            "followup_fixture_files": { "$ref": "#/$defs/fixtureFiles" },
             "modes": { "$ref": "#/$defs/common/properties/modes" },
             "expected_transition": { "enum": ["unchanged", "reopened", "rejected"] }
           }

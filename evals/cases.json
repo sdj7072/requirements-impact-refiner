@@ -12,7 +12,8 @@
         {"path": "auth/authorize.py", "content": "PERMITTED = (\"owner\", \"admin\")\nGATE = \"authorization.workspace_edit\"\n\ndef authorize_project_edit(role):\n    return role in PERMITTED\n"},
         {"path": "roles/defaults.py", "content": "INVITATION_DEFAULT_ROLE = \"member\"\nGATE_REF = \"authorization.workspace_edit\"\n"},
         {"path": "events/audit.py", "content": "AUDIT_EVENT = \"project.edit.audited\"\nGATE_LINK = \"authorization.workspace_edit\"\n\ndef emit_actor_role_audit(actor, role):\n    return {\"event\": AUDIT_EVENT, \"actor\": actor, \"role\": role}\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "POS-deletion",
@@ -26,7 +27,8 @@
         {"path": "db/constraints.py", "content": "INVOICE_FK = \"invoice.account_id ON DELETE RESTRICT\"\nFLOW = \"account.delete_flow\"\n"},
         {"path": "policy/retention.py", "content": "FINANCE_RETENTION_DAYS = 30\nFLOW_REF = \"account.delete_flow\"\n"},
         {"path": "workers/cleanup.py", "content": "QUEUE = \"account-cleanup\"\nFLOW_LINK = \"account.delete_flow\"\n\ndef consume(event):\n    return event[\"account_id\"]\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "POS-api-contract",
@@ -41,7 +43,8 @@
         {"path": "ios/UserDTO.swift", "content": "let decodedField = \"profile.displayName\"\n"},
         {"path": "cache/profile_cache.py", "content": "CACHED_FIELD = \"profile.displayName\"\n"},
         {"path": "docs/changelog.py", "content": "DEPRECATION_RELEASES = 1\nFIELD = \"profile.displayName\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "POS-cache",
@@ -55,7 +58,8 @@
         {"path": "api/dashboard.py", "content": "RESPONSE = \"dashboard.response\"\n\ndef render(tenant_id):\n    return {\"tenant\": tenant_id, \"body\": RESPONSE}\n"},
         {"path": "cache/permission_cache.py", "content": "INVALIDATED_ON_ROLE_CHANGE = True\nSCOPE = \"permission_cache\"\nRESPONSE_REF = \"dashboard.response\"\n"},
         {"path": "events/dashboard_updated.py", "content": "EVENT = \"dashboard.updated\"\nRESPONSE_LINK = \"dashboard.response\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "POS-payments",
@@ -69,7 +73,8 @@
         {"path": "payments/charge.py", "content": "OPERATION = \"payment.charge\"\n\ndef charge(amount, idempotency_key):\n    return {\"op\": OPERATION, \"key\": idempotency_key}\n"},
         {"path": "ui/status.py", "content": "RENDERS_BEFORE_WEBHOOK_SETTLEMENT = True\nOPERATION_REF = \"payment.charge\"\n"},
         {"path": "providers/gateway.py", "content": "TIMEOUT_AFTER_CAPTURE = True\nOPERATION_LINK = \"payment.charge\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "POS-sharing",
@@ -83,7 +88,8 @@
         {"path": "share/tokens.py", "content": "TOKEN = \"sharing.link\"\nEXPIRY_DAYS = 7\n"},
         {"path": "share/revoke.py", "content": "REVOKE_ON_PERMISSION_CHANGE = True\nTOKEN_REF = \"sharing.link\"\n"},
         {"path": "crypto/rotation.py", "content": "SIGNING_KEY_ROTATION_DAYS = 90\nTOKEN_LINK = \"sharing.link\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "POS-offline-sync",
@@ -97,7 +103,8 @@
         {"path": "models/record.py", "content": "STREAM = \"offline.edits\"\nSTAMPED = \"updated_at\"\n"},
         {"path": "server/tombstones.py", "content": "TOMBSTONE_HOURS = 24\nSTREAM_REF = \"offline.edits\"\n"},
         {"path": "client/queue.py", "content": "PRESERVES = \"local creation order only\"\nSTREAM_LINK = \"offline.edits\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "POS-background-retry",
@@ -110,7 +117,8 @@
       "fixture_files": [
         {"path": "workers/export.py", "content": "JOB = \"export.jobs\"\nOBJECT_KEY = \"deterministic\"\nMAX_ATTEMPTS = 5\n"},
         {"path": "alerts/dead_letter.py", "content": "CONSUMES = \"dead_letter\"\nJOB_REF = \"export.jobs\"\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "NEG-brainstorming",
@@ -120,7 +128,8 @@
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "invent repository evidence"],
       "modes": ["generic", "codex", "claude-code"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     },
     {
       "id": "NEG-planning",
@@ -130,7 +139,8 @@
       "must_detect": [],
       "must_not_do": ["repeat impact refinement", "replace the planning workflow"],
       "modes": ["generic", "codex", "claude-code"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     },
     {
       "id": "NEG-debugging",
@@ -140,7 +150,8 @@
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "rewrite the requirement"],
       "modes": ["generic", "codex", "claude-code"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     },
     {
       "id": "NEG-code-review",
@@ -150,7 +161,8 @@
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "replace code review"],
       "modes": ["generic", "codex", "claude-code"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     },
     {
       "id": "NEG-generic-prd",
@@ -160,7 +172,8 @@
       "must_detect": [],
       "must_not_do": ["activate impact refinement", "claim repository-backed findings"],
       "modes": ["generic", "codex", "claude-code"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     },
     {
       "id": "INT-generic",
@@ -170,7 +183,8 @@
       "must_detect": ["generic entry after clarification", "handoff to user-selected planning method"],
       "must_not_do": ["invoke an external framework", "write implementation tasks"],
       "modes": ["generic"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     },
     {
       "id": "INT-superpowers",
@@ -182,7 +196,8 @@
       "modes": ["superpowers"],
       "fixture_files": [
         {"path": "api/dashboard.py", "content": "RESPONSE = \"dashboard.response\"\n\ndef render_dashboard(tenant_id):\n    return {\"tenant\": tenant_id, \"body\": RESPONSE}\n"}
-      ]
+      ],
+      "followup_fixture_files": []
     },
     {
       "id": "INT-claude-feature-dev",
@@ -192,7 +207,8 @@
       "must_detect": ["entry after Phase 3", "exit before Phase 4"],
       "must_not_do": ["repeat general clarification", "invoke architecture design automatically"],
       "modes": ["claude-feature-dev"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     },
     {
       "id": "INT-spec-kit",
@@ -202,7 +218,8 @@
       "must_detect": ["entry after speckit.clarify", "exit before speckit.plan"],
       "must_not_do": ["repeat specification", "invoke speckit.plan automatically"],
       "modes": ["spec-kit"],
-      "fixture_files": []
+      "fixture_files": [],
+      "followup_fixture_files": []
     }
   ]
 }
