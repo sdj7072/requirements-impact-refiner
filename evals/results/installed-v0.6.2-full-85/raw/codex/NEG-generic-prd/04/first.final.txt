@@ -1,0 +1,13 @@
+## Fast impact scan
+
+### Candidate boundaries
+
+- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.
+
+### Scan information
+
+- Coverage: needs_input
+- Time: 0 ms
+- Cache: bypassed
+
+Which file, symbol, or API is the concrete boundary of this change? Please also provide the missing product idea and any repository evidence.

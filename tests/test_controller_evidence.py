@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from evals.harness.controller_evidence import analyze_controller_trace
+from evals.harness.controller_evidence import analyze_controller_trace, analyze_terminal_delivery
 
 
 def completed(tool, arguments, structured, *, status="completed", error=None):
@@ -51,6 +51,158 @@ def completed_trace(draft_id, receipt_id=None, seeds=()):
 
 
 class ControllerEvidenceTest(unittest.TestCase):
+    def test_terminal_delivery_binds_exact_final_and_stops_tool_activity(self):
+        display = "# Requirements Impact Report\n"
+        finalize = completed(
+            "rir_finalize",
+            {"draft_id": "0" * 32},
+            {
+                "status": "published",
+                "display_text": display,
+                "delivery_contract": {
+                    "canonical": True,
+                    "must_return_content_verbatim": True,
+                    "terminal": True,
+                },
+            },
+        )
+        final_message = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "answer", "type": "agent_message", "text": display},
+            }
+        )
+
+        evidence = analyze_terminal_delivery(
+            ("\n".join((finalize, final_message)),),
+            (display,),
+        )
+
+        self.assertTrue(evidence.valid, evidence.errors)
+        self.assertEqual(evidence.successful_finalize_calls, 1)
+        self.assertTrue(evidence.display_text_exact_match)
+        self.assertTrue(evidence.terminal_contract_observed)
+        self.assertTrue(evidence.no_post_finalize_tool_activity)
+
+    def test_terminal_delivery_rejects_rewritten_final_and_post_finalize_command(self):
+        display = "# Requirements Impact Report\n"
+        finalize = completed(
+            "rir_finalize",
+            {"draft_id": "0" * 32},
+            {
+                "status": "published",
+                "display_text": display,
+                "delivery_contract": {
+                    "canonical": True,
+                    "must_return_content_verbatim": True,
+                    "terminal": True,
+                },
+            },
+        )
+        command = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "command", "type": "command_execution", "command": "true"},
+            }
+        )
+
+        rewritten = analyze_terminal_delivery((finalize,), ("Implemented change.\n",))
+        continued = analyze_terminal_delivery(("\n".join((finalize, command)),), (display,))
+
+        self.assertFalse(rewritten.valid)
+        self.assertIn("terminal display text differs from selected final output", rewritten.errors)
+        self.assertFalse(continued.valid)
+        self.assertIn("tool activity followed terminal finalize", continued.errors)
+
+    def test_terminal_delivery_allows_failed_finalize_before_one_success(self):
+        display = "# Requirements Impact Report\n"
+        failed = completed(
+            "rir_finalize",
+            {"draft_id": "0" * 32},
+            {},
+            status="failed",
+            error={"message": "correct analysis"},
+        )
+        succeeded = completed(
+            "rir_finalize",
+            {"draft_id": "0" * 32},
+            {
+                "status": "published",
+                "display_text": display,
+                "delivery_contract": {
+                    "canonical": True,
+                    "must_return_content_verbatim": True,
+                    "terminal": True,
+                },
+            },
+        )
+        final_message = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "answer", "type": "agent_message", "text": display},
+            }
+        )
+
+        evidence = analyze_terminal_delivery(
+            ("\n".join((failed, succeeded, final_message)),), (display,)
+        )
+
+        self.assertTrue(evidence.valid, evidence.errors)
+        self.assertEqual(evidence.successful_finalize_calls, 1)
+
+    def test_terminal_delivery_treats_no_finalize_as_neutral(self):
+        final_message = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "answer", "type": "agent_message", "text": "fresh report"},
+            }
+        )
+
+        evidence = analyze_terminal_delivery((final_message,), ("fresh report",))
+
+        self.assertTrue(evidence.valid, evidence.errors)
+        self.assertEqual(evidence.successful_finalize_calls, 0)
+        self.assertFalse(evidence.display_text_exact_match)
+        self.assertFalse(evidence.terminal_contract_observed)
+
+    def test_terminal_delivery_rejects_extra_or_rewritten_agent_message(self):
+        display = "# Requirements Impact Report\n"
+        finalize = completed(
+            "rir_finalize",
+            {"draft_id": "0" * 32},
+            {
+                "status": "published",
+                "display_text": display,
+                "delivery_contract": {
+                    "canonical": True,
+                    "must_return_content_verbatim": True,
+                    "terminal": True,
+                },
+            },
+        )
+        matching = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "answer", "type": "agent_message", "text": display},
+            }
+        )
+        extra = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "extra", "type": "agent_message", "text": "Planning next."},
+            }
+        )
+
+        duplicate = analyze_terminal_delivery(("\n".join((finalize, matching, extra)),), (display,))
+        rewritten = analyze_terminal_delivery(("\n".join((finalize, extra)),), (display,))
+
+        for evidence in (duplicate, rewritten):
+            self.assertFalse(evidence.valid)
+            self.assertIn(
+                "terminal finalize requires one matching final agent message",
+                evidence.errors,
+            )
+
     def test_completed_begin_finalize_trace_binds_draft_and_display_bytes(self):
         draft_id = "0123456789abcdef0123456789abcdef"
         display = "## Change Impact Summary\n\n- safe"

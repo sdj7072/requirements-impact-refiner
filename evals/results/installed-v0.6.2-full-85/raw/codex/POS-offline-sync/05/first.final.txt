@@ -1,0 +1,9 @@
+Implemented reconnect synchronization for `offline.edits`.
+
+- [client/queue.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-os3hntbg/client/queue.py:34) replays edits in creation order and retains the failed suffix.
+- [models/record.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-os3hntbg/models/record.py:70) provides canonical `updated_at` stamping, acknowledgements, and idempotency.
+- [server/tombstones.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-os3hntbg/server/tombstones.py:21) prevents deleted-record resurrection across the 24-hour boundary.
+- Added [six regression tests](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-os3hntbg/tests/test_offline_sync.py:29).
+- The impact refinement specifically drove tombstone-boundary and partial-retry handling; its [report is available here](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-os3hntbg/.requirements-impact-refiner/reports/RPT-001/revision-0001.md).
+
+Verification: all 6 tests pass, and all modules compile successfully.

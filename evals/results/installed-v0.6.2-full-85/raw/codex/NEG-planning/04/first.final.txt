@@ -1,0 +1,1 @@
+Please paste or attach the approved specification/impact report and, if relevant, provide the repository checkout. The current workspace is empty, so there isn’t enough information to derive evidence-based coding tasks.

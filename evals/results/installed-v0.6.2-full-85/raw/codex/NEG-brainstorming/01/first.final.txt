@@ -1,0 +1,63 @@
+The strongest direction is not “another workout library.” It’s an app that helps people exercise when motivation, time, or energy is imperfect.
+
+That opportunity is well grounded: wearables, mobile exercise apps, programs for older adults, and balance/core training are leading 2026 fitness trends, while research associates continued use with personalization, social support, progress tracking, and realistic goals. [ACSM 2026 trends](https://acsm.org/top-fitness-trends-2026/), [systematic review](https://link.springer.com/article/10.1007/s11301-025-00537-1)
+
+## Concept ideas
+
+| Concept | Target user | Core promise | Distinctive feature |
+|---|---|---|---|
+| **Momentum** | Busy or inconsistent exercisers | “There’s always a workout you can do today.” | Generates a 2–20 minute session from available time, energy, location, and equipment |
+| **Never Miss Twice** | People who repeatedly restart | Recover from missed workouts without guilt | Automatically shrinks the next commitment and rebuilds momentum |
+| **Rally** | Friends with different fitness levels | Exercise together without matching workouts | Each person contributes personalized activity toward a shared weekly goal |
+| **NextSet** | Recreational strength trainees | Know what to do—and why—each session | Explainable adjustments based on training history, soreness, sleep, and equipment |
+| **Durable** | Adults 55+ | Stay capable for everyday life | Programs built around stairs, carrying, balance, getting off the floor, and fall resilience |
+| **Movement Snacks** | Desk workers | Break up sedentary days | Context-aware 2–5 minute movement prompts instead of generic reminders |
+| **Fitness Skill Tree** | Beginners intimidated by gyms | Progress through abilities, not appearance | Unlocks skills such as push-up, squat depth, balance, and running endurance |
+| **Local Loops** | People who dislike formal workouts | Turn errands and neighborhoods into activity | Creates walking routes based on time, terrain, shade, safety, and destinations |
+
+## My preferred concept: Momentum
+
+Its daily loop would be extremely simple:
+
+1. The user selects available time: `5`, `10`, `20`, or `30+` minutes.
+2. They answer three taps: energy, location, and equipment.
+3. The app offers one recommended session with an explanation.
+4. Afterward, the user records difficulty and mood.
+5. Tomorrow’s recommendation adapts—especially after skipped days.
+
+The key product principle would be: **never punish inconsistency**. Most fitness products celebrate perfect streaks; Momentum could specialize in graceful recovery.
+
+A focused MVP would contain:
+
+- A short onboarding assessment
+- Around 50 modular exercises
+- Rule-based workout generation
+- Adjustable session duration
+- “Too hard,” “too easy,” and “not today” feedback
+- Weekly progress based on active minutes and consistency
+- Optional Apple Health or Health Connect integration
+- One accountability partner
+
+Avoid starting with video libraries, meal tracking, public feeds, AI chat, or dozens of wearable integrations. Those add considerable scope without proving the central habit loop.
+
+## Promising combinations
+
+Three especially interesting hybrids are:
+
+- **Momentum + Rally:** personalized workouts feeding a small group goal
+- **Momentum + Movement Snacks:** formal sessions plus tiny interventions during sedentary days
+- **Durable + Rally:** older adults exercising independently while family members provide encouragement
+
+The latter has a meaningful underserved audience, but it requires stronger accessibility, exercise-safety review, and careful language around health claims.
+
+## Positioning ideas
+
+- “Fitness for unpredictable days.”
+- “Do what fits today.”
+- “The workout app that helps you restart.”
+- “Consistency without the streak anxiety.”
+- “Five minutes still counts.”
+
+A sensible north-star metric would be **weeks in which a user completes at least three intentional movement sessions**, rather than app opens or workouts started. WHO estimates that 31% of adults do not meet recommended physical-activity levels, so helping inactive or inconsistent people move regularly is a more meaningful wedge than optimizing already-committed athletes. [WHO physical-activity fact sheet](https://www.who.int/news-room/fact-sheets/detail/physical-activity)
+
+The repository is currently empty, so these are greenfield directions rather than ideas inferred from existing implementation.

@@ -1,0 +1,3 @@
+The workspace is empty—there’s no repository, test, or CI log to inspect.
+
+Please attach or check out the repository and provide the failing test name plus one CI failure trace. “Only fails in CI” alone isn’t enough to distinguish timing, test-order dependence, shared state, timezone/locale, resource limits, or environment differences.

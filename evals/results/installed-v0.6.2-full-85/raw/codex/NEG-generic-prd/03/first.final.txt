@@ -1,0 +1,1 @@
+Please provide the missing product idea. The “Repository evidence” section is also empty—either paste relevant paths/findings or tell me to inspect the repository directly. Once provided, I’ll produce the complete PRD.

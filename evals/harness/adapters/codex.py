@@ -1,5 +1,6 @@
 """Installed Codex composition adapter for deterministic evaluation runs."""
 
+import hashlib
 import json
 import os
 import re
@@ -15,7 +16,7 @@ from ..catalog import (
     MAX_FIXTURE_PATH_BYTES,
     MAX_FIXTURE_TOTAL_BYTES,
 )
-from ..controller_evidence import analyze_controller_trace
+from ..controller_evidence import analyze_controller_trace, analyze_terminal_delivery
 from ..evidence import Artifact, PotentialSecretError, record_run
 from ..graph_scoring import graph_run_policy, load_graph_cases
 from ..models import (
@@ -36,6 +37,13 @@ _UUID = re.compile(
 _COMPOSITION_LABEL = "Codex with Superpowers"
 _CANONICAL_RIR_PLUGIN_ID = "requirements-impact-refiner@requirements-impact-refiner"
 _SUPERPOWERS_PLUGIN_ID = "superpowers@openai-curated"
+_SEMANTIC_VERSION = re.compile(r"\A(\d+)\.(\d+)(?:\.|-|\Z)")
+_MAX_GUARDED_ENTRIES = 2048
+_MAX_GUARDED_FILE_BYTES = 8 * 1024 * 1024
+_MAX_GUARDED_TOTAL_BYTES = 32 * 1024 * 1024
+_MAX_CAPTURED_REPORT_FILES = 128
+_MAX_CAPTURED_REPORT_FILE_BYTES = 4 * 1024 * 1024
+_MAX_CAPTURED_REPORT_TOTAL_BYTES = 24 * 1024 * 1024
 _PREDECESSOR_HANDOFF = (
     "Harness continuity evidence:\n"
     "- In compact delivery, read `.requirements-impact-refiner/reports/RPT-###/current.json` and hash the exact canonical Markdown file it selects.\n"
@@ -177,6 +185,21 @@ class CodexAdapter(ClientAdapter):
                     probe,
                     None,
                 )
+            integrity_checks: list[dict[str, object]] = []
+            try:
+                first_baseline = self._snapshot_guarded_workspace(temporary_root)
+            except (OSError, ValueError) as error:
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INFRA_ERROR,
+                    f"workspace mutation check failed: {error}",
+                    None,
+                    None,
+                    None,
+                    probe,
+                    None,
+                )
             first_final = temporary_root / "first.final.txt"
             first_prompt = self._turn_prompt(
                 request.case.turns[0].prompt, request.case.turns[0].repository_evidence
@@ -186,8 +209,13 @@ class CodexAdapter(ClientAdapter):
                 temporary_root,
                 self.timeout_seconds,
             )
+            first_payload, first_read_problem = self._final_artifact(first_final)
             artifacts.update(
-                self._turn_artifacts("first", first_prompt, first_command, first_final)
+                self._turn_artifacts("first", first_prompt, first_command, first_payload)
+            )
+            commands: tuple[CommandResult, ...] = (first_command,)
+            artifacts["metadata.json"] = self._metadata_json(
+                probe, probe_commands, commands, request
             )
             capture_problem = self._capture_workspace_reports(artifacts, temporary_root)
             if capture_problem is None:
@@ -204,10 +232,40 @@ class CodexAdapter(ClientAdapter):
                     probe,
                     first_command,
                 )
-            problem, first_output = self._command_problem(first_command, first_final)
-            commands: tuple[CommandResult, ...] = (first_command,)
-            artifacts["metadata.json"] = self._metadata_json(
-                probe, probe_commands, commands, request
+            try:
+                first_integrity = self._workspace_integrity(
+                    temporary_root, first_baseline, first_final
+                )
+            except (OSError, ValueError) as error:
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INFRA_ERROR,
+                    f"workspace mutation check failed: {error}",
+                    first_command,
+                    None,
+                    None,
+                    probe,
+                    first_command,
+                )
+            integrity_checks.append(first_integrity)
+            artifacts["workspace-integrity.json"] = self._workspace_integrity_artifact(
+                integrity_checks
+            )
+            if first_integrity["status"] == "mutated":
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INVALID_EVIDENCE,
+                    "workspace mutation detected after first turn",
+                    first_command,
+                    None,
+                    None,
+                    probe,
+                    first_command,
+                )
+            problem, first_output = self._command_problem(
+                first_command, first_payload, first_read_problem
             )
             if problem is not None:
                 return self._record_result(
@@ -277,6 +335,20 @@ class CodexAdapter(ClientAdapter):
                     probe,
                     first_command,
                 )
+            try:
+                second_baseline = self._snapshot_guarded_workspace(temporary_root)
+            except (OSError, ValueError) as error:
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INFRA_ERROR,
+                    f"workspace mutation check failed: {error}",
+                    first_command,
+                    None,
+                    thread_id,
+                    probe,
+                    first_command,
+                )
             second_final = temporary_root / "second.final.txt"
             second_prompt = self._resume_prompt(second_turn)
             second_command = run_command(
@@ -290,8 +362,13 @@ class CodexAdapter(ClientAdapter):
                 temporary_root,
                 self.timeout_seconds,
             )
+            second_payload, second_read_problem = self._final_artifact(second_final)
             artifacts.update(
-                self._turn_artifacts("second", second_prompt, second_command, second_final)
+                self._turn_artifacts("second", second_prompt, second_command, second_payload)
+            )
+            commands = (first_command, second_command)
+            artifacts["metadata.json"] = self._metadata_json(
+                probe, probe_commands, commands, request
             )
             capture_problem = self._capture_workspace_reports(artifacts, temporary_root)
             if capture_problem is None:
@@ -308,11 +385,41 @@ class CodexAdapter(ClientAdapter):
                     probe,
                     first_command,
                 )
-            commands = (first_command, second_command)
-            artifacts["metadata.json"] = self._metadata_json(
-                probe, probe_commands, commands, request
+            try:
+                second_integrity = self._workspace_integrity(
+                    temporary_root, second_baseline, second_final
+                )
+            except (OSError, ValueError) as error:
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INFRA_ERROR,
+                    f"workspace mutation check failed: {error}",
+                    second_command,
+                    None,
+                    thread_id,
+                    probe,
+                    first_command,
+                )
+            integrity_checks.append(second_integrity)
+            artifacts["workspace-integrity.json"] = self._workspace_integrity_artifact(
+                integrity_checks
             )
-            problem, second_output = self._command_problem(second_command, second_final)
+            if second_integrity["status"] == "mutated":
+                return self._record_result(
+                    request,
+                    artifacts,
+                    RunStatus.INVALID_EVIDENCE,
+                    "workspace mutation detected after second turn",
+                    second_command,
+                    None,
+                    thread_id,
+                    probe,
+                    first_command,
+                )
+            problem, second_output = self._command_problem(
+                second_command, second_payload, second_read_problem
+            )
             if problem is not None:
                 return self._record_result(
                     request,
@@ -450,6 +557,11 @@ class CodexAdapter(ClientAdapter):
         return self._plugin_id(entry) == _SUPERPOWERS_PLUGIN_ID
 
     @staticmethod
+    def _requires_terminal_delivery(version: str) -> bool:
+        match = _SEMANTIC_VERSION.match(version)
+        return match is not None and tuple(map(int, match.groups())) >= (0, 6)
+
+    @staticmethod
     def _turn_prompt(prompt: str, repository_evidence: Sequence[str]) -> str:
         return "{}\n\nRepository evidence:\n{}".format(
             prompt,
@@ -489,29 +601,89 @@ class CodexAdapter(ClientAdapter):
             events.append({key: value for key, value in event.items() if isinstance(key, str)})
         return tuple(events) if events else None
 
+    @staticmethod
+    def _read_final_bytes(final_path: Path) -> bytes:
+        path = Path(final_path)
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        directory_fd = None
+        descriptor = None
+        try:
+            directory_fd = os.open(path.parent, directory_flags)
+            descriptor = os.open(path.name, file_flags, dir_fd=directory_fd)
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("final output must be a regular non-symlink file")
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(descriptor, 64 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            after = os.fstat(descriptor)
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+                before.st_size,
+                before.st_mtime_ns,
+            ) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_mode,
+                after.st_size,
+                after.st_mtime_ns,
+            ):
+                raise ValueError("final output changed while being read")
+            return b"".join(chunks)
+        except FileNotFoundError:
+            raise
+        except OSError as error:
+            raise ValueError("final output must be a regular non-symlink file") from error
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            if directory_fd is not None:
+                os.close(directory_fd)
+
+    @classmethod
+    def _final_artifact(cls, final_path: Path) -> tuple[bytes, Optional[str]]:
+        try:
+            payload = cls._read_final_bytes(final_path)
+        except FileNotFoundError:
+            return b"", "missing final output"
+        except ValueError:
+            return b"", "unsafe final output"
+        try:
+            payload.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            return payload, "invalid UTF-8 final output"
+        return payload, None
+
+    @classmethod
     def _command_problem(
-        self, command: CommandResult, final_path: Path
+        cls,
+        command: CommandResult,
+        final_payload: bytes,
+        read_problem: Optional[str],
     ) -> tuple[Optional[str], Optional[str]]:
         if command.timed_out:
             return "timeout", None
         if command.returncode != 0:
             return "nonzero exit", None
-        if self._parse_jsonl(command.stdout) is None:
+        if cls._parse_jsonl(command.stdout) is None:
             return "malformed JSONL", None
-        if not final_path.is_file():
-            return "missing final output", None
-        final_output = final_path.read_text(encoding="utf-8", errors="replace")
+        if read_problem is not None:
+            return read_problem, None
+        final_output = final_payload.decode("utf-8", errors="strict")
         if not final_output:
             return "missing final output", None
         return None, final_output
 
     @staticmethod
     def _turn_artifacts(
-        name: str, prompt: str, command: CommandResult, final_path: Path
-    ) -> dict[str, str]:
-        final_output = ""
-        if final_path.is_file():
-            final_output = final_path.read_text(encoding="utf-8", errors="replace")
+        name: str, prompt: str, command: CommandResult, final_output: bytes
+    ) -> dict[str, Artifact]:
         return {
             f"{name}.prompt.txt": prompt,
             f"{name}.jsonl": command.stdout,
@@ -520,23 +692,337 @@ class CodexAdapter(ClientAdapter):
         }
 
     @staticmethod
+    def _snapshot_guarded_workspace(
+        workspace_root: Path,
+        expected: Optional[tuple[tuple[str, str, int, int, int, str], ...]] = None,
+    ) -> tuple[tuple[str, str, int, int, int, str], ...]:
+        """Fingerprint the isolated workspace without following any symlink."""
+        root = Path(workspace_root)
+        root_metadata = root.lstat()
+        if root.is_symlink() or not stat.S_ISDIR(root_metadata.st_mode):
+            raise ValueError("workspace mutation root must be a real directory")
+        rows: list[tuple[str, str, int, int, int, str]] = []
+        expected_map = {} if expected is None else {row[0]: row for row in expected}
+        entry_count = 0
+        total_bytes = 0
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+
+        def same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+            return (left.st_dev, left.st_ino, left.st_mode) == (
+                right.st_dev,
+                right.st_ino,
+                right.st_mode,
+            )
+
+        def visit(directory_fd: int, relative_parent: PurePosixPath) -> None:
+            nonlocal entry_count, total_bytes
+            try:
+                with os.scandir(directory_fd) as iterator:
+                    entries = sorted(iterator, key=lambda entry: entry.name)
+            except OSError as error:
+                raise ValueError("workspace mutation snapshot is unavailable") from error
+            for entry in entries:
+                entry_count += 1
+                if entry_count > _MAX_GUARDED_ENTRIES:
+                    raise ValueError("workspace mutation snapshot exceeds entry limit")
+                relative = relative_parent / entry.name
+                relative_text = relative.as_posix()
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                except OSError as error:
+                    raise ValueError("workspace mutation entry is unavailable") from error
+                if relative.parts[0] == ".requirements-impact-refiner":
+                    if len(relative.parts) == 1 and (
+                        entry.is_symlink() or not stat.S_ISDIR(metadata.st_mode)
+                    ):
+                        raise ValueError(
+                            "workspace mutation reserved root must be a real directory"
+                        )
+                    continue
+                permissions = stat.S_IMODE(metadata.st_mode)
+                expected_row = expected_map.get(relative_text)
+                if expected is not None and expected_row is None:
+                    rows.append(
+                        (
+                            relative_text,
+                            "unexpected",
+                            permissions,
+                            metadata.st_size,
+                            metadata.st_ino,
+                            "",
+                        )
+                    )
+                    continue
+                if stat.S_ISDIR(metadata.st_mode):
+                    current_row = (
+                        relative_text,
+                        "directory",
+                        permissions,
+                        0,
+                        metadata.st_ino,
+                        "",
+                    )
+                    if expected_row is not None and current_row != expected_row:
+                        rows.append(current_row)
+                        continue
+                    try:
+                        child_fd = os.open(entry.name, directory_flags, dir_fd=directory_fd)
+                    except OSError as error:
+                        raise ValueError("workspace mutation directory is unavailable") from error
+                    try:
+                        opened = os.fstat(child_fd)
+                        if not same_identity(metadata, opened):
+                            raise ValueError("workspace mutation directory identity changed")
+                        rows.append(current_row)
+                        visit(child_fd, relative)
+                    finally:
+                        os.close(child_fd)
+                elif stat.S_ISREG(metadata.st_mode):
+                    current_prefix = (
+                        relative_text,
+                        "file",
+                        permissions,
+                        metadata.st_size,
+                        metadata.st_ino,
+                    )
+                    if expected_row is not None and current_prefix != expected_row[:5]:
+                        rows.append((*current_prefix, ""))
+                        continue
+                    if metadata.st_size > _MAX_GUARDED_FILE_BYTES:
+                        raise ValueError("workspace mutation file exceeds byte limit")
+                    total_bytes += metadata.st_size
+                    if total_bytes > _MAX_GUARDED_TOTAL_BYTES:
+                        raise ValueError("workspace mutation snapshot exceeds total byte limit")
+                    try:
+                        descriptor = os.open(entry.name, file_flags, dir_fd=directory_fd)
+                    except OSError as error:
+                        raise ValueError("workspace mutation file is unavailable") from error
+                    digest = hashlib.sha256()
+                    try:
+                        before = os.fstat(descriptor)
+                        if not same_identity(metadata, before):
+                            raise ValueError("workspace mutation file identity changed")
+                        while True:
+                            chunk = os.read(descriptor, 64 * 1024)
+                            if not chunk:
+                                break
+                            digest.update(chunk)
+                        after = os.fstat(descriptor)
+                    finally:
+                        os.close(descriptor)
+                    if (
+                        before.st_dev,
+                        before.st_ino,
+                        before.st_mode,
+                        before.st_size,
+                        before.st_mtime_ns,
+                    ) != (
+                        after.st_dev,
+                        after.st_ino,
+                        after.st_mode,
+                        after.st_size,
+                        after.st_mtime_ns,
+                    ):
+                        raise ValueError("workspace mutation file changed while being read")
+                    rows.append(
+                        (
+                            relative_text,
+                            "file",
+                            permissions,
+                            after.st_size,
+                            after.st_ino,
+                            digest.hexdigest(),
+                        )
+                    )
+                elif stat.S_ISLNK(metadata.st_mode):
+                    try:
+                        target = os.readlink(entry.name, dir_fd=directory_fd)
+                        after = os.stat(entry.name, dir_fd=directory_fd, follow_symlinks=False)
+                    except OSError as error:
+                        raise ValueError("workspace mutation symlink is unavailable") from error
+                    if not same_identity(metadata, after):
+                        raise ValueError("workspace mutation symlink identity changed")
+                    rows.append(
+                        (
+                            relative_text,
+                            "symlink",
+                            permissions,
+                            len(target.encode("utf-8", errors="surrogatepass")),
+                            metadata.st_ino,
+                            hashlib.sha256(
+                                target.encode("utf-8", errors="surrogatepass")
+                            ).hexdigest(),
+                        )
+                    )
+                else:
+                    raise ValueError("workspace mutation entry type is unsupported")
+
+        root_fd = None
+        try:
+            root_fd = os.open(root, directory_flags)
+            opened_root = os.fstat(root_fd)
+            if not same_identity(root_metadata, opened_root):
+                raise ValueError("workspace mutation root identity changed")
+            visit(root_fd, PurePosixPath())
+        except OSError as error:
+            raise ValueError("workspace mutation root is unavailable") from error
+        finally:
+            if root_fd is not None:
+                os.close(root_fd)
+        return tuple(rows)
+
+    @classmethod
+    def _workspace_integrity(
+        cls,
+        workspace_root: Path,
+        expected: tuple[tuple[str, str, int, int, int, str], ...],
+        allowed_output: Path,
+    ) -> dict[str, object]:
+        root = Path(workspace_root)
+        output = Path(allowed_output)
+        if output.parent != root or output.name not in {"first.final.txt", "second.final.txt"}:
+            raise ValueError("workspace mutation output path is invalid")
+        if output.exists():
+            metadata = output.lstat()
+            if output.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("workspace mutation output must be a regular file")
+        current = cls._snapshot_guarded_workspace(root, expected)
+        expected_map = {row[0]: row for row in expected if row[0] != output.name}
+        current_map = {row[0]: row for row in current if row[0] != output.name}
+        expected_paths = set(expected_map)
+        current_paths = set(current_map)
+        added = current_paths - expected_paths
+        removed = expected_paths - current_paths
+        changed = {
+            path
+            for path in expected_paths.intersection(current_paths)
+            if expected_map[path] != current_map[path]
+        }
+        return {
+            "schema_version": 1,
+            "status": "mutated" if added or removed or changed else "clean",
+            "added_count": len(added),
+            "removed_count": len(removed),
+            "changed_count": len(changed),
+        }
+
+    @staticmethod
+    def _workspace_integrity_artifact(checks: Sequence[dict[str, object]]) -> str:
+        return json.dumps({"schema_version": 1, "checks": list(checks)}, sort_keys=True)
+
+    @staticmethod
     def _workspace_report_artifacts(workspace_root: Path) -> dict[str, bytes]:
-        report_root = workspace_root / ".requirements-impact-refiner" / "reports"
-        if not report_root.exists():
-            return {}
-        if report_root.is_symlink() or not report_root.is_dir():
-            raise ValueError("workspace report root must be a real directory")
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         artifacts: dict[str, bytes] = {}
-        for path in sorted(report_root.rglob("*")):
-            if path.is_symlink():
-                raise ValueError("workspace report artifacts must not use symlinks")
-            if not path.is_file():
-                continue
-            relative = path.relative_to(report_root)
-            if any(part in {"", ".", ".."} for part in relative.parts):
-                raise ValueError("workspace report artifact path is unsafe")
-            artifacts[(Path("workspace-reports") / relative).as_posix()] = path.read_bytes()
-        return artifacts
+        workspace_fd = None
+        base_fd = None
+        reports_fd = None
+        captured_files = 0
+        captured_bytes = 0
+
+        def same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+            return (left.st_dev, left.st_ino, left.st_mode) == (
+                right.st_dev,
+                right.st_ino,
+                right.st_mode,
+            )
+
+        def visit(directory_fd: int, relative_parent: PurePosixPath) -> None:
+            nonlocal captured_files, captured_bytes
+            try:
+                names = sorted(os.listdir(directory_fd))
+            except OSError as error:
+                raise ValueError("workspace report directory is unavailable") from error
+            for name in names:
+                if not name or name in {".", ".."} or "/" in name or "\\" in name:
+                    raise ValueError("workspace report artifact path is unsafe")
+                relative = relative_parent / name
+                try:
+                    metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                except OSError as error:
+                    raise ValueError("workspace report artifact is unavailable") from error
+                if stat.S_ISDIR(metadata.st_mode):
+                    try:
+                        child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+                    except OSError as error:
+                        raise ValueError(
+                            "workspace report artifacts must not use symlinks"
+                        ) from error
+                    try:
+                        opened = os.fstat(child_fd)
+                        if not same_identity(metadata, opened):
+                            raise ValueError("workspace report directory identity changed")
+                        visit(child_fd, relative)
+                    finally:
+                        os.close(child_fd)
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ValueError("workspace report artifacts must be regular files")
+                captured_files += 1
+                if captured_files > _MAX_CAPTURED_REPORT_FILES:
+                    raise ValueError("workspace report capture exceeds file count limit")
+                if metadata.st_size > _MAX_CAPTURED_REPORT_FILE_BYTES:
+                    raise ValueError("workspace report artifact exceeds per-file byte limit")
+                captured_bytes += metadata.st_size
+                if captured_bytes > _MAX_CAPTURED_REPORT_TOTAL_BYTES:
+                    raise ValueError("workspace report capture exceeds total byte limit")
+                try:
+                    descriptor = os.open(name, file_flags, dir_fd=directory_fd)
+                except OSError as error:
+                    raise ValueError("workspace report artifacts must not use symlinks") from error
+                try:
+                    before = os.fstat(descriptor)
+                    if not same_identity(metadata, before):
+                        raise ValueError("workspace report artifact identity changed")
+                    chunks: list[bytes] = []
+                    while True:
+                        chunk = os.read(descriptor, 64 * 1024)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                    after = os.fstat(descriptor)
+                    if (
+                        before.st_dev,
+                        before.st_ino,
+                        before.st_mode,
+                        before.st_size,
+                        before.st_mtime_ns,
+                    ) != (
+                        after.st_dev,
+                        after.st_ino,
+                        after.st_mode,
+                        after.st_size,
+                        after.st_mtime_ns,
+                    ):
+                        raise ValueError("workspace report artifact changed while captured")
+                finally:
+                    os.close(descriptor)
+                artifacts[(PurePosixPath("workspace-reports") / relative).as_posix()] = b"".join(
+                    chunks
+                )
+
+        try:
+            workspace_fd = os.open(workspace_root, directory_flags)
+            try:
+                base_fd = os.open(
+                    ".requirements-impact-refiner", directory_flags, dir_fd=workspace_fd
+                )
+            except FileNotFoundError:
+                return {}
+            try:
+                reports_fd = os.open("reports", directory_flags, dir_fd=base_fd)
+            except FileNotFoundError:
+                return {}
+            visit(reports_fd, PurePosixPath())
+            return artifacts
+        except OSError as error:
+            raise ValueError("workspace report root must be a real directory") from error
+        finally:
+            for descriptor in (reports_fd, base_fd, workspace_fd):
+                if descriptor is not None:
+                    os.close(descriptor)
 
     @classmethod
     def _capture_workspace_reports(
@@ -752,7 +1238,29 @@ class CodexAdapter(ClientAdapter):
             status = RunStatus.INVALID_EVIDENCE
             reason = "run options disagree with execution argv"
             final_output = None
-        if self.expected_plugin_version.startswith("0.4.") and final_output is not None:
+        if (
+            self._requires_terminal_delivery(self.expected_plugin_version)
+            and request.case.kind != "negative"
+            and final_output is not None
+        ):
+            streams = tuple(
+                value
+                for name, value in sorted(artifacts.items())
+                if name in ("first.jsonl", "second.jsonl") and isinstance(value, str)
+            )
+            turn_outputs = tuple(
+                value if isinstance(value, str) else value.decode("utf-8", errors="strict")
+                for name, value in sorted(artifacts.items())
+                if name in ("first.final.txt", "second.final.txt")
+                and isinstance(value, (str, bytes))
+            )
+            terminal = analyze_terminal_delivery(streams, turn_outputs)
+            artifacts["terminal-delivery-evidence.json"] = terminal.to_json()
+            if not terminal.valid:
+                status = RunStatus.INVALID_EVIDENCE
+                reason = "terminal delivery evidence invalid"
+                final_output = None
+        elif self.expected_plugin_version.startswith("0.4.") and final_output is not None:
             streams = tuple(
                 value
                 for name, value in sorted(artifacts.items())
@@ -760,9 +1268,10 @@ class CodexAdapter(ClientAdapter):
             )
             expected_turns = 0 if request.case.kind == "negative" else len(request.case.turns)
             turn_outputs = tuple(
-                value
+                value if isinstance(value, str) else value.decode("utf-8", errors="strict")
                 for name, value in sorted(artifacts.items())
-                if name in ("first.final.txt", "second.final.txt") and isinstance(value, str)
+                if name in ("first.final.txt", "second.final.txt")
+                and isinstance(value, (str, bytes))
             )
             controller = analyze_controller_trace(
                 streams,

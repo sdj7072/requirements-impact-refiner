@@ -1,0 +1,53 @@
+The repository is empty, so there are no existing product constraints. That makes this a greenfield brainstorm.
+
+Here are several promising directions:
+
+1. “Plan B” fitness
+
+A coach for people whose schedules constantly fall apart. When a workout is missed, the app automatically rebuilds the week around available time, energy, location, and equipment.
+
+Core promise: “Your plan adapts before you quit.”
+
+2. Movement snacks
+
+Two-to-ten-minute workouts inserted into natural gaps: before a meeting, while dinner cooks, or during a commute break. Progress is measured by weekly movement volume rather than fragile daily streaks.
+
+3. Fitness skill tree
+
+Users choose an ability—first pull-up, comfortable 5K, deeper squat, carrying a child without back fatigue—and unlock prerequisite skills along a visual progression tree.
+
+4. Recovery-aware coach
+
+Each session starts with a 20-second check-in covering sleep, soreness, stress, and motivation. The app adjusts intensity without turning every low-energy day into a rest day.
+
+5. Real-life strength
+
+Training built around practical capabilities: lifting luggage, climbing stairs, gardening, hiking, playing with children, or staying mobile while aging. This could appeal to people alienated by gym culture.
+
+6. Accountability contracts
+
+Small private groups commit to weekly goals. Missing a goal triggers a predefined consequence, while completing it contributes to a shared reward or team streak.
+
+7. Form diary
+
+Users record a short clip of one movement each week. The app creates side-by-side comparisons and highlights visible changes in control, range, and technique—not just weight or repetitions.
+
+8. Fitness for “bad days”
+
+An app designed specifically for low-motivation, anxious, tired, or overwhelmed days. Users select how they feel and receive the smallest workout likely to improve that state.
+
+My strongest concept would combine #1, #2, and #8:
+
+> A fitness app that protects consistency by turning disrupted or low-energy days into smaller, achievable sessions.
+
+A lean MVP could include:
+
+- One weekly fitness goal
+- A flexible workout plan
+- “My day changed” and “Low energy” buttons
+- Automatic 5-, 10-, 20-, or 40-minute alternatives
+- Home, gym, office, and no-equipment modes
+- Weekly consistency and recovery trends
+- No shame-based streak resets
+
+The key validation question is: which audience should this serve first—busy professionals, fitness beginners, parents, older adults, or people returning after repeatedly quitting? That choice will shape nearly every useful product decision.

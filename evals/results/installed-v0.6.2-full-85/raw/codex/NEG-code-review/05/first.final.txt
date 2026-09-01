@@ -1,0 +1,3 @@
+I can’t review it yet: the supplied workspace is empty—there’s no Git repository, patch file, or diff content available.
+
+Please paste or attach the complete diff, and I’ll return correctness findings prioritized by severity with exact file and line references.

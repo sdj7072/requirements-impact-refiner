@@ -16,4 +16,4 @@ In the single `Planning Handoff` row, set `Selected planning workflow` exactly t
 
 ## Exit
 
-Exit before `writing-plans`. Hand off the report without invoking `writing-plans` or authoring its work breakdown.
+Exit before `writing-plans`. Hand off the report without invoking `writing-plans` or authoring its work breakdown. Return `display_text` verbatim and end the current turn. Do not run commands, use tools, plan, test, or modify files; execution requires a later user turn.

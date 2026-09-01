@@ -13,6 +13,7 @@ from evals.harness.models import (
     CaseSpec,
     CaseTurn,
     ClientProbe,
+    CommandResult,
     RunRequest,
     RunStatus,
 )
@@ -144,6 +145,12 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "        if not os.path.isfile('first.final.txt'):\n"
         "            print('missing exact predecessor artifact', file=sys.stderr)\n"
         "            sys.exit(25)\n"
+        "    if mode == 'mutate-source':\n"
+        "        with open(os.path.join('src', 'roles.py'), 'w', encoding='utf-8') as handle:\n"
+        "            handle.write('ROLE = \\\"admin\\\"\\n')\n"
+        "    if mode == 'mutate-predecessor' and args[0:2] == ['exec', 'resume']:\n"
+        "        with open('first.final.txt', 'w', encoding='utf-8') as handle:\n"
+        "            handle.write('mutated predecessor')\n"
         "    if mode == 'write-compact-report':\n"
         "        report_dir = os.path.join('.requirements-impact-refiner', 'reports', 'RPT-001')\n"
         "        os.makedirs(report_dir, exist_ok=True)\n"
@@ -169,7 +176,7 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         '        print(\'{\\"type\\":\\"item.completed\\"}\')\n'
         "    else:\n"
         '        print(\'{\\"type\\":\\"thread.started\\",\\"thread_id\\":\\"' + UUID + "\\\"}')\n"
-        "        if mode == 'controller-success':\n"
+        "        if mode in ('controller-success', 'controller-rewrite', 'controller-post-finalize-command'):\n"
         "            draft = '0123456789abcdef0123456789abcdef'\n"
         "            receipt = 'fedcba9876543210fedcba9876543210'\n"
         "            graph_dir = os.path.join('.requirements-impact-refiner', 'graph')\n"
@@ -179,14 +186,17 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
         "                handle.write(receipt_payload)\n"
         "            begin = {'type': 'item.completed', 'item': {'id': 'begin', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_begin', 'arguments': {'repo_root': os.getcwd()}, 'result': {'content': [], 'structured_content': {'draft_id': draft, 'installed_payload_sha256': 'a' * 64}}, 'error': None, 'status': 'completed'}}\n"
         "            trace = {'type': 'item.completed', 'item': {'id': 'trace', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_trace_impact', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'seeds': []}, 'result': {'content': [], 'structured_content': {'receipt_id': receipt, 'receipt_path': '.requirements-impact-refiner/graph/' + draft + '.json', 'receipt_sha256': hashlib.sha256(receipt_payload).hexdigest(), 'compact_graph': {'providers': [], 'nodes': [], 'edges': [], 'paths': [], 'frontier': [], 'timings_ms': {'total': 1}, 'budget_status': 'closed'}, 'budget_status': 'closed', 'request_sha256': 'c' * 64, 'seeds': []}}, 'error': None, 'status': 'completed'}}\n"
-        "            finalize = {'type': 'item.completed', 'item': {'id': 'finalize', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_finalize', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'graph_receipt_id': receipt, 'analysis': {}}, 'result': {'content': [{'type': 'text', 'text': 'final response'}], 'structured_content': {'status': 'published', 'display_text': 'final response'}}, 'error': None, 'status': 'completed'}}\n"
+        "            finalize = {'type': 'item.completed', 'item': {'id': 'finalize', 'type': 'mcp_tool_call', 'server': 'requirements-impact-refiner', 'tool': 'rir_finalize', 'arguments': {'repo_root': os.getcwd(), 'draft_id': draft, 'graph_receipt_id': receipt, 'analysis': {}}, 'result': {'content': [{'type': 'text', 'text': 'final response'}], 'structured_content': {'status': 'published', 'display_text': 'final response', 'delivery_contract': {'canonical': True, 'must_return_content_verbatim': True, 'terminal': True}}}, 'error': None, 'status': 'completed'}}\n"
         "            print(json.dumps(begin))\n"
         "            print(json.dumps(trace))\n"
         "            print(json.dumps(finalize))\n"
+        "            if mode == 'controller-post-finalize-command':\n"
+        "                print(json.dumps({'type': 'item.completed', 'item': {'id': 'late-command', 'type': 'command_execution', 'command': 'true'}}))\n"
+        "            print(json.dumps({'type': 'item.completed', 'item': {'id': 'answer', 'type': 'agent_message', 'text': 'final response'}}))\n"
         "    if mode != 'missing-final':\n"
         "        output = args[args.index('-o') + 1]\n"
         "        with open(output, 'w', encoding='utf-8') as handle:\n"
-        "            handle.write('final response')\n"
+        "            handle.write('implemented change' if mode == 'controller-rewrite' else 'final response')\n"
         "else:\n"
         "    print('unexpected arguments', file=sys.stderr)\n"
         "    sys.exit(2)\n",
@@ -197,6 +207,170 @@ def write_fake_codex(directory, plugins=None, exec_mode="success"):
 
 
 class CodexAdapterTest(unittest.TestCase):
+    def test_final_output_reader_rejects_symlink_without_reading_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            secret = root / "secret.txt"
+            secret.write_text("must-not-enter-evidence", encoding="utf-8")
+            final = root / "first.final.txt"
+            final.symlink_to(secret.name)
+
+            with self.assertRaisesRegex(ValueError, "regular non-symlink"):
+                CodexAdapter._read_final_bytes(final)
+
+    def test_command_problem_rejects_invalid_utf8_final_bytes(self):
+        command = CommandResult(("codex", "exec"), 0, "{}\n", "", 0.1, False)
+        with tempfile.TemporaryDirectory() as temporary:
+            final = Path(temporary) / "first.final.txt"
+            final.write_bytes(b"\xff")
+            payload, read_problem = CodexAdapter._final_artifact(final)
+
+            problem, output = CodexAdapter._command_problem(command, payload, read_problem)
+
+        self.assertEqual(problem, "invalid UTF-8 final output")
+        self.assertIsNone(output)
+
+    def test_execute_reads_each_final_artifact_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary)
+            request = make_request(temporary, ("first turn",))
+            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary))
+
+            with patch.object(
+                CodexAdapter,
+                "_read_final_bytes",
+                wraps=CodexAdapter._read_final_bytes,
+            ) as reader:
+                result = adapter.execute(request)
+
+        self.assertEqual(result.status, RunStatus.PASS)
+        self.assertEqual(reader.call_count, 1)
+
+    def test_workspace_guard_detects_product_tree_mutations(self):
+        mutations = {
+            "overwrite": lambda root: (root / "src/roles.py").write_text(
+                "ROLE = 'admin'\n", encoding="utf-8"
+            ),
+            "delete": lambda root: (root / "src/roles.py").unlink(),
+            "chmod": lambda root: (root / "src/roles.py").chmod(0o400),
+            "same-byte-replace": lambda root: (
+                (root / "replacement.py").write_text("ROLE = 'member'\n", encoding="utf-8"),
+                (root / "replacement.py").replace(root / "src/roles.py"),
+            ),
+            "symlink": lambda root: (
+                (root / "src/roles.py").unlink(),
+                (root / "src/roles.py").symlink_to("../target.py"),
+            ),
+            "extra-file": lambda root: (root / "extra.py").write_text("x = 1\n", encoding="utf-8"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "src").mkdir()
+                (root / "src/roles.py").write_text("ROLE = 'member'\n", encoding="utf-8")
+                baseline = CodexAdapter._snapshot_guarded_workspace(root)
+                mutate(root)
+                (root / "first.final.txt").write_text("final", encoding="utf-8")
+
+                integrity = CodexAdapter._workspace_integrity(
+                    root, baseline, root / "first.final.txt"
+                )
+
+                self.assertEqual(integrity["status"], "mutated")
+                self.assertGreater(
+                    integrity["added_count"]
+                    + integrity["removed_count"]
+                    + integrity["changed_count"],
+                    0,
+                )
+
+    def test_workspace_guard_allows_reserved_artifacts_and_current_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".requirements-impact-refiner.json").write_text("{}\n", encoding="utf-8")
+            baseline = CodexAdapter._snapshot_guarded_workspace(root)
+            report = root / ".requirements-impact-refiner" / "reports" / "RPT-001"
+            report.mkdir(parents=True)
+            (report / "revision-0001.md").write_text("report\n", encoding="utf-8")
+            (root / "first.final.txt").write_text("final\n", encoding="utf-8")
+
+            clean = CodexAdapter._workspace_integrity(root, baseline, root / "first.final.txt")
+            (root / ".requirements-impact-refiner.json").write_text(
+                '{"changed":true}\n', encoding="utf-8"
+            )
+            changed = CodexAdapter._workspace_integrity(root, baseline, root / "first.final.txt")
+
+        self.assertEqual(clean["status"], "clean")
+        self.assertEqual(changed["status"], "mutated")
+
+    def test_workspace_guard_does_not_read_oversized_added_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baseline = CodexAdapter._snapshot_guarded_workspace(root)
+            added = root / "oversized.bin"
+            with added.open("wb") as stream:
+                stream.truncate(16 * 1024 * 1024)
+
+            with patch(
+                "evals.harness.adapters.codex.os.read",
+                side_effect=AssertionError("forbidden added file was read"),
+            ):
+                integrity = CodexAdapter._workspace_integrity(
+                    root, baseline, root / "first.final.txt"
+                )
+
+        self.assertEqual(integrity["status"], "mutated")
+        self.assertEqual(integrity["added_count"], 1)
+
+    def test_workspace_report_capture_rejects_oversized_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = root / ".requirements-impact-refiner" / "reports" / "RPT-001"
+            report.mkdir(parents=True)
+            with (report / "revision-0001.json").open("wb") as stream:
+                stream.truncate(4 * 1024 * 1024 + 1)
+
+            with self.assertRaisesRegex(ValueError, "exceeds.*byte"):
+                CodexAdapter._workspace_report_artifacts(root)
+
+    def test_execute_rejects_fixture_mutation_but_preserves_raw_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, exec_mode="mutate-source")
+            request = make_request(temporary, ("first turn",))
+            request = replace(
+                request,
+                case=replace(
+                    request.case,
+                    fixture_files=(("src/roles.py", "ROLE = 'member'\n"),),
+                ),
+            )
+            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary))
+
+            result = adapter.execute(request)
+            attempt = request.output_root / "codex" / "POS-example" / "01"
+            integrity = json.loads(
+                (attempt / "workspace-integrity.json").read_text(encoding="utf-8")
+            )
+            first_jsonl_exists = (attempt / "first.jsonl").exists()
+
+        self.assertEqual(result.status, RunStatus.INVALID_EVIDENCE)
+        self.assertEqual(result.reason, "workspace mutation detected after first turn")
+        self.assertIsNone(result.final_output)
+        self.assertTrue(first_jsonl_exists)
+        self.assertEqual(integrity["checks"][0]["status"], "mutated")
+
+    def test_resume_rejects_mutation_of_first_turn_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(temporary, exec_mode="mutate-predecessor")
+            request = make_request(temporary, ("first turn", "second turn"))
+            adapter = CodexAdapter(executable=str(executable), cwd=Path(temporary))
+
+            result = adapter.execute(request)
+
+        self.assertEqual(result.status, RunStatus.INVALID_EVIDENCE)
+        self.assertEqual(result.reason, "workspace mutation detected after second turn")
+        self.assertIsNone(result.final_output)
+
     def test_graph_case_fixture_is_staged_inside_isolated_workspace(self):
         case = load_graph_cases()[0]
         with tempfile.TemporaryDirectory() as temporary:
@@ -573,6 +747,80 @@ class CodexAdapterTest(unittest.TestCase):
         self.assertEqual(result.reason, "controller evidence invalid")
         self.assertIsNone(result.final_output)
 
+    def test_v06_records_exact_terminal_delivery_evidence(self):
+        plugins = [
+            {
+                "id": "requirements-impact-refiner@requirements-impact-refiner",
+                "name": "Requirements Impact Refiner",
+                "version": "0.6.2-dev",
+                "enabled": True,
+            },
+            {
+                "id": "superpowers@openai-curated",
+                "name": "Superpowers",
+                "version": "6.3.0",
+                "enabled": True,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = write_fake_codex(
+                temporary, plugins=plugins, exec_mode="controller-success"
+            )
+            request = make_request(temporary, ("first turn",))
+            adapter = CodexAdapter(
+                executable=str(executable),
+                cwd=Path(temporary),
+                expected_plugin_version="0.6.2-dev",
+            )
+
+            result = adapter.execute(request)
+            evidence = json.loads(
+                (
+                    request.output_root
+                    / "codex"
+                    / "POS-example"
+                    / "01"
+                    / "terminal-delivery-evidence.json"
+                ).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.status, RunStatus.PASS)
+        self.assertTrue(evidence["valid"])
+        self.assertTrue(evidence["display_text_exact_match"])
+        self.assertTrue(evidence["terminal_contract_observed"])
+        self.assertTrue(evidence["no_post_finalize_tool_activity"])
+
+    def test_v06_rejects_rewritten_final_or_post_finalize_command(self):
+        plugins = [
+            {
+                "id": "requirements-impact-refiner@requirements-impact-refiner",
+                "name": "Requirements Impact Refiner",
+                "version": "0.6.2-dev",
+                "enabled": True,
+            },
+            {
+                "id": "superpowers@openai-curated",
+                "name": "Superpowers",
+                "version": "6.3.0",
+                "enabled": True,
+            },
+        ]
+        for mode in ("controller-rewrite", "controller-post-finalize-command"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                executable = write_fake_codex(temporary, plugins=plugins, exec_mode=mode)
+                request = make_request(temporary, ("first turn",))
+                adapter = CodexAdapter(
+                    executable=str(executable),
+                    cwd=Path(temporary),
+                    expected_plugin_version="0.6.2-dev",
+                )
+
+                result = adapter.execute(request)
+
+            self.assertEqual(result.status, RunStatus.INVALID_EVIDENCE)
+            self.assertEqual(result.reason, "terminal delivery evidence invalid")
+            self.assertIsNone(result.final_output)
+
     def test_one_turn_is_ephemeral_and_omitted_model_stays_omitted(self):
         with tempfile.TemporaryDirectory() as temporary:
             request = make_request(temporary, ("first turn",))
@@ -828,10 +1076,15 @@ class CodexAdapterTest(unittest.TestCase):
                     "first.stderr.txt",
                     "first.final.txt",
                     "metadata.json",
+                    "workspace-integrity.json",
                 },
             )
             metadata = json.loads((evidence / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["environment"], "Codex with Superpowers")
+            integrity = json.loads(
+                (evidence / "workspace-integrity.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(integrity["checks"][0]["status"], "clean")
 
     def test_execute_captures_compact_report_artifacts_before_workspace_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextvars
 import hashlib
 import importlib.util
@@ -116,7 +117,7 @@ MAX_REQUIRED_SOURCE_DIGESTS = 64
 MAX_REQUIRED_SOURCE_PATH_BYTES = 1024
 MAX_REQUIRED_SOURCE_MAP_BYTES = 64 * 1024
 MAX_SOURCE_RECHECK_BYTES = 4 * 1024 * 1024
-OPERATION_TIMEOUT_SECONDS = 0.25
+OPERATION_TIMEOUT_SECONDS = 0.3
 _TRANSFORM_CONFIG_PATTERN = r"^(core\.autocrlf|core\.eol|core\.attributesfile)"
 _DELTA_WORKER_SHARED_GROUP = False
 
@@ -1454,25 +1455,42 @@ def _capture_git_proof_state(
     if _replacement_refs_present(git_dir):
         raise _GitUnavailable("Git replacement refs are present")
     commit = _filesystem_head(git_dir)
-    transforms = _checkout_transform_snapshot(root, scope, git_dir, deadline)
-    status_payload = _successful(
-        _run_git_command(
-            root,
-            (
-                *scope,
-                "status",
-                "--porcelain=v1",
-                "-z",
-                "--untracked-files=normal",
-                "--ignore-submodules=none",
-                "--no-renames",
-            ),
-            deadline,
-        ),
-        "Git status",
+    status_arguments = (
+        *scope,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+        "--no-renames",
     )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        transforms_future = executor.submit(
+            contextvars.copy_context().run,
+            _checkout_transform_snapshot,
+            root,
+            scope,
+            git_dir,
+            deadline,
+        )
+        status_future = executor.submit(
+            contextvars.copy_context().run,
+            _run_git_command,
+            root,
+            status_arguments,
+            deadline,
+        )
+        index_future = executor.submit(
+            contextvars.copy_context().run,
+            _index_flags_snapshot,
+            root,
+            scope,
+            deadline,
+        )
+        transforms = transforms_future.result()
+        status_payload = _successful(status_future.result(), "Git status")
+        index_flags = index_future.result()
     status_paths = _status_paths(status_payload)
-    index_flags = _index_flags_snapshot(root, scope, deadline)
     _check_deadline(deadline)
     return _GitProofState(commit, status_payload, status_paths, index_flags, transforms)
 
@@ -1698,7 +1716,7 @@ def _selected_result(
 
 
 def _lookup_previous(request: PreviousLookupRequest) -> PreviousReportResult:
-    """Select and compactly render one exact report lineage within 250 milliseconds."""
+    """Select and compactly render one exact report lineage within 300 milliseconds."""
 
     if not isinstance(request, PreviousLookupRequest):
         raise TypeError("request must be PreviousLookupRequest")

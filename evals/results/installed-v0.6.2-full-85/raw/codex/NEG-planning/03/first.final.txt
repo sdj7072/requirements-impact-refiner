@@ -1,0 +1,3 @@
+I can do this, but the approved specification itself isn’t present, and the workspace is empty.
+
+Please paste or attach the approved impact report/specification—and, if tasks should reference concrete files, provide the repository contents. I’ll convert it into ordered coding tasks with dependencies, affected areas, acceptance criteria, and verification steps.

@@ -219,6 +219,20 @@ class EvalHarnessScoringTest(unittest.TestCase):
         self.assertFalse(score.passed)
         self.assertTrue(any("refinement" in finding for finding in score.findings))
 
+    def test_negative_case_rejects_canonical_fast_scan_delivery(self):
+        """A needs-input scan is still forbidden activation for a negative case."""
+        score = score_mechanical(
+            case("NEG-example", "negative"),
+            result(
+                "NEG-example",
+                RunStatus.PASS,
+                "## Fast impact scan\n\n### Candidate boundaries\n\n- api/profile.py",
+            ),
+        )
+
+        self.assertFalse(score.passed)
+        self.assertIn("negative case activated the Fast Scan workflow", score.findings)
+
     def test_superpowers_case_requires_exact_structured_boundary(self):
         """Free text cannot establish the mechanically provable workflow boundary."""
         score = score_mechanical(

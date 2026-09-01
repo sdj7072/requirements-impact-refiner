@@ -1,0 +1,275 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Reconnect replay of offline.edits
+- Possible issue: An edit replayed after its target's tombstone has expired can recreate data that the server previously deleted.
+- Affected feature or user: Users and server records involved in delete-versus-offline-edit conflicts.
+- Trigger: A client remains offline longer than 24 hours and later replays an edit for a deleted record.
+- Severity: critical
+- Prevention or check: Choose and enforce an explicit late-edit policy, with a test covering replay just inside and just outside the retention window.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: Routing queued edits through models/record.py
+- Possible issue: Replay-time updated_at values can replace the edits' original chronology and alter last-write-wins outcomes.
+- Affected feature or user: Records with concurrent server changes or multiple offline edits.
+- Trigger: Queued edits are stamped when replayed after reconnect.
+- Severity: high
+- Prevention or check: Keep queue order as the replay sequence, distinguish local creation metadata from server updated_at, and test concurrent-update ordering.
+- Status: detected
+
+### Impact IMP-003
+
+- Changed feature: Automatic reconnect synchronization
+- Possible issue: A disconnect during replay can apply an edit twice or drop remaining edits if acknowledgement and dequeue timing are not atomic.
+- Affected feature or user: Clients reconnecting over unstable networks and records receiving replayed edits.
+- Trigger: Connectivity fails after a server write but before the client records acknowledgement.
+- Severity: high
+- Prevention or check: Give queued edits stable identities, acknowledge each successful application, dequeue only acknowledged edits, and verify retry idempotency.
+- Status: detected
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Sync offline.edits through models/record.py when the app reconnects.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: When connectivity is restored, replay queued offline.edits in their preserved local creation order through the models/record.py record-write path so normal updated_at stamping is applied, while defining safe behavior for retries and edits that arrive after the server's 24-hour tombstone retention window.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: The client queue preserves offline edits in local creation order.
+- Evidence level: verified
+- Evidence: client/queue.py declares PRESERVES = "local creation order only" and STREAM_LINK = "offline.edits".
+
+### Invariant INV-002
+
+- Current behavior: Writes to the offline.edits record path use updated_at as the record stamp.
+- Evidence level: verified
+- Evidence: models/record.py declares STREAM = "offline.edits" and STAMPED = "updated_at".
+
+### Invariant INV-003
+
+- Current behavior: Server tombstones for offline.edits are retained for 24 hours.
+- Evidence level: verified
+- Evidence: server/tombstones.py declares TOMBSTONE_HOURS = 24 and STREAM_REF = "offline.edits".
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Evidence: client/queue.py declares PRESERVES = "local creation order only" and STREAM_LINK = "offline.edits".
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002, IMP-003
+- Evidence: models/record.py declares STREAM = "offline.edits" and STAMPED = "updated_at".
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: server/tombstones.py declares TOMBSTONE_HOURS = 24 and STREAM_REF = "offline.edits".
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: data
+- Severity: critical
+- State: blocked
+- Evidence level: unknown
+- Evidence: The supplied files declare a 24-hour tombstone window and offline replay ordering, but the graph provider was unavailable, so the transitive runtime behavior is unverified.
+- Invariants: INV-001, INV-003
+- Decision: none
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: high
+- State: detected
+- Evidence level: unknown
+- Evidence: The supplied files declare updated_at stamping and local creation order, but the graph provider was unavailable and no executable write path exists.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-002, AC-003
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: high
+- State: detected
+- Evidence level: unknown
+- Evidence: The repository contains no reconnect acknowledgement, retry, cursor, or idempotency implementation; only stream and ordering constants are present.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-004
+
+## Decision Needed
+
+- Question: What should happen when an offline edit is replayed after the target record's 24-hour tombstone has expired?
+
+### Option 1
+
+- Option: Reject and surface a conflict
+- Affected impacts: IMP-001
+- Trade-off: Prevents silent resurrection but requires a client-visible conflict/recovery path.
+
+### Option 2
+
+- Option: Extend tombstone retention
+- Affected impacts: IMP-001
+- Trade-off: Allows more offline clients to sync safely but increases server storage and still needs a finite cutoff policy.
+
+### Option 3
+
+- Option: Allow recreation
+- Affected impacts: IMP-001
+- Trade-off: Keeps replay simple but can silently undo a server-side deletion.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: When connectivity is restored, replay queued offline.edits in their preserved local creation order through the models/record.py record-write path so normal updated_at stamping is applied, while defining safe behavior for retries and edits that arrive after the server's 24-hour tombstone retention window.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-003
+- Observable criterion: Reconnect replay enforces the selected policy for edits targeting deleted records both before and after the 24-hour tombstone expiry.
+- Evidence: Required to close the delete-versus-late-edit ambiguity created by finite tombstone retention.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-002
+- Observable criterion: Every successfully replayed offline.edit is applied through models/record.py and receives the normal updated_at stamp exactly once per logical edit.
+- Evidence: Directly expresses the requested routing while preserving the existing record stamping behavior.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-001
+- Observable criterion: Multiple queued edits are submitted in stable local creation order across reconnect and retry boundaries.
+- Evidence: Preserves the only ordering guarantee declared by client/queue.py.
+
+### Criterion AC-004
+
+- Requirement: REQ-001
+- Impact: IMP-003
+- Invariant: INV-001
+- Observable criterion: If connectivity fails after an apply but before acknowledgement, reconnect retry does not duplicate the logical edit and does not skip later queued edits.
+- Evidence: Needed because no acknowledgement or idempotency contract currently exists.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The repository evidence does not define whether expired tombstones reject, defer, or permit late edits; choosing changes user-visible data semantics.
+- Linked decision: none
+- Next owner: Product/feature owner
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: Reconnect replay in client/queue.py
+- Evidence: client/queue.py references offline.edits and local creation order.
+- Consequence for confidence: verified target; implementation surface is currently only declarative constants
+
+### Scope 2
+
+- Scope or limitation: Record application and timestamping in models/record.py
+- Evidence: models/record.py identifies offline.edits and updated_at.
+- Consequence for confidence: verified target; executable write API is absent
+
+### Scope 3
+
+- Scope or limitation: Deletion conflict handling in server/tombstones.py
+- Evidence: server/tombstones.py sets a 24-hour retention for offline.edits.
+- Consequence for confidence: verified target; conflict behavior after expiry is absent
+
+### Scope 4
+
+- Scope or limitation: Tests for ordering, idempotency, timestamps, and tombstone expiry
+- Evidence: No tests or test configuration are present in the repository.
+- Consequence for confidence: verified by repository inventory
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-002: client/queue.py → offline.edits
+- Consequence for confidence: PATH-002: provider builtin; confidence lexical; location client/queue.py + server/tombstones.py
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-001: client/queue.py → offline.edits
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location client/queue.py + models/record.py
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-003
+- Evidence: PATH-001: client/queue.py → offline.edits
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location client/queue.py + models/record.py
+
+### Scope 8
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 3 nodes / 6 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 40f38630d8a20355fa3b0dfe36988332; sha256 7e8a86aab3bde2682f0f22b7797a74401b1b6100985e4f9d287eeb625fe43baf; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004
+- Selected planning workflow: Not ready

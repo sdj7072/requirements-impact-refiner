@@ -1,0 +1,6 @@
+Cache dashboard.response from api/dashboard.py for one hour.
+
+Repository evidence:
+- api/dashboard.py renders dashboard.response by tenant_id
+- cache/permission_cache.py invalidates permission_cache on role changes
+- events/dashboard_updated.py publishes dashboard.updated

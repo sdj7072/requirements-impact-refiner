@@ -1,0 +1,7 @@
+{
+  "collection_harness_sha256": "4d431c2e33c90f83e31dce8bad47cf0c0bbadb40810709886f55f96dff08f44b",
+  "raw_manifest_sha256": "9198c3710b497f1758d1c5d4e295eb1a7cc31a53ec31d8b6fa50ecb0f20bc6a6",
+  "reason": "Valid revision-1 lineage evidence is mechanically scoreable rather than invalid evidence.",
+  "intermediate_scoring_harness_sha256": "ef07a81dd2da9ac5f1ddfdc7763f3bb5067966e2984b9c21bf3df0a08deb2ee6",
+  "scoring_harness_sha256": "751a3f26e9ef1455f56593557427baa74186f6099dd59ee94a2d46473121b702"
+}

@@ -1,0 +1,9 @@
+I’m missing the product idea and repository evidence, so I can’t produce a grounded PRD yet.
+
+Please provide:
+
+- The product idea or desired behavior
+- The relevant file, symbol, API, or feature boundary
+- Any known users, goals, constraints, or success metrics
+
+The requirements-impact scan found no repository-backed candidate to infer these from.

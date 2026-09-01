@@ -1,0 +1,332 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Immediate account deletion through account.delete_flow
+- Possible issue: The delete fails for accounts referenced by invoices, or succeeds only after destructive invoice changes.
+- Affected feature or user: Accounts with invoices, callers of the deletion flow, and invoice records.
+- Trigger: A deletion request targets an account whose id is present in invoice.account_id.
+- Severity: critical
+- Prevention or check: Select an invoice-linked deletion policy and enforce it transactionally before implementing the flow.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: Immediate deletion of invoice-linked accounts
+- Possible issue: Financial records or their required account linkage are removed before the 30-day retention period ends.
+- Affected feature or user: Finance records, retention controls, audits, and account owners with invoice history.
+- Trigger: The deletion flow purges or cascades invoice-linked data before its retention deadline.
+- Severity: critical
+- Prevention or check: Retain the minimum finance-linked record for 30 days, or obtain an explicit policy change before permitting an earlier purge.
+- Status: blocked
+
+### Impact IMP-003
+
+- Changed feature: Account cleanup orchestration
+- Possible issue: Immediate deletion can leave stale cleanup events, duplicate destructive work, or bypass the existing worker contract.
+- Affected feature or user: The account-cleanup queue, its worker, retries, and operational monitoring.
+- Trigger: account.delete_flow deletes data before an account-cleanup event is consumed or without defining event behavior.
+- Severity: high
+- Prevention or check: Define emission, idempotency, and missing-account handling for cleanup events as part of the chosen deletion model.
+- Status: blocked
+
+### Impact IMP-004
+
+- Changed feature: account.delete_flow implementation in db/constraints.py
+- Possible issue: A local edit cannot provide a reliable deletion flow without a defined database API, transaction boundary, and event publisher.
+- Affected feature or user: Deletion callers, persistence behavior, and cleanup processing.
+- Trigger: Implementation is attempted from the current constant-only module without selecting the lifecycle semantics and integration contract.
+- Severity: high
+- Prevention or check: Specify the flow contract and verify or add its database and event dependencies before coding.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Delete an account immediately through account.delete_flow in db/constraints.py.<br><br>Repository evidence:<br>- db/constraints.py declares invoice.account_id ON DELETE RESTRICT<br>- policy/retention.py sets FINANCE_RETENTION_DAYS to 30<br>- workers/cleanup.py consumes account-cleanup events
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: account.delete_flow must make the requested account unavailable immediately, while the treatment of invoice-linked account data is explicitly selected so the ON DELETE RESTRICT constraint, the 30-day finance-retention rule, and the account-cleanup event consumer remain coherent.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: An account row referenced by invoice.account_id cannot be hard-deleted while the ON DELETE RESTRICT relationship remains in force.
+- Evidence level: verified
+- Evidence: db/constraints.py declares INVOICE_FK = "invoice.account_id ON DELETE RESTRICT".
+
+### Invariant INV-002
+
+- Current behavior: Finance data governed by the current policy is retained for 30 days.
+- Evidence level: verified
+- Evidence: policy/retention.py sets FINANCE_RETENTION_DAYS = 30 and references account.delete_flow.
+
+### Invariant INV-003
+
+- Current behavior: Deferred account cleanup is initiated through account-cleanup events carrying an account_id.
+- Evidence level: verified
+- Evidence: workers/cleanup.py names QUEUE = "account-cleanup" and consume(event) reads event["account_id"].
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-004
+- Evidence: db/constraints.py declares INVOICE_FK = "invoice.account_id ON DELETE RESTRICT".
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002, IMP-004
+- Evidence: policy/retention.py sets FINANCE_RETENTION_DAYS = 30 and references account.delete_flow.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-003, IMP-004
+- Evidence: workers/cleanup.py names QUEUE = "account-cleanup" and consume(event) reads event["account_id"].
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: data
+- Severity: critical
+- State: blocked
+- Evidence level: unknown
+- Evidence: The requested hard-delete path conflicts directly with invoice.account_id ON DELETE RESTRICT whenever invoices exist.
+- Invariants: INV-001
+- Decision: none
+- Acceptance criteria: AC-001, AC-002
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: legal/policy
+- Severity: critical
+- State: blocked
+- Evidence level: unknown
+- Evidence: The repository sets FINANCE_RETENTION_DAYS to 30; immediate purging of invoice-linked data would contradict that current rule.
+- Invariants: INV-002
+- Decision: none
+- Acceptance criteria: AC-003
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: workers/cleanup.py consumes account-cleanup events, but the supplied code does not establish whether immediate deletion emits, bypasses, or invalidates those events.
+- Invariants: INV-003
+- Decision: none
+- Acceptance criteria: AC-004
+
+### Impact detail IMP-004
+
+- Requirement: REQ-001
+- Category: functionality
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: db/constraints.py currently contains only INVOICE_FK and FLOW string declarations; it has no callable account.delete_flow implementation or persistence boundary.
+- Invariants: INV-001, INV-002, INV-003
+- Decision: none
+- Acceptance criteria: AC-005, AC-001
+
+## Decision Needed
+
+- Question: For an account referenced by invoices, what must “delete immediately” mean?
+
+### Option 1
+
+- Option: Immediately deactivate and anonymize non-financial account data, retain the minimum invoice-linked record for 30 days, then publish/consume account-cleanup to hard-delete it.
+- Affected impacts: IMP-001, IMP-002, IMP-003, IMP-004
+- Trade-off: Preserves retention and gives an immediate user-facing deletion outcome, but physical account deletion is delayed.
+
+### Option 2
+
+- Option: Hard-delete immediately only when no invoices reference the account; otherwise reject or schedule deletion after the 30-day retention period.
+- Affected impacts: IMP-001, IMP-002, IMP-003, IMP-004
+- Trade-off: Keeps the current constraint and retention policy, but deletion timing differs by invoice history.
+
+### Option 3
+
+- Option: Hard-delete every account immediately and also purge or detach its invoices, with an approved change to the 30-day finance-retention policy and database constraint.
+- Affected impacts: IMP-001, IMP-002, IMP-003, IMP-004
+- Trade-off: Meets literal immediate physical deletion but is destructive and requires explicit finance-policy and schema authorization.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003, IMP-004
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: account.delete_flow must make the requested account unavailable immediately, while the treatment of invoice-linked account data is explicitly selected so the ON DELETE RESTRICT constraint, the 30-day finance-retention rule, and the account-cleanup event consumer remain coherent.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: A deletion request produces the selected immediate outcome for both invoice-free and invoice-linked accounts, with no ambiguous partial state.
+- Evidence: Test both account classes and verify the selected hard-delete, deactivation, rejection, or scheduling result.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: No deletion path leaves an orphaned invoice.account_id or fails unexpectedly on the RESTRICT constraint.
+- Evidence: Integration tests exercise deletion inside the database transaction with an existing invoice reference.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-002
+- Observable criterion: Invoice-linked data remains recoverable/auditable for 30 days unless an explicitly approved policy revision is part of the change.
+- Evidence: A retention-boundary test verifies behavior before, at, and after 30 days, or cites the approved replacement policy.
+
+### Criterion AC-004
+
+- Requirement: REQ-001
+- Impact: IMP-003
+- Invariant: INV-003
+- Observable criterion: The deletion flow and worker define one idempotent outcome for emitted, retried, delayed, and missing-account cleanup events.
+- Evidence: Worker tests cover duplicate events and events consumed before and after the selected deletion transition.
+
+### Criterion AC-005
+
+- Requirement: REQ-001
+- Impact: IMP-004
+- Invariant: INV-003
+- Observable criterion: account.delete_flow has a concrete callable contract, transaction boundary, persistence dependency, and event-publication behavior.
+- Evidence: Repository code and tests demonstrate the public input/output contract and rollback behavior when database or event publication fails.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The current foreign key makes unconditional immediate hard deletion impossible for invoice-linked accounts.
+- Linked decision: none
+- Next owner: Product and finance-policy owner
+
+### Unresolved impact IMP-002
+
+- State: blocked
+- Rationale: The requested timing conflicts with the current 30-day retention rule unless deletion is logical or policy is changed.
+- Linked decision: none
+- Next owner: Finance-policy owner
+
+### Unresolved impact IMP-003
+
+- State: blocked
+- Rationale: Worker event semantics depend on the selected lifecycle and cannot be inferred from the current consumer stub.
+- Linked decision: none
+- Next owner: Account platform owner
+
+### Unresolved impact IMP-004
+
+- State: blocked
+- Rationale: The target module has no database or event interfaces from which to implement the flow safely.
+- Linked decision: none
+- Next owner: Account platform owner
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: Account deletion semantics and referential integrity in db/constraints.py
+- Evidence: Direct inspection found the RESTRICT declaration and flow identifier but no implementation.
+- Consequence for confidence: High for current file content; database runtime and callers are not present in the supplied repository.
+
+### Scope 2
+
+- Scope or limitation: Thirty-day finance retention in policy/retention.py
+- Evidence: Direct inspection confirmed FINANCE_RETENTION_DAYS = 30.
+- Consequence for confidence: High for the repository rule; external legal or policy approvals are unknown.
+
+### Scope 3
+
+- Scope or limitation: account-cleanup consumption in workers/cleanup.py
+- Evidence: Direct inspection confirmed the queue name and account_id extraction.
+- Consequence for confidence: Medium because publishing, retries, scheduling, and actual cleanup side effects are absent.
+
+### Scope 4
+
+- Scope or limitation: Transitive impact graph coverage
+- Evidence: PATH-001 covers the cleanup worker and PATH-002 covers retention; FRONTIER-001 records that ast-grep, codegraph, and scip providers were unavailable and the built-in fallback was used.
+- Consequence for confidence: Medium; graph links are lexical/structural-inferred and runtime dependencies remain unknown.
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: This is direct evidence in the requested source file, so no transitive graph path is needed.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-002: account.delete_flow → account.delete_flow
+- Consequence for confidence: PATH-002: provider builtin; confidence lexical; location db/constraints.py + policy/retention.py
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-003
+- Evidence: PATH-001: account.delete_flow → account.delete_flow
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location db/constraints.py + workers/cleanup.py
+
+### Scope 8
+
+- Scope or limitation: Graph paths for IMP-004
+- Evidence: This is direct inspection of the requested implementation file, not a transitive relationship.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 9
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 3 nodes / 6 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt f509bd2f7ac59994b9777e20e825bebd; sha256 cda3dd9041e2844686ad34d08afa0191910cb9b60c345123cfe35a8487d7c7ca; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003, IMP-004
+- Remaining risks: IMP-001, IMP-002, IMP-003, IMP-004
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004, AC-005
+- Selected planning workflow: Not ready

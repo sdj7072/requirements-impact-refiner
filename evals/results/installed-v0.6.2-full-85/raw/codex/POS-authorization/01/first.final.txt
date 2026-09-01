@@ -1,0 +1,8 @@
+Implemented workspace-wide member editing.
+
+- Added `"member"` to `PERMITTED` in [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-udq8wtvw/auth/authorize.py:1).
+- Preserved owner/admin access and denial for unrelated roles.
+- Verified default invitees gain access and member audit records remain intact.
+- All focused authorization and audit assertions passed.
+
+The authorization impact report is available at [revision-0001.md](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-udq8wtvw/.requirements-impact-refiner/reports/RPT-001/revision-0001.md).

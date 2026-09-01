@@ -59,6 +59,25 @@ class ControllerEvidence:
         return json.dumps(payload, sort_keys=True) + "\n"
 
 
+@dataclass(frozen=True)
+class TerminalDeliveryEvidence:
+    valid: bool
+    errors: tuple[str, ...]
+    successful_finalize_calls: int
+    display_text_exact_match: bool
+    terminal_contract_observed: bool
+    no_post_finalize_tool_activity: bool
+    display_text_sha256: tuple[str, ...]
+    final_output_sha256: tuple[str, ...]
+
+    def to_json(self) -> str:
+        payload = asdict(self)
+        payload["errors"] = list(self.errors)
+        payload["display_text_sha256"] = list(self.display_text_sha256)
+        payload["final_output_sha256"] = list(self.final_output_sha256)
+        return json.dumps(payload, sort_keys=True) + "\n"
+
+
 def _structured(result: object) -> Optional[dict[str, object]]:
     if not isinstance(result, dict):
         return None
@@ -136,6 +155,110 @@ def _attempted_calls(
                     malformed = True
             calls[scoped_identifier] = item
     return tuple(calls[identifier] for identifier in order), malformed
+
+
+def analyze_terminal_delivery(
+    jsonl_streams: Sequence[str], final_outputs: Sequence[str]
+) -> TerminalDeliveryEvidence:
+    """Bind each turn to one terminal successful finalize and its exact final bytes."""
+    streams = tuple(jsonl_streams)
+    outputs = tuple(final_outputs)
+    if len(streams) != len(outputs):
+        raise ValueError("terminal delivery streams and final outputs must match")
+    if any(not isinstance(value, str) for value in (*streams, *outputs)):
+        raise TypeError("terminal delivery inputs must be strings")
+
+    errors: list[str] = []
+    displays: list[str] = []
+    successful_calls = 0
+    exact = True
+    terminal_contract = True
+    no_post_activity = True
+    expected_contract = {
+        "canonical": True,
+        "must_return_content_verbatim": True,
+        "terminal": True,
+    }
+    for turn_index, (stream, final_output) in enumerate(zip(streams, outputs), start=1):
+        items: list[dict[str, object]] = []
+        malformed = False
+        for line in stream.splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except (json.JSONDecodeError, RecursionError):
+                malformed = True
+                continue
+            item = event.get("item") if isinstance(event, dict) else None
+            if isinstance(item, dict):
+                items.append(item)
+        if malformed:
+            errors.append(f"turn {turn_index} terminal delivery JSONL is malformed")
+
+        successes: list[tuple[int, dict[str, object], dict[str, object]]] = []
+        for item_index, item in enumerate(items):
+            if (
+                item.get("type") != "mcp_tool_call"
+                or item.get("server") != _SERVER
+                or item.get("tool") != "rir_finalize"
+                or item.get("status") != "completed"
+                or item.get("error") is not None
+            ):
+                continue
+            structured = _structured(item.get("result"))
+            if (
+                structured is not None
+                and structured.get("status") == "published"
+                and isinstance(structured.get("display_text"), str)
+            ):
+                successes.append((item_index, item, structured))
+
+        successful_calls += len(successes)
+        if not successes:
+            exact = False
+            terminal_contract = False
+            continue
+        if len(successes) != 1:
+            errors.append(f"turn {turn_index} requires exactly one successful terminal finalize")
+            exact = False
+            terminal_contract = False
+            no_post_activity = False
+            continue
+
+        success_index, _, structured = successes[0]
+        display = structured["display_text"]
+        assert isinstance(display, str)
+        displays.append(display)
+        if display != final_output:
+            exact = False
+            errors.append("terminal display text differs from selected final output")
+        if structured.get("delivery_contract") != expected_contract:
+            terminal_contract = False
+            errors.append("terminal finalize delivery contract is invalid")
+        post_items = items[success_index + 1 :]
+        for item in post_items:
+            if item.get("type") not in {"agent_message", "reasoning"}:
+                no_post_activity = False
+                errors.append("tool activity followed terminal finalize")
+                break
+        agent_messages = [item for item in post_items if item.get("type") == "agent_message"]
+        if len(agent_messages) != 1 or agent_messages[0].get("text") != display:
+            errors.append("terminal finalize requires one matching final agent message")
+
+    display_digests = tuple(hashlib.sha256(value.encode("utf-8")).hexdigest() for value in displays)
+    final_digests = tuple(hashlib.sha256(value.encode("utf-8")).hexdigest() for value in outputs)
+    unique_errors = tuple(sorted(set(errors)))
+    return TerminalDeliveryEvidence(
+        valid=not unique_errors,
+        errors=unique_errors,
+        successful_finalize_calls=successful_calls,
+        display_text_exact_match=exact and len(displays) == len(outputs),
+        terminal_contract_observed=terminal_contract and len(displays) == len(outputs),
+        no_post_finalize_tool_activity=no_post_activity,
+        display_text_sha256=display_digests,
+        final_output_sha256=final_digests,
+    )
 
 
 def analyze_controller_trace(

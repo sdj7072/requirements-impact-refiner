@@ -1,0 +1,69 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Automatic retry of failed `payment.charge` attempts
+- Possible issue: An ambiguous timeout may be retried as a new capture and charge the customer twice.
+- Affected: Customers, payment records, refunds, and reconciliation
+- Trigger: The gateway captures funds and then times out before returning the result.
+- Severity: critical
+- Prevention: Reuse the same idempotency key across attempts and require provider-side deduplication or reconciliation.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: Automatic retry of every failed `payment.charge`
+- Possible issue: Permanent declines may be retried unnecessarily, while unbounded retries create runaway work and unclear terminal behavior.
+- Affected: Gateway traffic, payment latency, customers, and monitoring
+- Severity: high
+- Prevention: Define retryable failures, a finite attempt limit, backoff, and an exhausted state.
+- Status: blocked
+
+### Impact IMP-003
+
+- Changed feature: Charge status during retries
+- Possible issue: The UI may display failure although capture succeeded, or success before settlement.
+- Affected: Customer-visible payment status
+- Trigger: Status renders between an attempt result and authoritative webhook settlement.
+- Severity: high
+- Prevention: Keep retrying and ambiguous outcomes non-terminal; webhook settlement determines final status.
+- Status: blocked
+
+## Current Behavior
+
+- `payments/charge.py` accepts and returns `idempotency_key`, but has no provider call, retry implementation, or deduplication.
+- `providers/gateway.py` declares `TIMEOUT_AFTER_CAPTURE = True`; timeout therefore does not prove failure.
+- `ui/status.py` renders before webhook settlement.
+- No tests, persistence, queue, reconciliation, or webhook implementation exist in the repository.
+
+## Decision Needed
+
+Which retry-safety policy should `payment.charge` use?
+
+1. **Bounded safe retries (recommended):** Retry transient failures with the original idempotency key, keep post-capture timeouts pending for reconciliation, and use a finite attempt limit and backoff.
+
+2. **Pre-capture retries only:** Retry confirmed pre-capture transient failures, but never automatically retry ambiguous timeouts or permanent declines.
+
+3. **Retry every error:** Retry all errors—including post-capture timeouts—with the same idempotency key. This requires guaranteed provider-side deduplication and still needs a finite stopping rule.
+
+Also specify the attempt limit and backoff—for example, **3 total attempts with exponential backoff**.
+
+## Acceptance Criteria
+
+- Every attempt for one logical charge uses the original `idempotency_key`.
+- A capture-then-timeout scenario cannot produce a second capture.
+- Retry eligibility, attempt limit, backoff, and exhaustion behavior are deterministic.
+- Before settlement, retrying and ambiguous outcomes render as pending/processing.
+- Tests cover transient recovery, permanent failure, exhaustion, capture-then-timeout, and pre-settlement UI state.
+
+## Planning Handoff
+
+Implementation is blocked pending the retry-policy choice, attempt budget/backoff, and provider idempotency or reconciliation contract.

@@ -1,0 +1,8 @@
+I’m blocked by missing evidence: the workspace is empty and the connected GitHub account contains multiple repositories, so I can’t identify “this test” safely.
+
+Please provide either:
+
+- the repository name/URL plus failing test name, or
+- the test file and CI failure log/stack trace.
+
+Then I can trace the intermittent CI-only cause.

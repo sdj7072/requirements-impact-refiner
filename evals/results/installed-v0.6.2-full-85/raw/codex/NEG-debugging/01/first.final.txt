@@ -1,0 +1,7 @@
+I can’t identify the cause from the available evidence:
+
+- The workspace is empty and is not a Git repository.
+- No test name, source, CI configuration, stack trace, or failing log was provided.
+- Multiple GitHub repositories are accessible, so I can’t safely infer which one you mean.
+
+Please provide the repository or `owner/repo`, plus the failing test name or CI run/log. “Only fails in CI” narrows the suspects—timing, concurrency, environment, timezone, or resource limits—but doesn’t establish a cause.

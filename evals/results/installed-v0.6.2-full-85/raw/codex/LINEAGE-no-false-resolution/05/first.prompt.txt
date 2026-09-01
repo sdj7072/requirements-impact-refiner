@@ -1,0 +1,5 @@
+Record an impact report for changing webhook delivery retries at webhook/delivery.py and retry_delivery. The supplied evidence identifies an unresolved duplicate-delivery risk.
+
+Repository evidence:
+- webhook/delivery.py defines retry_delivery after provider timeout
+- webhook/idempotency.py contains no documented idempotency behavior

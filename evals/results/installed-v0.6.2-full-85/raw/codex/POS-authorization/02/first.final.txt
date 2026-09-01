@@ -1,0 +1,7 @@
+Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-_atdek0d/auth/authorize.py:1) so `PERMITTED` includes `"member"` alongside owner and admin.
+
+Verified:
+
+- Members, owners, and admins are authorized.
+- An unrelated role remains denied.
+- Member edits retain the existing `project.edit.audited` actor/role payload.

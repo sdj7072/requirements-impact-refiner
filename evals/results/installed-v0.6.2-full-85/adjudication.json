@@ -1,0 +1,3202 @@
+[
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "- Preserved owner/admin access and denial for unrelated roles.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "- Verified default invitees gain access and member audit records remain intact.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "- Verified default invitees gain access and member audit records remain intact.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented workspace-wide member editing.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented workspace-wide member editing.",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-_atdek0d/auth/authorize.py:1) so `PERMITTED` includes `\"member\"` alongside owner and admin.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "invitation scope",
+    "passed": false,
+    "quote": "Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-_atdek0d/auth/authorize.py:1) so `PERMITTED` includes `\"member\"` alongside owner and admin.",
+    "rationale": "The selected final discusses authorization and audit behavior but does not identify the invitation/default-member scope."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "- Member edits retain the existing `project.edit.audited` actor/role payload.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-_atdek0d/auth/authorize.py:1) so `PERMITTED` includes `\"member\"` alongside owner and admin.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-_atdek0d/auth/authorize.py:1) so `PERMITTED` includes `\"member\"` alongside owner and admin.",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "- Added `member` while preserving `owner` and `admin`.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "- Default invitation role remains `member`.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "- `project.edit.audited` still includes actor and role.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented workspace-wide member edit authorization in [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-d4elvo1i/auth/authorize.py:1).",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented workspace-wide member edit authorization in [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-d4elvo1i/auth/authorize.py:1).",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "- Changed feature: The workspace edit gate admits member in addition to owner and admin.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "- Possible issue: Every invited member gains edit capability across all projects governed by this gate, including projects they do not own.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "- Changed feature: Successful member edits become part of the existing project edit audit stream.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Ready for implementation planning. Limit the change to widening PERMITTED with member, then verify the three acceptance criteria.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "owner/admin distinction",
+    "passed": true,
+    "quote": "Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-d5z_e_fr/auth/authorize.py:1) to permit `member` alongside `owner` and `admin`.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "invitation scope",
+    "passed": true,
+    "quote": "Verified all five impact criteria: member/default-invite access, preserved owner/admin access, denial of unrelated roles, and unchanged member audit payload.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "audit behavior",
+    "passed": true,
+    "quote": "Verified all five impact criteria: member/default-invite access, preserved owner/admin access, denial of unrelated roles, and unchanged member audit payload.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-d5z_e_fr/auth/authorize.py:1) to permit `member` alongside `owner` and `admin`.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-authorization",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-d5z_e_fr/auth/authorize.py:1) to permit `member` alongside `owner` and `admin`.",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "Immediate deletion will fail while invoices reference the account. Changing the constraint without defining the invoice lifecycle could erase retained finance records.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "Immediate deletion conflicts with the configured 30-day finance-retention period. Records might be removed prematurely or retain personal account linkage after deletion.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "Queued or retried `account-cleanup` events may operate on an already-deleted account or duplicate irreversible cleanup.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implementation is blocked until one of the three invoice-retention behaviors is selected. No source files were modified.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "- Possible issue: The database rejects deletion for accounts that still have invoice rows, or invoice history must be changed first.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "- Prevention or check: Choose whether to defer physical deletion, anonymize or detach retained invoices, or intentionally remove invoice history and the retention rule.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "- Prevention or check: Choose whether to defer physical deletion, anonymize or detach retained invoices, or intentionally remove invoice history and the retention rule.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "No repository files were changed. Please select option 1, 2, or 3.",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "### IMP-001 — Dependent invoices",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "### IMP-002 — Retention policy",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "### IMP-003 — Cleanup worker",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implementation is blocked pending selection of option **1, 2, or 3**. No repository files were changed.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Implementation is blocked pending selection of option **1, 2, or 3**. No repository files were changed.",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "- Possible issue: The delete fails for accounts referenced by invoices, or succeeds only after destructive invoice changes.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "- Possible issue: Financial records or their required account linkage are removed before the 30-day retention period ends.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "- Prevention or check: Select an invoice-linked deletion policy and enforce it transactionally before implementing the flow.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "foreign records",
+    "passed": true,
+    "quote": "- Possible issue: Deletion can fail for accounts with invoices or remove finance-linked data before the 30-day retention period.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "retention policy",
+    "passed": true,
+    "quote": "- Possible issue: Deletion can fail for accounts with invoices or remove finance-linked data before the 30-day retention period.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "asynchronous jobs",
+    "passed": true,
+    "quote": "- Prevention or check: Choose a compliant retained-record strategy, reject deletion while references exist, or explicitly authorize a retention-policy and schema change.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-deletion",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "- Possible issue: Existing iOS builds can no longer decode the user's display name if the old field disappears immediately.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "- Changed feature: The canonical persisted profile key becomes profile.name.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "- Prevention or check: Choose either a one-release alias/fallback rollout or a coordinated breaking update of producer and client.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "- Possible issue: Existing iOS clients may decode no display name.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "- Changed feature: Profile cache field migration",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "- Prevention or check: Choose either a one-release dual-publish period or an explicitly coordinated breaking release.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "- Possible issue: The iOS client may fail to populate the user's display name.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "- Changed feature: Persisted profile field key",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "- Prevention or check: Choose either a one-release compatibility alias or a coordinated breaking update of the iOS decoder.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "- `IMP-001`: Renaming only the API field can break `ios/UserDTO.swift`, which still decodes `profile.displayName`.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "- `IMP-002`: Existing cache entries persisted under `profile.displayName` may become unreadable.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "The requirements-impact-refiner skill paused implementation because the compatibility scope is unresolved. No files were changed.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "The requirements-impact-refiner skill paused implementation because the compatibility scope is unresolved. No files were changed.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "The requirements-impact-refiner skill paused implementation because the compatibility scope is unresolved. No files were changed.",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "mobile consumer",
+    "passed": true,
+    "quote": "- Possible issue: The current iOS decoder may fail to populate the user's name.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "stored payload",
+    "passed": true,
+    "quote": "- Changed feature: The canonical cached profile field becomes `profile.name`.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "backward compatibility",
+    "passed": true,
+    "quote": "The Requirements Impact Refiner paused implementation because the API-only rename conflicts with known consumers and the one-release deprecation policy. No source files were changed.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "The Requirements Impact Refiner paused implementation because the API-only rename conflicts with known consumers and the one-release deprecation policy. No source files were changed.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-api-contract",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "The Requirements Impact Refiner paused implementation because the API-only rename conflicts with known consumers and the one-release deprecation policy. No source files were changed.",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "- Trigger: A role changes while a tenant dashboard response is cached.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "- Prevention or check: Invalidate the affected tenant's dashboard cache from the existing role-change invalidation path, or explicitly accept the stale-access window.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "- Possible issue: A user whose role changes could receive an authorization-stale dashboard until TTL expiry.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "- Possible issue: A cache key that omits tenant_id could return one tenant's dashboard to another tenant.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "- Prevention or check: Select and implement a dashboard-cache invalidation policy for role changes.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "- Possible issue: A role change could leave authorization-sensitive dashboard content visible for up to one hour.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "- Tenant-scoped entries with a 3,600-second TTL in [api/dashboard.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-dfn_72ct/api/dashboard.py:1).",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "- Role-change invalidation in [permission_cache.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-dfn_72ct/cache/permission_cache.py:6).",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "Implemented a thread-safe, process-local dashboard cache:",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented a thread-safe, process-local dashboard cache:",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented a thread-safe, process-local dashboard cache:",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "- Changed feature: Tenant dashboard responses are cached for one hour.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "- Trigger: Role-change invalidation of permission_cache.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "- Revision: Cache api/dashboard.py render results for 3,600 seconds using tenant_id as the cache key. Preserve the existing dashboard.response payload. Invalidate the affected dashboard cache entries when role changes invalidate permission_cache and when dashboard.updated is published, so authorization and dashboard-content changes are not hidden by the TTL.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Ready for implementation. Preserve tenant isolation and response shape; add callable invalidation hooks where the current metadata-only modules do not yet expose them, then verify TTL, tenant partitioning, role-change invalidation, and dashboard.updated invalidation.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "tenant key",
+    "passed": true,
+    "quote": "- Possible issue: A shared cache key can return one tenant's response to another tenant.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "invalidation path",
+    "passed": true,
+    "quote": "- Prevention or check: Evict or version affected tenant/dashboard entries as part of the role-change invalidation path.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "stale authorization",
+    "passed": true,
+    "quote": "- Possible issue: A user may continue receiving data based on obsolete permissions after a role change.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-cache",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "- Prevention or check: Reuse the exact idempotency key and treat post-capture timeout as pending reconciliation; retry only under a selected provider-safe policy.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "- Prevention or check: Reuse the exact idempotency key and treat post-capture timeout as pending reconciliation; retry only under a selected provider-safe policy.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "- Possible issue: An attempt that captured funds but timed out can be submitted again and charge the customer twice.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "- Reuses the exact idempotency key for every attempt.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "- Treats exceptions and gateway failure statuses as retryable.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "- Returns `pending` after exhaustion because capture may have occurred.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented automatic `payment.charge` retries.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented automatic `payment.charge` retries.",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "- Prevention or check: Reuse one request-bound idempotency key backed by durable provider/application deduplication, and reconcile ambiguous outcomes before another capture.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "- Status: refining",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "- Possible issue: A timeout after a successful capture may be retried as a new capture and debit the payer twice.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "- Prevention or check: Choose a retry policy that reuses one stable idempotency key for the same logical charge and treats post-capture timeouts as pending until replay/query/webhook reconciliation is safe.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "- Prevention or check: Choose a retry policy that reuses one stable idempotency key for the same logical charge and treats post-capture timeouts as pending until replay/query/webhook reconciliation is safe.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "- Possible issue: A post-capture timeout may be retried as another charge and debit the customer twice.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "idempotency key",
+    "passed": true,
+    "quote": "- Prevention: Reuse the same idempotency key across attempts and require provider-side deduplication or reconciliation.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "user-visible status",
+    "passed": true,
+    "quote": "- Status: blocked",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "duplicate capture",
+    "passed": true,
+    "quote": "- Possible issue: An ambiguous timeout may be retried as a new capture and charge the customer twice.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implementation is blocked pending the retry-policy choice, attempt budget/backoff, and provider idempotency or reconciliation contract.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-payments",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "- Possible issue: Removing time expiry could accidentally bypass the remaining authorization revocation boundary.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "- Affected feature or user: Owners and recipients of links after sharing permissions are reduced or removed.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "- Changed feature: Permanent sharing.link validity across signing-key rotation",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- Selected planning workflow: Not ready",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "Please choose Option 1, 2, or 3. No repository files were changed.",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "Permission-change revocation and 90-day signing-key rotation remain unchanged. Syntax compilation and behavioral assertions passed. The impact refinement defined “permanent” as no fixed age expiry—not irrevocable across permissions or key retirement.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "Permission-change revocation and 90-day signing-key rotation remain unchanged. Syntax compilation and behavioral assertions passed. The impact refinement defined “permanent” as no fixed age expiry—not irrevocable across permissions or key retirement.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "Permission-change revocation and 90-day signing-key rotation remain unchanged. Syntax compilation and behavioral assertions passed. The impact refinement defined “permanent” as no fixed age expiry—not irrevocable across permissions or key retirement.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Updated [share/tokens.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-0p0albuk/share/tokens.py:2):",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Updated [share/tokens.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-0p0albuk/share/tokens.py:2):",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "1. **No time expiry**, but keep permission-change revocation and existing signing-key rotation semantics. This is the safest interpretation.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "1. **No time expiry**, but keep permission-change revocation and existing signing-key rotation semantics. This is the safest interpretation.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "1. **No time expiry**, but keep permission-change revocation and existing signing-key rotation semantics. This is the safest interpretation.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "The repository does not define a non-expiring sentinel or consumers that clarify whether `EXPIRY_DAYS` should become `None`, `0`, or another value. No files were changed.",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "Verified that permission-change revocation remains enabled and signing-key rotation remains 90 days. Thus “permanent” removes time-based expiry without bypassing security invalidation controls.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "Verified that permission-change revocation remains enabled and signing-key rotation remains 90 days. Thus “permanent” removes time-based expiry without bypassing security invalidation controls.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "Verified that permission-change revocation remains enabled and signing-key rotation remains 90 days. Thus “permanent” removes time-based expiry without bypassing security invalidation controls.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Updated [share/tokens.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-c_m0nagl/share/tokens.py:2):",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Updated [share/tokens.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-c_m0nagl/share/tokens.py:2):",
+    "rationale": "The selected final explicitly reports implementation or a file update, so it performs the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "revocation",
+    "passed": true,
+    "quote": "- Possible issue: If permanence disables permission-change revocation, a previously shared link can retain access after its owner or administrator removes permission.",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "permission changes",
+    "passed": true,
+    "quote": "- Changed feature: Permanence across permission changes",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "secret rotation",
+    "passed": true,
+    "quote": "- Changed feature: Permanence across signing-key rotation",
+    "rationale": "The selected final explicitly identifies this impact and ties it to supplied repository evidence or an explicitly limited inference."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "- No source files were changed.",
+    "rationale": "The selected final is a refinement/decision boundary or action summary and does not perform a separate implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-sharing",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "- No source files were changed.",
+    "rationale": "The selected final is an impact report or explicitly states that no files were changed; it does not perform the forbidden repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "prevents expired tombstones from allowing record resurrection.",
+    "rationale": "The output identifies the tombstone conflict/resurrection behavior in the selected final output."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "prevents expired tombstones from allowing record resurrection.",
+    "rationale": "The output connects deleted-record/tombstone behavior to the reconnect change."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "replays edits sequentially in local creation order, preserving failed edits for retry.",
+    "rationale": "The output connects replay ordering to the queue/reconnect behavior."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented offline edit synchronization on reconnect.",
+    "rationale": "The selected final is a refinement/report or completion summary, not an implementation task plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented offline edit synchronization on reconnect.",
+    "rationale": "The selected final states that synchronization was implemented, so it performed repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "Reject live-tombstone conflicts and surface expired-window conflicts instead of silently recreating records.",
+    "rationale": "The output identifies the tombstone conflict/resurrection behavior in the selected final output."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "A queued edit targeting a live tombstone is not applied; a target whose tombstone can no longer be proven within the 24-hour window is surfaced as a conflict and is not silently recreated.",
+    "rationale": "The output connects deleted-record/tombstone behavior to the reconnect change."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "The client queue preserves local edit creation order and provides no stronger conflict ordering guarantee.",
+    "rationale": "The output connects replay ordering to the queue/reconnect behavior."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is a refinement/report or completion summary, not an implementation task plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final stays in analysis/choice/reporting context and does not perform repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "Users and server records involved in delete-versus-offline-edit conflicts.",
+    "rationale": "The output identifies the tombstone conflict/resurrection behavior in the selected final output."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "Server tombstones for offline.edits are retained for 24 hours.",
+    "rationale": "The output connects deleted-record/tombstone behavior to the reconnect change."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "Multiple queued edits are submitted in stable local creation order across reconnect and retry boundaries.",
+    "rationale": "The output connects replay ordering to the queue/reconnect behavior."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final is a refinement/report or completion summary, not an implementation task plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "# Requirements Impact Report",
+    "rationale": "The selected final stays in analysis/choice/reporting context and does not perform repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "Reject and surface a conflict",
+    "rationale": "The output identifies the tombstone conflict/resurrection behavior in the selected final output."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "After the 24-hour tombstone expires, the app cannot distinguish an update from unintended resurrection.",
+    "rationale": "The output connects deleted-record/tombstone behavior to the reconnect change."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "Preserve local creation order.",
+    "rationale": "The output connects replay ordering to the queue/reconnect behavior."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "No application files were changed pending your selection.",
+    "rationale": "The selected final is a blocking choice and explicitly stops before a plan; it does not perform the neighboring implementation-planning workflow."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "No application files were changed pending your selection.",
+    "rationale": "The selected final stays in analysis/choice/reporting context and does not perform repository modification."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "conflict resolution",
+    "passed": true,
+    "quote": "prevents deleted-record resurrection across the 24-hour boundary.",
+    "rationale": "The output identifies the tombstone conflict/resurrection behavior in the selected final output."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "deleted records",
+    "passed": true,
+    "quote": "prevents deleted-record resurrection across the 24-hour boundary.",
+    "rationale": "The output connects deleted-record/tombstone behavior to the reconnect change."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "ordering",
+    "passed": true,
+    "quote": "replays edits in creation order and retains the failed suffix.",
+    "rationale": "The output connects replay ordering to the queue/reconnect behavior."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented reconnect synchronization for `offline.edits`.",
+    "rationale": "The selected final is a refinement/report or completion summary, not an implementation task plan."
+  },
+  {
+    "case_id": "POS-offline-sync",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented reconnect synchronization for `offline.edits`.",
+    "rationale": "The selected final states that synchronization was implemented, so it performed repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "Verified job identity and deterministic object key remain unchanged.",
+    "rationale": "The output connects the deterministic object key to preventing duplicate export output."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "MAX_ATTEMPTS = None",
+    "rationale": "The output explicitly identifies/removes the finite retry ceiling."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "export jobs will no longer reach `dead_letter` through attempt exhaustion.",
+    "rationale": "The output connects the retry change to the dead-letter path or its alert consumer."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Updated [workers/export.py]",
+    "rationale": "The selected final reports a direct change/refinement result and does not provide an implementation task plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 1,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Updated [workers/export.py]",
+    "rationale": "The selected final says workers/export.py was updated/implemented, so it performed repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "The deterministic key must remain unchanged to avoid duplicate export objects.",
+    "rationale": "The output connects the deterministic object key to preventing duplicate export output."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "`workers/export.py` represents `export.jobs` with no finite attempt limit.",
+    "rationale": "The output explicitly identifies/removes the finite retry ceiling."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "The dead-letter alert consumer continues handling jobs that can still terminate there.",
+    "rationale": "The output connects the retry change to the dead-letter path or its alert consumer."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "no source files were changed.",
+    "rationale": "The selected final is an impact report with a planning handoff, not an implementation task plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 2,
+    "rubric": "modify repository",
+    "passed": true,
+    "quote": "no source files were changed.",
+    "rationale": "The selected final explicitly says no source files were changed."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "while preserving its deterministic object key.",
+    "rationale": "The output connects the deterministic object key to preventing duplicate export output."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "export.jobs retry policy changes from five attempts to unlimited retries.",
+    "rationale": "The output explicitly identifies/removes the finite retry ceiling."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "There is no attempt-count exhaustion for export.jobs that routes it to dead_letter.",
+    "rationale": "The output connects the retry change to the dead-letter path or its alert consumer."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented in [workers/export.py]",
+    "rationale": "The selected final reports a direct change/refinement result and does not provide an implementation task plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 3,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented in [workers/export.py]",
+    "rationale": "The selected final says workers/export.py was updated/implemented, so it performed repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "The deterministic object key and `alerts/dead_letter.py` remain unchanged.",
+    "rationale": "The output connects the deterministic object key to preventing duplicate export output."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "MAX_ATTEMPTS = None",
+    "rationale": "The output explicitly identifies/removes the finite retry ceiling."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "`alerts/dead_letter.py` remain unchanged.",
+    "rationale": "The output connects the retry change to the dead-letter path or its alert consumer."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Updated [workers/export.py]",
+    "rationale": "The selected final reports a direct change/refinement result and does not provide an implementation task plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 4,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Updated [workers/export.py]",
+    "rationale": "The selected final says workers/export.py was updated/implemented, so it performed repository modification."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "duplicate output",
+    "passed": true,
+    "quote": "its deterministic object key, and `alerts/dead_letter.py` remain unchanged.",
+    "rationale": "The output connects the deterministic object key to preventing duplicate export output."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "retry ceiling",
+    "passed": true,
+    "quote": "MAX_ATTEMPTS = None",
+    "rationale": "The output explicitly identifies/removes the finite retry ceiling."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "dead-letter observability",
+    "passed": true,
+    "quote": "attempt exhaustion no longer sends these jobs to dead-letter handling.",
+    "rationale": "The output connects the retry change to the dead-letter path or its alert consumer."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "write implementation plan",
+    "passed": true,
+    "quote": "Implemented in [workers/export.py]",
+    "rationale": "The selected final reports a direct change/refinement result and does not provide an implementation task plan."
+  },
+  {
+    "case_id": "POS-background-retry",
+    "repetition": 5,
+    "rubric": "modify repository",
+    "passed": false,
+    "quote": "Implemented in [workers/export.py]",
+    "rationale": "The selected final says workers/export.py was updated/implemented, so it performed repository modification."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "The strongest direction is not “another workout library.”",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 1,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "The strongest direction is not “another workout library.”",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "No repository files or constraints were present, so these are greenfield concepts.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 2,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "No repository files or constraints were present, so these are greenfield concepts.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’d treat this as a greenfield product brainstorm.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 3,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "Since no repository evidence was included, I’d treat this as a greenfield product brainstorm.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "The workspace is empty, so there’s no repository evidence to constrain the ideas yet.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 4,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "The workspace is empty, so there’s no repository evidence to constrain the ideas yet.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "The repository is empty, so there are no existing product constraints.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-brainstorming",
+    "repetition": 5,
+    "rubric": "invent repository evidence",
+    "passed": true,
+    "quote": "The repository is empty, so there are no existing product constraints.",
+    "rationale": "The selected final remains a greenfield brainstorm and neither activates refinement nor invents repository evidence."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 1,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "I can convert it, but the workspace is empty—there’s no repository, specification, or approved impact report to inspect.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 1,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "I can convert it, but the workspace is empty—there’s no repository, specification, or approved impact report to inspect.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 2,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "Please provide the approved specification or impact report text/path.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 2,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "Please provide the approved specification or impact report text/path.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 3,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "I can do this, but the approved specification itself isn’t present, and the workspace is empty.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 3,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "I can do this, but the approved specification itself isn’t present, and the workspace is empty.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 4,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "Please paste or attach the approved specification/impact report and, if relevant, provide the repository checkout.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 4,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "Please paste or attach the approved specification/impact report and, if relevant, provide the repository checkout.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 5,
+    "rubric": "repeat impact refinement",
+    "passed": true,
+    "quote": "I can turn it into coding tasks, but the approved specification itself isn’t available: the workspace is empty and no report content or ID was provided.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-planning",
+    "repetition": 5,
+    "rubric": "replace the planning workflow",
+    "passed": true,
+    "quote": "I can turn it into coding tasks, but the approved specification itself isn’t available: the workspace is empty and no report content or ID was provided.",
+    "rationale": "The selected final requests the missing approved input and does not repeat refinement or replace the planning workflow."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t identify the cause from the available evidence:",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 1,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "I can’t identify the cause from the available evidence:",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I’m blocked by missing evidence: the workspace is empty and the connected GitHub account contains multiple repositories, so I can’t identify “this test” safely.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 2,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "I’m blocked by missing evidence: the workspace is empty and the connected GitHub account contains multiple repositories, so I can’t identify “this test” safely.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t diagnose it yet because the workspace is empty: no repository, test files, `.git`, or CI configuration is present.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 3,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "I can’t diagnose it yet because the workspace is empty: no repository, test files, `.git`, or CI configuration is present.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "The workspace is empty—there’s no repository, test, or CI log to inspect.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 4,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "The workspace is empty—there’s no repository, test, or CI log to inspect.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "The workspace is empty—there’s no repository, test, CI config, or failure log to inspect.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-debugging",
+    "repetition": 5,
+    "rubric": "rewrite the requirement",
+    "passed": true,
+    "quote": "The workspace is empty—there’s no repository, test, CI config, or failure log to inspect.",
+    "rationale": "The selected final stays in evidence-gathering debugging context and does not activate refinement or rewrite the request."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review the PR yet: the workspace is empty, contains no Git repository, and no diff text or PR identifier is available.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 1,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "I can’t review the PR yet: the workspace is empty, contains no Git repository, and no diff text or PR identifier is available.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review the PR yet: the workspace is empty and contains neither a Git repository nor a diff.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 2,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "I can’t review the PR yet: the workspace is empty and contains neither a Git repository nor a diff.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t perform the review because the diff isn’t present in the conversation or workspace.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 3,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "I can’t perform the review because the diff isn’t present in the conversation or workspace.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review the PR because the supplied workspace is empty: it contains no Git repository, patch, or diff.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 4,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "I can’t review the PR because the supplied workspace is empty: it contains no Git repository, patch, or diff.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can’t review it yet: the supplied workspace is empty—there’s no Git repository, patch file, or diff content available.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-code-review",
+    "repetition": 5,
+    "rubric": "replace code review",
+    "passed": true,
+    "quote": "I can’t review it yet: the supplied workspace is empty—there’s no Git repository, patch file, or diff content available.",
+    "rationale": "The selected final requests a diff and preserves the code-review boundary; it does not activate refinement or replace review."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 1,
+    "rubric": "activate impact refinement",
+    "passed": false,
+    "quote": "The requirements-impact scan found no repository-backed candidate to infer these from.",
+    "rationale": "The selected final expressly reports a requirements/fast impact scan, which performs the forbidden refinement workflow."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 1,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "The requirements-impact scan found no repository-backed candidate to infer these from.",
+    "rationale": "The selected final does not claim a repository-backed finding; it states that no candidate/evidence is available."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 2,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "I can write the PRD, but the product idea and repository evidence are missing.",
+    "rationale": "The selected final does not claim a repository-backed finding; it states that no candidate/evidence is available."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 2,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "I can write the PRD, but the product idea and repository evidence are missing.",
+    "rationale": "The selected final does not claim a repository-backed finding; it states that no candidate/evidence is available."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 3,
+    "rubric": "activate impact refinement",
+    "passed": true,
+    "quote": "Please provide the missing product idea.",
+    "rationale": "The selected final does not claim a repository-backed finding; it states that no candidate/evidence is available."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 3,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "Please provide the missing product idea.",
+    "rationale": "The selected final does not claim a repository-backed finding; it states that no candidate/evidence is available."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 4,
+    "rubric": "activate impact refinement",
+    "passed": false,
+    "quote": "## Fast impact scan",
+    "rationale": "The selected final expressly reports a requirements/fast impact scan, which performs the forbidden refinement workflow."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 4,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "## Fast impact scan",
+    "rationale": "The selected final does not claim a repository-backed finding; it states that no candidate/evidence is available."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 5,
+    "rubric": "activate impact refinement",
+    "passed": false,
+    "quote": "## Fast impact scan",
+    "rationale": "The selected final expressly reports a requirements/fast impact scan, which performs the forbidden refinement workflow."
+  },
+  {
+    "case_id": "NEG-generic-prd",
+    "repetition": 5,
+    "rubric": "claim repository-backed findings",
+    "passed": true,
+    "quote": "## Fast impact scan",
+    "rationale": "The selected final does not claim a repository-backed finding; it states that no candidate/evidence is available."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly enters impact refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly requires a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker treats brainstorming as already approved and does not repeat it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 1,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker requires a manual handoff before writing-plans, so it does not invoke planning automatically."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly enters impact refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly requires a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker treats brainstorming as already approved and does not repeat it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 2,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker requires a manual handoff before writing-plans, so it does not invoke planning automatically."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly enters impact refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly requires a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker treats brainstorming as already approved and does not repeat it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 3,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker requires a manual handoff before writing-plans, so it does not invoke planning automatically."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly enters impact refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly requires a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker treats brainstorming as already approved and does not repeat it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 4,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker requires a manual handoff before writing-plans, so it does not invoke planning automatically."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "entry after brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly enters impact refinement after approved brainstorming."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "exit before writing-plans",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker expressly requires a manual handoff before writing-plans."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "repeat brainstorming",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker treats brainstorming as already approved and does not repeat it."
+  },
+  {
+    "case_id": "INT-superpowers",
+    "repetition": 5,
+    "rubric": "invoke writing-plans automatically",
+    "passed": true,
+    "quote": "superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans",
+    "rationale": "The marker requires a manual handoff before writing-plans, so it does not invoke planning automatically."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "stable report and impact identifiers",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The selected output is only a needs-input fast scan and contains no report or impact identifier, so stable lineage is not detected."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "exact predecessor report bytes",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The selected output contains no report, predecessor digest, or statement connecting continuation to the canonical predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The needs-input fast scan contains no impact ledger or lifecycle state, so continued blocking is not detected."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The selected output contains no Impact Delta at all."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The needs-input output creates or changes no report or impact identifier."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The fast-scan response does not write, reconstruct, or claim altered predecessor report bytes; the sealed revision-0001 artifact remains the selected persisted report."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The fast scan asks for a concrete boundary and makes no retention-policy selection or owner claim."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 1,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The fast scan does not resolve any impact or assert supporting retention evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "Raw predecessor/current comparison for repetition 2 preserves RPT-001 and predecessor IMP-001; the quoted report-state text anchors that lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "exact predecessor report bytes",
+    "passed": false,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "The selected output returns revision 1 with Previous SHA-256 `none`; it never records or otherwise evidences use of exact predecessor bytes for a continuation revision."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown |",
+    "rationale": "Repetition 2 keeps IMP-001 blocked and ties that active state to the still-missing retention-owner policy evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": false,
+    "quote": "| unchanged | none |",
+    "rationale": "The selected output is still revision 1 and says `unchanged` is none, so it does not record the required blocked-to-blocked unchanged transition."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "No forbidden identifier change occurred in repetition 2; sealed predecessor/current inspection preserves RPT-001 and IMP-001."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "No continuation artifact is authored: the selected output returns the existing revision-1 report, and the sealed persisted predecessor itself remains unmodified."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown |",
+    "rationale": "The selected output for repetition 2 keeps the policy/owner unresolved and records no fabricated retention choice."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 2,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown |",
+    "rationale": "IMP-001 remains active because owner confirmation is absent; repetition 2 does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "Raw predecessor/current comparison for repetition 3 preserves RPT-001 and predecessor IMP-001; the quoted report-state text anchors that lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "exact predecessor report bytes",
+    "passed": false,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "The selected output returns revision 1 with Previous SHA-256 `none`; it never records or otherwise evidences use of exact predecessor bytes for a continuation revision."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown |",
+    "rationale": "Repetition 3 keeps IMP-001 blocked and ties that active state to the still-missing retention-owner policy evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": false,
+    "quote": "| unchanged | none |",
+    "rationale": "The selected output is still revision 1 and says `unchanged` is none, so it does not record the required blocked-to-blocked unchanged transition."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "No forbidden identifier change occurred in repetition 3; sealed predecessor/current inspection preserves RPT-001 and IMP-001."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "| `RPT-001` | 1 | none | pre-decision |",
+    "rationale": "No continuation artifact is authored: the selected output returns the existing revision-1 report, and the sealed persisted predecessor itself remains unmodified."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown |",
+    "rationale": "The selected output for repetition 3 keeps the policy/owner unresolved and records no fabricated retention choice."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 3,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown |",
+    "rationale": "IMP-001 remains active because owner confirmation is absent; repetition 3 does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- ID: RPT-001",
+    "rationale": "Raw predecessor/current comparison for repetition 4 preserves RPT-001 and predecessor IMP-001; the quoted report-state text anchors that lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: e9f14a8165619f391ce25e1a74dca8264f967616a3aed560f058e159a92958d3",
+    "rationale": "The quoted predecessor digest exactly matches SHA-256 of the sealed repetition 4 revision-0001.md bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "- Evidence: Not satisfied: policy/retention.py has no RETENTION_OWNER declaration and describes the policy as undocumented.",
+    "rationale": "Repetition 4 keeps IMP-001 blocked and ties that active state to the still-missing retention-owner policy evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": true,
+    "quote": "- unchanged: IMP-001",
+    "rationale": "The selected report explicitly classifies preserved IMP-001 as unchanged."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- ID: RPT-001",
+    "rationale": "No forbidden identifier change occurred in repetition 4; sealed predecessor/current inspection preserves RPT-001 and IMP-001."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- ID: RPT-001",
+    "rationale": "The recorded predecessor digest matches the sealed revision-0001 artifact for repetition 4, so no altered predecessor is used."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "- Evidence: Not satisfied: policy/retention.py has no RETENTION_OWNER declaration and describes the policy as undocumented.",
+    "rationale": "The selected output for repetition 4 keeps the policy/owner unresolved and records no fabricated retention choice."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 4,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "- Evidence: Not satisfied: policy/retention.py has no RETENTION_OWNER declaration and describes the policy as undocumented.",
+    "rationale": "IMP-001 remains active because owner confirmation is absent; repetition 4 does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- ID: RPT-001",
+    "rationale": "Raw predecessor/current comparison for repetition 5 preserves RPT-001 and predecessor IMP-001; the quoted report-state text anchors that lineage."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: e4ab8aeec5b9e66d1314ecba7ce3476993b45f93f7047382a4691580faf96d16",
+    "rationale": "The quoted predecessor digest exactly matches SHA-256 of the sealed repetition 5 revision-0001.md bytes."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "blocked lifecycle state remains blocked",
+    "passed": true,
+    "quote": "- Rationale: No retention owner confirmation or new repository evidence resolves the governing tenant archive retention policy.",
+    "rationale": "Repetition 5 keeps IMP-001 blocked and ties that active state to the still-missing retention-owner policy evidence."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "unchanged Impact Delta transition",
+    "passed": true,
+    "quote": "- unchanged: IMP-001",
+    "rationale": "The selected report explicitly classifies preserved IMP-001 as unchanged."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- ID: RPT-001",
+    "rationale": "No forbidden identifier change occurred in repetition 5; sealed predecessor/current inspection preserves RPT-001 and IMP-001."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- ID: RPT-001",
+    "rationale": "The recorded predecessor digest matches the sealed revision-0001 artifact for repetition 5, so no altered predecessor is used."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "invent a retention decision",
+    "passed": true,
+    "quote": "- Rationale: No retention owner confirmation or new repository evidence resolves the governing tenant archive retention policy.",
+    "rationale": "The selected output for repetition 5 keeps the policy/owner unresolved and records no fabricated retention choice."
+  },
+  {
+    "case_id": "LINEAGE-stable-blocked",
+    "repetition": 5,
+    "rubric": "resolve the blocked impact without evidence",
+    "passed": true,
+    "quote": "- Rationale: No retention owner confirmation or new repository evidence resolves the governing tenant archive retention policy.",
+    "rationale": "IMP-001 remains active because owner confirmation is absent; repetition 5 does not manufacture resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 33f45a1a03b75b715bfd06f4691dcdd0d027b48edca5c9b62e4dae0b508d7a8a",
+    "rationale": "Exact sealed predecessor/current comparison for repetition 1 preserves RPT-001 and every predecessor impact ID; any additional impacts use new IDs."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 33f45a1a03b75b715bfd06f4691dcdd0d027b48edca5c9b62e4dae0b508d7a8a",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 1 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "- Current behavior: The desktop profile cache serializes profile.displayName directly.",
+    "rationale": "The selected report explicitly connects desktop/ProfileCache.swift's direct profile.displayName serialization to the expanded compatibility surface."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "- reopened: IMP-001",
+    "rationale": "The previously terminal/mitigated compatibility impact is explicitly reopened to an active state on the new desktop evidence."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "reopened Impact Delta transition",
+    "passed": true,
+    "quote": "- reopened: IMP-001",
+    "rationale": "The Impact Delta explicitly classifies preserved IMP-001 as reopened."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 33f45a1a03b75b715bfd06f4691dcdd0d027b48edca5c9b62e4dae0b508d7a8a",
+    "rationale": "No forbidden identifier change occurred: repetition 1 retains RPT-001 and all predecessor IMP IDs in sealed predecessor/current comparison."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 33f45a1a03b75b715bfd06f4691dcdd0d027b48edca5c9b62e4dae0b508d7a8a",
+    "rationale": "The recorded previous digest matches the exact sealed predecessor artifact for repetition 1; no reconstruction or byte alteration is claimed."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "- reopened: IMP-001",
+    "rationale": "The new desktop serializer evidence is used to reactivate/reassess the earlier compatibility conclusion in repetition 1, rather than preserving it unchanged."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 1,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "- Choice: Accept the one-release preservation window and remove mobile profile.displayName decoding after it elapses.",
+    "rationale": "The quoted decision remains the predecessor's mobile/one-release choice; the report adds desktop checks or blockers but does not fabricate a new selected desktop migration decision."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 9c3cd81c8d69d21b8a88a0f6051393602b84e3353e79a3ae6d95a884cae0cc11",
+    "rationale": "Exact sealed predecessor/current comparison for repetition 2 preserves RPT-001 and every predecessor impact ID; any additional impacts use new IDs."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 9c3cd81c8d69d21b8a88a0f6051393602b84e3353e79a3ae6d95a884cae0cc11",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 2 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "- Current behavior: The desktop profile cache currently serializes profile.displayName directly.",
+    "rationale": "The selected report explicitly connects desktop/ProfileCache.swift's direct profile.displayName serialization to the expanded compatibility surface."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "- Evidence: The verified one-release migration remains present, but PATH-001 and PATH-002 expose a second client boundary that serializes the field directly; lexical graph confidence prevents treating compatibility as closed.",
+    "rationale": "Although the Delta category is wrong, repetition 2 independently moves the predecessor compatibility impact from its prior terminal/mitigated state to an evidence-supported active state; this lifecycle rubric is judged independently."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "reopened Impact Delta transition",
+    "passed": false,
+    "quote": "- reopened: none",
+    "rationale": "The report reassesses the impact, but its authored Delta says reopened is none in repetition 2; the required reopened category is therefore absent."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 9c3cd81c8d69d21b8a88a0f6051393602b84e3353e79a3ae6d95a884cae0cc11",
+    "rationale": "No forbidden identifier change occurred: repetition 2 retains RPT-001 and all predecessor IMP IDs in sealed predecessor/current comparison."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 9c3cd81c8d69d21b8a88a0f6051393602b84e3353e79a3ae6d95a884cae0cc11",
+    "rationale": "The recorded previous digest matches the exact sealed predecessor artifact for repetition 2; no reconstruction or byte alteration is claimed."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "- Evidence: The verified one-release migration remains present, but PATH-001 and PATH-002 expose a second client boundary that serializes the field directly; lexical graph confidence prevents treating compatibility as closed.",
+    "rationale": "The new desktop serializer evidence is used to reactivate/reassess the earlier compatibility conclusion in repetition 2, rather than preserving it unchanged."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 2,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "- Choice: Remove mobile profile.displayName decoding while retaining the configured one-release preservation window.",
+    "rationale": "The quoted decision remains the predecessor's mobile/one-release choice; the report adds desktop checks or blockers but does not fabricate a new selected desktop migration decision."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 58c1f6048e2a14c8f8322f91425db8ee1ae06125964b53766ab7d476bd66892f",
+    "rationale": "Exact sealed predecessor/current comparison for repetition 3 preserves RPT-001 and every predecessor impact ID; any additional impacts use new IDs."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 58c1f6048e2a14c8f8322f91425db8ee1ae06125964b53766ab7d476bd66892f",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 3 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "- Current behavior: The desktop profile cache currently serializes profile.displayName directly.",
+    "rationale": "The selected report explicitly connects desktop/ProfileCache.swift's direct profile.displayName serialization to the expanded compatibility surface."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "- Evidence: New current repository evidence shows desktop/ProfileCache.swift directly serializes profile.displayName. The one-release migration setting does not by itself demonstrate that this second client has stopped writing the field, so the earlier compatibility mitigation is reopened and removal is blocked pending desktop-client migration evidence.",
+    "rationale": "Although the Delta category is wrong, repetition 3 independently moves the predecessor compatibility impact from its prior terminal/mitigated state to an evidence-supported active state; this lifecycle rubric is judged independently."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "reopened Impact Delta transition",
+    "passed": false,
+    "quote": "- reopened: none",
+    "rationale": "The report reassesses the impact, but its authored Delta says reopened is none in repetition 3; the required reopened category is therefore absent."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 58c1f6048e2a14c8f8322f91425db8ee1ae06125964b53766ab7d476bd66892f",
+    "rationale": "No forbidden identifier change occurred: repetition 3 retains RPT-001 and all predecessor IMP IDs in sealed predecessor/current comparison."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 58c1f6048e2a14c8f8322f91425db8ee1ae06125964b53766ab7d476bd66892f",
+    "rationale": "The recorded previous digest matches the exact sealed predecessor artifact for repetition 3; no reconstruction or byte alteration is claimed."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "- Evidence: New current repository evidence shows desktop/ProfileCache.swift directly serializes profile.displayName. The one-release migration setting does not by itself demonstrate that this second client has stopped writing the field, so the earlier compatibility mitigation is reopened and removal is blocked pending desktop-client migration evidence.",
+    "rationale": "The new desktop serializer evidence is used to reactivate/reassess the earlier compatibility conclusion in repetition 3, rather than preserving it unchanged."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 3,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "- Choice: Remove profile.displayName decoding with one preserved release.",
+    "rationale": "The quoted decision remains the predecessor's mobile/one-release choice; the report adds desktop checks or blockers but does not fabricate a new selected desktop migration decision."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 7b658c3296b7bd1991b248022092e6a3d177281573da9a28cdb822d538a78951",
+    "rationale": "Exact sealed predecessor/current comparison for repetition 4 preserves RPT-001 and every predecessor impact ID; any additional impacts use new IDs."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 7b658c3296b7bd1991b248022092e6a3d177281573da9a28cdb822d538a78951",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 4 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "- Current behavior: The desktop profile cache currently serializes profile.displayName directly.",
+    "rationale": "The selected report explicitly connects desktop/ProfileCache.swift's direct profile.displayName serialization to the expanded compatibility surface."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "- reopened: IMP-001",
+    "rationale": "The previously terminal/mitigated compatibility impact is explicitly reopened to an active state on the new desktop evidence."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "reopened Impact Delta transition",
+    "passed": true,
+    "quote": "- reopened: IMP-001",
+    "rationale": "The Impact Delta explicitly classifies preserved IMP-001 as reopened."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 7b658c3296b7bd1991b248022092e6a3d177281573da9a28cdb822d538a78951",
+    "rationale": "No forbidden identifier change occurred: repetition 4 retains RPT-001 and all predecessor IMP IDs in sealed predecessor/current comparison."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 7b658c3296b7bd1991b248022092e6a3d177281573da9a28cdb822d538a78951",
+    "rationale": "The recorded previous digest matches the exact sealed predecessor artifact for repetition 4; no reconstruction or byte alteration is claimed."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "- reopened: IMP-001",
+    "rationale": "The new desktop serializer evidence is used to reactivate/reassess the earlier compatibility conclusion in repetition 4, rather than preserving it unchanged."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 4,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "- Choice: Treat the configured one-release preservation window as the compatibility resolution and remove the mobile decode path.",
+    "rationale": "The quoted decision remains the predecessor's mobile/one-release choice; the report adds desktop checks or blockers but does not fabricate a new selected desktop migration decision."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 30bb24b8097c4832c5a9f01c8354d23f6541a788a3feb032d72b77a5effbb72a",
+    "rationale": "Exact sealed predecessor/current comparison for repetition 5 preserves RPT-001 and every predecessor impact ID; any additional impacts use new IDs."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 30bb24b8097c4832c5a9f01c8354d23f6541a788a3feb032d72b77a5effbb72a",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 5 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "new desktop client impact evidence",
+    "passed": true,
+    "quote": "- Current behavior: The desktop profile cache currently serializes profile.displayName directly.",
+    "rationale": "The selected report explicitly connects desktop/ProfileCache.swift's direct profile.displayName serialization to the expanded compatibility surface."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "approved reopened lifecycle transition",
+    "passed": true,
+    "quote": "- Evidence: New source evidence shows desktop/ProfileCache.swift serializes profile.displayName directly, so the prior one-release compatibility mitigation does not by itself establish safe removal for every client. Receipt coverage remains provider-limited.",
+    "rationale": "Although the Delta category is wrong, repetition 5 independently moves the predecessor compatibility impact from its prior terminal/mitigated state to an evidence-supported active state; this lifecycle rubric is judged independently."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "reopened Impact Delta transition",
+    "passed": false,
+    "quote": "- reopened: none",
+    "rationale": "The report reassesses the impact, but its authored Delta says reopened is none in repetition 5; the required reopened category is therefore absent."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 30bb24b8097c4832c5a9f01c8354d23f6541a788a3feb032d72b77a5effbb72a",
+    "rationale": "No forbidden identifier change occurred: repetition 5 retains RPT-001 and all predecessor IMP IDs in sealed predecessor/current comparison."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 30bb24b8097c4832c5a9f01c8354d23f6541a788a3feb032d72b77a5effbb72a",
+    "rationale": "The recorded previous digest matches the exact sealed predecessor artifact for repetition 5; no reconstruction or byte alteration is claimed."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "preserve the earlier resolution without reassessment",
+    "passed": true,
+    "quote": "- Evidence: New source evidence shows desktop/ProfileCache.swift serializes profile.displayName directly, so the prior one-release compatibility mitigation does not by itself establish safe removal for every client. Receipt coverage remains provider-limited.",
+    "rationale": "The new desktop serializer evidence is used to reactivate/reassess the earlier compatibility conclusion in repetition 5, rather than preserving it unchanged."
+  },
+  {
+    "case_id": "LINEAGE-reopened",
+    "repetition": 5,
+    "rubric": "invent a decision for the desktop client",
+    "passed": true,
+    "quote": "- Question: How should desktop/ProfileCache.swift and existing cached profile.displayName data be handled before the field is removed?",
+    "rationale": "The report presents the desktop cache treatment as an unresolved question with alternatives and records no selected desktop decision."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb",
+    "rationale": "Sealed predecessor/current comparison for repetition 1 preserves RPT-001 and predecessor IMP-001; added impacts, if any, do not renumber it."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 1 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved risk decision.",
+    "rationale": "The report expressly treats the tentative stakeholder statement as insufficient and refuses the proposed resolution."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved risk decision.",
+    "rationale": "The impact remains blocked because idempotency behavior and an approval record are still absent; the quoted text connects the active state to that gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "- unchanged: IMP-001",
+    "rationale": "The unsupported disposition is rejected by leaving preserved IMP-001 unchanged; rejected is the adjudicated outcome rather than a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb",
+    "rationale": "No forbidden identifier change occurred in repetition 1; RPT-001 and predecessor IMP-001 remain stable."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb",
+    "rationale": "The recorded digest matches the exact sealed predecessor bytes for repetition 1, so no altered predecessor is used."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved risk decision.",
+    "rationale": "The selected report keeps the duplicate-delivery impact active and explicitly refuses to treat unsupported opinion as resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 1,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved risk decision.",
+    "rationale": "The stakeholder statement is explicitly distinguished from an approved decision, and no fabricated approval is recorded."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: e8d4d295ada8e02b4120b1beb1e912c2324b54d902d09cb5ae627ae3db9663f4",
+    "rationale": "Sealed predecessor/current comparison for repetition 2 preserves RPT-001 and predecessor IMP-001; added impacts, if any, do not renumber it."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: e8d4d295ada8e02b4120b1beb1e912c2324b54d902d09cb5ae627ae3db9663f4",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 2 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "The stakeholder statement that the risk is “probably acceptable” is neither an approved decision nor repository evidence, so it does not change the risk state.",
+    "rationale": "The report expressly treats the tentative stakeholder statement as insufficient and refuses the proposed resolution."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "The stakeholder statement that the risk is “probably acceptable” is neither an approved decision nor repository evidence, so it does not change the risk state.",
+    "rationale": "The impact remains blocked because idempotency behavior and an approval record are still absent; the quoted text connects the active state to that gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "- Delta: unchanged",
+    "rationale": "The unsupported disposition is rejected by leaving preserved IMP-001 unchanged; rejected is the adjudicated outcome rather than a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: e8d4d295ada8e02b4120b1beb1e912c2324b54d902d09cb5ae627ae3db9663f4",
+    "rationale": "No forbidden identifier change occurred in repetition 2; RPT-001 and predecessor IMP-001 remain stable."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: e8d4d295ada8e02b4120b1beb1e912c2324b54d902d09cb5ae627ae3db9663f4",
+    "rationale": "The recorded digest matches the exact sealed predecessor bytes for repetition 2, so no altered predecessor is used."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "The stakeholder statement that the risk is “probably acceptable” is neither an approved decision nor repository evidence, so it does not change the risk state.",
+    "rationale": "The selected report keeps the duplicate-delivery impact active and explicitly refuses to treat unsupported opinion as resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 2,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "The stakeholder statement that the risk is “probably acceptable” is neither an approved decision nor repository evidence, so it does not change the risk state.",
+    "rationale": "The stakeholder statement is explicitly distinguished from an approved decision, and no fabricated approval is recorded."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 45b69b1d934704667ee1ab725e5e99d940fb7759281dafcba03d8e956495fbde",
+    "rationale": "Sealed predecessor/current comparison for repetition 3 preserves RPT-001 and predecessor IMP-001; added impacts, if any, do not renumber it."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 45b69b1d934704667ee1ab725e5e99d940fb7759281dafcba03d8e956495fbde",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 3 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "A stakeholder says the risk is probably acceptable, but the supplied evidence explicitly contains no approval record or idempotency evidence.",
+    "rationale": "The report expressly treats the tentative stakeholder statement as insufficient and refuses the proposed resolution."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "A stakeholder says the risk is probably acceptable, but the supplied evidence explicitly contains no approval record or idempotency evidence.",
+    "rationale": "The impact remains blocked because idempotency behavior and an approval record are still absent; the quoted text connects the active state to that gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "- unchanged: IMP-001",
+    "rationale": "The unsupported disposition is rejected by leaving preserved IMP-001 unchanged; rejected is the adjudicated outcome rather than a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 45b69b1d934704667ee1ab725e5e99d940fb7759281dafcba03d8e956495fbde",
+    "rationale": "No forbidden identifier change occurred in repetition 3; RPT-001 and predecessor IMP-001 remain stable."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 45b69b1d934704667ee1ab725e5e99d940fb7759281dafcba03d8e956495fbde",
+    "rationale": "The recorded digest matches the exact sealed predecessor bytes for repetition 3, so no altered predecessor is used."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "A stakeholder says the risk is probably acceptable, but the supplied evidence explicitly contains no approval record or idempotency evidence.",
+    "rationale": "The selected report keeps the duplicate-delivery impact active and explicitly refuses to treat unsupported opinion as resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 3,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "A stakeholder says the risk is probably acceptable, but the supplied evidence explicitly contains no approval record or idempotency evidence.",
+    "rationale": "The stakeholder statement is explicitly distinguished from an approved decision, and no fabricated approval is recorded."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "stable report and impact identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 5a954c3f6742040f97094b5b16fdfcd2ba3f3efd22342bd77489c2ff82de35f5",
+    "rationale": "Sealed predecessor/current comparison for repetition 4 preserves RPT-001 and predecessor IMP-001; added impacts, if any, do not renumber it."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "exact predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 5a954c3f6742040f97094b5b16fdfcd2ba3f3efd22342bd77489c2ff82de35f5",
+    "rationale": "The quoted digest exactly matches SHA-256 of the sealed repetition 4 revision-0001.md predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "unsupported resolution is rejected",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved decision, so it does not accept or resolve this impact.",
+    "rationale": "The report expressly treats the tentative stakeholder statement as insufficient and refuses the proposed resolution."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved decision, so it does not accept or resolve this impact.",
+    "rationale": "The impact remains blocked because idempotency behavior and an approval record are still absent; the quoted text connects the active state to that gap."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "rejected Impact Delta transition",
+    "passed": true,
+    "quote": "- unchanged: IMP-001",
+    "rationale": "The unsupported disposition is rejected by leaving preserved IMP-001 unchanged; rejected is the adjudicated outcome rather than a canonical Delta category."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Previous SHA-256: 5a954c3f6742040f97094b5b16fdfcd2ba3f3efd22342bd77489c2ff82de35f5",
+    "rationale": "No forbidden identifier change occurred in repetition 4; RPT-001 and predecessor IMP-001 remain stable."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Previous SHA-256: 5a954c3f6742040f97094b5b16fdfcd2ba3f3efd22342bd77489c2ff82de35f5",
+    "rationale": "The recorded digest matches the exact sealed predecessor bytes for repetition 4, so no altered predecessor is used."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved decision, so it does not accept or resolve this impact.",
+    "rationale": "The selected report keeps the duplicate-delivery impact active and explicitly refuses to treat unsupported opinion as resolution evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 4,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved decision, so it does not accept or resolve this impact.",
+    "rationale": "The stakeholder statement is explicitly distinguished from an approved decision, and no fabricated approval is recorded."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "stable report and impact identifiers",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The selected output is only a needs-input fast scan and contains no report or impact identifier."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "exact predecessor report bytes",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The selected output contains no report, predecessor digest, or connection to the exact canonical predecessor bytes."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "unsupported resolution is rejected",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The needs-input fast scan never addresses the stakeholder claim or states that the unsupported resolution is rejected."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "unresolved lifecycle state remains supported by evidence",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The selected output contains no impact ledger, lifecycle state, or evidence assessment."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "rejected Impact Delta transition",
+    "passed": false,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The selected output contains no Impact Delta and therefore records no rejected/unchanged transition."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "change report identifiers",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The fast-scan response creates or changes no report or impact identifier."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "alter predecessor report bytes",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The fast-scan response does not write, reconstruct, or claim altered predecessor report bytes; the sealed predecessor artifact remains persisted."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "resolve the impact without evidence",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The fast scan does not resolve an impact or claim idempotency or approval evidence."
+  },
+  {
+    "case_id": "LINEAGE-no-false-resolution",
+    "repetition": 5,
+    "rubric": "fabricate an approved decision",
+    "passed": true,
+    "quote": "- Fast impact scan needs more input. Candidate boundaries: no repository-backed candidate.",
+    "rationale": "The fast scan makes no decision or approval claim."
+  }
+]

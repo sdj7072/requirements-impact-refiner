@@ -1,0 +1,209 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 2
+- Previous SHA-256: 7b658c3296b7bd1991b248022092e6a3d177281573da9a28cdb822d538a78951
+- Phase: post-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Remove profile.displayName consumption and serialization across mobile and desktop clients.
+- Possible issue: The desktop cache may continue writing or retaining profile.displayName after the server and mobile transition, producing stale cache data or a compatibility failure outside the original one-release assumption.
+- Affected feature or user: Desktop users with ProfileCache data, in addition to released mobile clients that still decode profile.displayName.
+- Trigger: Removing or retiring profile.displayName while desktop/ProfileCache.swift still serializes the field or existing cache entries remain unmanaged.
+- Severity: high
+- Prevention or check: Define and verify the desktop cache migration or serializer removal, including existing cached values, while retaining the one-release field-preservation window.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Remove profile.displayName only after coordinating both known clients: eliminate the mobile decode path beginning at decodeDisplayName, address desktop/ProfileCache.swift serialization and existing cached values, and retain the configured one-release migration window throughout the client transition.
+- Refined by decision: DEC-001
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: The mobile profile decoder currently treats payload["displayName"] as an optional String and exposes it through decodeDisplayName.
+- Evidence level: verified
+- Evidence: mobile/ProfileDecoder.swift defines decodedField as "profile.displayName" and decodeDisplayName returns payload["displayName"].
+
+### Invariant INV-002
+
+- Current behavior: The profile-field migration currently preserves profile.displayName for one release.
+- Evidence level: verified
+- Evidence: migrations/profile_field.py sets PRESERVE_RELEASES = 1 and FIELD = "profile.displayName".
+
+### Invariant INV-003
+
+- Current behavior: The desktop profile cache currently serializes profile.displayName directly.
+- Evidence level: verified
+- Evidence: desktop/ProfileCache.swift defines serializedField = "profile.displayName".
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: mobile/ProfileDecoder.swift defines decodedField as "profile.displayName" and decodeDisplayName returns payload["displayName"].
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: migrations/profile_field.py sets PRESERVE_RELEASES = 1 and FIELD = "profile.displayName".
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: desktop/ProfileCache.swift defines serializedField = "profile.displayName".
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: compatibility
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: New current source evidence identifies desktop/ProfileCache.swift as a second direct field consumer. PATH-001 connects the desktop cache to the one-release migration setting and PATH-002 connects it to the mobile decoder; both are lexical and provider-limited. PATH-003 also surfaces first.final.txt lexically, but persisted current.json identifies the canonical predecessor instead, so the transcript is covered only as an excluded artifact and does not support the application-impact conclusion.
+- Invariants: INV-001, INV-002, INV-003
+- Decision: DEC-001
+- Acceptance criteria: AC-001, AC-002
+
+## Decisions and Accepted Risks
+
+### Decision DEC-001
+
+- Choice: Treat the configured one-release preservation window as the compatibility resolution and remove the mobile decode path.
+- Requirement: REQ-001
+- Accepted impacts: IMP-001
+- Rationale: The request explicitly selects this resolution, and current repository evidence verifies PRESERVE_RELEASES = 1 for profile.displayName.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: IMP-001
+- new: none
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Remove the mobile client's profile.displayName decoding path beginning at decodeDisplayName in mobile/ProfileDecoder.swift, while preserving the field through the configured one-release migration window so older client releases remain compatible during the transition.
+- Decision: DEC-001
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+### Requirement REQ-001
+
+- Revision: Remove profile.displayName only after coordinating both known clients: eliminate the mobile decode path beginning at decodeDisplayName, address desktop/ProfileCache.swift serialization and existing cached values, and retain the configured one-release migration window throughout the client transition.
+- Decision: DEC-001
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: The transition must retain profile.displayName for at least one release while every known client dependency is removed or migrated; PRESERVE_RELEASES must not be shortened below 1 during that overlap.
+- Evidence: migrations/profile_field.py currently sets PRESERVE_RELEASES = 1, while mobile/ProfileDecoder.swift and desktop/ProfileCache.swift identify two current client dependencies.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-003
+- Observable criterion: Before profile.displayName is retired, desktop/ProfileCache.swift must stop serializing the field or apply an explicit cache migration, and regression coverage must verify that existing cached entries remain readable or are safely invalidated.
+- Evidence: desktop/ProfileCache.swift currently defines serializedField = "profile.displayName"; no supplied evidence identifies serializer removal, cache migration, safe invalidation, or regression coverage.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The earlier one-release resolution covered the mobile decoder but new evidence identifies an unaddressed desktop serializer and gives no evidence for handling existing cached values.
+- Linked decision: DEC-001
+- Next owner: Desktop client and profile migration owners
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: In scope: the mobile profile.displayName decode path beginning at mobile/ProfileDecoder.swift:decodeDisplayName.
+- Evidence: The file directly defines decodeDisplayName and reads payload["displayName"].
+- Consequence for confidence: verified
+
+### Scope 2
+
+- Scope or limitation: In scope: the migration compatibility window for profile.displayName.
+- Evidence: migrations/profile_field.py names the field and sets PRESERVE_RELEASES = 1.
+- Consequence for confidence: verified
+
+### Scope 3
+
+- Scope or limitation: In scope: desktop profile cache serialization and existing cached profile.displayName values.
+- Evidence: desktop/ProfileCache.swift directly defines serializedField = "profile.displayName"; behavior for existing cache entries is not supplied.
+- Consequence for confidence: serializer verified; cache migration behavior unknown
+
+### Scope 4
+
+- Scope or limitation: Canonical predecessor lineage.
+- Evidence: .requirements-impact-refiner/reports/RPT-001/current.json selects revision-0001.md with SHA-256 7b658c3296b7bd1991b248022092e6a3d177281573da9a28cdb822d538a78951, matching the hash of the exact selected Markdown file.
+- Consequence for confidence: verified without reconstructing or normalizing predecessor bytes
+
+### Scope 5
+
+- Scope or limitation: first.final.txt is excluded as lineage evidence and as an application impact path.
+- Evidence: It is the prior chat response; a persisted canonical RPT-001 report exists and current.json selects its Markdown artifact. PATH-003 is covered only to preserve the graph frontier.
+- Consequence for confidence: verified by persisted report selection; the PATH-003 relationship itself is lexical
+
+### Scope 6
+
+- Scope or limitation: Out of scope: unrelated profile fields and unidentified consumers.
+- Evidence: No supplied or traced evidence identifies other fields or consumers.
+- Consequence for confidence: bounded unknown because optional graph providers were unavailable
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: profile.displayName → profile.displayName &#124;&#124; PATH-002: profile.displayName → decodeDisplayName &#124;&#124; PATH-003: profile.displayName → first.final.txt
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location desktop/ProfileCache.swift + migrations/profile_field.py &#124;&#124; PATH-002: provider builtin; confidence lexical; location desktop/ProfileCache.swift + mobile/ProfileDecoder.swift &#124;&#124; PATH-003: provider builtin; confidence lexical; location desktop/ProfileCache.swift + first.final.txt
+
+### Scope 8
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 4 nodes / 12 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 38b53c3309079fb067e2d987ad695cab; sha256 d650ddff37d48500e4e8ca47ee049cf402cbcd9644e1a7343497103ef1e9d21c; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: REQ-001
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001, DEC-001
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001, AC-002
+- Selected planning workflow: Not ready

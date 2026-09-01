@@ -1,0 +1,177 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Tenant archive data export in write_tenant_archive
+- Possible issue: Changing archive creation without an approved retention rule could cause exported tenant data to be retained too long, deleted too early, or handled inconsistently.
+- Affected feature or user: Tenant archive payloads, tenants whose data is exported, and operators responsible for retention compliance
+- Trigger: Any change to write_tenant_archive or its archive lifecycle before the authoritative retention policy is confirmed
+- Severity: high
+- Prevention or check: Keep the change blocked until the export retention owner identifies the approved policy and confirms its duration or deletion trigger; then revise this report with that evidence.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Change the tenant archive data-export behavior beginning at exports/export_writer.py::write_tenant_archive only after the export retention owner confirms the authoritative retention policy, including its retention duration or deletion trigger. Until that confirmation is recorded, the change is blocked and must not proceed to planning or implementation.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: write_tenant_archive continues to produce a tenant archive containing the supplied tenant identifier and payload until an approved change defines replacement behavior.
+- Evidence level: verified
+- Evidence: exports/export_writer.py defines write_tenant_archive(tenant_id, payload) and returns a mapping containing tenant and payload.
+
+### Invariant INV-002
+
+- Current behavior: The repository currently does not declare an owner or an actionable retention rule for tenant archives.
+- Evidence level: verified
+- Evidence: policy/retention.py contains RETENTION_POLICY = "undocumented" and EXPORT_REF = "tenant archive"; repository search found no RETENTION_OWNER declaration.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: exports/export_writer.py defines write_tenant_archive(tenant_id, payload) and returns a mapping containing tenant and payload.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: policy/retention.py contains RETENTION_POLICY = "undocumented" and EXPORT_REF = "tenant archive"; repository search found no RETENTION_OWNER declaration.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: legal/policy
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: The export entry point and retention policy file are linked by tenant-archive terminology, but the repository provides neither a RETENTION_OWNER declaration nor an approved duration or deletion trigger. The governing policy therefore cannot be established from current evidence.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-001
+
+## Decision Needed
+
+- Question: Which approved retention policy must govern tenant archives produced by write_tenant_archive?
+
+### Option 1
+
+- Option: Apply an existing tenant-archive retention policy
+- Affected impacts: IMP-001
+- Trade-off: Reuses an established policy, but the owner must provide an authoritative reference and confirm its duration and deletion trigger.
+
+### Option 2
+
+- Option: Approve an export-specific retention policy
+- Affected impacts: IMP-001
+- Trade-off: Can match export-specific needs, but requires owner approval and explicit lifecycle parameters before the change can proceed.
+
+### Option 3
+
+- Option: Do not proceed with the export change
+- Affected impacts: IMP-001
+- Trade-off: Avoids introducing an ungoverned data lifecycle, but leaves the requested export behavior unchanged.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Change the tenant archive data-export behavior beginning at exports/export_writer.py::write_tenant_archive only after the export retention owner confirms the authoritative retention policy, including its retention duration or deletion trigger. Until that confirmation is recorded, the change is blocked and must not proceed to planning or implementation.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: The export retention owner is identified and supplies an authoritative policy reference that states the tenant archive retention duration or deletion trigger before planning or implementation begins.
+- Evidence: Not satisfied: policy/retention.py has no RETENTION_OWNER declaration and describes the policy as undocumented.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The applicable retention policy, duration or deletion trigger, and accountable confirmer are not established by the supplied or inspected repository evidence.
+- Linked decision: none
+- Next owner: Export retention owner (identity not declared in the repository)
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: Tenant archive export writer
+- Evidence: exports/export_writer.py defines ARCHIVE_TARGET = "tenant archive" and write_tenant_archive.
+- Consequence for confidence: high
+
+### Scope 2
+
+- Scope or limitation: Tenant archive retention policy and ownership
+- Evidence: policy/retention.py marks the policy undocumented and contains no RETENTION_OWNER declaration.
+- Consequence for confidence: high for the evidence gap; unknown for the governing policy
+
+### Scope 3
+
+- Scope or limitation: Downstream storage, delivery, deletion jobs, and external compliance obligations
+- Evidence: No supplied or discovered evidence identifies these consumers or obligations.
+- Consequence for confidence: unknown and excluded from confirmed scope pending owner evidence
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: exports/export_writer.py → policy/retention.py
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location exports/export_writer.py + policy/retention.py
+
+### Scope 5
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 6c125fae823e4788b416167e1441ea96; sha256 13c09eca16476902de1fe1e655b1162e2315a94356cbcb1ec9b9cd4b1807d7d2; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, IMP-001
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001
+- Selected planning workflow: Not ready

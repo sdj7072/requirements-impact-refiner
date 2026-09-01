@@ -1,0 +1,97 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | Tenant archive export behavior in write_tenant_archive | The export change could retain or dispose of tenant archive data under an unconfirmed policy. | Tenant archive data, export operations, and policy compliance | Planning, implementing, or releasing the export change before the applicable retention policy is confirmed | high | Have the export retention owner confirm whether the current policy applies or specify an archive-specific policy, document the owner, and verify enforcement before implementation. | blocked |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy. | User request and supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Assess the proposed tenant data export change beginning at exports/export_writer.py::write_tenant_archive, while preserving current tenant archive generation. Do not plan or implement retention-sensitive export behavior until the export retention owner confirms which retention policy applies and where that policy is enforced. | — | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | write_tenant_archive continues to produce tenant archives for the intended tenant export workflow. | verified | Supplied repository evidence states that exports/export_writer.py defines write_tenant_archive for tenant archives. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Supplied repository evidence states that exports/export_writer.py defines write_tenant_archive for tenant archives. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown | The promoted repository scan identifies PATH-001 from exports/export_writer.py to policy/retention.py. Supplied evidence states that policy/retention.py has no RETENTION_OWNER declaration, so neither the responsible approver nor the applicable policy has been confirmed. | `INV-001` | the pending decision | `AC-001` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which retention policy does the export retention owner confirm for tenant archives produced by write_tenant_archive? | Confirm the current retention policy applies unchanged | `IMP-001` | Keeps the change narrow, but requires explicit owner confirmation and evidence that existing enforcement covers tenant archives. |
+| Which retention policy does the export retention owner confirm for tenant archives produced by write_tenant_archive? | Require a tenant-archive-specific retention policy | `IMP-001` | Makes archive handling explicit, but policy details and enforcement must be defined before planning can proceed. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | Assess the proposed tenant data export change beginning at exports/export_writer.py::write_tenant_archive, while preserving current tenant archive generation. Do not plan or implement retention-sensitive export behavior until the export retention owner confirms which retention policy applies and where that policy is enforced. | the pending decision | none | Controller-created refinement revision. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-001` | Before implementation planning, the export retention owner is identified and confirms the applicable tenant archive retention policy; the repository records the confirmed ownership/policy and evidence shows where retention is enforced without breaking archive generation. | Current supplied evidence is insufficient because policy/retention.py has no RETENTION_OWNER declaration. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-001` | blocked | The applicable tenant archive retention policy and its owner are not confirmed by the supplied repository evidence. | none | Export retention owner (identity not declared in policy/retention.py) |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| Tenant archive creation entry point: exports/export_writer.py::write_tenant_archive | Named directly in the supplied repository evidence. | high |
+| Retention policy definition and ownership: policy/retention.py | Named in supplied evidence and connected to the export writer by promoted scan PATH-001; RETENTION_OWNER is absent. | high for the affected boundary; low for the policy decision because ownership is unconfirmed |
+| Graph paths for IMP-001 | PATH-001: exports/export_writer.py → policy/retention.py | PATH-001: provider builtin; confidence lexical; location exports/export_writer.py + policy/retention.py |
+| Impact graph coverage | Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers | provider_limited; receipt 6688708b3ef2314abca1f185bd061d49; sha256 07ab7480d891bbe833654279d42c4795a9edae4b2dfdb20693e82a6493fb26d5; frontier FRONTIER-001 |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending decision is selected. | `REQ-001`, `INV-001`, `IMP-001` | `IMP-001` | `AC-001` | Not ready |

@@ -1,0 +1,289 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Automatic retry of payment.charge failures
+- Possible issue: A post-capture timeout may be retried as another charge and debit the customer twice.
+- Affected feature or user: Customers, payment records, refunds, and reconciliation
+- Trigger: The gateway captures successfully, returns a timeout, and automatic retry runs without proven idempotent replay semantics.
+- Severity: critical
+- Prevention or check: Choose a retry policy that reuses one stable idempotency key for the same logical charge and treats post-capture timeouts as pending until replay/query/webhook reconciliation is safe.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: Automatic retry and its visible payment status
+- Possible issue: The UI may show failure, retry, or success as final while the original attempt has already captured and settlement remains unresolved.
+- Affected feature or user: Customers and support staff reading payment status
+- Trigger: Status is rendered after an attempt-level error but before webhook settlement or reconciliation.
+- Severity: high
+- Prevention or check: Represent ambiguous/retrying charges as pending and transition to a final state only from authoritative settlement or a proven terminal outcome.
+- Status: blocked
+
+### Impact IMP-003
+
+- Changed feature: Retry every failed payment.charge automatically
+- Possible issue: Permanent failures or prolonged outages may cause retry storms, repeated provider calls, and charges that never reach a terminal operational state.
+- Affected feature or user: Gateway capacity, workers, observability, and customer support
+- Trigger: A terminal or persistent error is classified as retryable without an attempt cap and backoff.
+- Severity: high
+- Prevention or check: Define retryable versus terminal errors, a finite attempt limit, backoff, and an exhausted state with observable reason.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Retry every failed payment.charge automatically, starting in payments/charge.py.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Add automatic retry handling for payment.charge beginning in payments/charge.py, while defining which failure classes are retryable, preserving one logical charge's idempotency identity across retries, and keeping user-visible status non-final until gateway/webhook settlement resolves ambiguous outcomes.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: payment.charge accepts an idempotency_key and exposes that key on the charge request/result.
+- Evidence level: verified
+- Evidence: payments/charge.py defines charge(amount, idempotency_key) and returns the payment.charge operation with the supplied key.
+
+### Invariant INV-002
+
+- Current behavior: A gateway timeout can occur after funds have already been captured, so a timeout is not evidence that no charge occurred.
+- Evidence level: verified
+- Evidence: providers/gateway.py sets TIMEOUT_AFTER_CAPTURE = True for payment.charge.
+
+### Invariant INV-003
+
+- Current behavior: The UI renders charge status before webhook settlement, so the initially rendered state is not authoritative settlement evidence.
+- Evidence level: verified
+- Evidence: ui/status.py sets RENDERS_BEFORE_WEBHOOK_SETTLEMENT = True for payment.charge.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: payments/charge.py defines charge(amount, idempotency_key) and returns the payment.charge operation with the supplied key.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Evidence: providers/gateway.py sets TIMEOUT_AFTER_CAPTURE = True for payment.charge.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002
+- Evidence: ui/status.py sets RENDERS_BEFORE_WEBHOOK_SETTLEMENT = True for payment.charge.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: critical
+- State: blocked
+- Evidence level: unknown
+- Evidence: The charge path accepts an idempotency key and the linked gateway path permits timeout after capture. Retrying an ambiguous timeout as a new logical attempt may capture funds twice; provider deduplication behavior is not present in the repository.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-001, AC-002
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: functionality
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: The linked UI path renders before webhook settlement. Automatic retries add intermediate states whose authoritative settlement behavior is not defined in the repository.
+- Invariants: INV-003, INV-002
+- Decision: none
+- Acceptance criteria: AC-003
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: No retry limit, backoff, retryable-error taxonomy, or terminal failure contract is present in the inspected repository files.
+- Invariants: INV-002
+- Decision: none
+- Acceptance criteria: AC-004
+
+## Decision Needed
+
+- Question: How should automatic retries handle failures that may occur after capture?
+
+### Option 1
+
+- Option: Retry only with the same idempotency key; keep ambiguous post-capture timeouts pending until safe replay or settlement reconciliation.
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Trade-off: Safest default and supports automatic recovery, but requires stable retry state, bounded policy, and pending/reconciliation behavior.
+
+### Option 2
+
+- Option: Retry only failures proven to occur before capture; do not automatically retry ambiguous post-capture timeouts.
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Trade-off: Minimizes duplicate-charge risk and implementation scope, but some recoverable ambiguous failures require webhook settlement or manual recovery.
+
+### Option 3
+
+- Option: Retry every reported failure immediately, including post-capture timeouts.
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Trade-off: Maximizes retry coverage but is unsafe unless the gateway's idempotent replay and settlement contracts are proven; those contracts are absent here.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Add automatic retry handling for payment.charge beginning in payments/charge.py, while defining which failure classes are retryable, preserving one logical charge's idempotency identity across retries, and keeping user-visible status non-final until gateway/webhook settlement resolves ambiguous outcomes.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: All automatic attempts for one logical payment.charge use exactly the original idempotency_key; the retry layer never generates a new key for an ambiguous result.
+- Evidence: Test with a simulated TIMEOUT_AFTER_CAPTURE and assert every provider invocation for the logical charge receives the same key.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: A timeout that can follow capture is never treated as proof of failure and does not create a second logical charge.
+- Evidence: Test the post-capture timeout path and verify it enters pending/reconciliation or a documented idempotent replay path without duplicate capture.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-003
+- Observable criterion: While retry or post-capture outcome is unresolved, ui/status.py renders a non-final pending state and only authoritative settlement or a proven terminal outcome produces final status.
+- Evidence: UI/state tests cover initial error, retry scheduled, retry exhausted with ambiguous settlement, webhook success, and webhook terminal failure.
+
+### Criterion AC-004
+
+- Requirement: REQ-001
+- Impact: IMP-003
+- Invariant: INV-002
+- Observable criterion: Automatic retries use a documented retryable-error taxonomy, finite maximum attempts, backoff, and an observable exhausted state.
+- Evidence: Unit tests verify terminal errors are not retried, retryable errors stop at the limit, backoff is applied, and exhaustion is recorded.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The phrase 'every failed' does not resolve whether an ambiguous post-capture timeout is a retryable failed attempt or an unsettled charge, and provider replay guarantees are absent.
+- Linked decision: none
+- Next owner: Product/payment owner
+
+### Unresolved impact IMP-002
+
+- State: blocked
+- Rationale: The repository has no defined intermediate status contract for retries and webhook settlement.
+- Linked decision: none
+- Next owner: Payment/UI owner
+
+### Unresolved impact IMP-003
+
+- State: blocked
+- Rationale: Retry count, backoff, and terminal/retryable failure classes are unspecified.
+- Linked decision: none
+- Next owner: Payment platform owner
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: payments/charge.py automatic retry entry point and stable idempotency identity
+- Evidence: Direct inspection of payments/charge.py.
+- Consequence for confidence: verified
+
+### Scope 2
+
+- Scope or limitation: providers/gateway.py post-capture timeout semantics
+- Evidence: Direct inspection of providers/gateway.py and promoted graph PATH-001.
+- Consequence for confidence: verified source; graph relationship confidence limited by scan provider availability
+
+### Scope 3
+
+- Scope or limitation: ui/status.py pre-webhook status rendering
+- Evidence: Direct inspection of ui/status.py and promoted graph PATH-002.
+- Consequence for confidence: verified source; graph relationship confidence limited by scan provider availability
+
+### Scope 4
+
+- Scope or limitation: Provider-side idempotency retention, replay response, retryable error taxonomy, persistence, workers, and webhook handler
+- Evidence: No implementation or contract for these areas exists in the inspected repository.
+- Consequence for confidence: unknown
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: payment.charge → payment.charge
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location payments/charge.py + providers/gateway.py
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-002: payment.charge → payment.charge
+- Consequence for confidence: PATH-002: provider builtin; confidence lexical; location payments/charge.py + ui/status.py
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-003
+- Evidence: PATH-001: payment.charge → payment.charge
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location payments/charge.py + providers/gateway.py
+
+### Scope 8
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 3 nodes / 6 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt d93a705b1a32693dbde9915f8b6e9c93; sha256 f56a635a85108350ec71c7eadf48b533c9f7bfd44b6cbf1f3cdcc9fe11395b60; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002, IMP-003
+- Remaining risks: IMP-001, IMP-002, IMP-003
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004
+- Selected planning workflow: Not ready

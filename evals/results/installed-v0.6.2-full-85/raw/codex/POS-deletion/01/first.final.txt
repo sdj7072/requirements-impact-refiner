@@ -1,0 +1,50 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### IMP-001 — Critical
+
+Immediate deletion will fail while invoices reference the account. Changing the constraint without defining the invoice lifecycle could erase retained finance records.
+
+### IMP-002 — High
+
+Immediate deletion conflicts with the configured 30-day finance-retention period. Records might be removed prematurely or retain personal account linkage after deletion.
+
+### IMP-003 — High
+
+Queued or retried `account-cleanup` events may operate on an already-deleted account or duplicate irreversible cleanup.
+
+## Current Behavior
+
+- `db/constraints.py` declares `invoice.account_id ON DELETE RESTRICT`.
+- `policy/retention.py` sets finance retention to 30 days.
+- `workers/cleanup.py` consumes `account-cleanup` events using `account_id`.
+
+## Decision Needed
+
+How should immediate deletion handle invoices still inside the 30-day retention window?
+
+1. **Immediately delete/anonymize the account while retaining detached finance records for 30 days.**  
+   Satisfies immediate account removal and retention, but requires changing the invoice relationship and making cleanup idempotent.
+
+2. **Immediately delete the account and invoices under an explicit retention-policy exception.**  
+   Simplest hard delete, but overrides the configured retention policy and may remove required audit data.
+
+3. **Keep finance-linked accounts pending for 30 days, then hard-delete through cleanup.**  
+   Preserves retention but does not provide literal immediate account deletion.
+
+## Acceptance Criteria
+
+- `account.delete_flow` has a defined successful result when invoices reference the account.
+- The behavior of finance records younger than 30 days is explicit and tested.
+- Cleanup safely handles missing accounts, duplicate events, and post-deletion delivery—or the obsolete event path is removed.
+
+## Planning Handoff
+
+Implementation is blocked until one of the three invoice-retention behaviors is selected. No source files were modified.

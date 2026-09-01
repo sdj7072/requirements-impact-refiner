@@ -1,0 +1,6 @@
+Brainstorming approved a design to cache dashboard.response for one hour; refine repository impacts next from api/dashboard.py and render_dashboard.
+
+Repository evidence:
+- Superpowers brainstorming approved the one-hour dashboard cache
+- api/dashboard.py defines render_dashboard for dashboard.response
+- writing-plans has not started

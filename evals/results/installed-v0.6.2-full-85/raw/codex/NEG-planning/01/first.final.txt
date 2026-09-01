@@ -1,0 +1,3 @@
+I can convert it, but the workspace is empty—there’s no repository, specification, or approved impact report to inspect.
+
+Please paste the approved specification/impact report or provide the repository files. I’ll return implementation-ready tasks with scope, dependencies, acceptance criteria, affected files, and verification steps.

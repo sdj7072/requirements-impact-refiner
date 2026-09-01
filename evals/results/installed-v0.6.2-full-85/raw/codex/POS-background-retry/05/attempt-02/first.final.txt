@@ -1,0 +1,9 @@
+Implemented in [workers/export.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-8qntx665/workers/export.py:3):
+
+```python
+MAX_ATTEMPTS = None
+```
+
+`export.jobs`, its deterministic object key, and `alerts/dead_letter.py` remain unchanged. Python compilation and configuration assertions pass. The accepted consequence is that attempt exhaustion no longer sends these jobs to dead-letter handling.
+
+The full impact report is available at [revision-0001.md](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-8qntx665/.requirements-impact-refiner/reports/RPT-001/revision-0001.md).

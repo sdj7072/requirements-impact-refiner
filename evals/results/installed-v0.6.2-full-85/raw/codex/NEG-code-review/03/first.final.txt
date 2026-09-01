@@ -1,0 +1,3 @@
+I can’t perform the review because the diff isn’t present in the conversation or workspace. The supplied workspace is empty and is not a Git repository.
+
+Please paste/attach the complete diff or provide the PR URL/repository and PR number.

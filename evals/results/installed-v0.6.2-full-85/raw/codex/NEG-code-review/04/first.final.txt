@@ -1,0 +1,3 @@
+I can’t review the PR because the supplied workspace is empty: it contains no Git repository, patch, or diff.
+
+Please attach/paste the complete diff, or provide the GitHub PR URL/repository and PR number.

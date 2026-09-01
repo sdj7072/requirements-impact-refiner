@@ -1,0 +1,7 @@
+Rename profile.displayName to profile.name in api/profile.py.
+
+Repository evidence:
+- api/profile.py publishes profile.displayName
+- ios/UserDTO.swift decodes profile.displayName
+- cache/profile_cache.py persists profile.displayName
+- docs/changelog.py sets DEPRECATION_RELEASES to 1

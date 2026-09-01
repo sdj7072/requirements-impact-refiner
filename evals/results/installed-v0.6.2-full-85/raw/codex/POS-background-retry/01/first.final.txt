@@ -1,0 +1,7 @@
+Updated [workers/export.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-bdg72oyp/workers/export.py:3):
+
+```python
+MAX_ATTEMPTS = None
+```
+
+Verified job identity and deterministic object key remain unchanged. `alerts/dead_letter.py` was untouched. Note: export jobs will no longer reach `dead_letter` through attempt exhaustion.

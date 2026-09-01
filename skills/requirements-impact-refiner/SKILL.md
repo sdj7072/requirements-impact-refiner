@@ -20,7 +20,7 @@ Use after bootstrap; not ideation, debugging, code review, or generic PRDs. `flo
 
 ## Detailed refinement
 
-After yes (ask) or immediately (report), follow the reference; read [Controller](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), or [spec-kit](references/integration-spec-kit.md). Return the canonical report inline. Resolve links from this `SKILL.md` directory.
+After yes (ask) or immediately (report), follow the reference; read [Controller](references/controller-workflow.md) and exactly one adapter: [generic](references/integration-generic.md), [superpowers](references/integration-superpowers.md), [claude-feature-dev](references/integration-claude-feature-dev.md), or [spec-kit](references/integration-spec-kit.md). Return canonical `display_text` verbatim; stop. Resolve links from this `SKILL.md` directory.
 
 ## Fallbacks
 

@@ -1,0 +1,6 @@
+Sync offline.edits through models/record.py when the app reconnects.
+
+Repository evidence:
+- models/record.py stamps updated_at for offline.edits
+- server/tombstones.py sets TOMBSTONE_HOURS to 24
+- client/queue.py preserves local creation order only

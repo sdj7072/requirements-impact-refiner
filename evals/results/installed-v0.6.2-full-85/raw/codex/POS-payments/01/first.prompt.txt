@@ -1,0 +1,6 @@
+Retry every failed payment.charge automatically, starting in payments/charge.py.
+
+Repository evidence:
+- payments/charge.py accepts idempotency_key for payment.charge
+- ui/status.py renders status before webhook settlement
+- providers/gateway.py sets TIMEOUT_AFTER_CAPTURE

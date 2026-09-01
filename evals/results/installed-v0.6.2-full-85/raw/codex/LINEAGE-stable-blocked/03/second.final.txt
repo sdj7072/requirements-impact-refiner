@@ -1,0 +1,102 @@
+# Requirements Impact Report
+
+## Report State
+
+| Report ID | Revision | Previous SHA-256 | Phase |
+| --- | --- | --- | --- |
+| `RPT-001` | 1 | none | pre-decision |
+
+## Change Impact Summary
+
+| Impact ID | Changed feature | Possible issue | Affected feature or user | Trigger | Severity | Prevention or check | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | Tenant archive export and lifecycle behavior rooted at write_tenant_archive. | Archives could be deleted too early, retained too long, or handled inconsistently if the export change assumes an unconfirmed retention policy. | Exported tenant data, archive consumers, operators, and policy/compliance obligations. | Implementing or approving the data export change before the export retention owner confirms the governing lifecycle. | high | Keep the change blocked, identify the authoritative export retention owner, record that owner's policy decision, and verify the implementation against it. | blocked |
+
+## Original Requirement
+
+| Requirement ID | Original request | Source |
+| --- | --- | --- |
+| `REQ-001` | Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy. | User request and supplied repository evidence. |
+
+## Current Refined Requirement
+
+| Requirement ID | Revision | Refined by decision | Supersedes |
+| --- | --- | --- | --- |
+| `REQ-001` | Assess the data-export behavior rooted at exports/export_writer.py::write_tenant_archive, preserve correct tenant-archive creation, and do not proceed with the change until the authoritative export retention owner confirms the retention policy that the archive lifecycle must enforce. | — | none |
+
+## Current Behavior
+
+| Invariant ID | Current behavior | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | write_tenant_archive continues to create tenant archives without unintended loss or corruption of exported tenant data. | verified | Supplied repository evidence states that exports/export_writer.py defines write_tenant_archive for tenant archives. |
+| `INV-002` | Tenant archives follow an explicitly approved retention lifecycle. | unknown | Supplied repository evidence states that policy/retention.py has no RETENTION_OWNER declaration, so the authoritative lifecycle policy is not established. |
+
+## Preserved Invariants
+
+| Invariant ID | Must preserve for requirement | Affected impacts | Evidence |
+| --- | --- | --- | --- |
+| `INV-001` | `REQ-001` | `IMP-001` | Supplied repository evidence states that exports/export_writer.py defines write_tenant_archive for tenant archives. |
+| `INV-002` | `REQ-001` | `IMP-001` | Supplied repository evidence states that policy/retention.py has no RETENTION_OWNER declaration, so the authoritative lifecycle policy is not established. |
+
+## Impact Ledger
+
+| ID | Requirement | Category | Severity | State | Evidence Level | Evidence | Invariants | Decision | Acceptance Criteria |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IMP-001` | `REQ-001` | legal/policy | high | blocked | unknown | The supplied evidence identifies archive creation in exports/export_writer.py and the absence of RETENTION_OWNER in policy/retention.py. The promoted scan links these locations through PATH-001, but its provider frontier and the governing policy remain unresolved. | `INV-001`, `INV-002` | the pending decision | `AC-001`, `AC-002` |
+
+## Decision Needed
+
+| Question | Option | Impact IDs | Trade-off |
+| --- | --- | --- | --- |
+| Which retention lifecycle does the authoritative export retention owner confirm for tenant archives produced by write_tenant_archive? | Finite retention | `IMP-001` | Requires the owner to specify the retention duration and deletion trigger before implementation can proceed. |
+| Which retention lifecycle does the authoritative export retention owner confirm for tenant archives produced by write_tenant_archive? | Indefinite retention | `IMP-001` | Avoids automatic expiry but requires explicit owner acceptance of storage, privacy, and compliance consequences. |
+| Which retention lifecycle does the authoritative export retention owner confirm for tenant archives produced by write_tenant_archive? | Externally managed lifecycle | `IMP-001` | Keeps lifecycle enforcement outside write_tenant_archive but requires the owner to identify the controlling system and contract. |
+
+## Impact Delta
+
+| Category | Impact IDs |
+| --- | --- |
+| resolved | none |
+| mitigated | none |
+| unchanged | none |
+| accepted | none |
+| deferred | none |
+| blocked | none |
+| superseded | none |
+| reopened | none |
+| new | `IMP-001` |
+
+## Requirement Revision History
+
+| Requirement ID | Revision | Decision | Superseded impacts | Change summary |
+| --- | --- | --- | --- | --- |
+| `REQ-001` | Assess the data-export behavior rooted at exports/export_writer.py::write_tenant_archive, preserve correct tenant-archive creation, and do not proceed with the change until the authoritative export retention owner confirms the retention policy that the archive lifecycle must enforce. | the pending decision | none | Controller-created refinement revision. |
+
+## Acceptance and Regression Criteria
+
+| Criterion ID | Requirement | Impact | Invariant | Observable criterion | Evidence/test |
+| --- | --- | --- | --- | --- | --- |
+| `AC-001` | `REQ-001` | `IMP-001` | `INV-002` | The authoritative export retention owner is identified and their exact tenant-archive retention lifecycle is recorded before the export change is approved. | Not yet satisfied: policy/retention.py has no RETENTION_OWNER declaration according to the supplied evidence. |
+| `AC-002` | `REQ-001` | `IMP-001` | `INV-001` | Tests or equivalent repository evidence show that write_tenant_archive preserves correct archive creation while the resulting archive lifecycle conforms to the owner-confirmed policy. | Future verification required after the owner confirms the policy; the supplied evidence establishes only the archive-writing entry point. |
+
+## Unresolved, Deferred, and Blocked Items
+
+| Impact ID | State | Information gap or rationale | Linked decision | Next owner |
+| --- | --- | --- | --- | --- |
+| `IMP-001` | blocked | The authoritative export retention policy and accountable owner are not established by the supplied repository evidence. | none | Export retention owner (identity not yet confirmed) |
+
+## Analysis Scope and Limitations
+
+| Scope or limitation | Inspected evidence | Consequence for confidence |
+| --- | --- | --- |
+| exports/export_writer.py::write_tenant_archive | Supplied repository evidence identifies this function as the tenant-archive writer. | verified from supplied evidence |
+| policy/retention.py retention ownership and policy | Supplied repository evidence states that RETENTION_OWNER is not declared. | verified gap from supplied evidence; actual policy and owner remain unknown |
+| Downstream archive storage, deletion, and consumers | The scan identifies only a bounded path between exports/export_writer.py and policy/retention.py; no complete downstream evidence was supplied. | unknown frontier |
+| Graph paths for IMP-001 | PATH-001: exports/export_writer.py → policy/retention.py | PATH-001: provider builtin; confidence lexical; location exports/export_writer.py + policy/retention.py |
+| Impact graph coverage | Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers | provider_limited; receipt 5feeda018705de31123096475015f83c; sha256 ffc4d3598fcd2aa5b032a399ee11ed91785888a22c20d3f1c7be5de510bcdfbf; frontier FRONTIER-001 |
+
+## Planning Handoff
+
+| Refined requirement | Report IDs | Remaining risks | Acceptance criteria | Selected planning workflow |
+| --- | --- | --- | --- | --- |
+| Not ready until the pending decision is selected. | `REQ-001`, `INV-001`, `INV-002`, `IMP-001` | `IMP-001` | `AC-001`, `AC-002` | Not ready |

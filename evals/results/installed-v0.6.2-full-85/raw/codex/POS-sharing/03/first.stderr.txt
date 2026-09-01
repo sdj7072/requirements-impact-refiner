@@ -1,0 +1,30 @@
+Reading additional input from stdin...
+2026-08-31T22:36:35.000884Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+2026-08-31T22:36:35.000904Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+2026-08-31T22:36:35.067277Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.074719Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.081036Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.086997Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.093025Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.099550Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.105955Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.113947Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.120141Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.127123Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.138251Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-08-31T22:36:35.715375Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+2026-08-31T22:36:35.715386Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+2026-08-31T22:36:35.783990Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer realm=\"OAuth\", resource_metadata=\"https://mcp.cloudflare.com/.well-known/oauth-protected-resource/mcp\"" })
+2026-08-31T22:37:00.053438Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:37:06.359811Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:37:11.950472Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:37:21.003295Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:37:38.435051Z  WARN codex_sandboxing::violation: recorded sandbox violation: resource=filesystem backend=seatbelt reason=operation_not_permitted path=../com.apple.appleaccountd/TemporaryItems
+2026-08-31T22:38:22.573372Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:38:22.608829Z  WARN codex_core::mcp_tool_call: MCP tool call error: "tool call error: tool call failed for `requirements-impact-refiner/rir_finalize`\n\nCaused by:\n    Mcp error: -32602: impact evidence confidence upgrades graph path evidence"
+2026-08-31T22:39:02.378287Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:39:02.412829Z  WARN codex_core::mcp_tool_call: MCP tool call error: "tool call error: tool call failed for `requirements-impact-refiner/rir_finalize`\n\nCaused by:\n    Mcp error: -32602: impact evidence confidence upgrades graph path evidence"
+2026-08-31T22:39:41.435971Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:39:41.470413Z  WARN codex_core::mcp_tool_call: MCP tool call error: "tool call error: tool call failed for `requirements-impact-refiner/rir_finalize`\n\nCaused by:\n    Mcp error: -32602: unresolved impact IMP-001 must be blocked or deferred; unresolved impact IMP-001 state disagrees with impact; unresolved impact IMP-002 must be blocked or deferred; unresolved impact IMP-002 state disagrees with impact; unresolved impact IMP-003 must be blocked or deferred; unresolved impact IMP-003 state disagrees with impact"
+2026-08-31T22:40:18.630224Z  WARN codex_core::guardian::review_session: failed to refresh guardian trunk rollout snapshot: Session persistence is disabled; cannot guardian review fork.
+2026-08-31T22:40:30.823778Z  WARN codex_mcp::rmcp_client: failed to initialize MCP client during shutdown: MCP startup failed: handshaking with MCP server failed: Send message error Transport [codex_rmcp_client::event_notification_transport::EventNotificationTransport<rmcp::transport::worker::WorkerTransport<rmcp::transport::streamable_http_client::StreamableHttpClientWorker<codex_rmcp_client::http_client_adapter::StreamableHttpClientAdapter>>>] error: Auth required, when send initialize request

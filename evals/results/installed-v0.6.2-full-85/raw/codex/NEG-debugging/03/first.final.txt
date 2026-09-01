@@ -1,0 +1,9 @@
+I can’t diagnose it yet because the workspace is empty: no repository, test files, `.git`, or CI configuration is present.
+
+Please attach/check out the repository, or provide:
+
+- The failing test and implementation it exercises
+- A CI failure log, including stack trace
+- The CI workflow/configuration
+
+“Only fails in CI” alone can indicate timing, concurrency, test-order dependence, environment differences, or resource pressure, but isn’t enough to identify the cause.

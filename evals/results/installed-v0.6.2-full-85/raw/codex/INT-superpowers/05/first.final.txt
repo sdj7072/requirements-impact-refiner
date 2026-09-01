@@ -1,0 +1,289 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: One-hour caching of the dashboard response unit
+- Possible issue: A global cache of the full returned mapping can return one tenant's identifier for another tenant and cross the tenant isolation boundary.
+- Affected feature or user: Callers of render_dashboard and any tenant whose identifier is included in a cached result
+- Trigger: Two different tenant_id values use the same cache entry within the 3,600-second lifetime
+- Severity: high
+- Prevention or check: Choose an explicit cache unit: key the full result by tenant_id, or cache only tenant-independent body data and reconstruct the tenant field per call.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: Reuse of cached dashboard data
+- Possible issue: Returning the same cached dictionary lets one caller's mutation affect later callers and creates shared-state races.
+- Affected feature or user: All callers receiving a cache hit
+- Trigger: A caller mutates a dictionary that is stored and returned directly from the cache
+- Severity: high
+- Prevention or check: Cache immutable data or return a new mapping/defensive copy for every call, including cache hits.
+- Status: detected
+
+### Impact IMP-003
+
+- Changed feature: A 3,600-second cache lifetime
+- Possible issue: Entries may live too long, expire inconsistently, or be refreshed from wall-clock jumps if TTL semantics are implicit.
+- Affected feature or user: All dashboard responses served after their first computation
+- Trigger: Time crosses the intended one-hour boundary or an implementation uses a non-monotonic/incorrect expiry calculation
+- Severity: medium
+- Prevention or check: Define TTL as 3,600 seconds from insertion, ensure expired entries are recomputed before return, and test just-before/at/after expiry with a controllable clock.
+- Status: refining
+
+### Impact IMP-004
+
+- Changed feature: Cache integration around render_dashboard
+- Possible issue: Callers can break if caching changes the function signature, sync behavior, or returned mapping shape.
+- Affected feature or user: Any direct or imported caller of render_dashboard
+- Trigger: The cache implementation adds required arguments, returns an awaitable, or changes tenant/body fields
+- Severity: medium
+- Prevention or check: Keep the existing signature and synchronous mapping contract; inject testable cache/clock dependencies without making them required public arguments.
+- Status: detected
+
+### Impact IMP-005
+
+- Changed feature: Shared one-hour dashboard cache
+- Possible issue: Concurrent misses can cause duplicate work, inconsistent publication, or tenant-key collisions.
+- Affected feature or user: Concurrent callers for the same or different tenant keys
+- Trigger: Multiple calls observe an absent or expired entry simultaneously
+- Severity: medium
+- Prevention or check: Use atomic cache publication and tenant-safe keys; at minimum guarantee all concurrent results satisfy current output and mutation-isolation invariants.
+- Status: detected
+
+### Impact IMP-006
+
+- Changed feature: Regression coverage for dashboard caching
+- Possible issue: A cache can appear correct on a single hit while failing tenant isolation, exact expiry, mutation isolation, or concurrent access.
+- Affected feature or user: Maintainers and all dashboard callers
+- Trigger: The implementation is planned or shipped without deterministic cache-state and clock-controlled tests
+- Severity: medium
+- Prevention or check: Add focused tests for miss/hit, different tenants, fresh returned mappings, expiry boundaries, and concurrent misses using a resettable cache and controllable clock.
+- Status: detected
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Brainstorming approved a design to cache dashboard.response for one hour; refine repository impacts next from api/dashboard.py and render_dashboard.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Not ready for writing-plans until the cache unit and tenant-keying decision is made. After that decision, render_dashboard(tenant_id) must cache the approved dashboard response unit for 3,600 seconds while preserving the current synchronous one-argument interface, returning the requested tenant_id and body value "dashboard.response", and avoiding shared mutable result state across calls. The implementation scope currently evidenced is api/dashboard.py; cache backend, callers, configuration, invalidation hooks, and tests are not present in the visible repository.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: render_dashboard(tenant_id) returns a mapping whose tenant field equals the supplied tenant_id.
+- Evidence level: verified
+- Evidence: api/dashboard.py:3-4 directly constructs {"tenant": tenant_id, "body": RESPONSE}.
+
+### Invariant INV-002
+
+- Current behavior: The returned body field is the string "dashboard.response".
+- Evidence level: verified
+- Evidence: api/dashboard.py:1 assigns RESPONSE = "dashboard.response" and line 4 returns RESPONSE as body.
+
+### Invariant INV-003
+
+- Current behavior: render_dashboard remains a synchronous function accepting exactly one tenant_id argument.
+- Evidence level: verified
+- Evidence: api/dashboard.py:3 defines def render_dashboard(tenant_id).
+
+### Invariant INV-004
+
+- Current behavior: Each invocation currently constructs a new result mapping, so one caller cannot mutate another caller's returned mapping.
+- Evidence level: verified
+- Evidence: api/dashboard.py:4 contains a dictionary literal inside render_dashboard, which creates a new mapping on each call.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-003, IMP-004, IMP-005, IMP-006
+- Evidence: api/dashboard.py:3-4 directly constructs {"tenant": tenant_id, "body": RESPONSE}.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-003, IMP-004, IMP-006
+- Evidence: api/dashboard.py:1 assigns RESPONSE = "dashboard.response" and line 4 returns RESPONSE as body.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-004, IMP-006
+- Evidence: api/dashboard.py:3 defines def render_dashboard(tenant_id).
+
+### Preserved invariant INV-004
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002, IMP-005, IMP-006
+- Evidence: api/dashboard.py:4 contains a dictionary literal inside render_dashboard, which creates a new mapping on each call.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: The visible result contains tenant_id, while "dashboard.response" appears only as a string assigned to RESPONSE. The approved wording does not establish whether the full tenant-bearing mapping or only its tenant-independent body is cached.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: high
+- State: detected
+- Evidence level: unknown
+- Evidence: render_dashboard currently returns a newly constructed mutable dictionary on every invocation. Caching and returning that dictionary instance would change object-identity and mutation-isolation behavior.
+- Invariants: INV-004
+- Decision: none
+- Acceptance criteria: AC-002
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: functionality
+- Severity: medium
+- State: refining
+- Evidence level: unknown
+- Evidence: The approved design supplies a one-hour duration, but the visible repository has no cache implementation, clock source, expiry convention, or invalidation behavior.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-003
+
+### Impact detail IMP-004
+
+- Requirement: REQ-001
+- Category: compatibility
+- Severity: medium
+- State: detected
+- Evidence level: unknown
+- Evidence: The only evidenced public surface is synchronous render_dashboard(tenant_id). Introducing a backend parameter, async behavior, or a wrapper-only cache would alter this surface.
+- Invariants: INV-003, INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-004
+
+### Impact detail IMP-005
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: medium
+- State: detected
+- Evidence level: unknown
+- Evidence: No cache primitive or deployment topology is visible. Concurrent misses could compute multiple values or publish partially shared mutable state depending on the chosen implementation.
+- Invariants: INV-004, INV-001
+- Decision: none
+- Acceptance criteria: AC-005
+
+### Impact detail IMP-006
+
+- Requirement: REQ-001
+- Category: regression
+- Severity: medium
+- State: detected
+- Evidence level: unknown
+- Evidence: The visible repository contains api/dashboard.py only; no tests, dependency manifest, cache abstraction, or test clock are present.
+- Invariants: INV-001, INV-002, INV-003, INV-004
+- Decision: none
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004, AC-005
+
+## Decision Needed
+
+- Question: What exactly should the one-hour cache store, given that render_dashboard returns tenant-specific data but "dashboard.response" is only the constant body string?
+
+### Option 1
+
+- Option: Cache the full response per tenant_id and return a fresh mapping from the cached immutable value.
+- Affected impacts: IMP-001, IMP-002, IMP-005
+- Trade-off: Preserves tenant isolation and enables full-result reuse, but creates one cache entry per tenant and requires tenant-safe key normalization.
+
+### Option 2
+
+- Option: Cache only the tenant-independent body value globally for one hour and reconstruct {tenant, body} on every call.
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Trade-off: Uses one entry and naturally preserves per-call tenant/mapping behavior, but may provide little benefit because the currently evidenced body computation is only a constant lookup.
+
+### Option 3
+
+- Option: Cache and return the full mutable mapping directly.
+- Affected impacts: IMP-001, IMP-002, IMP-005
+- Trade-off: Is mechanically smallest but is unsafe without per-tenant keys and changes the current fresh-object behavior; it should be selected only if shared mutation is explicitly acceptable.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, IMP-006
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Observable criterion: For any sequence of calls using tenant IDs A and B, every returned tenant field equals that call's argument; no cache entry can expose A in B's result.
+
+### Criterion AC-002
+
+- Observable criterion: Mutating a mapping returned by one invocation does not change the result of any later invocation, including a cache hit.
+
+### Criterion AC-003
+
+- Observable criterion: A cached value is reusable for less than 3,600 seconds from insertion; at the 3,600-second boundary it is treated as expired and recomputed before being returned.
+
+### Criterion AC-004
+
+- Observable criterion: Existing calls to synchronous render_dashboard(tenant_id) continue to return a mapping with exactly the evidenced tenant and body fields without requiring new arguments.
+
+### Criterion AC-005
+
+- Observable criterion: Concurrent calls for the same and different tenant IDs never publish a result under the wrong key and all returned mappings satisfy tenant and mutation-isolation criteria.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The approved duration does not identify the cached unit or cache key boundary, and the two viable units have materially different behavior and value.
+- Linked decision: none
+- Next owner: Product/design owner who approved the dashboard cache, with implementation owner confirming tenant-key semantics
+
+## Analysis Scope and Limitations
+
+- Direct implementation surface: [api/dashboard.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-de3o7beh/api/dashboard.py:1).
+- Behavior to preserve: synchronous signature, tenant echo, body value, and per-call mapping isolation.
+- Transitive callers, cache backend, deployment topology, invalidation sources, configuration, and test framework are not present in the visible repository.
+- Impact graph coverage was provider-limited: one node, no edges, and one unknown frontier.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, INV-004, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, IMP-006
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004, AC-005
+- Selected planning workflow: superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans

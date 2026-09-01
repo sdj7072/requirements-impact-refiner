@@ -1,0 +1,35 @@
+The requirements-impact-refiner workflow requires a planning handoff before implementation, so no source files were changed.
+
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: post-decision
+
+## Refined Requirement
+
+For `export.jobs` only, remove the five-attempt terminal limit in `workers/export.py` so every failed execution remains retryable indefinitely. Preserve the deterministic object key. Because `export.jobs` never exhausts retries, it must no longer reach `dead_letter` through attempt exhaustion; `alerts/dead_letter.py` remains unchanged for other dead-lettered work.
+
+## Preserved Invariants
+
+- Every retry writes to the same deterministic object key.
+- The dead-letter alert consumer continues handling jobs that can still terminate there.
+
+## Accepted Impacts
+
+- Permanently failing `export.jobs` tasks no longer produce exhaustion-based dead-letter alerts.
+- A permanently failing job may consume retry capacity indefinitely.
+- The deterministic key must remain unchanged to avoid duplicate export objects.
+
+## Acceptance Criteria
+
+- `workers/export.py` represents `export.jobs` with no finite attempt limit.
+- Failures beyond five attempts remain retryable instead of transitioning to `dead_letter` through exhaustion.
+- `OBJECT_KEY = "deterministic"` remains unchanged.
+- `alerts/dead_letter.py` remains unchanged.
+
+## Planning Handoff
+
+Ready for implementation: replace the finite `MAX_ATTEMPTS` value with the repository’s representation of unlimited retries, preserve the deterministic key, and verify the criteria above.

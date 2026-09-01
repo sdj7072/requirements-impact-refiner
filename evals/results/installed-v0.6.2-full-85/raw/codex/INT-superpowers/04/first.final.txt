@@ -1,0 +1,382 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Cache render_dashboard results for one hour.
+- Possible issue: A global cache entry can leak or mislabel tenant-specific responses.
+- Affected feature or user: Any caller rendering dashboards for more than one tenant.
+- Trigger: A cache hit occurs for a tenant different from the tenant that populated the entry.
+- Severity: high
+- Prevention or check: Key every full-response cache entry by tenant_id and test interleaved tenants.
+- Status: refining
+
+### Impact IMP-002
+
+- Changed feature: Reuse cached dashboard results.
+- Possible issue: One caller can mutate a cached dictionary and corrupt later responses, including during concurrent use.
+- Affected feature or user: All callers sharing the same tenant cache entry.
+- Trigger: A caller mutates a returned dictionary before another cache hit.
+- Severity: high
+- Prevention or check: Cache immutable payload data or return a fresh copy on every hit, with a mutation-isolation test.
+- Status: refining
+
+### Impact IMP-003
+
+- Changed feature: Expire dashboard cache entries after one hour.
+- Possible issue: Entries may expire early, remain stale past one hour, or behave nondeterministically at the boundary.
+- Affected feature or user: Callers expecting the approved one-hour freshness window.
+- Trigger: Time reaches or crosses the entry's expiry timestamp, or the system wall clock changes.
+- Severity: medium
+- Prevention or check: Define 3600 seconds precisely, use a monotonic/injectable clock for local expiry, and test just-before, at, and after expiry.
+- Status: refining
+
+### Impact IMP-004
+
+- Changed feature: Store tenant-scoped cached dashboard responses.
+- Possible issue: A process-local cache behaves independently per worker, while a shared backend adds availability and configuration behavior not present in the repository.
+- Affected feature or user: Deployments with multiple processes or hosts and operators responsible for cache health.
+- Trigger: The service runs in more than one process/host or the selected cache backend is unavailable.
+- Severity: high
+- Prevention or check: Choose process-local or shared topology explicitly before planning and document its consistency and failure semantics.
+- Status: blocked
+
+### Impact IMP-005
+
+- Changed feature: Retain one cache entry per active tenant for up to one hour.
+- Possible issue: High tenant cardinality or stale entries can cause unbounded memory or backend growth.
+- Affected feature or user: Service processes or the selected shared cache backend.
+- Trigger: Many distinct tenant IDs render dashboards within or across expiry windows.
+- Severity: medium
+- Prevention or check: Define capacity and eviction/expired-entry cleanup appropriate to the selected topology and verify expired entries are reclaimable.
+- Status: refining
+
+### Impact IMP-006
+
+- Changed feature: Introduce stateful, time-dependent behavior into render_dashboard.
+- Possible issue: Unknown callers may depend on fresh objects or deployment-specific behavior, and cache regressions may go undetected.
+- Affected feature or user: Unseen route/controller consumers and the eventual test suite.
+- Trigger: Implementation begins without the missing application/test context or equivalent acceptance tests.
+- Severity: high
+- Prevention or check: Locate or supply the integration repository and add deterministic tests for hits, tenant isolation, mutation isolation, expiry, and selected-backend failure behavior.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Brainstorming approved a design to cache dashboard.response for one hour; refine repository impacts next from api/dashboard.py and render_dashboard.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Add a one-hour (3600-second) cache at render_dashboard in api/dashboard.py for the dashboard response while preserving the existing return contract: each result contains the requested tenant_id and body "dashboard.response", cache entries are isolated by tenant_id, callers cannot mutate cached state through a returned dictionary, and expiry behavior is deterministic and testable. Cache topology remains a required decision because the repository contains no runtime, deployment, dependency, or caller evidence.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: render_dashboard(tenant_id) returns a mapping whose tenant value equals that invocation's tenant_id.
+- Evidence level: verified
+- Evidence: api/dashboard.py:3-4 accepts tenant_id and places it directly in the returned dictionary.
+
+### Invariant INV-002
+
+- Current behavior: The result remains a dictionary with tenant and body fields, and body remains the string dashboard.response.
+- Evidence level: verified
+- Evidence: api/dashboard.py:1 and api/dashboard.py:4 define RESPONSE as dashboard.response and return it under body.
+
+### Invariant INV-003
+
+- Current behavior: Separate invocations do not expose shared mutable outer-dictionary state to callers.
+- Evidence level: verified
+- Evidence: api/dashboard.py:4 constructs a new dictionary on every current invocation; the only shared value is an immutable string.
+
+### Invariant INV-004
+
+- Current behavior: A cached value is reusable for no more than 3600 seconds under the selected expiry boundary, after which render_dashboard recomputes or recreates it.
+- Evidence level: unknown
+- Evidence: The approved design supplies a one-hour requirement, but the repository has no clock, cache, or expiry implementation to verify boundary semantics.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-004, IMP-005, IMP-006
+- Evidence: api/dashboard.py:3-4 accepts tenant_id and places it directly in the returned dictionary.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002, IMP-006
+- Evidence: api/dashboard.py:1 and api/dashboard.py:4 define RESPONSE as dashboard.response and return it under body.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002, IMP-006
+- Evidence: api/dashboard.py:4 constructs a new dictionary on every current invocation; the only shared value is an immutable string.
+
+### Preserved invariant INV-004
+
+- Requirement: REQ-001
+- Affected impacts: IMP-003, IMP-004, IMP-005, IMP-006
+- Evidence: The approved design supplies a one-hour requirement, but the repository has no clock, cache, or expiry implementation to verify boundary semantics.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: high
+- State: refining
+- Evidence level: unknown
+- Evidence: api/dashboard.py:4 shows tenant_id is response data, so a non-tenant-keyed cached full response could return one tenant identifier for another request.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: high
+- State: refining
+- Evidence level: unknown
+- Evidence: api/dashboard.py:4 currently returns a fresh mutable dictionary; returning the same cached dictionary would create shared mutable state that does not exist today.
+- Invariants: INV-003, INV-002
+- Decision: none
+- Acceptance criteria: AC-002
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: functionality
+- Severity: medium
+- State: refining
+- Evidence level: unknown
+- Evidence: No clock or caching utility exists in the repository; exact behavior at 3600 seconds and wall-clock adjustments is therefore unspecified.
+- Invariants: INV-004
+- Decision: none
+- Acceptance criteria: AC-003
+
+### Impact detail IMP-004
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: The repository has no application bootstrap, deployment model, dependency manifest, configuration, or shared-cache client, so process count and cross-worker consistency needs cannot be established.
+- Invariants: INV-004, INV-001
+- Decision: none
+- Acceptance criteria: AC-004
+
+### Impact detail IMP-005
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: medium
+- State: refining
+- Evidence level: unknown
+- Evidence: tenant_id is unconstrained in api/dashboard.py:3 and the repository contains no cache capacity, eviction, or cleanup convention.
+- Invariants: INV-001, INV-004
+- Decision: none
+- Acceptance criteria: AC-005
+
+### Impact detail IMP-006
+
+- Requirement: REQ-001
+- Category: regression
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: Repository inventory contains only api/dashboard.py; there are no callers, routes, tests, test configuration, dependency manifests, or time-mocking conventions.
+- Invariants: INV-001, INV-002, INV-003, INV-004
+- Decision: none
+- Acceptance criteria: AC-006
+
+## Decision Needed
+
+- Question: Which cache topology should the one-hour tenant-scoped dashboard cache use?
+
+### Option 1
+
+- Option: Process-local per-tenant TTL cache
+- Affected impacts: IMP-004, IMP-005, IMP-002
+- Trade-off: Adds no external dependency and fits the visible repository, but each worker has independent entries and expiry, duplicate recomputation, and per-process memory.
+
+### Option 2
+
+- Option: Shared per-tenant TTL cache backend
+- Affected impacts: IMP-004, IMP-005, IMP-001
+- Trade-off: Provides cross-worker reuse and centrally enforced expiry, but requires a new backend, serialization, configuration, availability/failure semantics, and integration evidence absent from this repository.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, IMP-006
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Add a one-hour (3600-second) cache at render_dashboard in api/dashboard.py for the dashboard response while preserving the existing return contract: each result contains the requested tenant_id and body "dashboard.response", cache entries are isolated by tenant_id, callers cannot mutate cached state through a returned dictionary, and expiry behavior is deterministic and testable. Cache topology remains a required decision because the repository contains no runtime, deployment, dependency, or caller evidence.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: Interleaved calls for different tenant IDs never reuse another tenant's full response; the cache identity includes tenant_id.
+- Evidence: Required by api/dashboard.py:3-4 because tenant_id is embedded in the response.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-003
+- Observable criterion: Mutating one returned dictionary cannot change any later result, whether the later call is a cache hit or concurrent call.
+- Evidence: Preserves the fresh dictionary behavior currently implemented at api/dashboard.py:4.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-003
+- Invariant: INV-004
+- Observable criterion: A value is reusable before 3600 elapsed seconds and is not reused at or after the defined 3600-second boundary; tests control time deterministically.
+- Evidence: Makes the approved one-hour duration executable despite no existing repository time convention.
+
+### Criterion AC-004
+
+- Requirement: REQ-001
+- Impact: IMP-004
+- Invariant: INV-004
+- Observable criterion: The selected topology documents whether entries are shared across workers/hosts and defines behavior when cache storage is unavailable.
+- Evidence: No deployment, configuration, or cache-backend evidence exists in the repository.
+
+### Criterion AC-005
+
+- Requirement: REQ-001
+- Impact: IMP-005
+- Invariant: INV-001
+- Observable criterion: The cache has a defined capacity/eviction policy and expired tenant entries are reclaimable rather than accumulating indefinitely.
+- Evidence: tenant_id is an unconstrained cache-key input in api/dashboard.py:3.
+
+### Criterion AC-006
+
+- Requirement: REQ-001
+- Impact: IMP-006
+- Invariant: INV-002
+- Observable criterion: Automated tests cover miss, hit, response shape, tenant separation, mutation isolation, before/at/after expiry, test-state reset, and the chosen topology's failure mode.
+- Evidence: No tests or test infrastructure are present in the repository.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-004
+
+- State: blocked
+- Rationale: Process/deployment topology and consistency expectations are absent, and choosing a cache backend changes dependencies and failure behavior.
+- Linked decision: none
+- Next owner: Product/architecture owner
+
+### Unresolved impact IMP-006
+
+- State: blocked
+- Rationale: No callers, routes, runtime configuration, dependency metadata, or test suite are available to verify the integration boundary.
+- Linked decision: none
+- Next owner: Repository owner
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: Direct change surface: api/dashboard.py:1-4, especially render_dashboard.
+- Evidence: This is the only application source file and the only definition of render_dashboard and dashboard.response.
+- Consequence for confidence: verified
+
+### Scope 2
+
+- Scope or limitation: Downstream callers, HTTP routing, response serialization, and deployment process model.
+- Evidence: Repository-wide search found no callers, imports, routes, manifests, or deployment files.
+- Consequence for confidence: unknown outside the supplied repository
+
+### Scope 3
+
+- Scope or limitation: Tests, clock controls, cache libraries, configuration, invalidation hooks, and observability.
+- Evidence: None are present in the repository; all would be new or must be supplied from another integration repository.
+- Consequence for confidence: verified absent here; external context unknown
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: The promoted Fast Scan receipt contained no graph paths because ast-grep, codegraph, and SCIP providers were unavailable; this impact is inferred from direct inspection of api/dashboard.py:3-4.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: The scan receipt supplied no call paths; the compatibility risk is inferred from the directly observed fresh-dictionary behavior in api/dashboard.py:4.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-003
+- Evidence: The graph receipt had no paths; this impact is derived from the supplied one-hour requirement and absence of time/cache code in the only application source file.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-004
+- Evidence: The scan frontier identified an interface unknown and supplied no paths; repository inventory contains only api/dashboard.py, leaving runtime topology unverified.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 8
+
+- Scope or limitation: Graph paths for IMP-005
+- Evidence: No graph path was available; memory growth is inferred from the required per-tenant key and the lack of repository cache infrastructure.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 9
+
+- Scope or limitation: Graph paths for IMP-006
+- Evidence: The Fast Scan could not produce graph paths and direct repository search found no integration boundary or test suite, so downstream compatibility remains unknown.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 10
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 1 nodes / 0 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt c2e05bf1c3278ecc59bf96341e13a2fa; sha256 279c0262c85647f73ecc80ac72d21e4a7367e0a9255196a7fb458c426cea0da8; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, INV-004, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005, IMP-006
+- Remaining risks: IMP-004, IMP-006
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006
+- Selected planning workflow: superpowers:after-approved-brainstorming;impact-refinement;manual-handoff-before-writing-plans

@@ -1,0 +1,22 @@
+The requirements-impact-refiner skill paused implementation because the compatibility scope is unresolved. No files were changed.
+
+## Requirements Impact Report
+
+- Report: `RPT-001`, revision 1
+- Risk: high
+
+### Detected impacts
+
+- `IMP-001`: Renaming only the API field can break `ios/UserDTO.swift`, which still decodes `profile.displayName`.
+- `IMP-002`: Existing cache entries persisted under `profile.displayName` may become unreadable.
+- `IMP-003`: Immediate removal may conflict with the configured one-release deprecation window.
+
+### Decision needed
+
+Choose one:
+
+1. **One-release compatibility migration (recommended):** update API, iOS, cache, and changelog while temporarily supporting both field names.
+2. **Atomic breaking rename:** update all four components immediately, accepting incompatibility with older clients and cache entries.
+3. **API-only rename:** change only `api/profile.py`, knowingly leaving consumers inconsistent.
+
+Reply with **1**, **2**, or **3**.

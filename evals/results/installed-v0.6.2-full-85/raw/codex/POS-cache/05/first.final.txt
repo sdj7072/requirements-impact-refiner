@@ -1,0 +1,351 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: One-hour caching of dashboard.response
+- Possible issue: A shared cache key can return one tenant's response to another tenant.
+- Affected feature or user: All dashboard tenants and their data isolation.
+- Trigger: Two tenants render dashboard.response while the same cache entry remains live.
+- Severity: critical
+- Prevention or check: Include tenant_id in every cache key and test that tenants never share entries.
+- Status: refining
+
+### Impact IMP-002
+
+- Changed feature: Serving dashboard responses for up to one hour
+- Possible issue: A user may continue receiving data based on obsolete permissions after a role change.
+- Affected feature or user: Users whose roles or permissions change and tenants containing them.
+- Trigger: A role changes before the cached dashboard response expires.
+- Severity: critical
+- Prevention or check: Evict or version affected tenant/dashboard entries as part of the role-change invalidation path.
+- Status: refining
+
+### Impact IMP-003
+
+- Changed feature: One-hour dashboard response cache
+- Possible issue: Dashboard changes may remain invisible until TTL expiry.
+- Affected feature or user: Tenants whose dashboard content changes.
+- Trigger: dashboard.updated is published while a cached response exists.
+- Severity: high
+- Prevention or check: Consume the event and invalidate the affected tenant entry; define payload tenant identity and idempotent handling.
+- Status: refining
+
+### Impact IMP-004
+
+- Changed feature: Adding cached mutable state
+- Possible issue: Process-local entries can diverge across workers and ignore invalidations delivered elsewhere.
+- Affected feature or user: Multi-worker or multi-instance deployments.
+- Trigger: More than one process serves the same tenant or receives different invalidation events.
+- Severity: high
+- Prevention or check: Choose a shared cache/event strategy, or explicitly constrain and test a single-process local cache.
+- Status: blocked
+
+### Impact IMP-005
+
+- Changed feature: Caching render results
+- Possible issue: Concurrent misses may race, duplicate work, or mutate shared cached objects.
+- Affected feature or user: Concurrent requests for the same tenant.
+- Trigger: Two requests miss the same tenant entry simultaneously or callers mutate a returned mapping.
+- Severity: medium
+- Prevention or check: Use safe cache access and return immutable/copy-isolated values; cover concurrent or re-entrant access.
+- Status: refining
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Cache dashboard.response from api/dashboard.py for one hour.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Cache api/dashboard.py render results for 3,600 seconds using a tenant-scoped cache key. Preserve tenant isolation, invalidate affected dashboard responses when authorization/role state changes and when dashboard.updated is published, and define cache sharing/concurrency behavior for the deployment runtime.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: A dashboard response for one tenant is never returned to another tenant.
+- Evidence level: verified
+- Evidence: api/dashboard.py render(tenant_id) embeds tenant_id in every response.
+
+### Invariant INV-002
+
+- Current behavior: Role changes invalidate authorization-sensitive cached state associated with dashboard.response.
+- Evidence level: verified
+- Evidence: cache/permission_cache.py declares INVALIDATED_ON_ROLE_CHANGE and links RESPONSE_REF to dashboard.response.
+
+### Invariant INV-003
+
+- Current behavior: A dashboard update is represented by dashboard.updated and must make affected rendered responses refreshable.
+- Evidence level: inferred
+- Evidence: events/dashboard_updated.py declares dashboard.updated and links it to dashboard.response, but contains no executable publisher or consumer.
+
+### Invariant INV-004
+
+- Current behavior: render(tenant_id) continues to return a mapping containing the requested tenant and dashboard.response body.
+- Evidence level: verified
+- Evidence: api/dashboard.py currently returns {'tenant': tenant_id, 'body': RESPONSE}.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-004
+- Evidence: api/dashboard.py render(tenant_id) embeds tenant_id in every response.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002, IMP-004
+- Evidence: cache/permission_cache.py declares INVALIDATED_ON_ROLE_CHANGE and links RESPONSE_REF to dashboard.response.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-003, IMP-004
+- Evidence: events/dashboard_updated.py declares dashboard.updated and links it to dashboard.response, but contains no executable publisher or consumer.
+
+### Preserved invariant INV-004
+
+- Requirement: REQ-001
+- Affected impacts: IMP-005
+- Evidence: api/dashboard.py currently returns {'tenant': tenant_id, 'body': RESPONSE}.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: critical
+- State: refining
+- Evidence level: unknown
+- Evidence: The response varies by tenant_id while the requested cache is for dashboard.response; the receipt's built-in fallback suggests a permission-cache to dashboard path but provider verification is unavailable.
+- Invariants: INV-001
+- Decision: none
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: critical
+- State: refining
+- Evidence level: unknown
+- Evidence: cache/permission_cache.py declares role-change invalidation and references dashboard.response; the receipt suggests a path to api/dashboard.py but provider verification is unavailable and no executable hook exists.
+- Invariants: INV-002
+- Decision: none
+- Acceptance criteria: AC-002
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: high
+- State: refining
+- Evidence level: unknown
+- Evidence: events/dashboard_updated.py declares dashboard.updated and RESPONSE_LINK dashboard.response; the receipt suggests a path from permission cache to this event module but provider verification is unavailable and no subscriber exists.
+- Invariants: INV-003
+- Decision: none
+- Acceptance criteria: AC-003
+
+### Impact detail IMP-004
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: The repository has no cache client/backend, deployment model, locking, or event transport implementation.
+- Invariants: INV-001, INV-002, INV-003
+- Decision: none
+- Acceptance criteria: AC-004
+
+### Impact detail IMP-005
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: medium
+- State: refining
+- Evidence level: unknown
+- Evidence: No thread-safety or cache-fill convention exists; the receipt path is built-in fallback only.
+- Invariants: INV-004
+- Decision: none
+- Acceptance criteria: AC-005
+
+## Decision Needed
+
+- Question: Which cache scope should own the one-hour dashboard entries and their invalidation?
+
+### Option 1
+
+- Option: Shared cache with tenant-scoped keys and event-driven invalidation
+- Affected impacts: IMP-004, IMP-002, IMP-003, IMP-001
+- Trade-off: Correct across workers and instances, but requires a shared cache/client and event plumbing that this repository does not currently define.
+
+### Option 2
+
+- Option: Process-local in-memory cache, explicitly limited to a single-process deployment
+- Affected impacts: IMP-004, IMP-005, IMP-002, IMP-003
+- Trade-off: Can be implemented with the standard library now, but each worker has independent state and invalidation is only reliable within one process.
+
+### Option 3
+
+- Option: Tenant generation/version keys backed by an existing shared store
+- Affected impacts: IMP-004, IMP-002, IMP-003
+- Trade-off: Avoids broad eviction and tolerates retries, but needs a shared authoritative version store whose API is not present in the repository.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003, IMP-004, IMP-005
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Cache api/dashboard.py render results for 3,600 seconds using a tenant-scoped cache key. Preserve tenant isolation, invalidate affected dashboard responses when authorization/role state changes and when dashboard.updated is published, and define cache sharing/concurrency behavior for the deployment runtime.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: Given cached responses for two tenant IDs, each render returns only the response produced for its own tenant and uses a distinct cache entry.
+- Evidence: Directly verifies the tenant-scoped key required by api/dashboard.py behavior.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-002
+- Observable criterion: After a role/permission change for an affected tenant or principal, the next dashboard render does not reuse the pre-change response.
+- Evidence: Required by cache/permission_cache.py role-change invalidation declaration.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-003
+- Invariant: INV-003
+- Observable criterion: After dashboard.updated identifies an affected tenant, the next render for that tenant refreshes while unrelated tenant entries remain cached.
+- Evidence: Required by events/dashboard_updated.py linkage to dashboard.response.
+
+### Criterion AC-004
+
+- Requirement: REQ-001
+- Impact: IMP-004
+- Invariant: INV-003
+- Observable criterion: The selected design documents and tests invalidation behavior for every serving process in the supported deployment model.
+- Evidence: No deployment or cache-backend evidence exists, so this must be made explicit before implementation.
+
+### Criterion AC-005
+
+- Requirement: REQ-001
+- Impact: IMP-005
+- Invariant: INV-004
+- Observable criterion: Concurrent requests cannot corrupt cached state, and modifying one returned response cannot change later responses.
+- Evidence: Cached Python mappings would otherwise be shared mutable objects.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-004
+
+- State: blocked
+- Rationale: No cache backend or deployment topology exists in the repository; implementation semantics differ materially between shared and process-local designs.
+- Linked decision: none
+- Next owner: Request owner
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: api/dashboard.py render path and tenant-specific response identity
+- Evidence: Inspected api/dashboard.py.
+- Consequence for confidence: high
+
+### Scope 2
+
+- Scope or limitation: role/permission change invalidation linkage
+- Evidence: Inspected cache/permission_cache.py; declarations exist but executable hooks do not.
+- Consequence for confidence: medium
+
+### Scope 3
+
+- Scope or limitation: dashboard.updated publication/consumption linkage
+- Evidence: Inspected events/dashboard_updated.py; constants exist but publisher/consumer code does not.
+- Consequence for confidence: medium
+
+### Scope 4
+
+- Scope or limitation: cache backend, event transport, process topology, and tests
+- Evidence: Repository inventory contains no implementation or configuration for these concerns.
+- Consequence for confidence: unknown
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: cache/permission_cache.py → dashboard.response
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location cache/permission_cache.py + api/dashboard.py
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-001: cache/permission_cache.py → dashboard.response
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location cache/permission_cache.py + api/dashboard.py
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-003
+- Evidence: PATH-002: cache/permission_cache.py → dashboard.response
+- Consequence for confidence: PATH-002: provider builtin; confidence lexical; location cache/permission_cache.py + events/dashboard_updated.py
+
+### Scope 8
+
+- Scope or limitation: Graph paths for IMP-004
+- Evidence: Supplied repository evidence and inspected files establish the logical links but do not establish whether the service is single-process or multi-worker.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 9
+
+- Scope or limitation: Graph paths for IMP-005
+- Evidence: PATH-001: cache/permission_cache.py → dashboard.response
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location cache/permission_cache.py + api/dashboard.py
+
+### Scope 10
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 3 nodes / 6 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 8e31069c5955d4fa9233d8d0cb940c12; sha256 b1a65d96bc511b5cdf252c87f47b2c019cb6ba6a2678eb53b5b705607a1d1a34; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, INV-004, IMP-001, IMP-002, IMP-003, IMP-004, IMP-005
+- Remaining risks: IMP-004
+- Acceptance criteria: AC-001, AC-002, AC-003, AC-004, AC-005
+- Selected planning workflow: Not ready

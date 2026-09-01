@@ -1,0 +1,93 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Elapsed-time validity of sharing.link tokens
+- Possible issue: Changing only the seven-day constant may not express an unbounded lifetime in the token API or may leave hidden expiry assumptions untested.
+- Affected feature or user: Existing and newly issued sharing.link tokens, plus their validation behavior
+- Trigger: A token is validated more than seven days after issuance
+- Severity: high
+- Prevention or check: Use the repository’s supported non-expiring representation and verify validation beyond the former boundary.
+- Status: refining
+
+### Impact IMP-002
+
+- Changed feature: Permanence across permission changes
+- Possible issue: If permanence disables permission-change revocation, a previously shared link can retain access after its owner or administrator removes permission.
+- Affected feature or user: Resource owners, administrators, link recipients, and protected shared content
+- Trigger: Permissions change after a sharing.link token has been issued
+- Severity: critical
+- Prevention or check: Select and test an explicit permission-change invalidation policy; retaining revocation is the safer default.
+- Status: blocked
+
+### Impact IMP-003
+
+- Changed feature: Permanence across signing-key rotation
+- Possible issue: A nominally non-expiring token may stop verifying at rotation, or retaining old keys forever may enlarge the impact of a compromised signing key.
+- Affected feature or user: Long-lived link holders and operators responsible for key lifecycle and incident response
+- Trigger: The signing key rotates after a sharing.link token is issued
+- Severity: critical
+- Prevention or check: Choose a rotation survival policy, define verification-key retention/re-signing behavior, and test tokens across rotation.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Make sharing.link tokens in share/tokens.py permanent.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Make sharing.link tokens non-expiring by elapsed time. Before implementation, define whether “permanent” also requires tokens to survive permission changes and signing-key rotation, because the supplied repository evidence shows those independent invalidation boundaries.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: sharing.link tokens currently have a seven-day time limit.
+- Evidence level: verified
+- Evidence: share/tokens.py defines TOKEN = "sharing.link" and EXPIRY_DAYS = 7.
+
+### Invariant INV-002
+
+- Current behavior: Tokens are currently configured to be revoked when permissions change.
+- Evidence level: verified
+- Evidence: share/revoke.py defines REVOKE_ON_PERMISSION_CHANGE = True for TOKEN_REF = "sharing.link".
+
+### Invariant INV-003
+
+- Current behavior: Signing keys currently rotate every 90 days.
+- Evidence level: verified
+- Evidence: crypto/rotation.py defines SIGNING_KEY_ROTATION_DAYS = 90 and TOKEN_LINK = "sharing.link"; the available code does not show whether old verification keys are retained.
+
+## Decision Needed
+
+What should “permanent” mean beyond removing the seven-day expiry?
+
+1. **Recommended:** No elapsed-time expiry; keep permission-change revocation and allow signing-key lifecycle policy to invalidate tokens.
+2. No elapsed-time expiry and survive key rotation; keep permission-change revocation.
+3. Survive elapsed time, permission changes, and key rotation. This requires an emergency revocation design and carries critical authorization risk.
+
+## Acceptance and Regression Criteria
+
+- A token remains valid after the former seven-day boundary when no selected invalidation event occurs.
+- A test demonstrates the selected behavior after a permission change.
+- A test demonstrates the selected behavior after signing-key rotation and documents old-key retention or token migration.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until one of the three permanence boundaries is selected.
+- Remaining risks: permission-change revocation and signing-key rotation.
+- No source files were changed.

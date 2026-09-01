@@ -1,0 +1,34 @@
+Since no repository evidence was included, I’d treat this as a greenfield product brainstorm.
+
+Here are some differentiated directions:
+
+| Concept | Core idea | Best audience | Distinctive hook |
+|---|---|---|---|
+| Plan B Fitness | Rebuilds today’s workout around available time, energy, equipment, and soreness | Busy adults | “The workout that survives real life” |
+| Fitness Skill Tree | Users unlock capabilities such as their first pull-up, deeper squat, or 5K | Beginners | Progress through skills rather than calories |
+| Exercise Snacks | Schedules several 2–5 minute movement sessions throughout the day | Desk workers | Fitness without a formal workout |
+| Strength Autopilot | Automatically selects exercises, weights, reps, and progression | Casual lifters | Removes workout planning and gym math |
+| Recovery Radar | Combines sleep, soreness, mood, and recent training to recommend an appropriate session | Active enthusiasts | Helps answer “Should I push today?” |
+| Form Mirror | Private, real-time exercise feedback using the phone camera | Home exercisers | Technique coaching without uploading video |
+| Social Relay | Small groups contribute activity toward shared journeys or challenges | Friends and remote teams | Cooperation instead of leaderboards |
+| Movement Menu | Presents workouts like a streaming catalog organized by mood and context | People bored by routines | “Choose an experience, not a program” |
+| Adaptive Accessibility | Builds workouts around injuries, mobility limitations, sensory preferences, or seated exercise | Underserved users | Accessibility is the product, not a filter |
+| Local Microclubs | Creates lightweight neighborhood walking, running, or workout groups | People seeking accountability | Social fitness without joining a gym |
+
+My strongest product bet is **Plan B Fitness**. Most fitness products optimize the ideal routine; adherence usually breaks when the ideal day disappears. Its core interaction could be:
+
+> “I have 12 minutes, low energy, a resistance band, and sore legs.”
+
+The app immediately generates a useful session, explains why it fits, and allows one-tap substitutions.
+
+A focused MVP would include:
+
+- A short goal and ability assessment
+- A daily workout card
+- Time, location, energy, equipment, and soreness controls
+- Instant workout regeneration
+- One-tap exercise substitutions
+- Simple completion and effort tracking
+- A weekly review centered on consistency and capability gains
+
+The product should avoid becoming another generic exercise library, calorie tracker, or chatbot wrapper. The memorable promise should be something narrower: **there is always a workout you can realistically do today**.

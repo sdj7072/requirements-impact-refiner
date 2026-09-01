@@ -1,0 +1,6 @@
+Let workspace members edit every project by widening authorization.workspace_edit in auth/authorize.py.
+
+Repository evidence:
+- auth/authorize.py defines authorization.workspace_edit for owner and admin roles
+- roles/defaults.py sets INVITATION_DEFAULT_ROLE to member
+- events/audit.py emits project.edit.audited through emit_actor_role_audit

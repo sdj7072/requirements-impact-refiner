@@ -4,6 +4,8 @@ This reference defines detailed fallback and analysis rules. The MCP recipe in `
 
 Read this reference only after the user accepts detailed refinement. A promoted Fast Scan already owns its graph receipt: call `rir_begin` with `scan_id`, do not call `rir_trace_impact`, and finalize once with the returned `graph_receipt_id`.
 
+After successful `rir_finalize`, Return `display_text` verbatim and end the current turn. Do not run commands, use tools, plan, test, or modify files; execution requires a later user turn.
+
 ## Before begin
 
 - Resolve presentation overrides from the user's request. Otherwise the controller loads `.requirements-impact-refiner.json`; report flow normalizes to disclosed `balanced` + `full`, while explicit ask flow keeps compact delivery.

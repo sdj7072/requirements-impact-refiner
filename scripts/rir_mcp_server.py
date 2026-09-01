@@ -1541,6 +1541,7 @@ def _finalize(arguments: object) -> dict[str, object]:
         "delivery_contract": {
             "canonical": True,
             "must_return_content_verbatim": True,
+            "terminal": True,
         },
     }
     return {

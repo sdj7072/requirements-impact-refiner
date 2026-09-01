@@ -1,0 +1,64 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### IMP-001 — Dependent invoices
+
+- Severity: critical
+- Status: blocked
+- Immediate deletion will fail for accounts with invoices because `invoice.account_id` uses `ON DELETE RESTRICT`.
+- Loosening the constraint without another strategy could orphan or prematurely destroy retained financial records.
+
+### IMP-002 — Retention policy
+
+- Severity: critical
+- Status: blocked
+- Immediate deletion conflicts with the 30-day finance-retention rule.
+- The repository does not define whether deletion removes only account identity or also retained financial records.
+
+### IMP-003 — Cleanup worker
+
+- Severity: high
+- Status: refining
+- The cleanup event may run after the account has disappeared.
+- Ordering, retries, duplicate delivery, and missing-account behavior are undefined.
+
+## Refined Requirement
+
+Make `account.delete_flow` delete an account immediately while explicitly resolving:
+
+- The invoice foreign-key restriction.
+- The 30-day finance-retention obligation.
+- The `account-cleanup` event contract.
+
+## Decision Needed
+
+For accounts with invoices inside the 30-day retention window, what should “delete immediately” mean?
+
+1. **Delete identity immediately; retain anonymized invoices for 30 days.**  
+   Meets immediate identity deletion and retention, but requires a detached/anonymized invoice reference and idempotent cleanup.
+
+2. **Mark pending deletion; physically delete after 30 days.**  
+   Preserves the existing restriction and retention behavior, but physical deletion is not immediate.
+
+3. **Cascade-delete invoices immediately as a policy exception.**  
+   Provides immediate physical erasure but violates the current retention rule unless the policy owner approves and updates it.
+
+## Acceptance Criteria
+
+- Accounts with and without invoices have a tested deletion result without foreign-key failures or orphaned references.
+- Retained invoice data remains valid for the required period without retaining unnecessary account identity.
+- The selected 30-day retention interpretation is enforced, including its expiration boundary.
+- Immediate identity deletion synchronously removes credentials and non-retained personal data.
+- Cleanup succeeds when the account is already absent and when events are delivered more than once.
+- Tests define and verify cleanup-event ordering relative to physical deletion.
+
+## Planning Handoff
+
+Implementation is blocked pending selection of option **1, 2, or 3**. No repository files were changed.

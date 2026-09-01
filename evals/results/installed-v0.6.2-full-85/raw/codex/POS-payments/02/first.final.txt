@@ -1,0 +1,11 @@
+Implemented automatic `payment.charge` retries.
+
+- Added bounded retries—3 attempts by default—with injectable delay and sender in [payments/charge.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-f8h9y7ml/payments/charge.py:29).
+- Reuses the exact idempotency key for every attempt.
+- Treats exceptions and gateway failure statuses as retryable.
+- Returns `pending` after exhaustion because capture may have occurred.
+- Keeps pre-webhook UI status pending in [ui/status.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-f8h9y7ml/ui/status.py:5).
+- Added gateway failure classification in [providers/gateway.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-f8h9y7ml/providers/gateway.py:4).
+- Added four regression tests in [tests/test_charge.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-f8h9y7ml/tests/test_charge.py:7).
+
+Verification: all 4 tests pass.

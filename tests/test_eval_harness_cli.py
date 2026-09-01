@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from evals.harness.catalog import load_all
-from evals.harness.controller_evidence import analyze_controller_trace
+from evals.harness.controller_evidence import analyze_controller_trace, analyze_terminal_delivery
 from evals.harness.evidence import build_manifest, record_run, verify_manifest
 from evals.harness.graph_scoring import (
     GraphScore,
@@ -1060,6 +1060,46 @@ class EvalHarnessCliTest(unittest.TestCase):
                 },
                 sort_keys=True,
             )
+            finalize = "\n".join(
+                (
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "finalize",
+                                "type": "mcp_tool_call",
+                                "server": "requirements-impact-refiner",
+                                "tool": "rir_finalize",
+                                "arguments": {"draft_id": "0" * 32},
+                                "result": {
+                                    "structured_content": {
+                                        "status": "published",
+                                        "display_text": compact,
+                                        "delivery_contract": {
+                                            "canonical": True,
+                                            "must_return_content_verbatim": True,
+                                            "terminal": True,
+                                        },
+                                    }
+                                },
+                                "error": None,
+                                "status": "completed",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "answer",
+                                "type": "agent_message",
+                                "text": compact,
+                            },
+                        }
+                    ),
+                )
+            )
+            terminal = analyze_terminal_delivery((finalize,), (compact,))
             record_run(
                 raw,
                 "codex",
@@ -1067,10 +1107,17 @@ class EvalHarnessCliTest(unittest.TestCase):
                 1,
                 {
                     "metadata.json": json.dumps(
-                        {"attempt": 1, "client": "codex", "retry_of": None},
+                        {
+                            "attempt": 1,
+                            "client": "codex",
+                            "retry_of": None,
+                            "plugin_version": "0.6.2-dev",
+                        },
                         sort_keys=True,
                     ),
                     "first.final.txt": compact,
+                    "first.jsonl": finalize,
+                    "terminal-delivery-evidence.json": terminal.to_json(),
                     "workspace-reports/RPT-001/current.json": pointer,
                     "workspace-reports/RPT-001/revision-0001.json": state,
                     "workspace-reports/RPT-001/revision-0001.md": canonical,
@@ -1095,6 +1142,147 @@ class EvalHarnessCliTest(unittest.TestCase):
         self.assertTrue(
             any(path.endswith("workspace-reports/RPT-001/revision-0001.md") for path, _ in digests)
         )
+
+    def test_v06_canonical_report_cannot_mask_rewritten_selected_final(self):
+        case = next(case for case in load_all() if case.id == "POS-authorization")
+        rewritten = "Implemented the authorization change.\n"
+        canonical = (
+            Path(__file__).parent / "fixtures" / "compact-state-post-decision.md"
+        ).read_text(encoding="utf-8")
+        state = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(
+            encoding="utf-8"
+        )
+        pointer = json.dumps(
+            {
+                "schema_version": 1,
+                "report_id": "RPT-001",
+                "revision": 1,
+                "state": "revision-0001.json",
+                "markdown": "revision-0001.md",
+                "markdown_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            },
+            sort_keys=True,
+        )
+        finalize = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "finalize",
+                    "type": "mcp_tool_call",
+                    "server": "requirements-impact-refiner",
+                    "tool": "rir_finalize",
+                    "arguments": {"draft_id": "0" * 32},
+                    "result": {
+                        "structured_content": {
+                            "status": "published",
+                            "display_text": canonical,
+                            "delivery_contract": {
+                                "canonical": True,
+                                "must_return_content_verbatim": True,
+                                "terminal": True,
+                            },
+                        }
+                    },
+                    "error": None,
+                    "status": "completed",
+                },
+            }
+        )
+        terminal = analyze_terminal_delivery((finalize,), (rewritten,))
+        self.assertFalse(terminal.valid)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            record_run(
+                raw,
+                "codex",
+                case.id,
+                1,
+                {
+                    "metadata.json": json.dumps(
+                        {
+                            "attempt": 1,
+                            "client": "codex",
+                            "retry_of": None,
+                            "plugin_version": "0.6.2-dev",
+                        },
+                        sort_keys=True,
+                    ),
+                    "first.final.txt": rewritten,
+                    "first.jsonl": finalize,
+                    "terminal-delivery-evidence.json": terminal.to_json(),
+                    "workspace-reports/RPT-001/current.json": pointer,
+                    "workspace-reports/RPT-001/revision-0001.json": state,
+                    "workspace-reports/RPT-001/revision-0001.md": canonical,
+                },
+                root / "quarantine",
+            )
+            result = RunResult(case.id, 1, "codex", RunStatus.PASS, None, final_output=rewritten)
+
+            score, trusted, _ = _score_selected_attempt(raw, "codex", ScheduledRun(case, 1), result)
+
+        self.assertFalse(trusted)
+        self.assertIn("selected terminal delivery evidence is invalid", score.findings)
+
+    def test_lineage_revision_one_is_a_scoreable_behavior_failure(self):
+        """Missing the second revision is a skill failure, not corrupt evidence."""
+        case = next(case for case in load_all() if case.id == "LINEAGE-stable-blocked")
+        compact = "## Change Impact Summary\n\nValidation: passed\n"
+        canonical = (
+            Path(__file__).parent / "fixtures" / "compact-state-post-decision.md"
+        ).read_text(encoding="utf-8")
+        state = (Path(__file__).parent / "fixtures" / "compact-state-post-decision.json").read_text(
+            encoding="utf-8"
+        )
+        pointer = json.dumps(
+            {
+                "schema_version": 1,
+                "report_id": "RPT-001",
+                "revision": 1,
+                "state": "revision-0001.json",
+                "markdown": "revision-0001.md",
+                "markdown_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            },
+            sort_keys=True,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            record_run(
+                raw,
+                "codex",
+                case.id,
+                1,
+                {
+                    "metadata.json": json.dumps(
+                        {"attempt": 1, "client": "codex", "retry_of": None},
+                        sort_keys=True,
+                    ),
+                    "first.final.txt": canonical,
+                    "second.final.txt": compact,
+                    "workspace-reports/RPT-001/current.json": pointer,
+                    "workspace-reports/RPT-001/revision-0001.json": state,
+                    "workspace-reports/RPT-001/revision-0001.md": canonical,
+                },
+                root / "quarantine",
+            )
+            result = RunResult(
+                case.id,
+                1,
+                "codex",
+                RunStatus.PASS,
+                None,
+                final_output=compact,
+            )
+
+            score, trusted, digests = _score_selected_attempt(
+                raw, "codex", ScheduledRun(case, 1), result
+            )
+
+        self.assertTrue(trusted)
+        self.assertFalse(score.passed)
+        self.assertIn("captured lineage report did not publish a new revision", score.findings)
+        self.assertFalse(any(path.endswith("first.final.txt") for path, _ in digests))
 
     def test_v04_scoring_rejects_controller_evidence_detached_from_jsonl(self):
         case = next(case for case in load_all() if case.id == "POS-authorization")

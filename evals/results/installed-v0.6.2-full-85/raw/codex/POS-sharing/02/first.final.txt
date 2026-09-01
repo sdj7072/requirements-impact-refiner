@@ -1,0 +1,7 @@
+Updated [share/tokens.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-0p0albuk/share/tokens.py:2):
+
+```python
+EXPIRY_DAYS = None
+```
+
+Permission-change revocation and 90-day signing-key rotation remain unchanged. Syntax compilation and behavioral assertions passed. The impact refinement defined “permanent” as no fixed age expiry—not irrevocable across permissions or key retirement.

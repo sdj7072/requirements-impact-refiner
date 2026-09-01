@@ -1,0 +1,202 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: sharing.link token lifetime
+- Possible issue: A remaining expiry value or generated expiry claim would continue to reject links after seven days.
+- Affected feature or user: Existing and newly issued sharing links whose validation reads share/tokens.py.
+- Trigger: Validation occurs more than seven days after token issuance.
+- Severity: high
+- Prevention or check: Represent the lifetime as explicitly non-expiring and test validation beyond the old boundary.
+- Status: refining
+
+### Impact IMP-002
+
+- Changed feature: Permanent sharing.link validity
+- Possible issue: Removing time expiry could accidentally bypass the remaining authorization revocation boundary.
+- Affected feature or user: Owners and recipients of links after sharing permissions are reduced or removed.
+- Trigger: A permission change occurs after a token has been issued.
+- Severity: critical
+- Prevention or check: Keep REVOKE_ON_PERMISSION_CHANGE enabled and verify that an otherwise non-expiring token is rejected after a permission change.
+- Status: refining
+
+### Impact IMP-003
+
+- Changed feature: Permanent sharing.link validity across signing-key rotation
+- Possible issue: Tokens may become unverifiable at rotation, making “permanent” mean at most 90 days, or retaining keys indefinitely may enlarge the compromise window.
+- Affected feature or user: Every sharing.link token issued before a signing-key rotation.
+- Trigger: The active signing key rotates or a retired key is removed.
+- Severity: critical
+- Prevention or check: Choose and document rotation semantics, then test tokens issued before and validated after rotation.
+- Status: blocked
+
+### Impact IMP-004
+
+- Changed feature: sharing.link token lifetime
+- Possible issue: A leaked token remains usable indefinitely while permissions remain unchanged.
+- Affected feature or user: Resources accessible through copied, logged, forwarded, or otherwise exposed sharing links.
+- Trigger: A token is disclosed and the owner does not change the corresponding permission.
+- Severity: high
+- Prevention or check: Preserve explicit revocation and decide whether an additional manual revocation mechanism or documented risk acceptance is required.
+- Status: refining
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Make sharing.link tokens in share/tokens.py permanent.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Make sharing.link tokens non-expiring by age while preserving revocation when permissions change. The required behavior across the 90-day signing-key rotation must be selected before implementation because discarding old verification keys would still invalidate otherwise permanent tokens.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: sharing.link tokens currently expire after 7 days.
+- Evidence level: verified
+- Evidence: share/tokens.py defines TOKEN = "sharing.link" and EXPIRY_DAYS = 7.
+
+### Invariant INV-002
+
+- Current behavior: A sharing.link token is revoked when the associated permission changes.
+- Evidence level: verified
+- Evidence: share/revoke.py defines REVOKE_ON_PERMISSION_CHANGE = True for TOKEN_REF = "sharing.link".
+
+### Invariant INV-003
+
+- Current behavior: Signing keys rotate every 90 days.
+- Evidence level: verified
+- Evidence: crypto/rotation.py defines SIGNING_KEY_ROTATION_DAYS = 90 for TOKEN_LINK = "sharing.link"; the repository does not state whether prior verification keys are retained.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-003, IMP-004
+- Evidence: share/tokens.py defines TOKEN = "sharing.link" and EXPIRY_DAYS = 7.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002, IMP-004
+- Evidence: share/revoke.py defines REVOKE_ON_PERMISSION_CHANGE = True for TOKEN_REF = "sharing.link".
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-003
+- Evidence: crypto/rotation.py defines SIGNING_KEY_ROTATION_DAYS = 90 for TOKEN_LINK = "sharing.link"; the repository does not state whether prior verification keys are retained.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: functionality
+- Severity: high
+- State: refining
+- Evidence level: unknown
+- Evidence: The supplied source evidence verifies the 7-day setting; PATH-002 is provider-fallback graph evidence and does not expose issuance/validation implementation.
+- Invariants: INV-001
+- Decision: none
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: critical
+- State: refining
+- Evidence level: unknown
+- Evidence: The supplied source evidence verifies permission-change revocation; PATH-001 is provider-fallback graph evidence connecting crypto/rotation.py to share/revoke.py.
+- Invariants: INV-002
+- Decision: none
+- Acceptance criteria: AC-002
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: critical
+- State: blocked
+- Evidence level: unknown
+- Evidence: crypto/rotation.py establishes a 90-day signing-key rotation, but no evidence defines retention of old verification keys. PATH-002 is provider-fallback graph evidence.
+- Invariants: INV-003, INV-001
+- Decision: none
+- Acceptance criteria: AC-003
+
+### Impact detail IMP-004
+
+- Requirement: REQ-001
+- Category: authorization/privacy
+- Severity: high
+- State: refining
+- Evidence level: unknown
+- Evidence: Eliminating automatic expiry may extend the useful life of copied or leaked sharing tokens; the supplied evidence identifies permission-change revocation as a compensating control, while both graph paths come from provider fallback.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-004
+
+## Decision Needed
+
+- Question: What should “permanent” mean when signing keys rotate every 90 days?
+
+### Option 1
+
+- Option: Valid until explicitly revoked, including across routine key rotations.
+- Affected impacts: IMP-003, IMP-004
+- Trade-off: Matches the ordinary meaning of permanent, but requires retaining old verification capability or adopting a rotation-independent token design; compromised credentials need explicit revocation.
+
+### Option 2
+
+- Option: No EXPIRY_DAYS limit, but allow key rotation to invalidate older tokens.
+- Affected impacts: IMP-003
+- Trade-off: Smallest change in share/tokens.py, but tokens are not actually permanent and may stop working after rotation.
+
+### Option 3
+
+- Option: Keep the stable link permanent while transparently replacing its signed credential.
+- Affected impacts: IMP-003, IMP-004
+- Trade-off: Preserves the user-visible URL across rotations without retaining old signing keys indefinitely, but requires indirection or reissuance beyond the current files.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003, IMP-004
+
+## Acceptance and Regression Criteria
+
+- AC-001: A sharing.link token remains valid beyond 7 days when no revocation condition occurs.
+- AC-002: A sharing.link token is rejected after its associated permission changes, regardless of its non-expiring age policy.
+- AC-003: Token behavior after a 90-day signing-key rotation exactly matches the selected permanence option.
+- AC-004: The permanent-token threat model and supported revocation path are documented, and tests prove revocation terminates access.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Remaining risk: IMP-003
+- Selected planning workflow: Not ready
+
+Please choose Option 1, 2, or 3. No repository files were changed.

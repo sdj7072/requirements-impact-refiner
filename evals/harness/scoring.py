@@ -21,6 +21,7 @@ _REPORT_WORKFLOW = re.compile(
     r"|\b(?:begin|start|activate|perform)\s+(?:the\s+)?impact refinement\b",
     re.IGNORECASE,
 )
+_FAST_SCAN_WORKFLOW = re.compile(r"(?im)^## Fast impact scan\s*$")
 _REJECTION_ACTIVE_STATES = frozenset(("detected", "refining", "blocked"))
 _REJECTION_FORBIDDEN_STATES = frozenset(("resolved", "accepted", "superseded"))
 
@@ -155,6 +156,8 @@ def score_mechanical(
         return MechanicalScore(case.id, result.repetition, False, tuple(findings))
 
     if case.kind == "negative":
+        if _FAST_SCAN_WORKFLOW.search(output):
+            findings.append("negative case activated the Fast Scan workflow")
         if _REFINEMENT_ID.search(output) or _REPORT_WORKFLOW.search(output):
             findings.append("negative case activated refinement identifiers or workflow")
         return MechanicalScore(case.id, result.repetition, not findings, tuple(findings))

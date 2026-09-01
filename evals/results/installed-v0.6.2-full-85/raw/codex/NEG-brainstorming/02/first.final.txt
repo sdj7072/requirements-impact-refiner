@@ -1,0 +1,45 @@
+No repository files or constraints were present, so these are greenfield concepts.
+
+### Promising app ideas
+
+| Concept | Core hook | Best audience | MVP difficulty |
+|---|---|---|---|
+| **Skill Tree Fitness** | Workouts unlock visible abilities—first pull-up, deeper squat, 5K, handstand | Beginners bored by conventional plans | Medium |
+| **Plan B Workout** | Instantly rebuilds today’s workout around available time, equipment, energy, and location | Busy professionals | Low |
+| **Training Pact** | Small accountability groups with shared goals, check-ins, streaks, and “rescue” workouts | People who struggle with consistency | Medium |
+| **Gym Navigator** | Enter the equipment available—or photograph a gym—and receive an efficient routine with substitutions | Travelers and new gym members | Medium–high |
+| **Movement Snacks** | Two-to-five-minute activity sessions triggered by natural moments such as meetings ending or coffee brewing | Remote and sedentary workers | Low |
+| **Comeback Coach** | A deliberately gentle return-to-fitness program that adapts after missed workouts without guilt or punishment | Lapsed exercisers | Low–medium |
+| **Form Journal** | Compare exercise videos over time, annotate technique, and track form improvements alongside weight and reps | Strength-training enthusiasts | Medium–high |
+| **Adventure Engine** | Converts walking, running, or cycling into exploration campaigns and collaborative challenges | Users motivated by games and stories | High |
+
+### My strongest bet: Skill Tree Fitness
+
+Most fitness apps emphasize completing workouts or changing body weight. This concept emphasizes becoming capable of something.
+
+A user chooses an aspiration such as:
+
+- Perform one unassisted pull-up
+- Run continuously for 30 minutes
+- Touch their toes comfortably
+- Complete 20 controlled push-ups
+- Carry groceries without fatigue
+
+The app assesses their starting point, produces a branching progression tree, and regularly tests milestones. Missed sessions simply pause progress instead of destroying a streak.
+
+A focused MVP could include:
+
+- Three skill trees: push-up, pull-up, and 5K
+- A short starting assessment
+- Adaptive three-session weekly plans
+- Exercise substitutions
+- Milestone tests and a visual progression map
+- Optional friend comparisons based on skills earned, not calories burned
+
+The riskiest assumption is whether users find capability milestones more motivating than appearance or streaks. A cheap validation test would be a clickable prototype plus a two-week manually delivered program for 10–20 users.
+
+### A useful positioning line
+
+> “Fitness that helps you unlock what your body can do.”
+
+If you prefer the fastest concept to build and test, I’d choose **Plan B Workout**. If you want the most socially viral idea, I’d choose **Training Pact**. If you want the most distinctive long-term product, I’d choose **Skill Tree Fitness**.

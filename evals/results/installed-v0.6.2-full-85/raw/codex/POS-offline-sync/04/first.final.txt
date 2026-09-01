@@ -1,0 +1,25 @@
+Implementation is paused by the requirements-impact-refiner because the repository does not define behavior after a tombstone expires.
+
+Please choose:
+
+1. **Reject and surface a conflict** — recommended; prevents silent resurrection.
+2. **Apply and recreate the record** — preserves offline work but may resurrect deleted data.
+3. **Pause replay for manual resolution** — safest operationally but blocks the queue.
+
+## Requirements Impact Report
+
+- **Requirement:** On reconnect, replay `offline.edits` in local creation order through `models/record.py`, preserving normal `updated_at` handling.
+- **High-risk path:** Reconnect replay could skip, duplicate, or reorder edits, or bypass timestamp stamping.
+- **Critical unresolved path:** After the 24-hour tombstone expires, the app cannot distinguish an update from unintended resurrection.
+- **Concurrency risk:** Replay-time `updated_at` values must not be treated as the original offline edit chronology.
+
+Acceptance criteria:
+
+- Process each queued edit exactly once.
+- Remove an edit only after successful processing.
+- Preserve local creation order.
+- Route every edit through `models/record.py`.
+- Apply and test the selected expired-tombstone policy.
+- Resolve concurrent mutations deterministically.
+
+No application files were changed pending your selection.

@@ -1,0 +1,159 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: post-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: profile.displayName and decodeDisplayName are removed from the mobile profile contract.
+- Possible issue: An older mobile client could still request or decode displayName after the server stops providing it.
+- Affected feature or user: Mobile clients using ProfileDecoder.decodeDisplayName.
+- Trigger: Removal occurs before the compatibility release has elapsed.
+- Severity: high
+- Prevention or check: Preserve profile.displayName for the configured one release, then remove decodeDisplayName.
+- Status: accepted
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Remove profile.displayName support beginning at mobile/ProfileDecoder.swift's decodeDisplayName only after the one preserved release configured by migrations/profile_field.py.
+- Refined by decision: DEC-001
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: The current mobile decoder reads profile.displayName through decodeDisplayName and tolerates a missing value as nil.
+- Evidence level: verified
+- Evidence: mobile/ProfileDecoder.swift defines decodeDisplayName(payload:) -&gt; String? and returns payload["displayName"].
+
+### Invariant INV-002
+
+- Current behavior: profile.displayName remains preserved for one release before removal.
+- Evidence level: verified
+- Evidence: migrations/profile_field.py names FIELD = "profile.displayName" and sets PRESERVE_RELEASES = 1.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: mobile/ProfileDecoder.swift defines decodeDisplayName(payload:) -&gt; String? and returns payload["displayName"].
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: migrations/profile_field.py names FIELD = "profile.displayName" and sets PRESERVE_RELEASES = 1.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: compatibility
+- Severity: high
+- State: accepted
+- Evidence level: unknown
+- Evidence: The supplied source locations verify the decoder dependency and one-release setting, but the promoted scan's graph evidence is lexical and ends at a provider-unavailable frontier, so transitive client coverage is not independently verified.
+- Invariants: INV-001, INV-002
+- Decision: DEC-001
+- Acceptance criteria: AC-001
+
+## Decisions and Accepted Risks
+
+### Decision DEC-001
+
+- Choice: Accept the one-release preservation window and remove mobile profile.displayName decoding after it elapses.
+- Requirement: REQ-001
+- Accepted impacts: IMP-001
+- Rationale: The request selects removal and identifies migrations/profile_field.py's PRESERVE_RELEASES = 1 as sufficient compatibility evidence.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Remove profile.displayName support beginning at mobile/ProfileDecoder.swift's decodeDisplayName only after the one preserved release configured by migrations/profile_field.py.
+- Decision: DEC-001
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: profile.displayName remains available for one release, and decodeDisplayName plus its profile.displayName mapping are removed only after that window.
+- Evidence: migrations/profile_field.py establishes the one-release boundary; mobile/ProfileDecoder.swift identifies the client removal point.
+
+## Unresolved, Deferred, and Blocked Items
+
+- none
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: mobile/ProfileDecoder.swift at decodeDisplayName
+- Evidence: decodeDisplayName reads payload["displayName"] and decodedField names profile.displayName.
+- Consequence for confidence: verified
+
+### Scope 2
+
+- Scope or limitation: migrations/profile_field.py
+- Evidence: FIELD is profile.displayName and PRESERVE_RELEASES is 1.
+- Consequence for confidence: verified
+
+### Scope 3
+
+- Scope or limitation: Transitive repository coverage
+- Evidence: Fast Scan returned a lexical migration-to-decoder path and a provider-unavailable frontier.
+- Consequence for confidence: unknown beyond the supplied source locations
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: This impact relies on the supplied, directly inspected decoder and migration evidence; graph coverage beyond those locations is unknown because providers were unavailable.
+- Consequence for confidence: provider unavailable; confidence unknown; location unavailable
+
+### Scope 5
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 9ae16a79f32cff453377820f677b2639; sha256 bdd5fa3e4cd300f8342f0883d76d71efddefac2a4d035b7b9a2c3a883b9cc727; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: REQ-001
+- Report IDs: REQ-001, INV-001, INV-002, IMP-001, DEC-001
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001
+- Selected planning workflow: Ready for planning. The one-release compatibility policy is accepted from the supplied evidence; implementation must preserve that ordering, while transitive coverage remains limited to the inspected source locations.

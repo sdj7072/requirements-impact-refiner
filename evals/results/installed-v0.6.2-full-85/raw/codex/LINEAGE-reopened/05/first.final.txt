@@ -1,0 +1,159 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: post-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Remove profile.displayName decoding beginning at the mobile profile decoder.
+- Possible issue: Already-released clients could lose display-name data if the field disappears at the same time as decoder removal.
+- Affected feature or user: Mobile clients using decodeDisplayName and the profile.displayName payload contract.
+- Trigger: Deploying decoder removal while an older client release still consumes profile.displayName.
+- Severity: high
+- Prevention or check: Preserve profile.displayName for one migration release and retire the decoder dependency after the preservation window.
+- Status: mitigated
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Remove mobile decoding support for profile.displayName, beginning at decodeDisplayName in mobile/ProfileDecoder.swift, while preserving the field for one migration release so already-released clients remain compatible during the transition.
+- Refined by decision: DEC-001
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: Clients released before the decoder change continue to receive profile.displayName for the configured compatibility window.
+- Evidence level: verified
+- Evidence: migrations/profile_field.py identifies FIELD as profile.displayName and sets PRESERVE_RELEASES to 1.
+
+### Invariant INV-002
+
+- Current behavior: Existing mobile client code still decodes profile.displayName through decodeDisplayName.
+- Evidence level: verified
+- Evidence: mobile/ProfileDecoder.swift sets decodedField to profile.displayName and decodeDisplayName returns payload["displayName"].
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: migrations/profile_field.py identifies FIELD as profile.displayName and sets PRESERVE_RELEASES to 1.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: mobile/ProfileDecoder.swift sets decodedField to profile.displayName and decodeDisplayName returns payload["displayName"].
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: compatibility
+- Severity: high
+- State: mitigated
+- Evidence level: unknown
+- Evidence: Current source verifies that mobile/ProfileDecoder.swift decodes profile.displayName and migrations/profile_field.py preserves the same field for one release. The supplied evidence supports the compatibility resolution, but the promoted relationship path is lexical and provider-limited, so transitive compatibility remains recorded as mitigated rather than fully verified.
+- Invariants: INV-001, INV-002
+- Decision: DEC-001
+- Acceptance criteria: AC-001
+
+## Decisions and Accepted Risks
+
+### Decision DEC-001
+
+- Choice: Remove profile.displayName decoding while preserving the field for one release.
+- Requirement: REQ-001
+- Accepted impacts: IMP-001
+- Rationale: The request selects decoder-side field removal, and PRESERVE_RELEASES = 1 supplies the compatibility bridge for deployed clients.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Remove mobile decoding support for profile.displayName, beginning at decodeDisplayName in mobile/ProfileDecoder.swift, while preserving the field for one migration release so already-released clients remain compatible during the transition.
+- Decision: DEC-001
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: When decodeDisplayName support is removed from mobile/ProfileDecoder.swift, profile.displayName remains available for exactly one release, and the mobile decoder dependency is retired by the end of that window.
+- Evidence: migrations/profile_field.py sets FIELD = "profile.displayName" and PRESERVE_RELEASES = 1; mobile/ProfileDecoder.swift identifies the decoder dependency to retire.
+
+## Unresolved, Deferred, and Blocked Items
+
+- none
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: Mobile decoding of profile.displayName at decodeDisplayName in mobile/ProfileDecoder.swift
+- Evidence: The decoder declares decodedField = "profile.displayName" and returns payload["displayName"].
+- Consequence for confidence: Verified from current repository source.
+
+### Scope 2
+
+- Scope or limitation: Compatibility migration for profile.displayName
+- Evidence: migrations/profile_field.py names the field and configures PRESERVE_RELEASES = 1.
+- Consequence for confidence: Verified from current repository source.
+
+### Scope 3
+
+- Scope or limitation: Other transitive profile consumers or producers
+- Evidence: The promoted scan reports a provider-unavailable frontier and only a lexical path between the supplied migration and decoder locations.
+- Consequence for confidence: Limited; no additional consumers or producers were established.
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: migrations/profile_field.py → mobile/ProfileDecoder.swift
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location migrations/profile_field.py + mobile/ProfileDecoder.swift
+
+### Scope 5
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt c800d1aeaa6cf369bf87a650bc993826; sha256 a02ebcedb8e32064388050a1d730500d5494a0d212e39dbe8b3e2e08200a149c; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: REQ-001
+- Report IDs: REQ-001, INV-001, INV-002, IMP-001, DEC-001
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001
+- Selected planning workflow: Ready for planning with the one-release compatibility mitigation recorded. Planning must coordinate decoder removal with the preservation window and verify the mobile dependency is retired before the window expires.

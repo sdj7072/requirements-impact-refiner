@@ -1390,6 +1390,7 @@ if sys.modules["payload_identity"] is not foreign_payload:
             {
                 "canonical": True,
                 "must_return_content_verbatim": True,
+                "terminal": True,
             },
         )
 

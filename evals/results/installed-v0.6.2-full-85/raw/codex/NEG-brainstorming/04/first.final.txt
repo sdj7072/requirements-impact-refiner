@@ -1,0 +1,22 @@
+The workspace is empty, so there’s no repository evidence to constrain the ideas yet. Based on product potential, I’d explore these:
+
+1. **Minimum Viable Workout** — Adapts every workout to the user’s available time, energy, space, and equipment. “I have 11 minutes and sore legs” becomes a complete session.
+2. **Consistency Coach** — Optimizes for maintaining a habit rather than maximizing performance. It detects dropout patterns and automatically reduces intensity before motivation collapses.
+3. **Form Quest** — Camera-based exercise coaching presented as short skill challenges: squat depth, push-up alignment, balance, and mobility.
+4. **Exercise Snacks** — Inserts two-to-five-minute movement sessions into calendar gaps, with office-friendly and quiet modes.
+5. **Recovery Navigator** — Combines soreness, sleep, stress, and recent training to recommend whether to train hard, recover, or rest.
+6. **Real-Life Strength** — Programs built around practical goals such as carrying children, hiking comfortably, reducing desk pain, or staying mobile while aging.
+7. **Co-op Fitness** — Friends complete asynchronous team missions. Individual workouts contribute points, so users with different fitness levels can participate fairly.
+8. **Adaptive Gym Companion** — Builds a workout around whichever machines are currently available and reroutes instantly when equipment is occupied.
+9. **Fitness Experiment Lab** — Runs personal four-week experiments—morning versus evening workouts, strength versus cardio—and summarizes what actually improves the user’s adherence and energy.
+10. **Comeback Mode** — Designed specifically for returning after illness, injury, pregnancy, burnout, or a long break, with deliberately conservative progression.
+
+My strongest candidate is **Minimum Viable Workout**. Its core promise is simple: *the best workout you can realistically complete today*. A focused MVP would need only:
+
+- A daily check-in for time, energy, soreness, location, and equipment
+- A generated 5–30 minute workout
+- Easy substitutions during the session
+- Completion and difficulty feedback
+- Weekly progression based on what the user actually completed
+
+The most differentiated alternative is **Comeback Mode**, while **Adaptive Gym Companion** has the clearest immediately useful gym experience.

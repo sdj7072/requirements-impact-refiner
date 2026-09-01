@@ -1,0 +1,9 @@
+Implemented a thread-safe, process-local dashboard cache:
+
+- Tenant-scoped entries with a 3,600-second TTL in [api/dashboard.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-dfn_72ct/api/dashboard.py:1).
+- Role-change invalidation in [permission_cache.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-dfn_72ct/cache/permission_cache.py:6).
+- `dashboard.updated` invalidation in [dashboard_updated.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-dfn_72ct/events/dashboard_updated.py:5).
+- Defensive response copies prevent callers from mutating cached data.
+- Added five regression tests in [test_dashboard.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-dfn_72ct/tests/test_dashboard.py:1).
+
+Verification: all 5 tests pass, and bytecode compilation succeeds.

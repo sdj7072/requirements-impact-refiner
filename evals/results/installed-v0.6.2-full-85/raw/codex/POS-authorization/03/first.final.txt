@@ -1,0 +1,8 @@
+Implemented workspace-wide member edit authorization in [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-d4elvo1i/auth/authorize.py:1).
+
+- Added `member` while preserving `owner` and `admin`.
+- Unknown roles remain denied.
+- Default invitation role remains `member`.
+- `project.edit.audited` still includes actor and role.
+
+Direct executable assertions passed all four acceptance criteria. No test harness exists in the repository.

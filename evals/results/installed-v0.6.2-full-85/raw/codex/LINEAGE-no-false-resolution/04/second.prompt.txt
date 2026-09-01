@@ -1,0 +1,10 @@
+Continue the same webhook report. A stakeholder says the risk is probably acceptable, but provides no repository evidence or approved decision.
+
+Repository evidence:
+- the prior report text is supplied verbatim
+- no approval record or idempotency evidence exists
+
+Harness continuity evidence:
+- In compact delivery, read `.requirements-impact-refiner/reports/RPT-###/current.json` and hash the exact canonical Markdown file it selects.
+- `first.final.txt` is the chat response, not canonical lineage bytes, unless no persisted report exists and it is itself a complete canonical report.
+- Do not reconstruct predecessor bytes from conversation text or add, remove, or normalize bytes.

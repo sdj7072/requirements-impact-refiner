@@ -1,0 +1,6 @@
+Make sharing.link tokens in share/tokens.py permanent.
+
+Repository evidence:
+- share/tokens.py sets EXPIRY_DAYS to 7 for sharing.link
+- share/revoke.py sets REVOKE_ON_PERMISSION_CHANGE
+- crypto/rotation.py sets SIGNING_KEY_ROTATION_DAYS to 90

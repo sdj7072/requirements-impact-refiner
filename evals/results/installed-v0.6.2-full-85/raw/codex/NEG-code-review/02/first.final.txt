@@ -1,0 +1,1 @@
+I can’t review the PR yet: the workspace is empty and contains neither a Git repository nor a diff. Please paste or attach the complete diff, and I’ll return correctness findings prioritized by severity with file and line references.

@@ -1,0 +1,252 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 2
+- Previous SHA-256: 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Webhook retry behavior after provider timeout
+- Possible issue: A retry may deliver the same logical webhook event twice when the first attempt succeeded remotely but its acknowledgement was lost.
+- Affected feature or user: Webhook recipients, downstream side effects, delivery accounting, and operators reconciling webhook outcomes
+- Trigger: retry_delivery is invoked after an ambiguous provider timeout without a proven idempotency key or provider delivery-status check
+- Severity: high
+- Prevention or check: Select and verify an idempotency or reconciliation strategy, or obtain an explicit approved acceptance of at-least-once risk, before changing retry mechanics; retain one stable logical delivery identity across attempts and test the ambiguous-timeout case.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: Impact-report revision lineage for the webhook retry report
+- Possible issue: Using the prior chat response as predecessor bytes could corrupt or fork canonical report lineage.
+- Affected feature or user: RPT-001 revision history, impact IDs, deltas, and future report refinements
+- Trigger: A lexical scan finds webhook terms in first.final.txt and mistakes that chat artifact for the persisted canonical report.
+- Severity: high
+- Prevention or check: Read current.json, hash the exact Markdown file it selects without byte normalization, and bind the revision to that digest.
+- Status: mitigated
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for changing webhook delivery retries at webhook/delivery.py and retry_delivery. The supplied evidence identifies an unresolved duplicate-delivery risk.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Change webhook delivery retry behavior in webhook/delivery.py at retry_delivery for provider-timeout outcomes, while preventing a single logical webhook event from being delivered more than once. The retry mechanism must define how an ambiguous provider timeout is distinguished from a confirmed failure before another delivery attempt is issued.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: retry_delivery is the retry boundary used after a provider timeout and currently returns the supplied event for another delivery attempt.
+- Evidence level: verified
+- Evidence: webhook/delivery.py defines TIMEOUT_SOURCE as "provider timeout" and retry_delivery(event) returns event.
+
+### Invariant INV-002
+
+- Current behavior: No configured or documented idempotency guarantee currently protects webhook timeout retries.
+- Evidence level: verified
+- Evidence: webhook/idempotency.py contains STATUS = "not configured" and only references "provider timeout"; no idempotency behavior is defined.
+
+### Invariant INV-003
+
+- Current behavior: The persisted report selector, not the prior chat response, defines the canonical predecessor bytes when a persisted report exists.
+- Evidence level: verified
+- Evidence: .requirements-impact-refiner/reports/RPT-001/current.json selects revision-0001.md with SHA-256 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb, and hashing that exact file produced the same digest.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: webhook/delivery.py defines TIMEOUT_SOURCE as "provider timeout" and retry_delivery(event) returns event.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: webhook/idempotency.py contains STATUS = "not configured" and only references "provider timeout"; no idempotency behavior is defined.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002
+- Evidence: .requirements-impact-refiner/reports/RPT-001/current.json selects revision-0001.md with SHA-256 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb, and hashing that exact file produced the same digest.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: The supplied files establish a provider-timeout retry boundary and no configured idempotency behavior. The provider acknowledgement and commit semantics are absent, so whether a timed-out first attempt can have committed—and therefore whether a retry duplicates delivery—remains unverified. A stakeholder's statement that the risk is probably acceptable is neither repository evidence nor an approved risk decision.
+- Invariants: INV-001, INV-002
+- Decision: none
+- Acceptance criteria: AC-001, AC-002
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: regression
+- Severity: high
+- State: mitigated
+- Evidence level: unknown
+- Evidence: The bounded graph only lexically links webhook/delivery.py to first.final.txt, so that relationship is not trusted as repository behavior. Separately, current.json selects revision-0001.md as canonical and its exact-file hash matches the stored selector digest; the chat artifact was therefore excluded from predecessor lineage bytes for this revision.
+- Invariants: INV-003
+- Decision: none
+- Acceptance criteria: AC-003
+
+## Decision Needed
+
+- Question: Which duplicate-delivery control must govern retry_delivery after an ambiguous provider timeout?
+
+### Option 1
+
+- Option: Reuse a stable idempotency key for every attempt of one logical webhook event and require provider-side deduplication.
+- Affected impacts: IMP-001
+- Trade-off: Strong retry simplicity and duplicate protection, but depends on a documented provider idempotency contract and key-retention window.
+
+### Option 2
+
+- Option: Reconcile the first attempt with the provider before retrying, and retry only when non-delivery is confirmed.
+- Affected impacts: IMP-001
+- Trade-off: Avoids relying solely on deduplication, but adds status-query latency, provider integration complexity, and handling for inconclusive reconciliation.
+
+### Option 3
+
+- Option: Explicitly approve at-least-once retry semantics and require downstream consumers to deduplicate by a stable event identifier.
+- Affected impacts: IMP-001
+- Trade-off: Preserves availability during ambiguous failures, but requires an accountable risk-acceptance decision and transfers correctness responsibility to every consumer.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: IMP-001
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-002
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Change webhook delivery retry behavior in webhook/delivery.py at retry_delivery for provider-timeout outcomes, while preventing a single logical webhook event from being delivered more than once. The retry mechanism must define how an ambiguous provider timeout is distinguished from a confirmed failure before another delivery attempt is issued.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+### Requirement REQ-001
+
+- Revision: Change webhook delivery retry behavior in webhook/delivery.py at retry_delivery for provider-timeout outcomes, while preventing a single logical webhook event from being delivered more than once. The retry mechanism must define how an ambiguous provider timeout is distinguished from a confirmed failure before another delivery attempt is issued.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: A test that simulates a provider accepting the first delivery but timing out before acknowledgement must show that repeated retry_delivery processing produces no more than one committed downstream side effect for the same logical event, unless an accountable owner explicitly approves at-least-once delivery risk.
+- Evidence: Required acceptance evidence; the current idempotency module is not configured, and no approval record or idempotency evidence was supplied.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-001
+- Observable criterion: retry_delivery must preserve a stable logical delivery identity and follow the selected duplicate-control or explicitly approved risk-acceptance strategy before issuing another provider delivery attempt after a timeout.
+- Evidence: Required implementation, decision, and test evidence; the current function does not document or enforce an ambiguous-timeout strategy, and the stakeholder opinion is not an approved decision.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-003
+- Observable criterion: The predecessor digest for a continued report must equal the SHA-256 of the exact canonical Markdown path selected by current.json; first.final.txt must not supply predecessor bytes while that persisted report exists.
+- Evidence: Satisfied for RPT-001 revision 1: current.json selects revision-0001.md and both selector and exact-file hash equal 217040941fe47f42bfcb5b98924348996602cdc5999154e81ea6cb6a6f6097cb.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: No repository evidence establishes idempotency or provider reconciliation, and no accountable approval record accepts at-least-once duplicate-delivery risk. The stakeholder's tentative opinion cannot satisfy the pending decision.
+- Linked decision: none
+- Next owner: Webhook delivery owner
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: webhook/delivery.py: retry_delivery and provider-timeout retry semantics
+- Evidence: The file defines TIMEOUT_SOURCE = "provider timeout" and retry_delivery(event).
+- Consequence for confidence: verified
+
+### Scope 2
+
+- Scope or limitation: webhook/idempotency.py: idempotency configuration and delivery identity contract
+- Evidence: The file declares STATUS = "not configured" and contains no documented idempotency behavior.
+- Consequence for confidence: verified
+
+### Scope 3
+
+- Scope or limitation: Provider and downstream duplicate-control guarantees
+- Evidence: No provider idempotency contract, acknowledgement semantics, status-query behavior, or downstream deduplication contract is present in the repository evidence.
+- Consequence for confidence: unknown; must be resolved before implementation planning
+
+### Scope 4
+
+- Scope or limitation: Stakeholder risk-acceptance statement
+- Evidence: A stakeholder said the risk is probably acceptable, but no approval record, accountable approver, selected option, or supporting repository evidence was provided.
+- Consequence for confidence: verified as an unapproved statement; insufficient to create a decision or accept IMP-001
+
+### Scope 5
+
+- Scope or limitation: Canonical report continuity
+- Evidence: The persisted current.json selected revision-0001.md, whose exact SHA-256 matched the selector; first.final.txt was not used as predecessor lineage bytes or webhook impact evidence.
+- Consequence for confidence: verified
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-002: retry_delivery → idempotency
+- Consequence for confidence: PATH-002: provider builtin; confidence lexical; location webhook/delivery.py + webhook/idempotency.py
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-001: retry_delivery → first.final.txt
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location webhook/delivery.py + first.final.txt
+
+### Scope 8
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 3 nodes / 6 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 714c85234e4a547514041af24f991c1a; sha256 f9dbaf0be04a0c50e9c22db1c7905275afcd6e9717af91b108281f17794a7c2b; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001, IMP-002
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001, AC-002, AC-003
+- Selected planning workflow: Not ready

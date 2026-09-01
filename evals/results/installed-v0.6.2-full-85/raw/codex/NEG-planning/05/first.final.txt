@@ -1,0 +1,3 @@
+I can turn it into coding tasks, but the approved specification itself isn’t available: the workspace is empty and no report content or ID was provided.
+
+Please paste the approved impact report/specification or provide its accessible path/report ID. I’ll preserve its approved scope and produce ordered tasks with dependencies, affected components, acceptance criteria, and tests.

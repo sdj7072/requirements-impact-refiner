@@ -1,0 +1,19 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: pre-decision
+
+## Decision Needed
+
+What should “permanent” mean for `sharing.link` tokens?
+
+1. **No time expiry**, but keep permission-change revocation and existing signing-key rotation semantics. This is the safest interpretation.
+2. **No time expiry and survive key rotation**, but keep permission-change revocation.
+3. **Irrevocable indefinitely**, including across permission changes and key rotations. This carries critical authorization and key-compromise risks.
+
+The repository does not define a non-expiring sentinel or consumers that clarify whether `EXPIRY_DAYS` should become `None`, `0`, or another value. No files were changed.
+
+Please choose option 1, 2, or 3 and specify the intended no-expiry value if it is defined outside this repository.

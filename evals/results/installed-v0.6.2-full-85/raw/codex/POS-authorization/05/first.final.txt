@@ -1,0 +1,3 @@
+Updated [auth/authorize.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-d5z_e_fr/auth/authorize.py:1) to permit `member` alongside `owner` and `admin`.
+
+Verified all five impact criteria: member/default-invite access, preserved owner/admin access, denial of unrelated roles, and unchanged member audit payload.

@@ -1,0 +1,95 @@
+Recorded as [RPT-001 revision 1](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-52bu7028/.requirements-impact-refiner/reports/RPT-001/revision-0001.md). The change is blocked pending selection of a duplicate-handling guarantee.
+
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Webhook retry behavior after a provider timeout
+- Possible issue: The same logical event may be delivered and applied more than once when the first attempt succeeded remotely but its response timed out.
+- Affected feature or user: Webhook recipients and any non-idempotent downstream side effects such as writes, notifications, billing, or state transitions.
+- Trigger: `retry_delivery` runs after an ambiguous provider-timeout result.
+- Severity: high
+- Prevention or check: Select and implement one explicit delivery guarantee: stable idempotency enforcement, no automatic retry, or documented at-least-once delivery with downstream deduplication.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for changing webhook delivery retries at `webhook/delivery.py` and `retry_delivery`. The supplied evidence identifies an unresolved duplicate-delivery risk.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Change webhook retry behavior in `webhook/delivery.py` for provider-timeout outcomes only after defining the delivery guarantee and duplicate-prevention contract. `retry_delivery` must preserve the original logical event identity across attempts, and the selected policy must specify whether retries are idempotent, suppressed, or explicitly at-least-once with downstream deduplication.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: A retry represents the same logical webhook event and preserves the original event data/identity rather than creating an unrelated delivery.
+- Evidence level: verified
+- Evidence: `webhook/delivery.py` defines `retry_delivery(event)` and returns the same event object; the file identifies the trigger source as provider timeout.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: state/concurrency
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: A provider timeout does not prove that the provider rejected or failed to process the first attempt. `webhook/delivery.py` associates `retry_delivery` with provider timeout, while `webhook/idempotency.py` declares `STATUS = "not configured"` and contains no idempotency contract. Repository analysis links those files only through lexical and structural inference, and the provider remains an explicit coverage frontier.
+- Invariants: INV-001
+- Decision: none
+- Acceptance criteria: AC-001, AC-002
+
+## Decision Needed
+
+Which duplicate-handling guarantee should govern `retry_delivery` after an ambiguous provider timeout?
+
+1. Require a stable idempotency key and make retries safe to replay.
+   - Best preserves retry-based reliability, but requires a documented key lifecycle, persistence/deduplication behavior, and provider or receiver support.
+
+2. Suppress automatic retry after provider timeout.
+   - Avoids retry-created duplicates but can lose deliveries when the timed-out first attempt was not processed.
+
+3. Keep at-least-once retries and require downstream deduplication.
+   - Keeps delivery availability but makes duplicates part of the public contract and shifts correctness responsibility to recipients.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+An automated test models a provider that applies the event and then times out; the selected retry policy produces no undocumented duplicate side effect and preserves the same logical event identity.
+
+### Criterion AC-002
+
+The selected delivery guarantee, idempotency key source and lifetime, retry conditions, and duplicate ownership are documented and enforced by code before retry behavior is enabled.
+
+## Unresolved Item
+
+- Impact: IMP-001
+- State: blocked
+- Rationale: Implementation cannot safely choose between possible delivery loss and possible duplicate side effects until the timeout delivery guarantee is selected.
+- Next owner: Webhook delivery product/engineering owner
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, IMP-001
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001, AC-002
+- Selected planning workflow: Not ready

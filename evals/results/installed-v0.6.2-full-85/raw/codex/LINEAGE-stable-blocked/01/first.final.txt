@@ -1,0 +1,191 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Tenant archive export behavior in write_tenant_archive
+- Possible issue: A data export change could retain, dispose of, or expose tenant archives contrary to the authoritative retention policy.
+- Affected feature or user: Tenant archive data, export operators, and policy/compliance stakeholders
+- Trigger: Planning or implementing the export change before the retention policy and accountable owner are confirmed
+- Severity: medium
+- Prevention or check: Require the export retention owner to confirm the authoritative policy, including its reference and enforceable archive-lifecycle rules, before planning or implementation.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Assess and define the data export change at exports/export_writer.py::write_tenant_archive only after the export retention owner confirms the authoritative retention policy for tenant archives; do not plan or implement the change while that policy and ownership remain undocumented.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: write_tenant_archive creates a tenant archive result containing the supplied tenant identifier and payload.
+- Evidence level: verified
+- Evidence: exports/export_writer.py defines write_tenant_archive and currently returns a tenant/payload archive result.
+
+### Invariant INV-002
+
+- Current behavior: Tenant archive creation currently applies no explicit retention rule in write_tenant_archive.
+- Evidence level: verified
+- Evidence: The inspected body of exports/export_writer.py::write_tenant_archive only constructs and returns the archive result; it contains no retention-policy lookup or enforcement.
+
+### Invariant INV-003
+
+- Current behavior: The repository does not currently identify an owner for the tenant export retention policy.
+- Evidence level: verified
+- Evidence: policy/retention.py declares RETENTION_POLICY = "undocumented" and EXPORT_REF = "tenant archive", and contains no RETENTION_OWNER declaration.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: exports/export_writer.py defines write_tenant_archive and currently returns a tenant/payload archive result.
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: The inspected body of exports/export_writer.py::write_tenant_archive only constructs and returns the archive result; it contains no retention-policy lookup or enforcement.
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: policy/retention.py declares RETENTION_POLICY = "undocumented" and EXPORT_REF = "tenant archive", and contains no RETENTION_OWNER declaration.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: legal/policy
+- Severity: medium
+- State: blocked
+- Evidence level: unknown
+- Evidence: The bounded repository scan links exports/export_writer.py to policy/retention.py through PATH-001, but its provider frontier prevents the graph from establishing authoritative policy mechanics. The writer contains no retention enforcement, while the policy is marked undocumented and has no declared owner.
+- Invariants: INV-001, INV-002, INV-003
+- Decision: none
+- Acceptance criteria: AC-001, AC-002
+
+## Decision Needed
+
+- Question: What authoritative tenant-archive retention policy does the export retention owner confirm for write_tenant_archive?
+
+### Option 1
+
+- Option: Confirm an existing policy
+- Affected impacts: IMP-001
+- Trade-off: Provide the authoritative policy reference and the exact retention trigger, duration, and disposal requirements; this minimizes product-policy change but may expose implementation gaps.
+
+### Option 2
+
+- Option: Define a revised policy
+- Affected impacts: IMP-001
+- Trade-off: The owner specifies new retention, deletion, exception, and audit requirements; this resolves ambiguity but expands policy review and implementation scope.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Assess and define the data export change at exports/export_writer.py::write_tenant_archive only after the export retention owner confirms the authoritative retention policy for tenant archives; do not plan or implement the change while that policy and ownership remain undocumented.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-003
+- Observable criterion: The accountable export retention owner is identified and confirms an authoritative policy reference plus the exact tenant-archive retention trigger, duration, disposal behavior, exceptions, and audit requirements.
+- Evidence: No RETENTION_OWNER declaration or documented retention policy currently exists in policy/retention.py.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: Before implementation, the confirmed retention rules are mapped to explicit expected behavior and verification criteria for write_tenant_archive.
+- Evidence: The current writer body contains no retention-policy lookup or enforcement, so alignment cannot be verified without the owner's confirmed rules.
+
+## Unresolved, Deferred, and Blocked Items
+
+### Unresolved impact IMP-001
+
+- State: blocked
+- Rationale: The authoritative retention policy and accountable owner are absent from repository evidence, so the required tenant-archive behavior cannot be safely selected.
+- Linked decision: none
+- Next owner: Export retention owner (identity not yet confirmed)
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: exports/export_writer.py::write_tenant_archive
+- Evidence: Defines the tenant archive write entry point and currently returns the tenant identifier and payload without retention enforcement.
+- Consequence for confidence: high
+
+### Scope 2
+
+- Scope or limitation: policy/retention.py
+- Evidence: Marks RETENTION_POLICY as undocumented, references tenant archives, and has no RETENTION_OWNER declaration.
+- Consequence for confidence: high
+
+### Scope 3
+
+- Scope or limitation: Downstream tenant-archive retention behavior
+- Evidence: PATH-001 links the writer and retention policy, but the scan provider was unavailable and fallback graph evidence does not establish the missing policy mechanics.
+- Consequence for confidence: medium
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: exports/export_writer.py → policy/retention.py
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location exports/export_writer.py + policy/retention.py
+
+### Scope 5
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 066bf8e31a3a78fb4fad6d44912385d4; sha256 ee6a7fe01ac4110532acb660d964969ae3a09031e3a3d51470e37736f2efc74c; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, IMP-001
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001, AC-002
+- Selected planning workflow: Not ready

@@ -1,0 +1,7 @@
+Updated [workers/export.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-bbvw6rvx/workers/export.py:3):
+
+```python
+MAX_ATTEMPTS = None
+```
+
+`export.jobs` now retries indefinitely. The deterministic object key and `alerts/dead_letter.py` remain unchanged. Import assertions passed.

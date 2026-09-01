@@ -1,0 +1,6 @@
+Retry export.jobs in workers/export.py forever.
+
+Repository evidence:
+- workers/export.py writes export.jobs to a deterministic object key
+- workers/export.py sets MAX_ATTEMPTS to 5
+- alerts/dead_letter.py consumes dead_letter

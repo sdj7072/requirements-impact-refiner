@@ -1,0 +1,6 @@
+Delete an account immediately through account.delete_flow in db/constraints.py.
+
+Repository evidence:
+- db/constraints.py declares invoice.account_id ON DELETE RESTRICT
+- policy/retention.py sets FINANCE_RETENTION_DAYS to 30
+- workers/cleanup.py consumes account-cleanup events

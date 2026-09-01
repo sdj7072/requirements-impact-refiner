@@ -1,0 +1,274 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: The API field becomes profile.name.
+- Possible issue: Existing iOS builds can no longer decode the user's display name if the old field disappears immediately.
+- Affected feature or user: Released iOS clients and any staged rollout in which server and app versions differ.
+- Trigger: A response contains only profile.name while the client still requests profile.displayName.
+- Severity: high
+- Prevention or check: Choose either a one-release alias/fallback rollout or a coordinated breaking update of producer and client.
+- Status: detected
+
+### Impact IMP-002
+
+- Changed feature: The canonical persisted profile key becomes profile.name.
+- Possible issue: Existing cached records may be unreadable or may continue reintroducing the deprecated key.
+- Affected feature or user: Users with cache entries written before the rename and code paths reading cached profiles.
+- Trigger: New code reads only profile.name from an entry stored with profile.displayName, or keeps writing the legacy key.
+- Severity: high
+- Prevention or check: Define read-old/write-new migration behavior for one release, or invalidate/migrate all cache entries during a coordinated breaking rollout.
+- Status: detected
+
+### Impact IMP-003
+
+- Changed feature: profile.displayName becomes deprecated in favor of profile.name.
+- Possible issue: The implementation may either remove the old field too early or leave the changelog/policy record inconsistent with the actual rollout.
+- Affected feature or user: Release coordination, maintainers, and downstream consumers relying on the stated compatibility window.
+- Trigger: The API rename ships without updating the deprecation record and removal timing.
+- Severity: medium
+- Prevention or check: Record the replacement and apply the configured one-release compatibility window, unless an explicit breaking rollout is selected.
+- Status: detected
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Rename profile.displayName to profile.name in api/profile.py.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Rename the published profile field from profile.displayName to profile.name, while explicitly choosing and implementing a rollout strategy for the iOS decoder and persisted cache under the repository's one-release deprecation policy.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: The profile API currently publishes the field as profile.displayName.
+- Evidence level: verified
+- Evidence: api/profile.py:1 defines PROFILE_FIELD = "profile.displayName".
+
+### Invariant INV-002
+
+- Current behavior: The iOS client currently decodes the profile name from profile.displayName.
+- Evidence level: verified
+- Evidence: ios/UserDTO.swift:1 defines decodedField = "profile.displayName".
+
+### Invariant INV-003
+
+- Current behavior: Persisted profile cache entries currently use profile.displayName.
+- Evidence level: verified
+- Evidence: cache/profile_cache.py:1 defines CACHED_FIELD = "profile.displayName".
+
+### Invariant INV-004
+
+- Current behavior: Deprecated fields are retained for one release.
+- Evidence level: verified
+- Evidence: docs/changelog.py:1 defines DEPRECATION_RELEASES = 1; line 2 still names profile.displayName.
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Evidence: api/profile.py:1 defines PROFILE_FIELD = "profile.displayName".
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: ios/UserDTO.swift:1 defines decodedField = "profile.displayName".
+
+### Preserved invariant INV-003
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002
+- Evidence: cache/profile_cache.py:1 defines CACHED_FIELD = "profile.displayName".
+
+### Preserved invariant INV-004
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Evidence: docs/changelog.py:1 defines DEPRECATION_RELEASES = 1; line 2 still names profile.displayName.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: interfaces
+- Severity: high
+- State: detected
+- Evidence level: unknown
+- Evidence: The endpoint strings are verified in api/profile.py and ios/UserDTO.swift, but the promoted scan only weakly infers their dependency via PATH-001 and reports unavailable optional providers.
+- Invariants: INV-001, INV-002, INV-004
+- Decision: none
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: data
+- Severity: high
+- State: detected
+- Evidence level: unknown
+- Evidence: The endpoint strings are verified in api/profile.py and cache/profile_cache.py, but the promoted scan only weakly infers their dependency via PATH-002 and reports unavailable optional providers.
+- Invariants: INV-001, INV-003, INV-004
+- Decision: none
+- Acceptance criteria: AC-002
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: compatibility
+- Severity: medium
+- State: detected
+- Evidence level: unknown
+- Evidence: The deprecation constants are verified in docs/changelog.py, but the promoted scan only weakly infers their relationship to the API rename via PATH-003 and reports unavailable optional providers.
+- Invariants: INV-001, INV-004
+- Decision: none
+- Acceptance criteria: AC-003
+
+## Decision Needed
+
+- Question: Should the rename honor the configured one-release deprecation window, or be an immediate coordinated breaking change?
+
+### Option 1
+
+- Option: One-release compatibility rollout
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Trade-off: Temporarily support profile.displayName alongside profile.name; update iOS to prefer the new key with old-key fallback, migrate cache reads/writes, then remove the alias after one release.
+
+### Option 2
+
+- Option: Immediate coordinated rename
+- Affected impacts: IMP-001, IMP-002, IMP-003
+- Trade-off: Update API, iOS decoder, cache format/migration, and changelog together now; simpler end state, but incompatible with already-released clients and old cached data unless deployments and invalidation are tightly coordinated.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Rename the published profile field from profile.displayName to profile.name, while explicitly choosing and implementing a rollout strategy for the iOS decoder and persisted cache under the repository's one-release deprecation policy.
+- Decision: none
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: The selected rollout must specify how iOS decodes profile.name and what happens when it receives only the legacy or only the new field.
+- Evidence: Current iOS code recognizes only profile.displayName.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-003
+- Observable criterion: The selected rollout must specify reads of existing profile.displayName cache entries and ensure new writes use the intended canonical key.
+- Evidence: Current cache code persists only profile.displayName.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-003
+- Invariant: INV-004
+- Observable criterion: The changelog must name profile.name as the replacement and state when profile.displayName is removed, consistent with the selected rollout.
+- Evidence: The configured deprecation duration is one release and the recorded field is profile.displayName.
+
+## Unresolved, Deferred, and Blocked Items
+
+- none
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: API profile field publication
+- Evidence: api/profile.py:1
+- Consequence for confidence: verified
+
+### Scope 2
+
+- Scope or limitation: iOS profile decoding
+- Evidence: ios/UserDTO.swift:1
+- Consequence for confidence: verified
+
+### Scope 3
+
+- Scope or limitation: Persisted profile cache key and migration behavior
+- Evidence: cache/profile_cache.py:1
+- Consequence for confidence: verified
+
+### Scope 4
+
+- Scope or limitation: Deprecation release record
+- Evidence: docs/changelog.py:1-2
+- Consequence for confidence: verified
+
+### Scope 5
+
+- Scope or limitation: Other external consumers and tests
+- Evidence: No additional repository files or tests were found by the repository-wide search.
+- Consequence for confidence: unknown outside this repository
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: profile.displayName → profile.displayName
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location api/profile.py + ios/UserDTO.swift
+
+### Scope 7
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-002: profile.displayName → profile.displayName
+- Consequence for confidence: PATH-002: provider builtin; confidence lexical; location api/profile.py + cache/profile_cache.py
+
+### Scope 8
+
+- Scope or limitation: Graph paths for IMP-003
+- Evidence: PATH-003: profile.displayName → docs/changelog.py
+- Consequence for confidence: PATH-003: provider builtin; confidence lexical; location api/profile.py + docs/changelog.py
+
+### Scope 9
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 4 nodes / 12 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 78519230511bdc822698b5d03f2c9154; sha256 4bac76d793cb77f426eed6847ce00d4092d768cc3e1a829db4f481eaa39fbcb2; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, INV-002, INV-003, INV-004, IMP-001, IMP-002, IMP-003
+- Remaining risks: IMP-001, IMP-002, IMP-003
+- Acceptance criteria: AC-001, AC-002, AC-003
+- Selected planning workflow: Not ready

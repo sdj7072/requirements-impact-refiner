@@ -1,0 +1,9 @@
+Implemented offline edit synchronization on reconnect.
+
+- [client/queue.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-l4nm_lao/client/queue.py:34) replays edits sequentially in local creation order, preserving failed edits for retry.
+- [models/record.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-l4nm_lao/models/record.py:55) provides idempotent application and owns `updated_at` stamping.
+- [server/tombstones.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-l4nm_lao/server/tombstones.py:30) prevents expired tombstones from allowing record resurrection.
+- [tests/test_offline_sync.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-l4nm_lao/tests/test_offline_sync.py:24) covers ordering, interrupted retries, idempotency, timestamps, and tombstones.
+- Impact refinement report: [RPT-001](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-l4nm_lao/.requirements-impact-refiner/reports/RPT-001/revision-0001.md)
+
+Verification: 4 tests passed; all modules compiled successfully.

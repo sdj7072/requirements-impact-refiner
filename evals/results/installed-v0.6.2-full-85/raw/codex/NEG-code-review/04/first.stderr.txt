@@ -1,0 +1,32 @@
+Reading additional input from stdin...
+2026-09-01T02:06:49.949713Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+2026-09-01T02:06:49.949735Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+2026-09-01T02:06:49.970298Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:49.982882Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:49.992055Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.001145Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.009635Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.017562Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.030358Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.043871Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.062863Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.079702Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.090351Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.099762Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.109720Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.119742Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.128704Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.137582Z  WARN codex_rollout::list: state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back
+2026-09-01T02:06:50.621012Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+2026-09-01T02:06:50.621025Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+2026-09-01T02:06:50.748115Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer realm=\"OAuth\", resource_metadata=\"https://mcp.cloudflare.com/.well-known/oauth-protected-resource/mcp\"" })
+2026-09-01T02:07:35.997291Z  WARN codex_mcp::binding_clients: Failed to list resource templates for MCP server 'requirements-impact-refiner': Mcp error: -32601: method not found
+2026-09-01T02:07:35.997358Z  WARN codex_mcp::binding_clients: Failed to list resources for MCP server 'requirements-impact-refiner': Mcp error: -32601: method not found
+2026-09-01T02:07:35.997832Z  WARN codex_mcp::binding_clients: Failed to list resource templates for MCP server 'codex-security': Mcp error: -32601: Method not found
+2026-09-01T02:07:35.998183Z  WARN codex_mcp::binding_clients: Failed to list resources for MCP server 'chrome-devtools': Mcp error: -32601: Method not found
+2026-09-01T02:07:35.998215Z  WARN codex_mcp::binding_clients: Failed to list resource templates for MCP server 'open-design': Mcp error: -32601: Method not found
+2026-09-01T02:07:35.998309Z  WARN codex_mcp::binding_clients: Failed to list resource templates for MCP server 'chrome-devtools': Mcp error: -32601: Method not found
+2026-09-01T02:07:35.998304Z  WARN codex_mcp::binding_clients: Failed to list resources for MCP server 'codex-security': Mcp error: -32601: Method not found
+2026-09-01T02:07:36.548375Z  WARN codex_mcp::binding_clients: Failed to list resources for MCP server 'openaiDeveloperDocs': Mcp error: -32601: Method not found
+2026-09-01T02:07:36.548395Z  WARN codex_mcp::binding_clients: Failed to list resource templates for MCP server 'openaiDeveloperDocs': Mcp error: -32601: Method not found
+2026-09-01T02:07:42.351179Z  WARN codex_mcp::rmcp_client: failed to initialize MCP client during shutdown: MCP startup failed: handshaking with MCP server failed: Send message error Transport [codex_rmcp_client::event_notification_transport::EventNotificationTransport<rmcp::transport::worker::WorkerTransport<rmcp::transport::streamable_http_client::StreamableHttpClientWorker<codex_rmcp_client::http_client_adapter::StreamableHttpClientAdapter>>>] error: Auth required, when send initialize request

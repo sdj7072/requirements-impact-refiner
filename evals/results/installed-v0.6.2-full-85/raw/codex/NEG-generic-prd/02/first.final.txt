@@ -1,0 +1,8 @@
+I can write the PRD, but the product idea and repository evidence are missing. The workspace is empty and isn’t a Git repository.
+
+Please provide either:
+
+- The product idea plus target users and core problem, or
+- The repository/files to analyze.
+
+With that, I’ll produce a complete PRD covering goals, personas, user journeys, requirements, edge cases, metrics, dependencies, rollout, risks, and acceptance criteria.

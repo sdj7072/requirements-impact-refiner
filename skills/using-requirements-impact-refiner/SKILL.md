@@ -15,10 +15,14 @@ An imperative you could execute immediately is still a behavior change — being
 
 If it does, **requirements-impact-refiner is required** before planning or implementation. Invoke it automatically; do not wait for the user to name it. Respect its selected workflow adapter: with Superpowers, run it after approved brainstorming and before `writing-plans`; otherwise run it before the user's planning method.
 
+Before any RIR tool, require both substantive product behavior and an inspectable repository scope or evidence target. A generic PRD request missing either input is ideation: ask only for the missing behavior and scope, and call neither `rir_previous` nor `rir_scan`.
+
 For a selected change, read [Previous-report bootstrap](../requirements-impact-refiner/references/previous-report.md), call `rir_previous` before any `rir_scan`, and follow its route. Forward stale identity only as the exact delta hint set the tool returned. Return renderer text; never substitute searches, graph JSON, or an invented report. Report flow enters detailed refinement immediately after a non-`needs_input` scan; ask flow enters it only after a later explicit yes to that scan's refinement question. Original request wording is not ask-flow confirmation.
 
 The default report flow returns a fresh previous report directly or uses a stale/none scan to seed immediate detailed refinement. The opt-in ask flow returns the scan summary and waits for a later explicit yes. `needs_input` and `ambiguous` always stop for user input.
 
-For pure ideation, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan, call neither `rir_previous` nor `rir_scan`.
+After successful `rir_finalize`, Return `display_text` verbatim and end the current turn. Do not run commands, use tools, plan, test, or modify files; execution requires a later user turn.
+
+For pure ideation, a generic PRD, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan, call neither `rir_previous` nor `rir_scan`.
 
 In plugin-capable clients, the plugin's enabled/disabled control is the on/off switch for this automatic check.

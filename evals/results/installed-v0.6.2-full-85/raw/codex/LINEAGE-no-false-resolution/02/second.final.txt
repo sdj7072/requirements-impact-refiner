@@ -1,0 +1,83 @@
+Recorded [RPT-001 revision 2](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-52bu7028/.requirements-impact-refiner/reports/RPT-001/revision-0002.md). Canonical SHA-256: `38be3510b4ca35a9d30ca549a33b3c8e2b720ce777182bea2b7ca047e45f6757`.
+
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 2
+- Previous SHA-256: e8d4d295ada8e02b4120b1beb1e912c2324b54d902d09cb5ae627ae3db9663f4
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: Webhook retry behavior after a provider timeout
+- Possible issue: The same logical event may be delivered and applied more than once when the first attempt succeeded remotely but its response timed out.
+- Affected feature or user: Webhook recipients and any non-idempotent downstream side effects such as writes, notifications, billing, or state transitions.
+- Trigger: `retry_delivery` runs after an ambiguous provider-timeout result.
+- Severity: high
+- Prevention or check: Select and approve one explicit delivery guarantee: stable idempotency enforcement, no automatic retry, or documented at-least-once delivery with downstream deduplication.
+- Status: blocked
+
+## Current Refined Requirement
+
+Change webhook retry behavior in `webhook/delivery.py` for provider-timeout outcomes only after defining the delivery guarantee and duplicate-prevention contract. `retry_delivery` must preserve the original logical event identity across attempts, and the selected policy must specify whether retries are idempotent, suppressed, or explicitly at-least-once with downstream deduplication.
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Category: state/concurrency
+- Severity: high
+- State: blocked
+- Evidence level: unknown
+- Evidence: A provider timeout does not prove that the provider rejected or failed to process the first attempt. `webhook/delivery.py` associates `retry_delivery` with provider timeout, while `webhook/idempotency.py` declares `STATUS = "not configured"` and contains no idempotency contract. The stakeholder statement that the risk is “probably acceptable” is neither an approved decision nor repository evidence, so it does not change the risk state.
+- Delta: unchanged
+- Decision: none
+- Acceptance criteria: AC-001, AC-002
+
+## Decision Needed
+
+Which duplicate-handling guarantee should govern `retry_delivery` after an ambiguous provider timeout?
+
+1. Require a stable idempotency key and make retries safe to replay.
+2. Suppress automatic retry after provider timeout.
+3. Keep at-least-once retries and require downstream deduplication.
+
+## Acceptance and Regression Criteria
+
+### AC-001
+
+An automated test models a provider that applies the event and then times out; the selected retry policy produces no undocumented duplicate side effect and preserves the same logical event identity.
+
+Evidence: No such test, approved timeout policy, or new repository evidence was supplied.
+
+### AC-002
+
+The selected delivery guarantee, idempotency key source and lifetime, retry conditions, and duplicate ownership are documented and enforced by code before retry behavior is enabled.
+
+Evidence: `webhook/idempotency.py` still reports idempotency as not configured; no approval record or idempotency evidence was supplied.
+
+## Unresolved Item
+
+- Impact: IMP-001
+- State: blocked
+- Rationale: The stakeholder’s tentative acceptability statement is not an approved decision. The implementation still cannot safely choose between possible delivery loss and possible duplicate side effects until the timeout delivery guarantee is explicitly selected and approved.
+- Next owner: Webhook delivery product/engineering owner
+
+## Lineage
+
+- `current.json` selected canonical revision 1 with SHA-256 `e8d4d295ada8e02b4120b1beb1e912c2324b54d902d09cb5ae627ae3db9663f4`.
+- That exact canonical file produced the same digest.
+- `first.final.txt` was excluded as canonical predecessor evidence.
+- Revision 2 now has SHA-256 `38be3510b4ca35a9d30ca549a33b3c8e2b720ce777182bea2b7ca047e45f6757`.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Report IDs: REQ-001, INV-001, IMP-001
+- Remaining risks: IMP-001
+- Acceptance criteria: AC-001, AC-002
+- Selected planning workflow: Not ready

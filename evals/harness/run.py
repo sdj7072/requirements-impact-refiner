@@ -18,7 +18,7 @@ from typing import Any, Optional
 from .adapters.claude import ClaudeAdapter
 from .adapters.codex import CodexAdapter
 from .catalog import load_all, select_suite
-from .controller_evidence import analyze_controller_trace
+from .controller_evidence import analyze_controller_trace, analyze_terminal_delivery
 from .evidence import (
     PotentialSecretError,
     build_manifest,
@@ -1055,8 +1055,6 @@ def _captured_canonical_report(
         (markdown_path, markdown_digest),
     ]
     previous_bytes = None
-    if lineage and revision < 2:
-        raise ValueError("captured lineage report did not publish a new revision")
     if revision > 1:
         previous_name = "revision-%04d.md" % (revision - 1)
         previous_bytes, previous_digest, previous_path = _read_selected_file(
@@ -1124,6 +1122,52 @@ def _score_selected_attempt(
             slot, result, "selected final output does not match raw evidence"
         )
 
+    plugin_version = metadata.get("plugin_version")
+    terminal_delivery_complete = True
+    if (
+        expected_client == "codex"
+        and isinstance(plugin_version, str)
+        and CodexAdapter._requires_terminal_delivery(plugin_version)
+        and slot.case.kind != "negative"
+    ):
+        streams = []
+        turn_outputs = []
+        turn_names = ("first", "second")[: len(slot.case.turns)]
+        try:
+            terminal_bytes, terminal_digest, terminal_path = _read_selected_file(
+                raw_root,
+                attempt_path / "terminal-delivery-evidence.json",
+                "selected terminal delivery evidence",
+            )
+            digests.append((terminal_path, terminal_digest))
+            stored_terminal = json.loads(terminal_bytes.decode("utf-8", errors="strict"))
+            for name in turn_names:
+                jsonl_bytes, jsonl_digest, jsonl_path = _read_selected_file(
+                    raw_root, attempt_path / f"{name}.jsonl", "selected terminal JSONL"
+                )
+                final_bytes, final_digest, final_path = _read_selected_file(
+                    raw_root, attempt_path / f"{name}.final.txt", "selected turn output"
+                )
+                streams.append(jsonl_bytes.decode("utf-8", errors="strict"))
+                turn_outputs.append(final_bytes.decode("utf-8", errors="strict"))
+                digests.extend(((jsonl_path, jsonl_digest), (final_path, final_digest)))
+            derived_terminal = analyze_terminal_delivery(tuple(streams), tuple(turn_outputs))
+            if stored_terminal != json.loads(derived_terminal.to_json()):
+                raise ValueError("selected terminal delivery evidence disagrees with raw JSONL")
+            if not derived_terminal.valid:
+                raise ValueError("selected terminal delivery evidence is invalid")
+            terminal_delivery_complete = derived_terminal.successful_finalize_calls == len(
+                turn_names
+            )
+        except (
+            OSError,
+            ValueError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            RecursionError,
+        ) as error:
+            return _scoring_evidence_failure(slot, result, str(error))
+
     if metadata.get("plugin_version") == "0.4.0":
         streams = []
         turn_outputs = []
@@ -1172,6 +1216,7 @@ def _score_selected_attempt(
 
     scoring_result = result
     previous_bytes = None
+    missing_captured_lineage_revision = False
     try:
         captured = _captured_canonical_report(raw_root, attempt_path, slot.case.kind == "lineage")
     except (OSError, ValueError) as error:
@@ -1185,7 +1230,9 @@ def _score_selected_attempt(
                 slot, result, "captured canonical Markdown is not valid UTF-8"
             )
         digests.extend(captured_digests)
-        scoring_result = replace(result, final_output=canonical_output)
+        if terminal_delivery_complete:
+            scoring_result = replace(result, final_output=canonical_output)
+        missing_captured_lineage_revision = slot.case.kind == "lineage" and previous_bytes is None
     elif slot.case.kind == "lineage":
         try:
             previous_bytes, previous_digest, previous_path = _read_selected_file(
@@ -1199,11 +1246,14 @@ def _score_selected_attempt(
             return _scoring_evidence_failure(slot, result, "lineage predecessor is not valid UTF-8")
         except (OSError, ValueError) as error:
             return _scoring_evidence_failure(slot, result, str(error))
-    return (
-        score_mechanical(slot.case, scoring_result, previous_bytes=previous_bytes),
-        True,
-        tuple(digests),
-    )
+    score = score_mechanical(slot.case, scoring_result, previous_bytes=previous_bytes)
+    if missing_captured_lineage_revision:
+        score = replace(
+            score,
+            passed=False,
+            findings=(*score.findings, "captured lineage report did not publish a new revision"),
+        )
+    return score, True, tuple(digests)
 
 
 def _validate_attempt_evidence(

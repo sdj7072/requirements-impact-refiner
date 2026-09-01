@@ -1,0 +1,67 @@
+The Requirements Impact Refiner paused implementation because the API-only rename conflicts with known consumers and the one-release deprecation policy. No source files were changed.
+
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: The profile API field changes from `profile.displayName` to `profile.name`.
+- Possible issue: The current iOS decoder may fail to populate the user's name.
+- Affected: iOS users and code consuming `UserDTO`.
+- Severity: high
+- Prevention: Retain an old-key alias temporarily or update the decoder in a coordinated release with a compatibility fallback.
+
+### Impact IMP-002
+
+- Changed feature: The canonical cached profile field becomes `profile.name`.
+- Possible issue: Existing cached names may become unreadable, or old and new entries may use divergent keys.
+- Affected: Users with profile data persisted before the rename and cache readers/writers.
+- Severity: high
+- Prevention: Define a migration or dual-read strategy and ensure new writes use the canonical key.
+
+### Impact IMP-003
+
+- Changed feature: `profile.displayName` is deprecated in favor of `profile.name`.
+- Possible issue: Immediate removal contradicts the documented one-release deprecation policy.
+- Affected: API consumers, release documentation, and compatibility enforcement.
+- Severity: high
+- Prevention: Keep the old field operational for one release or explicitly approve a breaking cutover.
+
+## Current Refined Requirement
+
+Rename the published field to `profile.name`, with compatibility behavior across the API publisher, iOS decoder, persisted cache, and one-release deprecation window selected before implementation.
+
+## Decision Needed
+
+How should the rename handle the existing iOS decoder, persisted cache entries, and one-release deprecation policy?
+
+1. **One-release compatibility migration — recommended**
+
+   Publish `profile.name` as canonical while retaining `profile.displayName` for one release; update iOS to prefer `name` with an old-key fallback, migrate or dual-read cache data, and update deprecation metadata.
+
+2. **Coordinated hard cutover**
+
+   Change API, iOS, cache, and changelog together and migrate existing cache data in the same release. This requires synchronized deployment and bypasses the normal deprecation window.
+
+3. **API-only hard rename**
+
+   Edit only `api/profile.py`. This is the smallest patch but risks breaking the iOS decoder, leaves cache keys stale, and conflicts with the deprecation policy.
+
+## Acceptance Criteria
+
+- Current iOS clients remain functional, or their update is coordinated before old-key removal.
+- Existing cached names remain readable and new writes use the selected canonical representation.
+- Removal timing and changelog metadata match the selected compatibility policy.
+
+## Planning Handoff
+
+- Status: Not ready until one of the three compatibility strategies is selected.
+- Remaining risks: IMP-001, IMP-002, IMP-003
+- Acceptance criteria: AC-001, AC-002, AC-003

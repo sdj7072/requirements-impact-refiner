@@ -1,0 +1,199 @@
+Implemented in [workers/export.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-ocyho_gt/workers/export.py:3): `MAX_ATTEMPTS` is now `None`. The deterministic key remains unchanged, and the dead-letter consumer was not modified. Static assertions passed.
+
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: post-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: export.jobs retry policy changes from five attempts to unlimited retries.
+- Possible issue: Permanent failures will no longer reach the attempt-exhaustion dead-letter path consumed by alerts/dead_letter.py.
+- Affected feature or user: Dead-letter alerting for export.jobs.
+- Trigger: export.jobs continues failing beyond five attempts.
+- Severity: medium
+- Prevention or check: Treat the dead-letter bypass as an explicit consequence of the requested forever-retry policy and verify the configured attempt limit is removed.
+- Status: accepted
+
+### Impact IMP-002
+
+- Changed feature: Failures are retried without an attempt ceiling.
+- Possible issue: A permanently failing job can retry indefinitely and consume worker capacity or produce repeated failure logs.
+- Affected feature or user: Export worker operations and monitoring.
+- Trigger: A non-transient export.jobs failure.
+- Severity: medium
+- Prevention or check: Preserve the deterministic key and make the unlimited policy explicit so operations can distinguish it from accidental retry exhaustion.
+- Status: accepted
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Retry export.jobs in workers/export.py forever.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Change workers/export.py so export.jobs has no retry-attempt limit and is retried indefinitely after failures, while preserving its deterministic object key.
+- Refined by decision: DEC-001
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: export.jobs continues writing to the same deterministic object key across retry attempts.
+- Evidence level: verified
+- Evidence: workers/export.py defines JOB = "export.jobs" and OBJECT_KEY = "deterministic".
+
+### Invariant INV-002
+
+- Current behavior: The worker continues to identify the job as export.jobs.
+- Evidence level: verified
+- Evidence: workers/export.py defines JOB = "export.jobs".
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-002
+- Evidence: workers/export.py defines JOB = "export.jobs" and OBJECT_KEY = "deterministic".
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001
+- Evidence: workers/export.py defines JOB = "export.jobs".
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: functionality
+- Severity: medium
+- State: accepted
+- Evidence level: unknown
+- Evidence: The receipt links alerts/dead_letter.py to export.jobs in workers/export.py, but the exact runtime routing semantics are not present in this minimal repository.
+- Invariants: INV-002
+- Decision: DEC-001
+- Acceptance criteria: AC-001, AC-002
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: operations
+- Severity: medium
+- State: accepted
+- Evidence level: unknown
+- Evidence: The repository does not expose scheduler semantics; generally, an unlimited retry policy can keep a permanently failing export.jobs item active indefinitely.
+- Invariants: INV-001
+- Decision: DEC-001
+- Acceptance criteria: AC-003
+
+## Decisions and Accepted Risks
+
+### Decision DEC-001
+
+- Choice: Retry export.jobs indefinitely with no maximum-attempt cutoff.
+- Requirement: REQ-001
+- Accepted impacts: IMP-001, IMP-002
+- Rationale: The user explicitly requested forever retries; this selects continued retry over the existing five-attempt dead-letter behavior.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Change workers/export.py so export.jobs has no retry-attempt limit and is retried indefinitely after failures, while preserving its deterministic object key.
+- Decision: DEC-001
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: workers/export.py represents export.jobs retries as unlimited rather than capped at five attempts.
+- Evidence: The current MAX_ATTEMPTS = 5 is the concrete limit to replace.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: There is no attempt-count exhaustion for export.jobs that routes it to dead_letter.
+- Evidence: alerts/dead_letter.py consumes dead_letter and references export.jobs, so unlimited retries intentionally bypass exhaustion-based delivery.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-001
+- Observable criterion: OBJECT_KEY remains deterministic after the retry-policy change.
+- Evidence: workers/export.py currently defines OBJECT_KEY = "deterministic".
+
+## Unresolved, Deferred, and Blocked Items
+
+- none
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: workers/export.py retry configuration for export.jobs
+- Evidence: The file defines JOB, OBJECT_KEY, and MAX_ATTEMPTS.
+- Consequence for confidence: verified
+
+### Scope 2
+
+- Scope or limitation: alerts/dead_letter.py behavior is not modified
+- Evidence: The file only declares consumption of dead_letter and a reference to export.jobs.
+- Consequence for confidence: verified
+
+### Scope 3
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: alerts/dead_letter.py → export.jobs
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location alerts/dead_letter.py + workers/export.py
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-001: alerts/dead_letter.py → export.jobs
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location alerts/dead_letter.py + workers/export.py
+
+### Scope 5
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 99fe17f213aa435ca588548b9ea0b938; sha256 2c44f0d4147a3e223a1915463bf9d7cb898ed2eaa4ddbcac0f8e851c6f28c6d0; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: REQ-001
+- Report IDs: REQ-001, INV-001, INV-002, IMP-001, IMP-002, DEC-001
+- Remaining risks: IMP-001, IMP-002
+- Acceptance criteria: AC-001, AC-002, AC-003
+- Selected planning workflow: Ready for implementation. Replace the finite retry-attempt limit for export.jobs with the repository's unlimited-retry representation, preserve the deterministic object key, and verify the dead-letter consumer remains unchanged.

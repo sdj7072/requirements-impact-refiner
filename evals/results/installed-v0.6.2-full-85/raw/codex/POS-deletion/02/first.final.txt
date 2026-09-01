@@ -1,0 +1,100 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: pre-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: account.delete_flow would physically remove an account immediately.
+- Possible issue: The database rejects deletion for accounts that still have invoice rows, or invoice history must be changed first.
+- Affected feature or user: Accounts with invoices and the integrity of invoice.account_id.
+- Trigger: Immediate hard deletion of an account referenced by invoice.account_id.
+- Severity: critical
+- Prevention or check: Choose whether to defer physical deletion, anonymize or detach retained invoices, or intentionally remove invoice history and the retention rule.
+- Status: blocked
+
+### Impact IMP-002
+
+- Changed feature: Immediate account deletion changes the lifetime of account-linked finance data.
+- Possible issue: The implementation can violate the configured 30-day finance-retention policy or retain personally identifying account linkage after users believe deletion is complete.
+- Affected feature or user: Invoice records, retention enforcement, and account-deletion guarantees.
+- Trigger: Deleting an account before FINANCE_RETENTION_DAYS has elapsed.
+- Severity: high
+- Prevention or check: Define whether immediate deletion means access revocation, identity anonymization, or full physical purge, and align the retention policy and schema with that choice.
+- Status: blocked
+
+### Impact IMP-003
+
+- Changed feature: account.delete_flow would complete account deletion immediately while cleanup remains event-driven.
+- Possible issue: The worker may receive an ID for an already-deleted account, race the transaction, retry destructive work, or lose cleanup work if event publication is not atomic.
+- Affected feature or user: The account-cleanup worker, queue retries, and dependent account data.
+- Trigger: Publishing or consuming account-cleanup around an immediate physical delete.
+- Severity: high
+- Prevention or check: Specify transaction/outbox ordering and make the cleanup handler idempotent and safe when the account no longer exists.
+- Status: blocked
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Delete an account immediately through account.delete_flow in db/constraints.py.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Make account.delete_flow delete an account immediately, while explicitly defining how invoice rows protected by invoice.account_id ON DELETE RESTRICT, the 30-day finance-retention rule, and queued account-cleanup work remain valid.
+- Refined by decision: none
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: An account referenced by an invoice cannot currently be physically deleted.
+- Evidence level: verified
+- Evidence: db/constraints.py:1 declares invoice.account_id ON DELETE RESTRICT.
+
+### Invariant INV-002
+
+- Current behavior: Finance data is currently retained for 30 days.
+- Evidence level: verified
+- Evidence: policy/retention.py:1 sets FINANCE_RETENTION_DAYS = 30.
+
+### Invariant INV-003
+
+- Current behavior: The account-cleanup consumer expects an event containing account_id and is linked to account.delete_flow.
+- Evidence level: verified
+- Evidence: workers/cleanup.py:1-5 names the account-cleanup queue, links account.delete_flow, and reads event["account_id"].
+
+## Decision Needed
+
+What must “delete immediately” mean when the account has retained invoices?
+
+1. Immediately disable and anonymize the account, retain invoices for 30 days, then physically delete.
+   - Preserves retention and referential integrity, but physical deletion is delayed.
+
+2. Detach or replace `invoice.account_id` with a non-identifying retention reference, then hard-delete the account immediately.
+   - Allows immediate account removal while retaining finance records, but requires schema/data migration and an anonymization standard.
+
+3. Cascade-delete invoices and the account immediately, and remove or waive the 30-day retention rule.
+   - Provides a full immediate purge, but destroys finance history and changes an explicit retention policy.
+
+## Acceptance and Regression Criteria
+
+- For an account with invoices, `account.delete_flow` completes according to the selected model without foreign-key errors or dangling references.
+- Finance-data behavior is tested before and after the 30-day retention boundary.
+- Cleanup publication and consumption are idempotent, retry-safe, and tolerate an already-deleted or anonymized account.
+
+## Planning Handoff
+
+- Refined requirement: Not ready until the pending decision is selected.
+- Remaining risks: IMP-001, IMP-002, IMP-003
+- Selected planning workflow: Not ready
+
+No repository files were changed. Please select option 1, 2, or 3.

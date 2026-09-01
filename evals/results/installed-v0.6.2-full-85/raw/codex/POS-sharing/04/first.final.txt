@@ -1,0 +1,7 @@
+Updated [share/tokens.py](/private/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-c_m0nagl/share/tokens.py:2):
+
+```python
+EXPIRY_DAYS = None
+```
+
+Verified that permission-change revocation remains enabled and signing-key rotation remains 90 days. Thus “permanent” removes time-based expiry without bypassing security invalidation controls.

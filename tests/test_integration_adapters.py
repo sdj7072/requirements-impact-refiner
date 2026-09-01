@@ -703,9 +703,19 @@ class IntegrationAdapterContractTest(unittest.TestCase):
 
     def test_non_change_conversations_invoke_neither_lookup_nor_scan(self):
         bootstrap = BOOTSTRAP_SKILL_PATH.read_text(encoding="utf-8")
-        for conversation in ("ideation", "explanation", "debugging", "code review", "status"):
+        for conversation in (
+            "ideation",
+            "generic PRD",
+            "explanation",
+            "debugging",
+            "code review",
+            "status",
+        ):
             self.assertIn(conversation, bootstrap)
         self.assertIn("call neither `rir_previous` nor `rir_scan`", bootstrap)
+        self.assertIn("before any rir tool", bootstrap.lower())
+        self.assertIn("substantive product behavior", bootstrap)
+        self.assertIn("inspectable repository scope or evidence target", bootstrap)
 
     def test_bootstrap_confirmation_rule_is_explicitly_flow_specific(self):
         bootstrap = BOOTSTRAP_SKILL_PATH.read_text(encoding="utf-8")
@@ -802,11 +812,9 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertIn("Approval alone is not sufficient.", entry)
         self.assertIn("substantive change request", entry)
         self.assertIn("affected repository scope or evidence target", entry)
-        self.assertIn(
-            "Before emitting any `REQ-###`, `INV-###`, `IMP-###`, `DEC-###`, `AC-###`, or canonical report",
-            entry,
-        )
+        self.assertIn("Before calling `rir_previous`, `rir_scan`, or emitting", entry)
         self.assertIn("do not start impact refinement", entry)
+        self.assertIn("A `needs_input` scan is still forbidden activation", entry)
         self.assertIn("state that the entry gate is not met", entry)
         self.assertIn("ask only for the missing requirement text or scope", entry)
         self.assertIn("not broad product ideation", entry)
@@ -834,6 +842,20 @@ class IntegrationAdapterContractTest(unittest.TestCase):
             self.assertIn("canonical impact report", output)
             self.assertIn("Planning Handoff", output)
             self.assertIn("not an implementation plan", output)
+
+    def test_generic_and_superpowers_finalize_as_a_terminal_current_turn(self):
+        for name in ("generic", "superpowers"):
+            text = (REFERENCES / ADAPTERS[name]["file"]).read_text(encoding="utf-8")
+            self.assertIn("Return `display_text` verbatim", text, name)
+            self.assertIn("end the current turn", text, name)
+            self.assertIn("Do not run commands, use tools, plan, test, or modify files", text, name)
+            self.assertIn("later user turn", text, name)
+
+        bootstrap = BOOTSTRAP_SKILL_PATH.read_text(encoding="utf-8")
+        controller = (REFERENCES / "controller-workflow.md").read_text(encoding="utf-8")
+        for text in (bootstrap, controller):
+            self.assertIn("Return `display_text` verbatim", text)
+            self.assertIn("end the current turn", text)
 
     def test_superpowers_adapter_requires_the_exact_structured_handoff_marker(self):
         """Packaged guidance must emit the marker consumed by mechanical scoring."""

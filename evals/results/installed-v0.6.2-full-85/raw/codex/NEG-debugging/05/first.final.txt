@@ -1,0 +1,9 @@
+The workspace is empty—there’s no repository, test, CI config, or failure log to inspect.
+
+Please attach or mount the repository, or provide:
+
+- The failing test name and source
+- A representative CI failure log/stack trace
+- The relevant CI workflow/configuration
+
+Then I can trace the intermittent cause without modifying the code.
