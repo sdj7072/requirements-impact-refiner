@@ -1,0 +1,10 @@
+Continue the same profile-field report. New repository evidence shows a second client serializes the field directly, so reassess the earlier resolution.
+
+Repository evidence:
+- the prior report text is supplied verbatim
+- desktop/ProfileCache.swift serializes profile.displayName
+
+Harness continuity evidence:
+- In compact delivery, read `.requirements-impact-refiner/reports/RPT-###/current.json` and hash the exact canonical Markdown file it selects.
+- `first.final.txt` is the chat response, not canonical lineage bytes, unless no persisted report exists and it is itself a complete canonical report.
+- Do not reconstruct predecessor bytes from conversation text or add, remove, or normalize bytes.

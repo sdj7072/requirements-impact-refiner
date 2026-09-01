@@ -1,0 +1,1313 @@
+{
+  "attempts": [
+    {
+      "attempt": 1,
+      "case_id": "POS-authorization",
+      "repetition": 1,
+      "result": {
+        "attempt": 1,
+        "case_id": "POS-authorization",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-dgdjre_x/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Let workspace members edit every project by widening authorization.workspace_edit in auth/authorize.py.\n\nRepository evidence:\n- auth/authorize.py defines authorization.workspace_edit for owner and admin roles\n- roles/defaults.py sets INVITATION_DEFAULT_ROLE to member\n- events/audit.py emits project.edit.audited through emit_actor_role_audit"
+          ],
+          "elapsed_seconds": 0.22776841699999995,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:23.503316Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:23.503352Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": null,
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": null
+    },
+    {
+      "attempt": 2,
+      "case_id": "POS-authorization",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "POS-authorization",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-a85s029_/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Let workspace members edit every project by widening authorization.workspace_edit in auth/authorize.py.\n\nRepository evidence:\n- auth/authorize.py defines authorization.workspace_edit for owner and admin roles\n- roles/defaults.py sets INVITATION_DEFAULT_ROLE to member\n- events/audit.py emits project.edit.audited through emit_actor_role_audit"
+          ],
+          "elapsed_seconds": 0.232221416,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:24.160503Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:24.160546Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "POS-authorization/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": "POS-authorization/01"
+    },
+    {
+      "attempt": 1,
+      "case_id": "NEG-debugging",
+      "repetition": 1,
+      "result": {
+        "attempt": 1,
+        "case_id": "NEG-debugging",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-uuu0qdzo/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Find why this test intermittently fails.\n\nRepository evidence:\n- the failure occurs only in CI"
+          ],
+          "elapsed_seconds": 0.2178236659999997,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:24.808919Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:24.808959Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": null,
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": null
+    },
+    {
+      "attempt": 2,
+      "case_id": "NEG-debugging",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "NEG-debugging",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-u6d_1dvy/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Find why this test intermittently fails.\n\nRepository evidence:\n- the failure occurs only in CI"
+          ],
+          "elapsed_seconds": 0.2796229590000001,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:25.559079Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:25.559155Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "NEG-debugging/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": "NEG-debugging/01"
+    },
+    {
+      "attempt": 1,
+      "case_id": "INT-superpowers",
+      "repetition": 1,
+      "result": {
+        "attempt": 1,
+        "case_id": "INT-superpowers",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-7cza5xzu/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Brainstorming approved a design to cache dashboard.response for one hour; refine repository impacts next from api/dashboard.py and render_dashboard.\n\nRepository evidence:\n- Superpowers brainstorming approved the one-hour dashboard cache\n- api/dashboard.py defines render_dashboard for dashboard.response\n- writing-plans has not started"
+          ],
+          "elapsed_seconds": 0.22650199999999998,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:26.248408Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:26.248444Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": null,
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": null
+    },
+    {
+      "attempt": 2,
+      "case_id": "INT-superpowers",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "INT-superpowers",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-0r8wz32h/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Brainstorming approved a design to cache dashboard.response for one hour; refine repository impacts next from api/dashboard.py and render_dashboard.\n\nRepository evidence:\n- Superpowers brainstorming approved the one-hour dashboard cache\n- api/dashboard.py defines render_dashboard for dashboard.response\n- writing-plans has not started"
+          ],
+          "elapsed_seconds": 0.2266334160000003,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:26.901733Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:26.901763Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "INT-superpowers/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": "INT-superpowers/01"
+    },
+    {
+      "attempt": 1,
+      "case_id": "LINEAGE-stable-blocked",
+      "repetition": 1,
+      "result": {
+        "attempt": 1,
+        "case_id": "LINEAGE-stable-blocked",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-4e82w8l_/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.\n\nRepository evidence:\n- exports/export_writer.py defines write_tenant_archive for tenant archives\n- policy/retention.py has no RETENTION_OWNER declaration"
+          ],
+          "elapsed_seconds": 0.20900037499999957,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:27.536669Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:27.536699Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": null,
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": null
+    },
+    {
+      "attempt": 2,
+      "case_id": "LINEAGE-stable-blocked",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "LINEAGE-stable-blocked",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-zqjxl9r4/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.\n\nRepository evidence:\n- exports/export_writer.py defines write_tenant_archive for tenant archives\n- policy/retention.py has no RETENTION_OWNER declaration"
+          ],
+          "elapsed_seconds": 0.2235556660000002,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:28.206009Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:28.206046Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "LINEAGE-stable-blocked/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": "LINEAGE-stable-blocked/01"
+    },
+    {
+      "attempt": 1,
+      "case_id": "LINEAGE-reopened",
+      "repetition": 1,
+      "result": {
+        "attempt": 1,
+        "case_id": "LINEAGE-reopened",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-1d7xdi98/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.\n\nRepository evidence:\n- mobile/ProfileDecoder.swift defines decodeDisplayName for profile.displayName\n- migrations/profile_field.py sets PRESERVE_RELEASES to 1"
+          ],
+          "elapsed_seconds": 0.21227270799999953,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:28.845895Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:28.845925Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": null,
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": null
+    },
+    {
+      "attempt": 2,
+      "case_id": "LINEAGE-reopened",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "LINEAGE-reopened",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-gobdc1bz/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.\n\nRepository evidence:\n- mobile/ProfileDecoder.swift defines decodeDisplayName for profile.displayName\n- migrations/profile_field.py sets PRESERVE_RELEASES to 1"
+          ],
+          "elapsed_seconds": 0.23443691599999994,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:29.530536Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:29.530576Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "LINEAGE-reopened/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": "LINEAGE-reopened/01"
+    },
+    {
+      "attempt": 1,
+      "case_id": "LINEAGE-no-false-resolution",
+      "repetition": 1,
+      "result": {
+        "attempt": 1,
+        "case_id": "LINEAGE-no-false-resolution",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-ltgq16tf/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for changing webhook delivery retries at webhook/delivery.py and retry_delivery. The supplied evidence identifies an unresolved duplicate-delivery risk.\n\nRepository evidence:\n- webhook/delivery.py defines retry_delivery after provider timeout\n- webhook/idempotency.py contains no documented idempotency behavior"
+          ],
+          "elapsed_seconds": 0.21092354199999974,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:30.167942Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:30.167974Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": null,
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": null
+    },
+    {
+      "attempt": 2,
+      "case_id": "LINEAGE-no-false-resolution",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "LINEAGE-no-false-resolution",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-qcg8i8hr/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for changing webhook delivery retries at webhook/delivery.py and retry_delivery. The supplied evidence identifies an unresolved duplicate-delivery risk.\n\nRepository evidence:\n- webhook/delivery.py defines retry_delivery after provider timeout\n- webhook/idempotency.py contains no documented idempotency behavior"
+          ],
+          "elapsed_seconds": 0.3624024160000001,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:30.972027Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:30.972059Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "LINEAGE-no-false-resolution/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "retry_of": "LINEAGE-no-false-resolution/01"
+    }
+  ],
+  "identity": {
+    "catalog_sha256": "986e58af16ceb11c3e9cf5425f83326a676c7e7971199cfd4ec7c21f7bb80000",
+    "client": "codex",
+    "enabled_composition": "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled",
+    "enabled_plugins": [
+      "browser@openai-bundled",
+      "chrome@openai-bundled",
+      "codex-app-tools@openai-bundled",
+      "computer-use@openai-bundled",
+      "documents@openai-primary-runtime",
+      "google-calendar@openai-curated",
+      "pdf@openai-primary-runtime",
+      "presentations@openai-primary-runtime",
+      "requirements-impact-refiner@requirements-impact-refiner",
+      "sites@openai-bundled",
+      "slack@openai-curated",
+      "spreadsheets@openai-primary-runtime",
+      "superpowers@openai-curated",
+      "template-creator@openai-primary-runtime",
+      "visualize@openai-bundled"
+    ],
+    "harness_sha256": "09fb29396b5d1c6f4938cdb98e635dac73204d0999c44cc50258640473ad87c7",
+    "model": "gpt-5.6-sol",
+    "plugin_version": "0.6.2-dev",
+    "reasoning": "high",
+    "skills_sha256": "8de869a50a21df317d113c2152fc4e5aa99535df15fdd71aa7d172bc9eb27e49",
+    "version": "codex-cli 0.151.0-alpha.7.2"
+  },
+  "mechanical_scores": [
+    {
+      "case_id": "POS-authorization",
+      "findings": [
+        "run status infra_error is not pass"
+      ],
+      "passed": false,
+      "repetition": 1
+    },
+    {
+      "case_id": "NEG-debugging",
+      "findings": [
+        "run status infra_error is not pass"
+      ],
+      "passed": false,
+      "repetition": 1
+    },
+    {
+      "case_id": "INT-superpowers",
+      "findings": [
+        "run status infra_error is not pass"
+      ],
+      "passed": false,
+      "repetition": 1
+    },
+    {
+      "case_id": "LINEAGE-stable-blocked",
+      "findings": [
+        "run status infra_error is not pass"
+      ],
+      "passed": false,
+      "repetition": 1
+    },
+    {
+      "case_id": "LINEAGE-reopened",
+      "findings": [
+        "run status infra_error is not pass"
+      ],
+      "passed": false,
+      "repetition": 1
+    },
+    {
+      "case_id": "LINEAGE-no-false-resolution",
+      "findings": [
+        "run status infra_error is not pass"
+      ],
+      "passed": false,
+      "repetition": 1
+    }
+  ],
+  "repetitions": 1,
+  "runs": [
+    {
+      "case_id": "POS-authorization",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "POS-authorization",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-a85s029_/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Let workspace members edit every project by widening authorization.workspace_edit in auth/authorize.py.\n\nRepository evidence:\n- auth/authorize.py defines authorization.workspace_edit for owner and admin roles\n- roles/defaults.py sets INVITATION_DEFAULT_ROLE to member\n- events/audit.py emits project.edit.audited through emit_actor_role_audit"
+          ],
+          "elapsed_seconds": 0.232221416,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:24.160503Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:24.160546Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "POS-authorization/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "selected_attempt": 2
+    },
+    {
+      "case_id": "NEG-debugging",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "NEG-debugging",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-u6d_1dvy/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Find why this test intermittently fails.\n\nRepository evidence:\n- the failure occurs only in CI"
+          ],
+          "elapsed_seconds": 0.2796229590000001,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:25.559079Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:25.559155Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "NEG-debugging/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "selected_attempt": 2
+    },
+    {
+      "case_id": "INT-superpowers",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "INT-superpowers",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-0r8wz32h/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Brainstorming approved a design to cache dashboard.response for one hour; refine repository impacts next from api/dashboard.py and render_dashboard.\n\nRepository evidence:\n- Superpowers brainstorming approved the one-hour dashboard cache\n- api/dashboard.py defines render_dashboard for dashboard.response\n- writing-plans has not started"
+          ],
+          "elapsed_seconds": 0.2266334160000003,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:26.901733Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:26.901763Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "INT-superpowers/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "selected_attempt": 2
+    },
+    {
+      "case_id": "LINEAGE-stable-blocked",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "LINEAGE-stable-blocked",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-zqjxl9r4/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for a data export change starting at exports/export_writer.py and write_tenant_archive. The supplied repository evidence is incomplete, so the report remains blocked until the export retention owner confirms the policy.\n\nRepository evidence:\n- exports/export_writer.py defines write_tenant_archive for tenant archives\n- policy/retention.py has no RETENTION_OWNER declaration"
+          ],
+          "elapsed_seconds": 0.2235556660000002,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:28.206009Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:28.206046Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "LINEAGE-stable-blocked/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "selected_attempt": 2
+    },
+    {
+      "case_id": "LINEAGE-reopened",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "LINEAGE-reopened",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-gobdc1bz/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.\n\nRepository evidence:\n- mobile/ProfileDecoder.swift defines decodeDisplayName for profile.displayName\n- migrations/profile_field.py sets PRESERVE_RELEASES to 1"
+          ],
+          "elapsed_seconds": 0.23443691599999994,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:29.530536Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:29.530576Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "LINEAGE-reopened/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "selected_attempt": 2
+    },
+    {
+      "case_id": "LINEAGE-no-false-resolution",
+      "repetition": 1,
+      "result": {
+        "attempt": 2,
+        "case_id": "LINEAGE-no-false-resolution",
+        "client": "codex",
+        "command": {
+          "argv": [
+            "codex",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--approve-for-me",
+            "-o",
+            "/var/folders/l6/c382c0nn4g94zmw47tpt8gjm0000gn/T/codex-eval-qcg8i8hr/first.final.txt",
+            "-m",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "Record an impact report for changing webhook delivery retries at webhook/delivery.py and retry_delivery. The supplied evidence identifies an unresolved duplicate-delivery risk.\n\nRepository evidence:\n- webhook/delivery.py defines retry_delivery after provider timeout\n- webhook/idempotency.py contains no documented idempotency behavior"
+          ],
+          "elapsed_seconds": 0.3624024160000001,
+          "returncode": 1,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\n2026-09-01T08:36:30.972027Z  WARN codex_state::runtime: failed to open state db at /Users/p042890/.codex/state_5.sqlite: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database\n2026-09-01T08:36:30.972059Z  WARN codex_rollout::state_db: failed to initialize state runtime: failed to initialize state runtime at /Users/p042890/.codex: failed to open state DB at /Users/p042890/.codex/state_5.sqlite: error returned from database: (code: 8) attempt to write a readonly database: error returned from database: (code: 8) attempt to write a readonly database: (code: 8) attempt to write a readonly database\nReading additional input from stdin...\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+          "stdout": "",
+          "timed_out": false
+        },
+        "final_output": null,
+        "metadata": [
+          [
+            "environment",
+            "Codex with Superpowers"
+          ],
+          [
+            "client_version",
+            "codex-cli 0.151.0-alpha.7.2"
+          ],
+          [
+            "plugin_version",
+            "0.6.2-dev"
+          ],
+          [
+            "enabled_composition",
+            "codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "enabled_plugins",
+            "browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled"
+          ],
+          [
+            "model",
+            "gpt-5.6-sol"
+          ],
+          [
+            "reasoning",
+            "high"
+          ]
+        ],
+        "reason": "nonzero exit",
+        "repetition": 1,
+        "retry_of": "LINEAGE-no-false-resolution/01",
+        "session_id": null,
+        "status": "infra_error"
+      },
+      "selected_attempt": 2
+    }
+  ],
+  "suite": "smoke"
+}

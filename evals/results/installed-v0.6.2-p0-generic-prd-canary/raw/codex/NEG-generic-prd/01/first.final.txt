@@ -1,0 +1,6 @@
+Please provide the missing inputs:
+
+1. The product idea or proposed behavior.
+2. Repository evidence—relevant file paths, excerpts, or a repository containing code/docs.
+
+The current workspace is empty, and nothing appears after “Repository evidence:”, so I can’t produce an implementation-grounded PRD yet.

@@ -1,0 +1,3 @@
+I’m blocked because the assigned workspace is empty and isn’t a Git repository.
+
+Please provide the repository checkout (or correct path), plus the failing test name and one CI failure log. With those, I can trace the intermittent cause rather than speculate from “CI-only.”

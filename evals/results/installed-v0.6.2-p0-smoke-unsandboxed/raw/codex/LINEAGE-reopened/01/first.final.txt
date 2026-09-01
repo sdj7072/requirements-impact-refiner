@@ -1,0 +1,231 @@
+# Requirements Impact Report
+
+## Report State
+
+- ID: RPT-001
+- Revision: 1
+- Previous SHA-256: none
+- Phase: post-decision
+
+## Change Impact Summary
+
+### Impact IMP-001
+
+- Changed feature: profile.displayName is removed from mobile profile decoding.
+- Possible issue: A released client that still decodes displayName could receive payloads without the field before its compatibility window ends.
+- Affected feature or user: Mobile clients using ProfileDecoder.decodeDisplayName during the migration window.
+- Trigger: Server-side removal of profile.displayName while a client release that expects it is still active.
+- Severity: high
+- Prevention or check: Preserve profile.displayName for one release and verify release ordering before completing removal.
+- Status: mitigated
+
+### Impact IMP-002
+
+- Changed feature: The profile.displayName field enters a one-release removal migration.
+- Possible issue: Removing the stored or serialized field too early could discard data still needed by clients in the compatibility window.
+- Affected feature or user: Profile records and payload serialization for profile.displayName.
+- Trigger: Migration cleanup runs before the configured preservation release has elapsed.
+- Severity: medium
+- Prevention or check: Keep PRESERVE_RELEASES at 1 and verify cleanup occurs only after that release boundary.
+- Status: mitigated
+
+### Impact IMP-003
+
+- Changed feature: decodeDisplayName no longer supplies a display-name value from profile payloads.
+- Possible issue: Profile UI or client logic may continue to expect a decoded display name.
+- Affected feature or user: Potential mobile code paths downstream of ProfileDecoder.decodeDisplayName.
+- Trigger: The decoder field is removed while a downstream caller still relies on its returned value.
+- Severity: medium
+- Prevention or check: Remove or adapt downstream use and verify profile behavior with payloads that omit displayName.
+- Status: detected
+
+## Original Requirement
+
+- ID: REQ-001
+- Original request: Record an impact report for removing a profile field beginning in mobile/ProfileDecoder.swift at decodeDisplayName. The supplied migration evidence supports resolving the client compatibility impact.
+- Source: User request and supplied repository evidence.
+
+## Current Refined Requirement
+
+- ID: REQ-001
+- Revision: Remove the profile.displayName client field beginning at mobile/ProfileDecoder.swift decodeDisplayName, while preserving the field for one release through migrations/profile_field.py so older clients retain a compatibility window.
+- Refined by decision: DEC-001
+- Supersedes: none
+
+## Current Behavior
+
+### Invariant INV-001
+
+- Current behavior: The mobile profile decoder currently reads the displayName payload key and returns it as an optional string.
+- Evidence level: verified
+- Evidence: mobile/ProfileDecoder.swift declares decodedField as profile.displayName and decodeDisplayName returns payload["displayName"].
+
+### Invariant INV-002
+
+- Current behavior: The profile.displayName migration preserves the field for one release during removal.
+- Evidence level: verified
+- Evidence: migrations/profile_field.py sets PRESERVE_RELEASES = 1 and FIELD = "profile.displayName".
+
+## Preserved Invariants
+
+### Preserved invariant INV-001
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-003
+- Evidence: mobile/ProfileDecoder.swift declares decodedField as profile.displayName and decodeDisplayName returns payload["displayName"].
+
+### Preserved invariant INV-002
+
+- Requirement: REQ-001
+- Affected impacts: IMP-001, IMP-002
+- Evidence: migrations/profile_field.py sets PRESERVE_RELEASES = 1 and FIELD = "profile.displayName".
+
+## Impact Ledger
+
+### Impact detail IMP-001
+
+- Requirement: REQ-001
+- Category: compatibility
+- Severity: high
+- State: mitigated
+- Evidence level: unknown
+- Evidence: Direct source evidence verifies the client consumption point and one-release preservation setting, while the promoted graph path remains lexical-only and cannot formally prove end-to-end compatibility.
+- Invariants: INV-001, INV-002
+- Decision: DEC-001
+- Acceptance criteria: AC-001
+
+### Impact detail IMP-002
+
+- Requirement: REQ-001
+- Category: data
+- Severity: medium
+- State: mitigated
+- Evidence level: unknown
+- Evidence: The migration file configures one-release preservation, while the fallback graph does not verify migration execution timing or post-window cleanup.
+- Invariants: INV-002
+- Decision: DEC-001
+- Acceptance criteria: AC-002
+
+### Impact detail IMP-003
+
+- Requirement: REQ-001
+- Category: regression
+- Severity: medium
+- State: detected
+- Evidence level: unknown
+- Evidence: The repository shows decodeDisplayName as the client consumption point, but the fallback graph could not verify downstream consumers and no supplied evidence demonstrates replacement presentation behavior or regression coverage.
+- Invariants: INV-001
+- Decision: DEC-001
+- Acceptance criteria: AC-003
+
+## Decisions and Accepted Risks
+
+### Decision DEC-001
+
+- Choice: Remove profile.displayName from the mobile decoder with a one-release preservation window.
+- Requirement: REQ-001
+- Accepted impacts: IMP-001, IMP-002, IMP-003
+- Rationale: The request selects removal at decodeDisplayName, and migrations/profile_field.py supplies the one-release preservation mechanism for client compatibility.
+
+## Impact Delta
+
+- resolved: none
+- mitigated: none
+- unchanged: none
+- accepted: none
+- deferred: none
+- blocked: none
+- superseded: none
+- reopened: none
+- new: IMP-001, IMP-002, IMP-003
+
+## Requirement Revision History
+
+### Requirement REQ-001
+
+- Revision: Remove the profile.displayName client field beginning at mobile/ProfileDecoder.swift decodeDisplayName, while preserving the field for one release through migrations/profile_field.py so older clients retain a compatibility window.
+- Decision: DEC-001
+- Superseded impacts: none
+- Change summary: Controller-created refinement revision.
+
+## Acceptance and Regression Criteria
+
+### Criterion AC-001
+
+- Requirement: REQ-001
+- Impact: IMP-001
+- Invariant: INV-002
+- Observable criterion: The field remains available to the released client that still uses decodeDisplayName for one complete release before becoming unavailable.
+- Evidence: migrations/profile_field.py currently sets PRESERVE_RELEASES = 1; release-order validation is still required to close the end-to-end impact.
+
+### Criterion AC-002
+
+- Requirement: REQ-001
+- Impact: IMP-002
+- Invariant: INV-002
+- Observable criterion: Migration execution retains profile.displayName data through the configured release boundary and removes it only afterward.
+- Evidence: The configured preservation duration is verified; execution timing should be checked during implementation validation.
+
+### Criterion AC-003
+
+- Requirement: REQ-001
+- Impact: IMP-003
+- Invariant: INV-001
+- Observable criterion: After removal, mobile profile decoding and its downstream consumers handle payloads without displayName without failure or stale display-name assumptions.
+- Evidence: mobile/ProfileDecoder.swift is the verified starting point; downstream behavior and tests require implementation-time validation.
+
+## Unresolved, Deferred, and Blocked Items
+
+- none
+
+## Analysis Scope and Limitations
+
+### Scope 1
+
+- Scope or limitation: Client decoding boundary
+- Evidence: mobile/ProfileDecoder.swift defines decodeDisplayName for profile.displayName.
+- Consequence for confidence: High: directly verified in the named source file.
+
+### Scope 2
+
+- Scope or limitation: Migration compatibility boundary
+- Evidence: migrations/profile_field.py sets PRESERVE_RELEASES = 1 for profile.displayName.
+- Consequence for confidence: High: directly verified in the named migration file.
+
+### Scope 3
+
+- Scope or limitation: Downstream mobile consumers and post-window cleanup
+- Evidence: No additional displayName references were found in the inspected repository beyond the decoder and migration evidence.
+- Consequence for confidence: Medium: repository search is complete for textual references, but runtime behavior and tests are not demonstrated.
+
+### Scope 4
+
+- Scope or limitation: Graph paths for IMP-001
+- Evidence: PATH-001: migrations/profile_field.py → mobile/ProfileDecoder.swift
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location migrations/profile_field.py + mobile/ProfileDecoder.swift
+
+### Scope 5
+
+- Scope or limitation: Graph paths for IMP-002
+- Evidence: PATH-001: migrations/profile_field.py → mobile/ProfileDecoder.swift
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location migrations/profile_field.py + mobile/ProfileDecoder.swift
+
+### Scope 6
+
+- Scope or limitation: Graph paths for IMP-003
+- Evidence: PATH-001: migrations/profile_field.py → mobile/ProfileDecoder.swift
+- Consequence for confidence: PATH-001: provider builtin; confidence lexical; location migrations/profile_field.py + mobile/ProfileDecoder.swift
+
+### Scope 7
+
+- Scope or limitation: Impact graph coverage
+- Evidence: Impact scan: 0.0 s · codegraph (missing) + scip (missing) + ast-grep (missing) + builtin (ready) · 2 nodes / 2 edges · 1 unknown frontiers
+- Consequence for confidence: provider_limited; receipt 7057d50888782d584ecd3bcb13c1f557; sha256 f582197079e07f222ffa0ef983db630690a1f377f5141278c28559852cb7434a; frontier FRONTIER-001
+
+## Planning Handoff
+
+- Refined requirement: REQ-001
+- Report IDs: REQ-001, INV-001, INV-002, IMP-001, IMP-002, IMP-003, DEC-001
+- Remaining risks: IMP-001, IMP-002, IMP-003
+- Acceptance criteria: AC-001, AC-002, AC-003
+- Selected planning workflow: Ready for planning with implementation-time validation of release ordering, downstream decoder behavior, and migration timing.

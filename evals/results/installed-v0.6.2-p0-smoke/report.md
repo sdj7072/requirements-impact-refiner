@@ -1,0 +1,21 @@
+# Installed Plugin Evaluation
+
+- status: not verified
+- client: codex
+- version: codex-cli 0.151.0-alpha.7.2
+- plugin version: 0.6.2-dev
+- enabled composition: codex codex-cli 0.151.0-alpha.7.2 plugins=browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled
+- enabled plugins: browser@openai-bundled,chrome@openai-bundled,codex-app-tools@openai-bundled,computer-use@openai-bundled,documents@openai-primary-runtime,google-calendar@openai-curated,pdf@openai-primary-runtime,presentations@openai-primary-runtime,requirements-impact-refiner@requirements-impact-refiner,sites@openai-bundled,slack@openai-curated,spreadsheets@openai-primary-runtime,superpowers@openai-curated,template-creator@openai-primary-runtime,visualize@openai-bundled
+- model: gpt-5.6-sol
+- reasoning: high
+- repetitions: 1
+- strict score: 0/6
+- pass: 0
+- partial: 0
+- fail: 0
+- blocked: 0
+- infra_error: 6
+- invalid_evidence: 0
+- mechanical failures: 6
+- adjudications: 0
+- verification blockers: 6
