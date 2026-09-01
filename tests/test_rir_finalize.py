@@ -115,20 +115,43 @@ class RirFinalizeTest(unittest.TestCase):
         self.assertIs(type(result), finalize.CONTRACTS.FinalizeResult)
         self.assertTrue(CONTROLLER.load_draft(self.root, draft.draft_id)["consumed"])
 
-    def test_full_finalize_returns_localized_reader_view_and_keeps_canonical_artifact(self):
+    def test_full_finalize_defaults_to_table_view_and_keeps_canonical_artifact(self):
         finalize = self.finalize()
         draft = self.begin("모든 프로젝트의 편집 권한 영향을 검토해줘.")
 
         result = finalize.finalize_refinement(self.request(draft))
 
         self.assertEqual(result.delivery, "full")
+        persisted = result.markdown_path.read_text(encoding="utf-8")
+        self.assertTrue(result.display_text.startswith("# Requirements Impact Report\n"))
+        self.assertTrue(any(line.startswith("|") for line in result.display_text.splitlines()))
+        self.assertEqual(result.display_text, persisted.removesuffix("\n"))
+
+    def test_full_finalize_explicit_narrative_preserves_localized_reader_view(self):
+        (self.root / ".requirements-impact-refiner.json").write_text(
+            json.dumps(
+                {
+                    "report_layout": "narrative",
+                    "impact_graph": {
+                        "enabled": False,
+                        "max_seconds": 30,
+                        "target_seconds": 10,
+                        "providers": ["auto"],
+                        "install_policy": "never",
+                        "deep": False,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        finalize = self.finalize()
+        draft = self.begin("모든 프로젝트의 편집 권한 영향을 검토해줘.")
+
+        result = finalize.finalize_refinement(self.request(draft))
+
         self.assertTrue(result.display_text.startswith("# 요구사항 영향 보고서\n"))
         self.assertFalse(any(line.startswith("|") for line in result.display_text.splitlines()))
-        self.assertTrue(
-            result.markdown_path.read_text(encoding="utf-8").startswith(
-                "# Requirements Impact Report\n"
-            )
-        )
+        self.assertTrue(result.markdown_path.read_text().startswith("# Requirements Impact Report"))
 
     def test_graph_disabled_finalize_rejects_receipt_without_publication_or_consumption(self):
         finalize = self.finalize()

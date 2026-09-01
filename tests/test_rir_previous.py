@@ -1153,6 +1153,17 @@ class PreviousLookupTest(unittest.TestCase):
             self.assertIn(full_report_block, text)
         self.assertNotIn("## Previous Impact Report", text)
 
+    def test_previous_renderer_uses_table_for_state_with_table_layout(self):
+        self.publish()
+        result = PREVIOUS.lookup_previous(self.request())
+        state = json.loads(STATE_FIXTURE.read_text(encoding="utf-8"))
+        state["settings"].update({"report_layout": "table", "report_layout_source": "repository"})
+
+        text = RENDERER.render_previous(result, state)
+
+        self.assertTrue(text.startswith("# Requirements Impact Report\n"))
+        self.assertTrue(any(line.startswith("|") for line in text.splitlines()))
+
     def test_renderer_returns_empty_text_for_none_and_ambiguous(self):
         self.publish()
         state = json.loads(STATE_FIXTURE.read_text(encoding="utf-8"))

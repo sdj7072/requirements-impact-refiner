@@ -189,6 +189,30 @@ class ImpactRendererTest(unittest.TestCase):
             (FIXTURES / "compact-state-post-decision.md").read_text(encoding="utf-8"),
         )
 
+    def test_full_view_defaults_legacy_state_to_narrative_and_preserves_opt_in_bytes(self):
+        legacy = self.fixture()
+        expected = RENDERER.render_reader_view(legacy)
+        narrative = self.fixture()
+        narrative["settings"].update(
+            {"report_layout": "narrative", "report_layout_source": "repository"}
+        )
+
+        self.assertEqual(RENDERER.render_full_view(legacy), expected)
+        self.assertEqual(RENDERER.render_full_view(narrative), expected)
+
+    def test_full_view_table_equals_canonical_markdown_without_changing_state_bytes(self):
+        state = self.fixture()
+        before = json.dumps(state, ensure_ascii=False, sort_keys=True)
+        state["settings"].update({"report_layout": "table", "report_layout_source": "default"})
+
+        rendered = RENDERER.render_full_view(state)
+
+        self.assertEqual(rendered, RENDERER.render_markdown(state))
+        self.assertEqual(RENDERER.validate_rendered_markdown(rendered), [])
+        state["settings"].pop("report_layout")
+        state["settings"].pop("report_layout_source")
+        self.assertEqual(json.dumps(state, ensure_ascii=False, sort_keys=True), before)
+
     def test_compact_render_names_every_impact_once_and_stays_bounded(self):
         state = self.fixture()
 

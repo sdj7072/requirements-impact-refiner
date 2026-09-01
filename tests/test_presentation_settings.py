@@ -36,6 +36,8 @@ class PresentationSettingsTest(unittest.TestCase):
                 "delivery_source": "default",
                 "flow": "report",
                 "flow_source": "default",
+                "report_layout": "table",
+                "report_layout_source": "default",
                 "impact_graph": {
                     "enabled": True,
                     "max_seconds": 30,
@@ -64,6 +66,8 @@ class PresentationSettingsTest(unittest.TestCase):
                 "delivery_source": "default",
                 "flow": "report",
                 "flow_source": "default",
+                "report_layout": "table",
+                "report_layout_source": "default",
                 "impact_graph": {
                     "enabled": True,
                     "max_seconds": 30,
@@ -100,6 +104,8 @@ class PresentationSettingsTest(unittest.TestCase):
                 "delivery_source": "request",
                 "flow": "ask",
                 "flow_source": "request",
+                "report_layout": "table",
+                "report_layout_source": "default",
                 "impact_graph": {
                     "enabled": True,
                     "max_seconds": 30,
@@ -130,6 +136,42 @@ class PresentationSettingsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("delivery must be one of: compact, full", result.stderr)
+
+    def test_report_layout_defaults_to_table_and_repository_can_opt_into_narrative(self):
+        with tempfile.TemporaryDirectory() as directory:
+            default = json.loads(self.run_resolver(directory).stdout)
+            Path(directory, ".requirements-impact-refiner.json").write_text(
+                '{"report_layout":"narrative"}\n', encoding="utf-8"
+            )
+            configured = json.loads(self.run_resolver(directory).stdout)
+
+        self.assertEqual(
+            (default["report_layout"], default["report_layout_source"]),
+            ("table", "default"),
+        )
+        self.assertEqual(
+            (configured["report_layout"], configured["report_layout_source"]),
+            ("narrative", "repository"),
+        )
+
+    def test_report_layout_cli_override_wins_and_invalid_value_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, ".requirements-impact-refiner.json").write_text(
+                '{"report_layout":"narrative"}\n', encoding="utf-8"
+            )
+            overridden = self.run_resolver(directory, "--report-layout", "table")
+            Path(directory, ".requirements-impact-refiner.json").write_text(
+                '{"report_layout":"cards"}\n', encoding="utf-8"
+            )
+            invalid = self.run_resolver(directory)
+
+        value = json.loads(overridden.stdout)
+        self.assertEqual(
+            (value["report_layout"], value["report_layout_source"]),
+            ("table", "request"),
+        )
+        self.assertEqual(invalid.returncode, 2)
+        self.assertIn("report_layout must be one of: table, narrative", invalid.stderr)
 
     def test_graph_settings_accept_exact_fields_and_fall_back_safely(self):
         with tempfile.TemporaryDirectory() as directory:

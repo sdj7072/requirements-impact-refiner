@@ -115,6 +115,8 @@ class _ImpactRendererContract(Protocol):
 
     def render_reader_view(self, state: Mapping[str, object], locale: str | None = None) -> str: ...
 
+    def render_full_view(self, state: Mapping[str, object], locale: str | None = None) -> str: ...
+
 
 class _ReportStoreContract(Protocol):
     compact_state: _CompactStateContract
@@ -360,7 +362,10 @@ def _is_lineage_contract(value: object) -> TypeGuard[_LineageContract]:
         and getattr(report_store, "impact_renderer", None) is renderer
         and getattr(renderer, "compact_state", None) is compact_state
         and _callables(compact_state, ("load_state_bytes", "validate_state"))
-        and _callables(renderer, ("render_compact", "render_markdown", "render_reader_view"))
+        and _callables(
+            renderer,
+            ("render_compact", "render_markdown", "render_reader_view", "render_full_view"),
+        )
         and isinstance(getattr(report_store, "ReportStoreError", None), type)
         and _callables(report_store, ("load_current", "publish_revision", "report_directory"))
         and _callables(
@@ -1078,6 +1083,7 @@ _RUNTIME_CALLABLES = (
     "render_compact",
     "render_markdown",
     "render_reader_view",
+    "render_full_view",
     "context_type",
     "canonical_requirement_sha256",
     "canonical_repository_evidence_sha256",
@@ -1129,6 +1135,7 @@ def default_runtime() -> Mapping[str, object]:
         "render_compact": IMPACT_RENDERER.render_compact,
         "render_markdown": IMPACT_RENDERER.render_markdown,
         "render_reader_view": IMPACT_RENDERER.render_reader_view,
+        "render_full_view": IMPACT_RENDERER.render_full_view,
         "context_type": REPORT_CONTEXT.ReportContext,
         "canonical_requirement_sha256": REPORT_CONTEXT.canonical_requirement_sha256,
         "canonical_repository_evidence_sha256": REPORT_CONTEXT.canonical_repository_evidence_sha256,
@@ -1317,7 +1324,7 @@ def _verified_published_display(runtime: Mapping[str, object], published):
     display = (
         _operation(runtime, "render_compact")(stored_state)
         if delivery == "compact"
-        else _operation(runtime, "render_reader_view")(stored_state)
+        else _operation(runtime, "render_full_view")(stored_state)
     )
     if display.endswith("\n"):
         display = display[:-1]

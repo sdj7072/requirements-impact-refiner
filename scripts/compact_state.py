@@ -37,6 +37,8 @@ class RequiredSettings(TypedDict):
 class Settings(RequiredSettings, total=False):
     impact_graph: GraphSettings
     warnings: list[str]
+    report_layout: str
+    report_layout_source: str
 
 
 class OriginalRequirement(TypedDict):
@@ -329,9 +331,17 @@ SEVERITIES = {"critical", "high", "medium", "low"}
 EVIDENCE_LEVELS = {"verified", "inferred", "unknown"}
 AUDIENCES = {"simple", "balanced", "technical"}
 DELIVERIES = {"compact", "full"}
+REPORT_LAYOUTS = {"table", "narrative"}
 SETTING_SOURCES = {"request", "repository", "default"}
 SETTING_FIELDS = {"audience", "audience_source", "delivery", "delivery_source"}
-OPTIONAL_SETTING_FIELDS = {"impact_graph", "warnings", "flow", "flow_source"}
+OPTIONAL_SETTING_FIELDS = {
+    "impact_graph",
+    "warnings",
+    "flow",
+    "flow_source",
+    "report_layout",
+    "report_layout_source",
+}
 GRAPH_SETTING_FIELDS = {
     "enabled",
     "max_seconds",
@@ -476,6 +486,14 @@ def validate_structure(value: object) -> list[str]:
             errors.extend(_validate_graph_settings(settings["impact_graph"]))
         if "warnings" in settings and not _string_list(settings["warnings"]):
             errors.append("settings warnings must be an array of non-empty strings")
+        layout_present = "report_layout" in settings
+        layout_source_present = "report_layout_source" in settings
+        if layout_present != layout_source_present:
+            errors.append("settings report_layout and report_layout_source must appear together")
+        if layout_present and not isinstance(settings["report_layout"], str):
+            errors.append("settings report_layout must be a string")
+        if layout_source_present and not isinstance(settings["report_layout_source"], str):
+            errors.append("settings report_layout_source must be a string")
     for name, fields in ROW_FIELDS.items():
         rows = value[name]
         if not isinstance(rows, list):
@@ -611,6 +629,11 @@ def validate_definitions(state: State) -> list[str]:
             errors.append(f"invalid {name} {settings.get(name)}")
         if settings.get(f"{name}_source") not in SETTING_SOURCES:
             errors.append(f"invalid {name}_source {settings.get(f'{name}_source')}")
+    if "report_layout" in settings:
+        if settings.get("report_layout") not in REPORT_LAYOUTS:
+            errors.append(f"invalid report_layout {settings.get('report_layout')}")
+        if settings.get("report_layout_source") not in SETTING_SOURCES:
+            errors.append(f"invalid report_layout_source {settings.get('report_layout_source')}")
     definitions = (
         ("requirement", [state["original_requirement"]["id"]]),
         ("invariant", [row["id"] for row in state["current_behavior"]]),

@@ -793,6 +793,17 @@ def render_reader_view(state: Mapping[str, object], locale: str | None = None) -
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_full_view(state: Mapping[str, object], locale: str | None = None) -> str:
+    """Render the configured full display without changing canonical state bytes."""
+    settings = state.get("settings") if isinstance(state, Mapping) else None
+    layout = settings.get("report_layout", "narrative") if isinstance(settings, Mapping) else None
+    if layout == "table":
+        return render_markdown(state)
+    if layout == "narrative":
+        return render_reader_view(state, locale)
+    raise ValueError("report_layout must be table or narrative")
+
+
 def render_markdown(state: Mapping[str, object]) -> str:
     errors = compact_state.validate_state(state)
     if errors:

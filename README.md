@@ -94,12 +94,12 @@ When the plugin is enabled, [`using-requirements-impact-refiner`](skills/using-r
 Every report now starts with a user-facing `Change Impact Summary`: which feature changes, what can go wrong, who or what is affected, when it happens, and how to prevent or check it. Its audience defaults to `balanced`. Set a repository preference in `.requirements-impact-refiner.json`:
 
 ```json
-{"audience":"balanced","delivery":"full","flow":"report"}
+{"audience":"balanced","delivery":"full","flow":"report","report_layout":"table"}
 ```
 
 The `flow` setting shapes the answer: the default `report` delivers the complete impact report directly (the scan runs internally to seed it, stopping early only on `needs_input`), while `ask` returns the one-line scan summary plus a confirmation question before detailed refinement.
 
-Allowed audience values are `simple`, `balanced`, and `technical`. The default `report` flow always returns the complete reader view; a compact delivery override in report flow is ignored with a warning. Compact delivery remains available only for the explicit `ask` flow's scan-and-confirm response. Append-only canonical JSON and Markdown are still persisted, and persistence failure uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings except for report-flow full normalization. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
+Allowed audience values are `simple`, `balanced`, and `technical`. New reports default to `report_layout: "table"`, which returns the existing canonical Markdown tables; set `report_layout: "narrative"` to keep the localized section-and-list reader view. Legacy stored reports without this optional setting retain narrative display. The default `report` flow always returns the complete selected full view; a compact delivery override in report flow is ignored with a warning. Compact delivery remains available only for the explicit `ask` flow's scan-and-confirm response. Append-only canonical JSON and Markdown are still persisted, and persistence failure uses a disclosed `full-inline` fallback. Current-request overrides beat repository settings except for report-flow full normalization. These are cross-client skill settings rather than custom Codex or Claude settings-screen controls.
 
 The default report path runs one `rir_scan` internally and continues directly to detailed refinement unless the scan returns `needs_input`. The explicit `ask` flow keeps the renderer-owned scan response bounded to `180 words` and asks before detailed refinement. The graph engine targets `10s` with a `30s` ceiling, but this does not promise total model latency: the first representative canary found the API → decoder → cache → migration path in 17 ms while the model turn took `297.159` seconds and failed strict one-call automation, so v0.4 remains `not verified`.
 

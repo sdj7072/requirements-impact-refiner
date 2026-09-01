@@ -124,6 +124,35 @@ class CompactStateTest(unittest.TestCase):
             COMPACT.validate_state(value),
         )
 
+    def test_optional_report_layout_preserves_legacy_and_requires_a_valid_pair(self):
+        legacy = self.fixture()
+        self.assertEqual(COMPACT.validate_state(legacy), [])
+
+        value = self.fixture()
+        value["settings"].update({"report_layout": "table", "report_layout_source": "default"})
+        self.assertEqual(COMPACT.validate_state(value), [])
+
+        del value["settings"]["report_layout_source"]
+        self.assertIn(
+            "settings report_layout and report_layout_source must appear together",
+            COMPACT.validate_state(value),
+        )
+        value["settings"]["report_layout_source"] = "default"
+        value["settings"]["report_layout"] = "cards"
+        self.assertIn("invalid report_layout cards", COMPACT.validate_state(value))
+
+    def test_published_schema_requires_report_layout_pair_in_both_directions(self):
+        schema = json.loads((ROOT / "schemas" / "compact-state.schema.json").read_text())
+        settings = schema["$defs"]["settings"]
+
+        self.assertEqual(
+            settings["dependentRequired"],
+            {
+                "report_layout": ["report_layout_source"],
+                "report_layout_source": ["report_layout"],
+            },
+        )
+
     def test_relationships_reject_unknown_ids(self):
         value = self.fixture()
         value["impacts"][0]["criteria"] = ["AC-999"]

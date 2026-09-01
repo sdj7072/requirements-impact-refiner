@@ -11,7 +11,7 @@
         "message": "invalid adapter: unsupported"
       },
       "success": {
-        "draft_canonical_sha256": "6c3d69de12a05b8c584339f284483cdb09cc7f586ed0bb079b856fb2da4b1478",
+      "draft_canonical_sha256": "453a4584972a86c6534ad9948f355809687cada062a537ec52826031ec2c57bf",
         "filesystem": {
           "modes": {
             ".requirements-impact-refiner/drafts": "0700",
@@ -40,7 +40,7 @@
             "delivery_source": "default",
             "flow": "report",
             "flow_source": "default",
-            "impact_graph": {
+          "impact_graph": {
               "deep": false,
               "enabled": false,
               "install_policy": "never",
@@ -48,11 +48,13 @@
               "providers": [
                 "builtin"
               ],
-              "target_seconds": 10
-            }
+            "target_seconds": 10
+          },
+          "report_layout": "table",
+          "report_layout_source": "default"
           }
         },
-        "result_canonical_sha256": "bc9913c50903f9f40134f8f7b31c9d14965bcfded13be1a702cfc809aa66c8c0"
+      "result_canonical_sha256": "910c0b6c7f95fe93f6921f1356b395858a3ec1031c252ddc6d969413bfe5ffb6"
       }
     },
     "finalize": {
@@ -111,7 +113,7 @@
         "markdown_canonical_sha256": "0245b2f3a7af219a62e9887121e6459e467fa737a4502b35f3e343107569d39e",
         "result": {
           "delivery": "full",
-          "display_text_sha256": "be6a185147252157783469c1d6ccdbe292c0d691a3ca332df0aaa766a35dc08b",
+        "display_text_sha256": "028d26157dd45efc46c34830bcfb62004f2fef809ed706596ebee40e6bda5699",
           "markdown_path": ".requirements-impact-refiner/reports/RPT-001/revision-0001.md",
           "markdown_sha256": "0245b2f3a7af219a62e9887121e6459e467fa737a4502b35f3e343107569d39e",
           "report_id": "RPT-001",
@@ -119,8 +121,8 @@
           "state_path": ".requirements-impact-refiner/reports/RPT-001/revision-0001.json",
           "status": "published"
         },
-        "result_canonical_sha256": "2fd717e3b990c09850f9b70013fce5c077902129c85f7b5bc519e36038c2f991",
-        "state_canonical_sha256": "d1fff0711b635c5c95d8a209b87f0cbed071dd5911a2043a203d270d45a43a5d"
+      "result_canonical_sha256": "de8dc59c9155e76faab614c4ebc2885df99e0b34ab4c3a8c431aa9dbd8d4e44b",
+      "state_canonical_sha256": "c37e8558d14d034bf6c258bc213a2e871028c27ae113b7f65ac0183cfd4321b1"
       }
     },
     "trace": {

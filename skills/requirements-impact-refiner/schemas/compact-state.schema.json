@@ -55,11 +55,17 @@
     "settings": {
       "type": "object", "additionalProperties": false,
       "required": ["audience", "audience_source", "delivery", "delivery_source"],
+      "dependentRequired": {
+        "report_layout": ["report_layout_source"],
+        "report_layout_source": ["report_layout"]
+      },
       "properties": {
         "audience": {"enum": ["simple", "balanced", "technical"]},
         "audience_source": {"enum": ["request", "repository", "default"]},
         "delivery": {"enum": ["compact", "full"]},
-        "delivery_source": {"enum": ["request", "repository", "default"]}
+        "delivery_source": {"enum": ["request", "repository", "default"]},
+        "report_layout": {"enum": ["table", "narrative"]},
+        "report_layout_source": {"enum": ["request", "repository", "default"]}
       }
     },
     "originalRequirement": {

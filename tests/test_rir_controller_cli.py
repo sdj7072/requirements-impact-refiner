@@ -173,7 +173,7 @@ class RirControllerCliTest(unittest.TestCase):
         )
         self.assertTrue(payload["display_text"].startswith("## Previous Impact Report\n"))
         self.assertIn("# Requirements Impact Report\n", payload["display_text"])
-        self.assertFalse(any(line.startswith("|") for line in payload["display_text"].splitlines()))
+        self.assertTrue(any(line.startswith("|") for line in payload["display_text"].splitlines()))
         self.assertEqual(
             result.stdout,
             json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
@@ -281,7 +281,7 @@ class RirControllerCliTest(unittest.TestCase):
         self.assertTrue(result.stdout.startswith("# Requirements Impact Report\n"))
         self.assertIn("IMP-001", result.stdout)
         self.assertIn("## Decision Needed", result.stdout)
-        self.assertFalse(any(line.startswith("|") for line in result.stdout.splitlines()))
+        self.assertTrue(any(line.startswith("|") for line in result.stdout.splitlines()))
         self.assertNotIn('"status": "published"', result.stdout)
 
     def test_invalid_finalize_has_no_display_stdout(self):
@@ -436,7 +436,7 @@ class RirControllerCliTest(unittest.TestCase):
 
         self.assertEqual(finalized.returncode, 0, finalized.stderr)
         self.assertTrue(finalized.stdout.startswith("# Requirements Impact Report\n"))
-        self.assertFalse(any(line.startswith("|") for line in finalized.stdout.splitlines()))
+        self.assertTrue(any(line.startswith("|") for line in finalized.stdout.splitlines()))
 
     def test_trace_validation_and_io_failures_preserve_cli_exit_contracts(self):
         self.enable_graph_sources()

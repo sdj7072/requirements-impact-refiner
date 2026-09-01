@@ -10,6 +10,7 @@ from pathlib import Path
 AUDIENCES = ("simple", "balanced", "technical")
 DELIVERIES = ("compact", "full")
 FLOWS = ("report", "ask")
+REPORT_LAYOUTS = ("table", "narrative")
 CONFIG_NAME = ".requirements-impact-refiner.json"
 DELTA_MAX_SECONDS_DEFAULT = 3
 DELTA_MAX_SECONDS_LIMIT = 30
@@ -42,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audience", choices=AUDIENCES)
     parser.add_argument("--delivery", choices=DELIVERIES)
     parser.add_argument("--flow", choices=FLOWS)
+    parser.add_argument("--report-layout", choices=REPORT_LAYOUTS)
     return parser
 
 
@@ -56,7 +58,15 @@ def load_repository_config(project_root: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"{CONFIG_NAME} must contain a JSON object")
     unknown = sorted(
-        set(value) - {"audience", "delivery", "flow", "impact_graph", "delta_max_seconds"}
+        set(value)
+        - {
+            "audience",
+            "delivery",
+            "flow",
+            "report_layout",
+            "impact_graph",
+            "delta_max_seconds",
+        }
     )
     if unknown:
         raise ValueError(f"unsupported setting(s): {', '.join(unknown)}")
@@ -152,6 +162,7 @@ def resolve(
     audience_override: str | None,
     delivery_override: str | None,
     flow_override: str | None = None,
+    report_layout_override: str | None = None,
 ) -> dict[str, object]:
     config = load_repository_config(project_root)
     audience, audience_source = resolve_value(
@@ -165,6 +176,9 @@ def resolve(
     delivery_default = "full" if flow == "report" else "compact"
     delivery, delivery_source = resolve_value(
         "delivery", delivery_override, config, DELIVERIES, delivery_default
+    )
+    report_layout, report_layout_source = resolve_value(
+        "report_layout", report_layout_override, config, REPORT_LAYOUTS, "table"
     )
     delivery_warning = None
     if flow == "report" and delivery == "compact":
@@ -180,6 +194,8 @@ def resolve(
         "delivery_source": delivery_source,
         "flow": flow,
         "flow_source": flow_source,
+        "report_layout": report_layout,
+        "report_layout_source": report_layout_source,
         "impact_graph": impact_graph,
     }
     warnings = []
@@ -197,7 +213,13 @@ def resolve(
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        settings = resolve(args.project_root, args.audience, args.delivery, args.flow)
+        settings = resolve(
+            args.project_root,
+            args.audience,
+            args.delivery,
+            args.flow,
+            args.report_layout,
+        )
     except ValueError as error:
         print(error, file=sys.stderr)
         return 2

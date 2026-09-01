@@ -94,12 +94,12 @@ python3 scripts/install-agent-skill.py --target-dir ~/.agents/skills
 各報告書の先頭には、利用者向けの `Change Impact Summary` が表示されます。変更される機能、起こり得る問題、影響を受ける機能や利用者、発生条件、予防または確認方法を示します。既定値は `balanced` で、リポジトリルートの `.requirements-impact-refiner.json` で設定できます。
 
 ```json
-{"audience":"balanced","delivery":"full","flow":"report"}
+{"audience":"balanced","delivery":"full","flow":"report","report_layout":"table"}
 ```
 
 `flow` 設定は応答の形を決めます: 既定の `report` は完全な影響レポートを直接返し(スキャンはシード用に内部でのみ実行され、`needs_input` の場合のみ早期停止)、`ask` は 1 行のスキャン要約と確認の質問を先に返してから詳細精緻化に進みます。
 
-audience は `simple`, `balanced`, `technical` を指定できます。既定の `report` フローは常に完全な reader view を返し、report フローの compact override は警告付きで無視されます。Compact delivery は明示的な `ask` フローの scan-and-confirm 応答だけに残ります。append-only の正規 JSON と Markdown は引き続き保存され、保存できない場合は明示した `full-inline` fallback を使います。report-flow full 正規化を除き、現在の依頼がリポジトリ設定より優先されます。これは Codex や Claude 専用画面ではなくクロスクライアントのスキル設定です。
+audience は `simple`, `balanced`, `technical` を指定できます。新しいレポートは `report_layout: "table"` が既定で、既存の canonical Markdown 表をそのまま返します。ローカライズされたセクション・リスト形式の reader view を維持するには `report_layout: "narrative"` を設定します。この任意フィールドがない既存の保存済みレポートは narrative 表示を維持します。既定の `report` フローは選択した完全な view を返し、report フローの compact override は警告付きで無視されます。Compact delivery は明示的な `ask` フローの scan-and-confirm 応答だけに残ります。append-only の正規 JSON と Markdown は引き続き保存され、保存できない場合は明示した `full-inline` fallback を使います。report-flow full 正規化を除き、現在の依頼がリポジトリ設定より優先されます。これは Codex や Claude 専用画面ではなくクロスクライアントのスキル設定です。
 
 既定の report 経路は `rir_scan` を内部で1回実行し、結果が `needs_input` でなければ詳細精緻化を直ちに続行します。明示的な `ask` フローだけが renderer-owned scan 応答を最大 `180 words` に制限し、詳細精緻化の前に確認します。graph engine の target は `10s`、ceiling は `30s` ですが total model latency の保証ではありません。最初の representative canary は API → decoder → cache → migration path を17 msで発見しましたが model turn は `297.159`秒で strict one-call automation に失敗したため、v0.4 は `not verified` のままです。
 
