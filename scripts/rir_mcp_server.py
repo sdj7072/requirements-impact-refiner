@@ -1462,7 +1462,41 @@ def _begin(arguments: object) -> dict[str, object]:
                 "rationale": decision_row["rationale"],
             }
         )
+    impact_graph = result.settings.get("impact_graph")
+    graph_enabled = isinstance(impact_graph, Mapping) and impact_graph.get("enabled") is True
+    if result.graph_receipt_id is not None:
+        next_action = {
+            "tool": "rir_finalize",
+            "required": True,
+            "fixed_arguments": {
+                "repo_root": arguments["repo_root"],
+                "draft_id": result.draft_id,
+                "graph_receipt_id": result.graph_receipt_id,
+            },
+            "required_agent_arguments": ["analysis"],
+        }
+    elif graph_enabled:
+        next_action = {
+            "tool": "rir_trace_impact",
+            "required": True,
+            "fixed_arguments": {
+                "repo_root": arguments["repo_root"],
+                "draft_id": result.draft_id,
+            },
+            "required_agent_arguments": ["seeds"],
+        }
+    else:
+        next_action = {
+            "tool": "rir_finalize",
+            "required": True,
+            "fixed_arguments": {
+                "repo_root": arguments["repo_root"],
+                "draft_id": result.draft_id,
+            },
+            "required_agent_arguments": ["analysis"],
+        }
     structured = {
+        "contract_version": 2,
         "draft_id": result.draft_id,
         "draft_path": draft_path,
         "report_id": result.report_id,
@@ -1476,14 +1510,6 @@ def _begin(arguments: object) -> dict[str, object]:
             "carry_forward_decisions": carry_forward_decisions,
             "carry_forward_impacts": carry_forward_impacts,
         },
-        "repository_evidence": list(arguments["repository_evidence"]),
-        "allowed_enums": {
-            "phase": ["pre-decision", "post-decision"],
-            "adapter": sorted(rir_controller.ADAPTERS),
-            "audience": ["simple", "balanced", "technical"],
-            "delivery": ["compact", "full"],
-        },
-        "analysis_contract": EXPANDED_ANALYSIS_SCHEMA,
         "semantic_rules": [
             (
                 "this promoted Fast Scan already supplies graph_receipt_id; do not call rir_trace_impact and return the supplied ID unchanged to finalize"
@@ -1503,6 +1529,7 @@ def _begin(arguments: object) -> dict[str, object]:
         "installed_payload_sha256": INSTALLED_PAYLOAD_SHA256,
         "scan_id": result.scan_id,
         "graph_receipt_id": result.graph_receipt_id,
+        "next_action": next_action,
     }
     return {
         "content": [
@@ -1664,7 +1691,10 @@ def handle(message: object) -> dict[str, object] | None:
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "requirements-impact-refiner", "version": "0.4.0"},
+                "serverInfo": {
+                    "name": "requirements-impact-refiner",
+                    "version": "0.6.2-dev",
+                },
             },
         )
     if method == "tools/list":

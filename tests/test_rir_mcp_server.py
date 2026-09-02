@@ -622,6 +622,7 @@ else:
         )
 
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
+        self.assertEqual(replies[0]["result"]["serverInfo"]["version"], "0.6.2-dev")
         self.assertEqual(
             [tool["name"] for tool in replies[1]["result"]["tools"]],
             [
@@ -811,8 +812,49 @@ if sys.modules["payload_identity"] is not foreign_payload:
                 promoted["graph_receipt_id"],
                 result["structuredContent"]["receipt_id"],
             )
+            self.assertEqual(
+                promoted["next_action"],
+                {
+                    "tool": "rir_finalize",
+                    "required": True,
+                    "fixed_arguments": {
+                        "repo_root": str(root),
+                        "draft_id": promoted["draft_id"],
+                        "graph_receipt_id": promoted["graph_receipt_id"],
+                    },
+                    "required_agent_arguments": ["analysis"],
+                },
+            )
             rules = " ".join(promoted["semantic_rules"])
             self.assertIn("do not call rir_trace_impact", rules)
+
+    def test_graph_enabled_begin_declares_required_trace_seeds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            begin = self.exchange(
+                [
+                    request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "rir_begin",
+                            "arguments": {
+                                "repo_root": str(root),
+                                "request": "Add nickname.",
+                                "repository_evidence": ["displayName exists"],
+                                "adapter": "generic",
+                            },
+                        },
+                    )
+                ]
+            )[0]["result"]["structuredContent"]
+
+        self.assertEqual(begin["next_action"]["tool"], "rir_trace_impact")
+        self.assertEqual(
+            begin["next_action"]["fixed_arguments"],
+            {"repo_root": str(root), "draft_id": begin["draft_id"]},
+        )
+        self.assertEqual(begin["next_action"]["required_agent_arguments"], ["seeds"])
 
     def test_begin_and_finalize_tools_share_controller_state(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -845,8 +887,24 @@ if sys.modules["payload_identity"] is not foreign_payload:
                 begin_reply = json.loads(process.stdout.readline())
                 begin_content = begin_reply["result"]["structuredContent"]
                 draft_id = begin_content["draft_id"]
-                self.assertEqual(begin_content["repository_evidence"], ["displayName exists"])
-                self.assertIn("impacts", begin_content["analysis_contract"]["required"])
+                self.assertNotIn("repository_evidence", begin_content)
+                self.assertNotIn("analysis_contract", begin_content)
+                self.assertNotIn("allowed_enums", begin_content)
+                self.assertEqual(begin_content["contract_version"], 2)
+                self.assertEqual(
+                    begin_content["next_action"],
+                    {
+                        "tool": "rir_finalize",
+                        "required": True,
+                        "fixed_arguments": {
+                            "repo_root": str(root),
+                            "draft_id": draft_id,
+                        },
+                        "required_agent_arguments": ["analysis"],
+                    },
+                )
+                begin_bytes = len(json.dumps(begin_content, ensure_ascii=False).encode("utf-8"))
+                self.assertLess(begin_bytes, 7613 // 2)
                 self.assertIn("prior_key_map", begin_content)
                 self.assertRegex(begin_content["installed_payload_sha256"], r"^[0-9a-f]{64}$")
                 self.assertIn("post-decision requires", " ".join(begin_content["semantic_rules"]))

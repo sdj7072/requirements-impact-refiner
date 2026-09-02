@@ -786,6 +786,13 @@ class IntegrationAdapterContractTest(unittest.TestCase):
 
         self.assertLess(text.index("references/previous-report.md"), text.index("`rir_previous`"))
 
+    def test_controller_uses_finalize_schema_instead_of_begin_schema_duplication(self):
+        text = (REFERENCES / "controller-workflow.md").read_text(encoding="utf-8")
+
+        self.assertIn("`rir_finalize` tool schema", text)
+        self.assertIn("begin result's prior state and analysis guidance", text)
+        self.assertNotIn("begin result's prior state, enums, and required analysis shape", text)
+
     def test_each_adapter_has_exactly_the_four_contract_sections(self):
         for adapter in ADAPTERS.values():
             text = (REFERENCES / adapter["file"]).read_text(encoding="utf-8")

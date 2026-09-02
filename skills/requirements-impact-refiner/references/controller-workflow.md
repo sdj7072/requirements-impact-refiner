@@ -14,7 +14,7 @@ After successful `rir_finalize`, Return `display_text` verbatim and end the curr
 
 ## Between begin and finalize
 
-Use the begin result's prior state, enums, and required analysis shape. Inspect only necessary repository evidence. Preserve behavior as invariant keys; future criteria are targets, not current evidence.
+Use the begin result's prior state and analysis guidance. Read enums and the required analysis shape from the `rir_finalize` tool schema, which is the single contract source. Inspect only necessary repository evidence. Preserve behavior as invariant keys; future criteria are targets, not current evidence.
 
 Every affected behavior gets an impact row with a user-facing consequence: name the feature, describe what may break, and state the mitigation, owner, or missing evidence. Relationships use local keys; the controller allocates numeric IDs and Delta.
 
