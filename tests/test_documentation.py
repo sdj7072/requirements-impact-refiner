@@ -213,6 +213,26 @@ class DocumentationTest(unittest.TestCase):
         self.assertIn("Ask flow: return scan `display_text` and stop.", route)
         self.assertIn("immediately (report)", core)
 
+    def test_previous_report_routes_stale_delta_details_progressively(self):
+        previous = (SKILL_ROOT / "references" / "previous-report.md").read_text(encoding="utf-8")
+        delta_path = SKILL_ROOT / "references" / "previous-report-delta.md"
+
+        self.assertTrue(delta_path.is_file())
+        delta = delta_path.read_text(encoding="utf-8")
+        self.assertLess(len(previous.split()), 950)
+        self.assertGreaterEqual(len(delta.split()), 220)
+        self.assertLess(len(delta.split()), 320)
+        self.assertIn("[Stale delta](previous-report-delta.md)", previous)
+        self.assertIn("Read this reference only for a `stale`", delta)
+        for preserved_rule in (
+            "all-or-none hint set",
+            "delta_max_seconds",
+            "killable child-process boundary",
+            "receipt-local edge chain",
+            "Schema-1 controller metadata is not delta-eligible",
+        ):
+            self.assertIn(preserved_rule, delta)
+
     def test_graph_workflow_and_limits_are_synchronized_in_public_docs(self):
         required = (
             "rir_scan",

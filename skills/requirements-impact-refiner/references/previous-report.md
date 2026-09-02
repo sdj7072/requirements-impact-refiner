@@ -6,6 +6,13 @@ Call `rir_previous` with the canonical repository root, unchanged request, and s
 
 Within one user turn, one byte-exact request, ordered evidence list, and `report_id` has one reusable result. Reuse it instead of repeating the lookup. MCP responses expose its `lookup_key`; CLI fallback tracks the exact arguments locally. Changed input is a different lookup, and a later user turn may repeat the same lookup.
 
+## Result reference set
+
+| Result | References to read |
+| --- | --- |
+| `none`, `fresh`, `ambiguous` | this file only |
+| `stale` | this file, then [Stale delta](previous-report-delta.md) |
+
 ## Activation contract
 
 | Conversation | Action |
@@ -44,11 +51,7 @@ MCP-capable Codex and Claude clients use the same semantic route. CLI fallback r
 
 Before `rir_scan`, separately require request UTF-8 at most 4 KiB, at most 32 evidence rows, and at most 4 KiB UTF-8 per row. A wider fresh lookup still returns and stops. A wider stale/none result never calls an invalid scan: keep any stale display, emit one bounded sentence in the request language asking for shorter input and naming those limits, then stop. English: “Shorten the request to 4 KiB and evidence to 32 rows of 4 KiB, then retry.” Korean: “요청은 4 KiB 이하, 근거는 행당 4 KiB 이하로 32개까지 줄인 뒤 다시 시도해 주세요.” Japanese: “リクエストを4 KiB以下、根拠を1行4 KiB以下で32件までに短縮して再試行してください。”
 
-For `none`, map `repo_root` unchanged, `request` to `change_request`, and `repository_evidence` to `evidence` without sorting or deduplicating; optional `presentation` is the selected audience. For `stale`, add the exact tool-owned `report_id` as `previous_report_id`, `revision` as `previous_revision`, and `changed_paths` unchanged. These three fields are an all-or-none hint set: the backend repeats the exact same-repository/request/ordered-evidence lookup with that disclosed report ID and accepts prior state only when the result is still `stale` and its revision and changed paths match. A fresh, forged, mismatched, foreign, or concurrently changed hint set fails closed and performs no scan.
-
-Only a validated stale delta uses the configured `delta_max_seconds`, hard-capped at 3 seconds. The whole lookup, immutable artifact binding, source hashing, graph/provider work, persistence, and rendering call runs inside one killable child-process boundary; ordinary `none` scans remain in process with their existing graph budget. At deadline the parent kills the worker process group and returns its already-bound immutable previous/frontier fallback as `partial`, `can_promote=false`, with actual wall elapsed time. If trust was not established before timeout, it returns a generic identity-free partial fallback.
-
-A prior selected path survives only when the current receipt contains a receipt-local edge chain covering its ordered locations and each relevant node has a current non-null source digest; an explicitly verified replacement may supersede a location. Same-location placeholders, missing/deleted nodes, unexpected source changes, zero-edge receipts, and omitted seeds remain frontiers and cannot promote. Seed priority is unchanged, but only the first 512 unique seeds enter graph work; `omitted_seed_count` and provenance remain in the receipt/frontier instead of failing the call. The delta/cache identity binds the exact prior graph receipt ID and canonical SHA-256. Schema-1 controller metadata is not delta-eligible.
+For `none`, map `repo_root` unchanged, `request` to `change_request`, and `repository_evidence` to `evidence` without sorting or deduplicating; optional `presentation` is the selected audience.
 
 ## Scan result contract
 
