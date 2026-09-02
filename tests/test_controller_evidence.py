@@ -165,6 +165,71 @@ class ControllerEvidenceTest(unittest.TestCase):
         self.assertFalse(evidence.display_text_exact_match)
         self.assertFalse(evidence.terminal_contract_observed)
 
+    def test_terminal_delivery_rejects_duplicate_previous_lookup_in_one_turn(self):
+        lookup_key = "d" * 32
+        previous = completed(
+            "rir_previous",
+            {
+                "repo_root": "/tmp/work",
+                "request": "Rename profile.displayName",
+                "repository_evidence": ["symbol:Profile"],
+            },
+            {"status": "none", "lookup_key": lookup_key},
+        )
+        duplicate_event = json.loads(previous)
+        duplicate_event["item"]["id"] = "item-rir-previous-duplicate"
+
+        evidence = analyze_terminal_delivery(
+            ("\n".join((previous, json.dumps(duplicate_event))),), ("",)
+        )
+
+        self.assertFalse(evidence.valid)
+        self.assertIn("turn 1 repeats rir_previous lookup key", evidence.errors)
+
+    def test_terminal_delivery_allows_previous_selection_and_later_turn_lookup(self):
+        first_key = "d" * 32
+        selected_key = "e" * 32
+        first = completed(
+            "rir_previous",
+            {
+                "repo_root": "/tmp/work",
+                "request": "Rename profile.displayName",
+                "repository_evidence": ["symbol:Profile"],
+            },
+            {"status": "ambiguous", "lookup_key": first_key},
+        )
+        selected = completed(
+            "rir_previous",
+            {
+                "repo_root": "/tmp/work",
+                "request": "Rename profile.displayName",
+                "repository_evidence": ["symbol:Profile"],
+                "report_id": "RPT-002",
+            },
+            {"status": "none", "lookup_key": selected_key},
+        )
+
+        same_turn_selection = analyze_terminal_delivery(("\n".join((first, selected)),), ("",))
+        later_turn_repeat = analyze_terminal_delivery((first, first), ("", ""))
+
+        self.assertTrue(same_turn_selection.valid, same_turn_selection.errors)
+        self.assertTrue(later_turn_repeat.valid, later_turn_repeat.errors)
+
+    def test_terminal_delivery_keeps_legacy_previous_without_lookup_key_valid(self):
+        previous = completed(
+            "rir_previous",
+            {
+                "repo_root": "/tmp/work",
+                "request": "Rename profile.displayName",
+                "repository_evidence": [],
+            },
+            {"status": "none"},
+        )
+
+        evidence = analyze_terminal_delivery((previous,), ("",))
+
+        self.assertTrue(evidence.valid, evidence.errors)
+
     def test_terminal_delivery_rejects_extra_or_rewritten_agent_message(self):
         display = "# Requirements Impact Report\n"
         finalize = completed(

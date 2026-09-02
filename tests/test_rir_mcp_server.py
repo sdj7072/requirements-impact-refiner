@@ -1019,6 +1019,36 @@ if sys.modules["payload_identity"] is not foreign_payload:
         self.assertEqual(structured["changed_paths"], [])
         self.assertIsNone(structured["changed_count"])
 
+    def test_previous_lookup_key_is_stable_and_binds_exact_lookup_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = {
+                "repo_root": directory,
+                "request": "Rename profile.displayName",
+                "repository_evidence": ["path:b.py", "symbol:B", "symbol:B"],
+            }
+            variants = (
+                base,
+                dict(base),
+                {**base, "request": "Rename profile.nickname"},
+                {**base, "repository_evidence": ["symbol:B", "path:b.py", "symbol:B"]},
+                {**base, "report_id": "RPT-002"},
+            )
+            replies = self.exchange(
+                [
+                    request(
+                        identifier,
+                        "tools/call",
+                        {"name": "rir_previous", "arguments": arguments},
+                    )
+                    for identifier, arguments in enumerate(variants, start=1)
+                ]
+            )
+
+        keys = [reply["result"]["structuredContent"]["lookup_key"] for reply in replies]
+        self.assertRegex(keys[0], r"^[0-9a-f]{32}$")
+        self.assertEqual(keys[0], keys[1])
+        self.assertEqual(len(set(keys)), 4)
+
     def test_previous_root_parameter_and_operation_failures_have_distinct_error_codes(self):
         module = self.load_server_module("_rir_mcp_previous_root_failure_guard")
 

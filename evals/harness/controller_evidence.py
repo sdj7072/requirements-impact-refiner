@@ -196,6 +196,27 @@ def analyze_terminal_delivery(
         if malformed:
             errors.append(f"turn {turn_index} terminal delivery JSONL is malformed")
 
+        previous_keys: set[str] = set()
+        for item in items:
+            if (
+                item.get("type") != "mcp_tool_call"
+                or item.get("server") != _SERVER
+                or item.get("tool") != "rir_previous"
+                or item.get("status") != "completed"
+                or item.get("error") is not None
+            ):
+                continue
+            structured = _structured(item.get("result"))
+            lookup_key = structured.get("lookup_key") if structured is not None else None
+            if lookup_key is None:
+                continue
+            if not isinstance(lookup_key, str) or re.fullmatch(r"[0-9a-f]{32}", lookup_key) is None:
+                errors.append(f"turn {turn_index} rir_previous lookup key is invalid")
+                continue
+            if lookup_key in previous_keys:
+                errors.append(f"turn {turn_index} repeats rir_previous lookup key")
+            previous_keys.add(lookup_key)
+
         successes: list[tuple[int, dict[str, object], dict[str, object]]] = []
         for item_index, item in enumerate(items):
             if (

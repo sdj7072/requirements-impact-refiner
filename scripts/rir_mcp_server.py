@@ -1318,6 +1318,22 @@ def _validated_previous_root(value: str) -> Path:
     return resolved
 
 
+def _previous_lookup_key(root: Path, arguments: Mapping[str, object]) -> str:
+    payload = {
+        "repo_root": str(root),
+        "request": arguments["request"],
+        "repository_evidence": arguments["repository_evidence"],
+        "report_id": arguments.get("report_id"),
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()[:32]
+
+
 def _previous(arguments: object) -> dict[str, object]:
     _validate_arguments(arguments, PREVIOUS_SCHEMA, "rir_previous")
     if not _is_previous_arguments(arguments):
@@ -1336,6 +1352,7 @@ def _previous(arguments: object) -> dict[str, object]:
     if not _is_previous_result(result):
         raise _ControllerContractError("controller previous result contract is incomplete")
     structured = {
+        "lookup_key": _previous_lookup_key(root, arguments),
         "status": result.status,
         "report_id": result.report_id,
         "revision": result.revision,

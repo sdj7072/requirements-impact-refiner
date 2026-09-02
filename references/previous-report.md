@@ -4,6 +4,8 @@ Use this route only after the bootstrap selects a concrete behavior change and t
 
 Call `rir_previous` with the canonical repository root, unchanged request, and supplied repository evidence in exact order, including duplicates. Lookup keeps its detailed limits: raw request at most 256 KiB and evidence under the existing ordered-evidence contract. Return renderer-owned `display_text` before other work. Never reconstruct a previous body from files, memory, search results, or graph data.
 
+Within one user turn, one byte-exact request, ordered evidence list, and `report_id` has one reusable result. Reuse it instead of repeating the lookup. MCP responses expose its `lookup_key`; CLI fallback tracks the exact arguments locally. Changed input is a different lookup, and a later user turn may repeat the same lookup.
+
 ## Activation contract
 
 | Conversation | Action |
