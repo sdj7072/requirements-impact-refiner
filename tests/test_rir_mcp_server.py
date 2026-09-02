@@ -10,6 +10,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from evals.harness.performance import (
+    ControllerPayloadObservation,
+    evaluate_controller_payload_gate,
+)
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover
@@ -835,6 +840,102 @@ if sys.modules["payload_identity"] is not foreign_payload:
             )
             rules = " ".join(promoted["semantic_rules"])
             self.assertIn("do not call rir_trace_impact", rules)
+
+    def test_controller_payload_gate_accepts_real_bounded_path_responses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            change_request = "Rename profile.displayName"
+            evidence = ["symbol:Profile"]
+            previous = self.exchange(
+                [
+                    request(
+                        1,
+                        "tools/call",
+                        {
+                            "name": "rir_previous",
+                            "arguments": {
+                                "repo_root": directory,
+                                "request": change_request,
+                                "repository_evidence": evidence,
+                            },
+                        },
+                    )
+                ]
+            )[0]["result"]
+            scan = self.exchange(
+                [
+                    request(
+                        2,
+                        "tools/call",
+                        {
+                            "name": "rir_scan",
+                            "arguments": {
+                                "repo_root": directory,
+                                "change_request": change_request,
+                                "evidence": evidence,
+                                "presentation": "balanced",
+                            },
+                        },
+                    )
+                ]
+            )[0]["result"]
+            begin = self.exchange(
+                [
+                    request(
+                        3,
+                        "tools/call",
+                        {
+                            "name": "rir_begin",
+                            "arguments": {
+                                "repo_root": directory,
+                                "request": change_request,
+                                "repository_evidence": evidence,
+                                "adapter": "generic",
+                            },
+                        },
+                    )
+                ]
+            )[0]["result"]
+
+        previous_value = previous["structuredContent"]
+        scan_value = scan["structuredContent"]
+        begin_value = begin["structuredContent"]
+
+        def is_hex32(value):
+            return (
+                isinstance(value, str)
+                and len(value) == 32
+                and all(character in "0123456789abcdef" for character in value)
+            )
+
+        semantic_contracts = (
+            previous_value["status"] == "none"
+            and is_hex32(previous_value["lookup_key"])
+            and previous_value["display_text"] is None,
+            scan_value["status"] == "needs_input"
+            and is_hex32(scan_value["scan_id"])
+            and scan["content"][0]["text"] == scan_value["display_text"],
+            begin_value["contract_version"] == 2
+            and is_hex32(begin_value["draft_id"])
+            and begin_value["next_action"]["tool"] == "rir_trace_impact"
+            and begin_value["next_action"]["required_agent_arguments"] == ["seeds"],
+        )
+        self.assertTrue(all(semantic_contracts))
+        observations = tuple(
+            ControllerPayloadObservation(
+                tool,
+                path,
+                len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")),
+            )
+            for tool, path, result in zip(
+                ("rir_previous", "rir_scan", "rir_begin"),
+                ("none", "needs_input", "new_trace"),
+                (previous, scan, begin),
+            )
+        )
+
+        gate = evaluate_controller_payload_gate(observations)
+
+        self.assertTrue(gate.passed, gate.errors)
 
     def test_graph_enabled_begin_declares_required_trace_seeds(self):
         with tempfile.TemporaryDirectory() as directory:

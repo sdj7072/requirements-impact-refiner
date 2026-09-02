@@ -5,10 +5,12 @@ from pathlib import Path
 
 from evals.harness.models import RunStatus
 from evals.harness.performance import (
+    ControllerPayloadObservation,
     FastScanPerformanceObservation,
     GraphPerformanceObservation,
     InstantWorkEvidence,
     PerformanceObservation,
+    evaluate_controller_payload_gate,
     evaluate_fast_scan_gate,
     evaluate_graph_smoke,
     evaluate_instant_performance_gate,
@@ -155,6 +157,53 @@ class PerformanceBudgetTest(unittest.TestCase):
         for expected, mutated in mutations.items():
             with self.subTest(expected=expected):
                 self.assertIn(expected, evaluate_instant_performance_gate(mutated).errors)
+
+    def test_controller_payload_gate_limits_exact_bounded_paths(self):
+        rows = (
+            ControllerPayloadObservation("rir_previous", "none", 468),
+            ControllerPayloadObservation("rir_scan", "needs_input", 1012),
+            ControllerPayloadObservation("rir_begin", "new_trace", 4743),
+        )
+
+        accepted = evaluate_controller_payload_gate(rows)
+
+        self.assertTrue(accepted.passed, accepted.errors)
+        self.assertEqual(accepted.total_result_bytes, 6223)
+        mutations = (
+            (
+                "controller payload observations must cover exact bounded paths once",
+                (rows[0], rows[1], rows[1]),
+            ),
+            (
+                "rir_previous result exceeds 600 bytes",
+                (replace(rows[0], result_bytes=601), *rows[1:]),
+            ),
+            (
+                "rir_scan result exceeds 1200 bytes",
+                (rows[0], replace(rows[1], result_bytes=1201), rows[2]),
+            ),
+            (
+                "rir_begin result exceeds 5500 bytes",
+                (*rows[:2], replace(rows[2], result_bytes=5501)),
+            ),
+            (
+                "controller payload observations must cover exact bounded paths once",
+                (replace(rows[0], path="fresh"), *rows[1:]),
+            ),
+        )
+        for expected, mutated in mutations:
+            with self.subTest(expected=expected):
+                self.assertIn(expected, evaluate_controller_payload_gate(mutated).errors)
+
+        total = (
+            replace(rows[0], result_bytes=550),
+            replace(rows[1], result_bytes=1150),
+            replace(rows[2], result_bytes=5400),
+        )
+        self.assertIn(
+            "controller payload total exceeds 7000 bytes",
+            evaluate_controller_payload_gate(total).errors,
+        )
 
     def observation(self, case_id):
         impact_ids = () if case_id == "NEG-debugging" else ("IMP-001",)

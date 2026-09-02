@@ -33,6 +33,12 @@ MAX_GRAPH_DURATION_MS = 30_000
 MAX_FAST_SCAN_OUTPUT_WORDS = 180
 MAX_PREVIOUS_LOOKUP_P95_MS = 300
 MAX_STALE_DELTA_P95_MS = 3_000
+CONTROLLER_PAYLOAD_BYTE_BUDGETS = {
+    ("rir_previous", "none"): 600,
+    ("rir_scan", "needs_input"): 1_200,
+    ("rir_begin", "new_trace"): 5_500,
+}
+MAX_CONTROLLER_PAYLOAD_TOTAL_BYTES = 7_000
 
 
 @dataclass(frozen=True)
@@ -153,6 +159,53 @@ class InstantPerformanceGateResult:
     previous_lookup_p95_ms: int
     stale_delta_p95_ms: int
     token_comparison_status: str
+
+
+@dataclass(frozen=True)
+class ControllerPayloadObservation:
+    tool: str
+    path: str
+    result_bytes: int
+
+
+@dataclass(frozen=True)
+class ControllerPayloadGateResult:
+    passed: bool
+    errors: tuple[str, ...]
+    total_result_bytes: int
+
+
+def evaluate_controller_payload_gate(
+    observations: Sequence[ControllerPayloadObservation],
+) -> ControllerPayloadGateResult:
+    errors = []
+    rows = tuple(row for row in observations if isinstance(row, ControllerPayloadObservation))
+    if len(rows) != len(observations):
+        errors.append("controller payload observations contain invalid rows")
+    keys = tuple((row.tool, row.path) for row in rows)
+    if len(rows) != len(CONTROLLER_PAYLOAD_BYTE_BUDGETS) or set(keys) != set(
+        CONTROLLER_PAYLOAD_BYTE_BUDGETS
+    ):
+        errors.append("controller payload observations must cover exact bounded paths once")
+
+    total_bytes = 0
+    for row in rows:
+        if (
+            (row.tool, row.path) not in CONTROLLER_PAYLOAD_BYTE_BUDGETS
+            or isinstance(row.result_bytes, bool)
+            or not isinstance(row.result_bytes, int)
+            or row.result_bytes < 0
+        ):
+            errors.append("controller payload observation is malformed")
+            continue
+        total_bytes += row.result_bytes
+        budget = CONTROLLER_PAYLOAD_BYTE_BUDGETS[(row.tool, row.path)]
+        if row.result_bytes > budget:
+            errors.append(f"{row.tool} result exceeds {budget} bytes")
+    if total_bytes > MAX_CONTROLLER_PAYLOAD_TOTAL_BYTES:
+        errors.append("controller payload total exceeds 7000 bytes")
+    unique = tuple(sorted(set(errors)))
+    return ControllerPayloadGateResult(not unique, unique, total_bytes)
 
 
 def measure_instant_fixture(
