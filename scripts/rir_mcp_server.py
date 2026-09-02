@@ -1375,10 +1375,6 @@ def _previous(arguments: object) -> dict[str, object]:
             for candidate in result.candidates
         ],
     }
-    performance_metrics = getattr(result, "performance_metrics", None)
-    metrics_mapping = getattr(performance_metrics, "to_mapping", None)
-    if callable(metrics_mapping):
-        structured["performance_metrics"] = metrics_mapping()
     if not _is_json_value(structured):
         raise _ControllerContractError("controller previous result is not JSON-safe")
     content = [] if result.display_text is None else [{"type": "text", "text": result.display_text}]

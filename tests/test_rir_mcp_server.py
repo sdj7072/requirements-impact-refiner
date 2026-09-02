@@ -1026,6 +1026,14 @@ if sys.modules["payload_identity"] is not foreign_payload:
             self.assertIsNone(structured[field], field)
         self.assertEqual(structured["changed_paths"], [])
         self.assertIsNone(structured["changed_count"])
+        structured_bytes = len(
+            json.dumps(
+                structured,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        self.assertLess(structured_bytes, 700)
 
     def test_previous_lookup_key_is_stable_and_binds_exact_lookup_payload(self):
         with tempfile.TemporaryDirectory() as directory:
