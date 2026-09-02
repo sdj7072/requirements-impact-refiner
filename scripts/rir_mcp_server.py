@@ -1626,10 +1626,6 @@ def _scan(arguments: object) -> dict[str, object]:
         "cache_status": result.cache_status,
         "can_promote": result.can_promote,
     }
-    performance_metrics = getattr(result, "performance_metrics", None)
-    metrics_mapping = getattr(performance_metrics, "to_mapping", None)
-    if callable(metrics_mapping):
-        structured["performance_metrics"] = metrics_mapping()
     previous_report_id = getattr(result, "previous_report_id", None)
     if previous_report_id is not None:
         structured.update(

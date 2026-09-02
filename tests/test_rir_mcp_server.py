@@ -790,6 +790,14 @@ if sys.modules["payload_identity"] is not foreign_payload:
                 result["structuredContent"]["display_text"],
             )
             self.assertRegex(result["structuredContent"]["scan_id"], r"^[0-9a-f]{32}$")
+            structured_bytes = len(
+                json.dumps(
+                    result["structuredContent"],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            self.assertLess(structured_bytes, 900)
             promoted = self.exchange(
                 [
                     request(
