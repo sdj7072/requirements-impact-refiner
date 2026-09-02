@@ -17,11 +17,9 @@ If it does, **requirements-impact-refiner is required** before planning or imple
 
 Before any RIR tool, require both substantive product behavior and an inspectable repository scope or evidence target. A generic PRD request missing either input is ideation: ask only for the missing behavior and scope, and call neither `rir_previous` nor `rir_scan`.
 
-For a selected change, read [Previous-report bootstrap](../requirements-impact-refiner/references/previous-report.md), call `rir_previous` before any `rir_scan`, and follow its route. Forward stale identity only as the exact delta hint set the tool returned. Return renderer text; never substitute searches, graph JSON, or an invented report. Report flow enters detailed refinement immediately after a non-`needs_input` scan; ask flow enters it only after a later explicit yes to that scan's refinement question. Original request wording is not ask-flow confirmation.
+For a selected change, invoke `requirements-impact-refiner` and follow it. The invoked skill owns previous lookup, scan, confirmation, detailed refinement, renderer output, and the terminal stop.
 
-The default report flow returns a fresh previous report directly or uses a stale/none scan to seed immediate detailed refinement. The opt-in ask flow returns the scan summary and waits for a later explicit yes. `needs_input` and `ambiguous` always stop for user input.
-
-After successful `rir_finalize`, Return `display_text` verbatim and end the current turn. Do not run commands, use tools, plan, test, or modify files; execution requires a later user turn.
+After successful finalize, Return `display_text` verbatim and end the current turn.
 
 For pure ideation, a generic PRD, explanation, debugging, code review, status checks, and execution of an already impact-refined requirement or plan, call neither `rir_previous` nor `rir_scan`.
 

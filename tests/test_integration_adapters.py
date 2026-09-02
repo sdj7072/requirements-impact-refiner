@@ -717,19 +717,30 @@ class IntegrationAdapterContractTest(unittest.TestCase):
         self.assertIn("substantive product behavior", bootstrap)
         self.assertIn("inspectable repository scope or evidence target", bootstrap)
 
-    def test_bootstrap_confirmation_rule_is_explicitly_flow_specific(self):
+    def test_bootstrap_delegates_selected_change_details_to_core_skill(self):
         bootstrap = BOOTSTRAP_SKILL_PATH.read_text(encoding="utf-8")
+        core = SKILL_PATH.read_text(encoding="utf-8")
+        previous = PREVIOUS_REFERENCE_PATH.read_text(encoding="utf-8")
 
+        self.assertLessEqual(len(bootstrap.split()), 310)
         self.assertIn(
-            "Report flow enters detailed refinement immediately after a non-`needs_input` scan; "
-            "ask flow enters it only after a later explicit yes",
+            "The invoked skill owns previous lookup, scan, confirmation, detailed refinement, "
+            "renderer output, and the terminal stop.",
             bootstrap,
         )
-        self.assertNotIn(
-            "Only a later explicit yes to a non-`needs_input` scan's refinement question "
-            "enters detailed refinement",
+        self.assertNotIn("Report flow enters detailed refinement", bootstrap)
+        self.assertIn(
+            "After successful finalize, Return `display_text` verbatim and end the current turn.",
             bootstrap,
         )
+        self.assertNotIn("After finalize, Return", bootstrap)
+        self.assertIn("After yes (ask) or immediately (report)", core)
+        self.assertIn("Return canonical `display_text` verbatim; stop.", core)
+        self.assertIn(
+            "Report flow starts detailed lineage immediately after a non-`needs_input` scan",
+            previous,
+        )
+        self.assertIn("Never reinterpret the original request", previous)
 
     def test_disabled_and_unavailable_routes_make_no_tool_calls(self):
         with tempfile.TemporaryDirectory() as directory:
